@@ -131,9 +131,10 @@ struct USBDeviceList: View {
     @StateObject private var before: USBListBefore
     @ObservedObject private var running: USBRunHolder
 
-    init(source: Source, vmName: String, preview: [USBDevice]? = nil, done: @escaping () -> Void) {
+    init(source: Source, vmName: String, preview: [USBDevice]? = nil, showsTitle: Bool = true, done: @escaping () -> Void) {
         self.vmName = vmName
         self.done = done
+        self.showsTitle = showsTitle
         switch source {
         case .before(let folder):
             _before = StateObject(wrappedValue: USBListBefore(folder: folder, vmName: vmName, preview: preview))
@@ -159,55 +160,63 @@ struct USBDeviceList: View {
     }
     private var isRunning: Bool { running.run != nil || pictureRunning }
 
+    /// In the running VM's panel the window has the title already.
+    private let showsTitle: Bool
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Form {
-                if rows.isEmpty {
-                    Section {
-                        Text("No devices yet. When \(vmName) runs and you plug in a device it can use, \(Product.name) asks what to do.")
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                if !rows.remembered.isEmpty {
-                    Section("Remembered") {
-                        ForEach(rows.remembered) { row in deviceRow(row) }
-                    }
-                }
-                if !rows.plugged.isEmpty {
-                    Section("Plugged in now") {
-                        ForEach(rows.plugged) { row in deviceRow(row) }
-                    }
-                }
-                if !rows.kept.isEmpty {
-                    Section {
-                        DisclosureGroup("Kept by macOS (\(rows.kept.count))") {
-                            ForEach(rows.kept) { k in
-                                LabeledContent(k.name) {
-                                    Text(k.why).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
-                                }
-                                .accessibilityElement(children: .combine)
-                            }
+        VStack(alignment: .leading, spacing: 12) {
+            if showsTitle { Text("USB Devices").font(.system(size: 15, weight: .semibold)) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if rows.isEmpty {
+                        Card {
+                            Text("No devices yet. When \(vmName) runs and you plug in a device it can use, \(Product.name) asks what to do.")
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 16).padding(.vertical, 12)
                         }
                     }
+                    if !rows.plugged.isEmpty {
+                        SheetHeading(text: "Plugged in now")
+                        Card { ForEach(rows.plugged) { row in deviceRow(row) } }
+                    }
+                    if !rows.remembered.isEmpty {
+                        SheetHeading(text: "Remembered")
+                        Card { ForEach(rows.remembered) { row in deviceRow(row) } }
+                    }
+                    if !rows.kept.isEmpty {
+                        DisclosureGroup("Kept by macOS (\(rows.kept.count))") {
+                            Card {
+                                ForEach(rows.kept) { k in
+                                    SettingRow(k.name, subtitle: k.why)
+                                        .accessibilityElement(children: .combine)
+                                }
+                            }
+                            .padding(.top, 6)
+                        }
+                        .font(.subheadline)
+                        .padding(.leading, 2)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .formStyle(.grouped)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxHeight: 460)
+            .fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .firstTextBaseline) {
                 if let e = before.error {
-                    Text(e).font(.caption).foregroundStyle(.red)
+                    Text(e).font(.subheadline).foregroundStyle(Look.red)
                 } else {
-                    Text("A choice here applies the next time the device is plugged in.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("A choice here counts the next time the device is plugged in.")
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Done", action: done).keyboardShortcut(.defaultAction)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 16)
         }
+        .padding(16)
         .frame(width: 520)
-        .frame(minHeight: 240, idealHeight: 470, maxHeight: 640)
+        .background(Look.window)
         .onAppear { if running.run == nil && fixed == nil { before.start() } }
         .onDisappear { before.stop() }
     }
@@ -225,35 +234,27 @@ struct USBDeviceList: View {
 
     @ViewBuilder
     private func deviceRow(_ row: USBListRows.Row) -> some View {
-        LabeledContent {
-            HStack(spacing: 6) {
-                Picker("When “\(row.name)” is plugged in", selection: planBinding(row)) {
-                    Text("Ask Each Time").tag(USBPlan.ask)
-                    Text("Connect to \(vmName)").tag(USBPlan.omarchy)
-                    Text("Keep on Mac").tag(USBPlan.mac)
-                }
-                .labelsHidden()
-                .fixedSize()
-                if row.canConnect && isRunning {
-                    Button("Connect") { running.run?.connect(row) }
-                        .accessibilityLabel("Connect \(row.name) to \(vmName)")
-                }
-                if row.canDisconnect && isRunning {
-                    Button("Disconnect") { running.run?.disconnect(row) }
-                        .accessibilityLabel("Disconnect \(row.name)")
-                }
-                if row.key != nil {
-                    Button { forget(row) } label: { Image(systemName: "minus.circle") }
-                        .buttonStyle(.borderless)
-                        .help("Forget this device: asked about again next time")
-                        .accessibilityLabel("Forget \(row.name)")
-                }
+        SettingRow(title: row.name, subtitle: [row.detail, row.status].filter { !$0.isEmpty }.joined(separator: " · ")) {
+            Picker("When “\(row.name)” is plugged in", selection: planBinding(row)) {
+                Text("Ask Each Time").tag(USBPlan.ask)
+                Text("Connect to \(vmName)").tag(USBPlan.omarchy)
+                Text("Keep on Mac").tag(USBPlan.mac)
             }
-        } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.name)
-                Text(row.detail).font(.caption).foregroundStyle(.secondary)
-                Text(row.status).font(.caption).foregroundStyle(.secondary)
+            .labelsHidden()
+            .fixedSize()
+            if row.canConnect && isRunning {
+                Button("Connect") { running.run?.connect(row) }
+                    .accessibilityLabel("Connect \(row.name) to \(vmName)")
+            }
+            if row.canDisconnect && isRunning {
+                Button("Disconnect") { running.run?.disconnect(row) }
+                    .accessibilityLabel("Disconnect \(row.name)")
+            }
+            if row.key != nil {
+                Button { forget(row) } label: { Image(systemName: "minus.circle") }
+                    .buttonStyle(.borderless)
+                    .help("Forget this device: asked about again next time")
+                    .accessibilityLabel("Forget \(row.name)")
             }
         }
         .accessibilityElement(children: .contain)

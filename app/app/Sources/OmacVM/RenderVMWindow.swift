@@ -27,6 +27,7 @@ enum RenderVMWindow {
         var running: Bool? = nil
         /// Scrolled to this section.
         var section: String? = nil
+        var sheet: ReadyView.ReadySheet? = nil
         var magicMouse: Bool? = false
         /// Disk › Change… open: what Omarchy needs, the size chosen.
         var disk: (need: DiskSize.Need, gb: Int)? = nil
@@ -171,7 +172,10 @@ enum RenderVMWindow {
         window("screen-3-install", state, usual)
         state.screen = .ready
 
-        // The sheets: All VMs, USB devices.
+        // The sheets: Delete (typed, and while the VM runs), All VMs, USB
+        // devices.
+        sheet("sheet-2-delete") { DeleteSheet(vm: config, size: 9 * DiskSize.gib, running: false) { _ in } }
+        sheet("sheet-3-delete-vm-runs") { DeleteSheet(vm: config, size: 9 * DiskSize.gib, running: true) { _ in } }
         let all = StorageModel()
         all.shownRoot = longRoot
         all.root = longRoot
@@ -318,7 +322,7 @@ enum RenderVMWindow {
         sheet("sheet-5-usb-before-start") { USBDeviceList(source: .picture(before, running: false), vmName: "Omarchy") {} }
         let running = USBListRows.make(memory: memory, devices: usbDevices,
                                        states: [0x0110_0000: .connected, 0x0120_0000: .onMac(remembered: false)], vmName: "Omarchy")
-        sheet("sheet-6-usb-running") { USBDeviceList(source: .picture(running, running: true), vmName: "Omarchy") {} }
+        sheet("sheet-6-usb-running") { USBDeviceList(source: .picture(running, running: true), vmName: "Omarchy", showsTitle: false) {} }
         sheet("sheet-7-usb-empty") { USBDeviceList(source: .picture(USBListRows(), running: false), vmName: "Omarchy") {} }
         // The question, as USBAlertAsker shows it (light and dark).
         let q = USBQuestion(device: usbDevices[0], vmName: "Omarchy", waiting: 0)

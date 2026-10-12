@@ -178,7 +178,7 @@ final class USBRun: ObservableObject {
             p.level = .floating
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             p.isReleasedWhenClosed = false
-            p.contentViewController = NSHostingController(rootView: USBDeviceList(source: .running(self), vmName: config.name) { [weak self] in
+            p.contentViewController = NSHostingController(rootView: USBDeviceList(source: .running(self), vmName: config.name, showsTitle: false) { [weak self] in
                 self?.closeList()
             })
             p.center()

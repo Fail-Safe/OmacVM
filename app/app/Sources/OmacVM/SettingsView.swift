@@ -16,6 +16,18 @@ struct ReadyView: View {
     /// The window pictures (--render-vm-window): this keyboard note and this
     /// "omacvm in Terminal" state instead of the Mac's, and more.
     var preview: RenderVMWindow.Preview? = nil
+    @State private var sheet: ReadySheet?
+    /// The VM to delete runs (or omacvm works on it): asked once, when the sheet opens.
+    @State private var deleteBusy = false
+
+    enum ReadySheet: Identifiable {
+        case delete(VMConfig)
+        var id: String {
+            switch self {
+            case .delete(let c): return "delete-" + c.folder.path
+            }
+        }
+    }
 
     private var running: Bool { preview?.running ?? state.vmRunning() }
 
@@ -26,9 +38,23 @@ struct ReadyView: View {
             UpdateBanner(updater: updater)
             notices
         } content: {
-            SettingsSections(state: state, preview: preview, running: running)
+            SettingsSections(state: state, preview: preview, running: running) { vm in
+                deleteBusy = preview?.running ?? !Storage.busyFolders([vm.folder]).isEmpty
+                sheet = .delete(vm)
+            }
         }
         .environment(\.spyStart, preview?.section)
+        .sheet(item: $sheet) { s in
+            switch s {
+            case .delete(let vm):
+                DeleteSheet(vm: vm, size: state.storage.vms.first { $0.folder.path == vm.folder.path }?.size,
+                            running: deleteBusy) { delete in
+                    sheet = nil
+                    if delete { state.storage.trash(vm) }
+                }
+            }
+        }
+        .onAppear { if let s = preview?.sheet { sheet = s } }
         // `omacvm`, the control centre or another window may have changed a
         // setting meanwhile: read them again (every row follows state.tick).
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -125,6 +151,7 @@ struct SettingsSections: View {
     @ObservedObject var state: AppState
     var preview: RenderVMWindow.Preview?
     var running: Bool
+    var delete: (VMConfig) -> Void
     @StateObject private var mouse = MagicMouseWatch()
 
     var body: some View {
@@ -172,7 +199,7 @@ struct SettingsSections: View {
             Card {
                 DiskRow(state: state, preview: preview?.disk)
                 StorageRows(storage: state.storage, selected: state.config.location == nil ? nil : state.config.folder,
-                            open: { state.openExisting() })
+                            open: { state.openExisting() }, delete: delete)
                 CommandLineRow(preview: preview?.terminal)
                 UpdateRow(updater: Updater.shared)
             }
@@ -185,7 +212,7 @@ struct SettingsSections: View {
                     .textSelection(.enabled)
                     .padding(.top, 8).padding(.horizontal, 4)
             }
-            Button("Delete VM…") { state.storage.delete(state.config) }
+            Button("Delete VM…") { delete(state.config) }
                 .buttonStyle(.plain)
                 .foregroundStyle(Look.red)
                 .disabled(state.storage.moving != nil)

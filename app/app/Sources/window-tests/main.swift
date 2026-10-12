@@ -386,6 +386,9 @@ expect(SwipeOut.isOn(stored: true) && SwipeOut.isOn(stored: 1) && SwipeOut.isOn(
        && SwipeOut.isOn(stored: "1"), "SwipeOut: a bool, a number, true or yes (as CFPreferences reads it)")
 expect(!SwipeOut.isOn(stored: false) && !SwipeOut.isOn(stored: 0) && !SwipeOut.isOn(stored: "no") && !SwipeOut.isOn(stored: "off"),
        "SwipeOut: false, 0, no: off")
+expect(DeleteConfirm.matches(typed: "Omarchy", name: "Omarchy"), "Delete: the exact name")
+expect(!DeleteConfirm.matches(typed: "omarchy", name: "Omarchy") && !DeleteConfirm.matches(typed: "Omarchy ", name: "Omarchy")
+       && !DeleteConfirm.matches(typed: "", name: ""), "Delete: not another case, a space more, or nothing")
 
 // The keys in a settings domain, as the app reads and writes them.
 let suite = "org.omacvm.test.window-tests.\(getpid())"
