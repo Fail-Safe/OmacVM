@@ -286,6 +286,25 @@ static void test_reveal(void)
 }
 
 /*
+ * "Always show the menu bar in full screen" (#356): in the way only without
+ * "Keep the Dock away" (the MacBook Air and the mini, 2026-10-12: with it,
+ * the menu bar stays hidden in full screen whatever that setting says).
+ */
+static void test_menu_bar_setting(void)
+{
+    for (size_t i = 0; i < sizeof builtins / sizeof builtins[0]; i++) {
+        const Display *d = &builtins[i];
+        CHECK(omacvm_fp_display_ok(true, d->notch, omacvm_fp_menu_bar_in_the_way(true, true)),
+              "%s: menu bar always shown, Keep the Dock away on: FullPanel", d->name);
+        CHECK(!omacvm_fp_display_ok(true, d->notch, omacvm_fp_menu_bar_in_the_way(true, false)),
+              "%s: menu bar always shown, Keep the Dock away off: normal full screen", d->name);
+        CHECK(omacvm_fp_display_ok(true, d->notch, omacvm_fp_menu_bar_in_the_way(false, false)) &&
+              omacvm_fp_display_ok(true, d->notch, omacvm_fp_menu_bar_in_the_way(false, true)),
+              "%s: menu bar hidden in full screen (macOS's default): FullPanel either way", d->name);
+    }
+}
+
+/*
  * The app's presentation options while the window covers the strip, with
  * "Keep the Dock away" on (QEMU's immersive=on, the default: the menu bar
  * never comes down, as in normal full screen) and off (it comes down at the
@@ -398,6 +417,7 @@ int main(void)
     test_moves();
     test_guest_size();
     test_reveal();
+    test_menu_bar_setting();
     test_presentation();
     if (failures) {
         printf("test-fullpanel: %d of %d checks failed\n", failures, checks);

@@ -31,8 +31,10 @@ grep -q 'full = omacvm_fp_cut_rows(isFullscreen, omacvm_present_layer(),' "$m" |
 # Both window classes: prepared on the way into full screen, frames kept.
 [[ $(grep -c 'omacvm_fullpanel_prepare_window(self);' "$m") == 2 ]] || fail "QemuWindow and OmacVMHeadWindow are not both prepared"
 [[ $(grep -c 'if (omacvm_fullpanel_keep_frame(self, ' "$m") == 10 ]] || fail "not every frame setter of both windows goes through omacvm_fullpanel_keep_frame"
+# "Always show the menu bar in full screen" only without Keep the Dock away (#356).
+grep -q 'omacvm_fp_menu_bar_in_the_way(always, immersive_mode_enabled))) {' "$m" || fail "the menu bar setting counts with Keep the Dock away"
 # The decisions are the tested ones.
-for f in omacvm_fp_display_ok omacvm_fp_cut_rows omacvm_fp_frame omacvm_fp_keep omacvm_fp_strip_lost omacvm_fp_reveal_allowed omacvm_fp_presentation; do
+for f in omacvm_fp_display_ok omacvm_fp_cut_rows omacvm_fp_frame omacvm_fp_keep omacvm_fp_strip_lost omacvm_fp_reveal_allowed omacvm_fp_presentation omacvm_fp_menu_bar_in_the_way; do
   grep -q "$f(" "$m" || fail "$f is not used"
 done
 # Private interfaces only looked up at run time (no link to SkyLight).

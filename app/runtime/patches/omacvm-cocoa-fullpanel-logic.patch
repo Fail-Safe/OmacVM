@@ -25,7 +25,7 @@ diff --git a/ui/omacvm-fullpanel.h b/ui/omacvm-fullpanel.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-fullpanel.h
-@@ -0,0 +1,223 @@
+@@ -0,0 +1,236 @@
 +/*
 + * OmacVM: FullPanel, the VM's full-screen window over the whole notched
 + * display, the strip beside the camera housing included (experimental,
@@ -71,6 +71,19 @@ new file mode 100644
 +                                        bool menu_bar_always_shown)
 +{
 +    return requested && notch_inset > 0 && !menu_bar_always_shown;
++}
++
++/*
++ * "Always show the menu bar in full screen" (AppleMenuBarVisibleInFullscreen)
++ * is in the way only without "Keep the Dock away" (QEMU's immersive=on): its
++ * presentation options hide the menu bar in full screen whatever that
++ * setting says, so the strip stays the VM's (probed on the MacBook Air and
++ * the Mac mini, 2026-10-12, work/tracks/fullpanel-menubar.md). Without it
++ * the menu bar would sit on the VM's top rows: normal full screen.
++ */
++static inline bool omacvm_fp_menu_bar_in_the_way(bool always_shown, bool immersive)
++{
++    return always_shown && !immersive;
 +}
 +
 +/* What AppKit's full-screen frame for the window becomes. */

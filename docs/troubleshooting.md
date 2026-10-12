@@ -20,7 +20,9 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
 - **The Mac's menu bar stays over the full-screen VM**: macOS is set to always
   show it. System Settings › Menu Bar (on older macOS: Control Center) ›
   Automatically hide and show the menu bar: **In Full Screen Only** (or Always).
-  `omacvm check` points this out.
+  OmacVM.app with **Keep the Dock and hot corners away** on (the default)
+  hides it anyway; with that setting off, **Full screen including notch**
+  starts as normal full screen. `omacvm check` points this out.
 - **A keyboard sharing app (Synergy, Deskflow, Barrier, Input Leap) loses
   the keyboard to the VM**: the VM types what was meant for the other
   computer. Turn on the hidden switch in

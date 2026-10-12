@@ -32,6 +32,10 @@ A new window for the VM's settings.
   Mac's media engine (it runs the VM without its display, so it saw no encoder). Each start now
   puts the flags back when they are missing, so a VM updated with 3.0.18 is fixed by its next start
   (`omacvm check` said "WebRTC encoding" FAIL).
+- OmacVM.app, **Full screen including notch**: with macOS's "Always show the menu bar in full
+  screen" on, it now covers the notch strip anyway while **Keep the Dock and hot corners away** is
+  on (the default); before, it fell back to normal full screen. With that setting off it still
+  falls back, and `omacvm check` now warns about it (#356, thanks @brianmerchant).
 
 ## 3.0.18
 

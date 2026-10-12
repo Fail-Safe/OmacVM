@@ -626,9 +626,20 @@ fi
 FEATURE=""
 # macOS's "Automatically hide and show the menu bar: Never" keeps the Mac's
 # menu bar over the full-screen VM: a hint (it is the person's setting).
-if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) == 1 ]]; then
-  skip "menu bar in full screen" "macOS always shows it: System Settings > Menu Bar (older macOS: Control Center) > Automatically hide and show the menu bar: In Full Screen Only" human
-else ok "menu bar in full screen" "hidden by macOS"; fi
+# OmacVM.app with "Keep the Dock and hot corners away" (the default) hides it
+# in full screen anyway; without it, "Full screen including notch" falls back
+# to normal full screen while macOS always shows it (#356).
+MENU_HINT="System Settings > Menu Bar (older macOS: Control Center) > Automatically hide and show the menu bar: In Full Screen Only"
+if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) != 1 ]]; then
+  ok "menu bar in full screen" "hidden by macOS"
+elif [[ $TYPE == app ]] && notch_keep_dock_away; then
+  ok "menu bar in full screen" "hidden by OmacVM.app (Keep the Dock and hot corners away), although macOS always shows it"
+elif [[ $TYPE == app && $(notch_choice "$(app_dir "$VM" 2>/dev/null)") == fullpanel ]]; then
+  FEATURE=""
+  warn "menu bar in full screen" "macOS always shows it, so Full screen including notch starts as normal full screen: turn on Keep the Dock and hot corners away in OmacVM, or $MENU_HINT"
+else
+  skip "menu bar in full screen" "macOS always shows it: $MENU_HINT" human
+fi
 case $TYPE in
 parallels)
   running "$L_CLIP" && ok "clipboard VM -> Mac" "$L_CLIP" || bad "clipboard VM -> Mac" "$L_CLIP not running"

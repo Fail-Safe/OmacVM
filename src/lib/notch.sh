@@ -44,6 +44,22 @@ notch_app_full_screen() {
   [[ $(defaults read "${APP_ID:-org.omacvm.app}" startFullScreen 2>/dev/null) != 0 ]]
 }
 
+# The app's "Keep the Dock and hot corners away" (app-wide; Settings.keepDockAway,
+# default on; QEMU's immersive=on). With it macOS's menu bar stays hidden in
+# full screen, also with "Always show the menu bar in full screen" (#356,
+# work/tracks/fullpanel-menubar.md).
+notch_keep_dock_away() {
+  [[ $(defaults read "${APP_ID:-org.omacvm.app}" keepDockAway 2>/dev/null) != 0 ]]
+}
+
+# macOS's "Always show the menu bar in full screen" is in the way of FullPanel
+# (the menu bar over the strip): only without Keep the Dock away. Then QEMU
+# uses normal full screen (omacvm_fp_menu_bar_in_the_way in
+# omacvm-cocoa-fullpanel-logic.patch).
+notch_menu_bar_in_the_way() {
+  [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) == 1 ]] && ! notch_keep_dock_away
+}
+
 # What the next start does, as the app's NotchArea.start says it, without the
 # geometry: "fullpanel" or "native" / "native (why)". MAC_NOTCH: notch|none
 # (mac_tool mac-notch), FULL: 1|0 (notch_app_full_screen).

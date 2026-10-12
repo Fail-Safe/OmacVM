@@ -71,13 +71,14 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  #include <AppKit/NSOpenGL.h>
  #ifdef CONFIG_OPENGL
  #import <IOSurface/IOSurface.h>
-@@ -1578,9 +1580,16 @@
+@@ -1577,10 +1579,17 @@
+  * that view shrank it on every reboot.
   */
  static CGFloat omacvm_main_full_top = -1;
- 
++
 +/* OmacVM FullPanel (omacvm-cocoa-fullpanel.patch), defined below. */
 +static bool omacvm_fullpanel_window_usable(NSWindow *window);
-+
+ 
  - (NSSize) screenSafeAreaSize
  {
      NSSize size = [[[self window] screen] frame].size;
@@ -102,10 +103,11 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -2969,9 +2980,1001 @@
+@@ -2968,10 +2979,1002 @@
+  */
  @interface QemuWindow : NSWindow
  @end
- 
++
 +/*
 + * ---------------------------------------------------------------------------
 + * OmacVM FullPanel (experimental): the full-screen window over the whole
@@ -163,7 +165,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +static const char *omacvm_fullpanel_frame_types;
 +static Class omacvm_fullpanel_hooked_classes[8];
 +static int omacvm_fullpanel_hooked_count;
-+
+ 
 +typedef int32_t (*OmacVMSLSMainConnectionIDFn)(void);
 +typedef CFArrayRef (*OmacVMSLSCopySpacesForWindowsFn)(int32_t, int32_t, CFArrayRef);
 +typedef int32_t (*OmacVMSLSSpaceGetTypeFn)(int32_t, uint64_t);
@@ -580,10 +582,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +- (bool)usable
 +{
 +    NSScreen *screen = window ? [window screen] : nil;
++    bool always = [[NSUserDefaults standardUserDefaults] boolForKey:@"AppleMenuBarVisibleInFullscreen"];
 +    if (!screen || !omacvm_fp_display_ok(omacvm_fullpanel_requested(),
 +                                         [screen safeAreaInsets].top,
-+                                         [[NSUserDefaults standardUserDefaults]
-+                                             boolForKey:@"AppleMenuBarVisibleInFullscreen"])) {
++                                         omacvm_fp_menu_bar_in_the_way(always, immersive_mode_enabled))) {
 +        return false;
 +    }
 +    return omacvm_fullpanel_class_hooked([window class]) &&
@@ -878,7 +880,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    area_lost = false;
 +    if (![self usable] && !display_logged) {
 +        display_logged = true;
-+        fprintf(stderr, "omacvm: full panel: this window's display has no camera housing (or the menu bar is always shown): normal full screen\n");
++        fprintf(stderr, "omacvm: full panel: this window's display has no camera housing (or the menu bar is always shown and Keep the Dock away is off): normal full screen\n");
 +    }
 +}
 +
@@ -1116,7 +1118,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      NSSize display = [[window screen] frame].size;
      CGFloat top = display.height - proposedSize.height;
  
-@@ -7443,7 +8451,7 @@
+@@ -7445,7 +8453,7 @@
      CGRect r = CGDisplayBounds(omacvm_screen_id(s));
      OmacVMBox b = { r.origin.x, r.origin.y, r.size.width, r.size.height };
  
@@ -1125,7 +1127,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          NSEdgeInsets in = [s safeAreaInsets];
          b.x += in.left;
          b.y += in.top;
-@@ -7851,6 +8859,55 @@
+@@ -7853,6 +8861,55 @@
  @implementation OmacVMHeadWindow
  - (BOOL)canBecomeKeyWindow { return YES; }
  - (BOOL)canBecomeMainWindow { return NO; }

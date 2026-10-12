@@ -95,8 +95,11 @@ another of the VM's outputs). Plugging a display in or out while the VM
 runs moves the bar with the MacBook's display within a few seconds.
 
 **When it falls back:** macOS's "Always show the menu bar in full screen"
-(Control Center settings), a macOS that changed the private interfaces it
-uses, or macOS moving the window below the notch after all: the VM then
+(Control Center settings) while **Keep the Dock and hot corners away** is
+off (with it on, the default, the menu bar stays hidden anyway and nothing
+falls back; `omacvm check` warns when it would), a macOS that changed the
+private interfaces it uses, or macOS moving the window below the notch
+after all: the VM then
 runs in normal full screen, and the bar is the normal one. Omanotch comes
 back with the next start via Omanotch. `omacvm check --vm NAME` says which
 one this start is, and when it includes the notch whether the strip is
