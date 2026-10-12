@@ -179,7 +179,7 @@ enum RenderVMWindow {
         state.screen = .ready
 
         // The sheets: Delete (typed, and while the VM runs), All VMs, USB
-        // devices.
+        // devices, the icon's looks.
         sheet("sheet-2-delete") { DeleteSheet(vm: config, size: 9 * DiskSize.gib, running: false) { _ in } }
         sheet("sheet-3-delete-vm-runs") { DeleteSheet(vm: config, size: 9 * DiskSize.gib, running: true) { _ in } }
         let all = StorageModel()
@@ -193,6 +193,14 @@ enum RenderVMWindow {
         }
         sheet("sheet-4-all-vms") { AllVMsView(storage: all, selected: all.vms.first?.folder) {} }
         usbPictures(folder: folder, into: dir)
+        sheet("sheet-8-icon-looks") { AppIconPicker(selected: IconTheme.all[0]) { _ in } }
+
+        // The icon in every look, for the Dock.
+        for t in IconTheme.all {
+            if let tiff = AppIcon.image(t, size: 128).tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("icon-\(t.id).png"))
+            }
+        }
 
         saved.restore()
         try? FileManager.default.removeItem(at: tmp)
