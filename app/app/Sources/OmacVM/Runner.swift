@@ -370,7 +370,8 @@ final class Runner {
         if notchStart.fullPanel { env["OMACVM_FULLPANEL"] = "1" } else { env.removeValue(forKey: "OMACVM_FULLPANEL") }
         // Named under the boot logo when the VM is slow to show anything.
         env["OMACVM_LOGS"] = c.folder.appendingPathComponent("logs").path
-        if let icon = Paths.icon { env["OMACVM_ICON"] = icon.path }
+        // The icon in the look chosen in the window (AppIcon), else the bundle's.
+        if let icon = AppIcon.fileForQEMU() ?? Paths.icon { env["OMACVM_ICON"] = icon.path }
         // The VM reaches the Mac's 127.0.0.1 (as 10.0.2.2) only on OmacVM's
         // ports (patched libslirp), and only for its features that are on:
         // Omanotch, Gestures, Bridge.

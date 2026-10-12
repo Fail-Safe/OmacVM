@@ -386,6 +386,15 @@ expect(SwipeOut.isOn(stored: true) && SwipeOut.isOn(stored: 1) && SwipeOut.isOn(
        && SwipeOut.isOn(stored: "1"), "SwipeOut: a bool, a number, true or yes (as CFPreferences reads it)")
 expect(!SwipeOut.isOn(stored: false) && !SwipeOut.isOn(stored: 0) && !SwipeOut.isOn(stored: "no") && !SwipeOut.isOn(stored: "off"),
        "SwipeOut: false, 0, no: off")
+expect(IconTheme.key == "appIconTheme" && IconTheme.choice(stored: nil).isDefault, "appIconTheme: not set = OmacVM's own icon")
+expect(IconTheme.choice(stored: "flexoki-light").name == "Flexoki Light" && IconTheme.choice(stored: "nope").isDefault,
+       "appIconTheme: a theme's id, anything else the default")
+expect(IconTheme.all.count == 8 && IconTheme.all.filter(\.dark).count == 4 && IconTheme.all.prefix(4).allSatisfy(\.dark),
+       "eight looks: four dark first, four light")
+expect(Set(IconTheme.all.map(\.id)).count == 8 && IconTheme.all.filter { !$0.isDefault }.allSatisfy { $0.colors != nil },
+       "each look has its own id and colours")
+expect(IconTheme.mark.count == 43 && IconTheme.mark.allSatisfy { $0.count == 4 && $0[0] >= 330 && $0[0] + $0[2] <= 694 },
+       "Omarchy's mark: 43 rectangles inside the pad")
 expect(DeleteConfirm.matches(typed: "Omarchy", name: "Omarchy"), "Delete: the exact name")
 expect(!DeleteConfirm.matches(typed: "omarchy", name: "Omarchy") && !DeleteConfirm.matches(typed: "Omarchy ", name: "Omarchy")
        && !DeleteConfirm.matches(typed: "", name: ""), "Delete: not another case, a space more, or nothing")
@@ -393,13 +402,14 @@ expect(!DeleteConfirm.matches(typed: "omarchy", name: "Omarchy") && !DeleteConfi
 // The keys in a settings domain, as the app reads and writes them.
 let suite = "org.omacvm.test.window-tests.\(getpid())"
 if let d = UserDefaults(suiteName: suite) {
-    expect(CloseAction.parse(d.object(forKey: CloseAction.key)) == .shutdown && !SwipeOut.isOn(stored: d.object(forKey: SwipeOut.key)),
-           "an empty domain: every default")
+    expect(CloseAction.parse(d.object(forKey: CloseAction.key)) == .shutdown && !SwipeOut.isOn(stored: d.object(forKey: SwipeOut.key))
+           && IconTheme.choice(stored: d.object(forKey: IconTheme.key)).isDefault, "an empty domain: every default")
     d.set(CloseAction.ask.rawValue, forKey: CloseAction.key)
     d.set(true, forKey: SwipeOut.key)
+    d.set("gruvbox", forKey: IconTheme.key)
     let again = UserDefaults(suiteName: suite)!
-    expect(CloseAction.parse(again.object(forKey: CloseAction.key)) == .ask && SwipeOut.isOn(stored: again.object(forKey: SwipeOut.key)),
-           "written values read back")
+    expect(CloseAction.parse(again.object(forKey: CloseAction.key)) == .ask && SwipeOut.isOn(stored: again.object(forKey: SwipeOut.key))
+           && IconTheme.choice(stored: again.object(forKey: IconTheme.key)).id == "gruvbox", "written values read back")
     d.removePersistentDomain(forName: suite)
 }
 

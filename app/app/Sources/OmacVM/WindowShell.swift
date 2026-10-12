@@ -88,20 +88,6 @@ struct WindowHeader<Icon: View, Trailing: View>: View {
     }
 }
 
-/// The header's app icon.
-struct AppIconButton: View {
-    var size: CGFloat = 32
-
-    var body: some View {
-        Image(nsImage: NSApp.applicationIconImage ?? NSImage())
-            .resizable()
-            .interpolation(.high)
-            .frame(width: size, height: size)
-            .accessibilityLabel("\(Product.name) icon")
-            .layoutProbe("app-icon")
-    }
-}
-
 /// A line under the header: a message (an error in red, else grey), with ×.
 struct MessageStrip: View {
     let text: String

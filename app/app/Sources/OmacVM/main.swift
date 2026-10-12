@@ -134,6 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let n = unknownVM {
             FileHandle.standardError.write(Data("OmacVM: \(VMPick.unknownText(n, roots: Paths.vmsRoots))\n".utf8))
         }
+        // The icon's look (the header's easter egg) in the Dock.
+        AppIcon.apply()
         // Before any VM start reads the Graphics setting.
         Settings.migrateVenusSwitch()
         // The control centre's Mac jobs run this app's omacvm when there is no checkout.
