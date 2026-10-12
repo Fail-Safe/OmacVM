@@ -5,6 +5,9 @@ in more words.
 
 ## Unreleased
 
+- OmacVM.app, **Full screen including notch**: with Omarchy's bar hidden (Super+Shift+Space) the
+  strip beside the notch was black. The wallpaper now fills the whole screen up to the top edge;
+  windows still start below the strip. A full-screen video still turns the strip black.
 - **Omanotch**: the bar and wallpaper patches no longer trust their version line alone. A bar
   that has the line but not the whole patch (for example from another FullPanel build) is
   restored from its unpatched copy and patched again; without a clean copy the install stops and

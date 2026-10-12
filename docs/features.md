@@ -62,8 +62,10 @@ its bar there itself:
   13-inch MacBook Air), so Omarchy's scale panel offers the scales that fit
   that size: 1, 1.33, 2 and 4 on an Air or a 14-inch MacBook Pro, 1 and 2
   on a 16-inch; a saved 1.67 becomes 2 there;
-- windows start below the strip; a full-screen window (a video, Super+F)
-  and a hidden bar leave the strip black, so nothing sits behind the notch;
+- windows start below the strip, so nothing sits behind the notch, also
+  with the bar hidden (Super+Shift+Space), when the wallpaper fills the
+  strip up to the top edge; a full-screen window (a video, Super+F) turns
+  the strip black;
 - macOS's menu bar stays hidden over the strip and comes down from the
   display's top edge, as in other full-screen apps;
 - Omanotch has nothing to do and stays idle for that start; its switch
