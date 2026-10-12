@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.0 (unreleased)
+## 3.1.0
 
 A new settings window, Swipe out to macOS, Closing the window, every scale in Full screen including notch.
 
