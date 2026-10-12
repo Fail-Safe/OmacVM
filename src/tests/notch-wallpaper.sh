@@ -28,6 +28,39 @@ r=$(python3 "$patch" "$out/Background.qml") && [[ $r == *"older patch"* ]] &&
   cmp -s "$out/Background.qml" <(cp "$fixture" "$out/clean.qml" && python3 "$patch" "$out/clean.qml" >/dev/null && cat "$out/clean.qml") &&
   ok "an older patch is replaced" || bad "upgrade from an older patch: $r"
 
+# The version line alone is not a patch (#354): every piece must be there.
+v=$(sed -n 's/^VERSION = //p' "$patch")
+cp "$fixture" "$out/clean.qml" && python3 "$patch" "$out/clean.qml" >/dev/null
+line="// omarchy-notch-bar background patch v$v"
+printf '%s\n' "$line" > "$out/Background.qml"
+cp "$fixture" "$out/Background.qml.before-notchbar"
+r=$(python3 "$patch" "$out/Background.qml") && [[ $r == *"replacing an incomplete or older patch"* ]] &&
+  cmp -s "$out/Background.qml" "$out/clean.qml" && ok "version line alone, clean backup: the whole patch" ||
+  bad "version line alone with a clean backup: $r"
+printf '%s\n' "$line" > "$out/Background.qml"; rm -f "$out/Background.qml.before-notchbar"
+if r=$(python3 "$patch" "$out/Background.qml" 2>&1); then bad "version line alone, no backup: went on ($r)"
+elif [[ $(cat "$out/Background.qml") == "$line" && $r == *re-clone* ]]; then ok "version line alone, no backup: stops, file unchanged"
+else bad "version line alone, no backup: $r / $(head -c 200 "$out/Background.qml")"; fi
+cp "$fixture" "$out/Background.qml.before-notchbar"
+cp "$out/clean.qml" "$out/Background.qml"
+r=$(python3 "$patch" "$out/Background.qml") && [[ $r == already* ]] && cmp -s "$out/Background.qml" "$out/clean.qml" &&
+  ok "the whole patch stays as it is: $r" || bad "the whole patch again: $r"
+# Each piece removed from a whole patch: patched again from the clean backup.
+r=$(python3 - "$patch" "$out/clean.qml" "$fixture" "$out/Background.qml" <<'PY'
+import importlib.util, subprocess, sys
+spec = importlib.util.spec_from_file_location("bg", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+full, stock = open(sys.argv[2]).read(), open(sys.argv[3]).read()
+for piece in m.PIECES:
+    if piece not in full or piece in stock:
+        print("piece not in the patch, or already in Omarchy's file: %r" % piece); sys.exit(1)
+    open(sys.argv[4], "w").write(full.replace(piece, ""))
+    out = subprocess.run([sys.executable, sys.argv[1], sys.argv[4]], capture_output=True, text=True)
+    if out.returncode or "incomplete or older" not in out.stdout or open(sys.argv[4]).read() != full:
+        print("not patched again without %r: %s %s" % (piece, out.stdout, out.stderr)); sys.exit(1)
+print(len(m.PIECES))
+PY
+) && ok "each of the $r pieces missing: patched again from the backup" || bad "$r"
+
 # The helpers and the canvas, as JavaScript.
 qml="$out/Background.qml"
 helpers=$(awk '/--- omarchy-notch-bar ---/ {on = 1} on {print} /--- end omarchy-notch-bar ---/ {exit}' "$qml")

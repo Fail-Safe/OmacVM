@@ -41,8 +41,10 @@ picture only changed when the reveal ended. With the NOTCH output there are
 always two (the strip and the built-in display), so the display often skipped
 the animation. The patch lets a late output join the running reveal.
 
-The patch is versioned like the bar patch; an older version is restored from
-<Background.qml>.before-notchbar (kept by install.sh) and patched again.
+The patch is versioned like the bar patch; an older version, or a file with
+the version line but a piece of the patch missing (PIECES, #354), is restored
+from <Background.qml>.before-notchbar (kept by install.sh) and patched again.
+Without a clean backup it is left as it is and the patch stops.
 """
 import os
 import sys
@@ -50,6 +52,28 @@ import sys
 MARK = "omarchy-notch-bar"
 VERSION = 7
 VERSION_LINE = f"// omarchy-notch-bar background patch v{VERSION}"
+
+
+# One line each step below leaves in the file and no stock Background.qml has.
+# All of them must be there for a file with VERSION_LINE to count as patched.
+PIECES = [
+    "  function notchPeerOf(s) {\n",                                             # 1. pairing helpers
+    "      WlrLayershell.layer: root.notchIsStrip(panel.modelData) ? WlrLayer.Overlay : WlrLayer.Background\n",  # 2.
+    "      visible: !remapGuard.remapping && !notchRemap.remapping\n",            # 3. remap
+    "        id: notchCanvas\n",                                                  # 4. shared canvas, 5. decode size
+    "        id: base\n        anchors.fill: notchCanvas\n        sourceSize: panel.notchImageSize\n        retainWhileLoading: true\n",
+    "        id: oldFrame\n        anchors.fill: notchCanvas\n        sourceSize: panel.notchImageSize\n        retainWhileLoading: true\n",
+    "        id: incomingLayer\n        anchors.fill: notchCanvas\n",
+    "        id: revealMask\n        anchors.fill: notchCanvas\n",
+    "      readonly property size notchImageSize: ",
+    "          id: incomingFrame\n          anchors.fill: parent\n          sourceSize: panel.notchImageSize\n",
+    "      // omarchy-notch-bar: a late output joins a running reveal.\n",        # 6. late outputs
+]
+
+
+def missing_pieces(text):
+    """The PIECES not in text (each may appear more than once)."""
+    return [p for p in PIECES if text.count(p) < 1]
 
 
 def replace_once(text, old, new):
@@ -62,18 +86,18 @@ def replace_once(text, old, new):
 def main():
     path = sys.argv[1]
     text = open(path).read()
-    if VERSION_LINE in text:
+    if VERSION_LINE in text and not missing_pieces(text):
         print(f"already patched (v{VERSION})")
         return
     if MARK in text:
         backup = path + ".before-notchbar"
         if not os.path.exists(backup) or MARK in open(backup).read():
-            sys.exit(f"apply-patch: {path} carries an older patch and no clean backup exists; "
+            sys.exit(f"apply-patch: {path} carries an incomplete or older patch and no clean backup exists; "
                      "re-clone the background (omarchy plugin clone omarchy.background) and run install.sh again")
         # Patch the clean copy in memory; the file is only written once the
         # whole patch applied, so a failure leaves the old patch in place.
         text = open(backup).read()
-        print("replacing an older patch version")
+        print("replacing an incomplete or older patch")
 
     # 1. Helpers that pair the NOTCH output with the built-in display.
     text = replace_once(text, '  function imageUrl(path) {\n', f'''  // --- omarchy-notch-bar ------------------------------------------------

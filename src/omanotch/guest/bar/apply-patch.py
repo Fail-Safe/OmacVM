@@ -3,10 +3,13 @@
 
 usage: apply-patch.py <Bar.qml>        (patches the file in place)
 
-The patch is versioned. A file carrying the current version only gets the
-older-Omarchy compatibility fix (see COMPAT) if it is still missing; a file
-patched by an older version is restored from its unpatched backup
-(<Bar.qml>.before-notchbar, kept by install.sh) and patched again.
+The patch is versioned. A file carrying the current version and every piece
+of the patch (PIECES) only gets the older-Omarchy compatibility fix (see
+COMPAT) if it is still missing; a file patched by an older version, or one
+with the version line but a piece missing (another patcher's work under the
+same line, #354), is restored from its unpatched backup
+(<Bar.qml>.before-notchbar, kept by install.sh) and patched again. Without a
+clean backup it is left as it is and the patch stops.
 
 What the patch adds:
   * A copy of the bar on any output whose name starts with NOTCH (the hidden
@@ -46,6 +49,27 @@ VERSION = 20
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
+# One line each step below leaves in the file and no stock Bar.qml has. All
+# of them must be there for a file with VERSION_LINE to count as patched.
+PIECES = [
+    "  function notchRoleFor(s) {\n",                                       # 1. state and roles
+    '    target: "notchbar"\n',                                              # 2. IPC and watchdog
+    "    readonly property string notchRole: root.notchRoleFor(screen)\n",  # 3. parking per window
+    '      top: barWindow.parked && root.position === "top" ? -barWindow.parkedSize : 0\n',
+    '    implicitHeight: root.vertical ? 0 : (barWindow.notchRole === "" ? ',
+    "      anchors.topMargin: barWindow.notchPadTop\n",
+    "        CenterModules { anchors.fill: parent; notchLayout: barWindow.notchLayout }\n",  # 4. layout mode
+    "    property bool notchLayout: false\n",                                # 5. around the housing
+    "        Item { id: notchLeftEdge; ",
+    "    WlrLayershell.layer: barWindow.notchRole === \"notch\" || ",        # 6. layer, repaint, black strip
+]
+
+
+def missing_pieces(text):
+    """The PIECES not in text (each may appear more than once)."""
+    return [p for p in PIECES if text.count(p) < 1]
+
+
 def replace_once(text, old, new):
     count = text.count(old)
     if count != 1:
@@ -73,7 +97,7 @@ def compat(text):
 def main():
     path = sys.argv[1]
     text = open(path).read()
-    if VERSION_LINE in text:
+    if VERSION_LINE in text and not missing_pieces(text):
         fixed = compat(text)
         if fixed != text:
             open(path, "w").write(fixed)
@@ -84,12 +108,12 @@ def main():
     if MARK in text:
         backup = path + ".before-notchbar"
         if not os.path.exists(backup) or MARK in open(backup).read():
-            sys.exit(f"apply-patch: {path} carries an older patch and no clean backup exists; "
+            sys.exit(f"apply-patch: {path} carries an incomplete or older patch and no clean backup exists; "
                      "re-clone the bar (omarchy plugin clone omarchy.bar) and run install.sh again")
         # Patch the clean copy in memory; the file is only written once the
         # whole patch applied, so a failure leaves the old patch in place.
         text = open(backup).read()
-        print("replacing an older patch version")
+        print("replacing an incomplete or older patch")
 
     text = compat(text)
 

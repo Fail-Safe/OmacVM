@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Omanotch**: the bar and wallpaper patches no longer trust their version line alone. A bar
+  that has the line but not the whole patch (for example from another FullPanel build) is
+  restored from its unpatched copy and patched again; without a clean copy the install stops and
+  says to clone the bar again. Reported by @brianmerchant (#354).
+
 ## 3.0.17
 
 - OmacVM.app: the **start animation** (OMACVM turning into Omarchy's logo) plays again in full

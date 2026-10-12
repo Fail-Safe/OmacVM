@@ -160,6 +160,88 @@ class Patch(unittest.TestCase):
             shutil.rmtree(d)
 
 
+def load_patch():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("bar_apply_patch", PATCH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class Incomplete(unittest.TestCase):
+    """#354: the version line alone is not a patch; every piece must be there."""
+
+    def setUp(self):
+        self.full = patched()
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.bar = self.dir / "Bar.qml"
+        self.backup = self.dir / "Bar.qml.before-notchbar"
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def run_patch(self):
+        return subprocess.run([sys.executable, str(PATCH), str(self.bar)], capture_output=True, text=True)
+
+    @property
+    def pieces(self):
+        return load_patch().PIECES
+
+    def test_every_piece_is_in_the_patch_and_not_in_omarchy(self):
+        for piece in self.pieces:
+            self.assertGreaterEqual(self.full.count(piece), 1, piece)
+            self.assertNotIn(piece, BAR, piece)
+
+    def test_version_line_alone_with_a_backup_gets_the_whole_patch(self):
+        self.bar.write_text("// omarchy-notch-bar patch v20\n")
+        self.backup.write_text(BAR)
+        out = self.run_patch()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("replacing an incomplete or older patch", out.stdout)
+        self.assertEqual(self.bar.read_text(), self.full)
+        self.assertEqual(self.backup.read_text(), BAR)
+
+    def test_version_line_alone_without_a_backup_stops(self):
+        self.bar.write_text("// omarchy-notch-bar patch v20\n")
+        out = self.run_patch()
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("re-clone the bar", out.stderr)
+        self.assertEqual(self.bar.read_text(), "// omarchy-notch-bar patch v20\n")
+
+    def test_a_backup_that_is_patched_itself_is_not_used(self):
+        self.bar.write_text("// omarchy-notch-bar patch v20\n")
+        self.backup.write_text(self.full)
+        out = self.run_patch()
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("no clean backup", out.stderr)
+        self.assertEqual(self.bar.read_text(), "// omarchy-notch-bar patch v20\n")
+
+    def test_each_missing_piece_is_patched_again(self):
+        self.backup.write_text(BAR)
+        for piece in self.pieces:
+            self.bar.write_text(self.full.replace(piece, ""))
+            out = self.run_patch()
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("replacing an incomplete or older patch", out.stdout, piece)
+            self.assertEqual(self.bar.read_text(), self.full, piece)
+
+    def test_whole_patch_stays_as_it_is(self):
+        self.backup.write_text(BAR)
+        self.bar.write_text(self.full)
+        out = self.run_patch()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("already patched (v20)", out.stdout)
+        self.assertEqual(self.bar.read_text(), self.full)
+
+    def test_a_piece_found_twice_still_counts(self):
+        # Present, not "exactly once": "id: notchRemap" is also in "id: notchRemapSettle".
+        twice = self.full + "// " + "    readonly property string notchRole: root.notchRoleFor(screen)\n"
+        self.bar.write_text(twice)
+        out = self.run_patch()
+        self.assertIn("already patched (v20)", out.stdout)
+        self.assertEqual(self.bar.read_text(), twice)
+
+
 # Runs the patch's own JavaScript with fake files and a fake clock.
 HARNESS = r'''
 const files = %(files)s;
