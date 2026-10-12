@@ -383,6 +383,8 @@ final class Runner {
         if !Settings.pointerStart { env["OMACVM_POINTER_START"] = "0" }
         if Settings.macPointer { env["OMACVM_HW_CURSOR"] = "1" }
         if !Settings.globeKeyToVM { env["OMACVM_GLOBE_KEY"] = "mac" }
+        // Keyboard sharing apps see the keys before QEMU's tap (#350, omacvm-cocoa-keys-last.patch).
+        ShareKeyboard.apply(Settings.shareKeyboard, to: &env)
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
         // video-decode): FFmpeg's AV1 cannot go to VideoToolbox.
