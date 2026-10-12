@@ -49,6 +49,9 @@ A new window for the VM's settings.
   down) or *Ask*. Asked for by @Vocllum (#358).
 - OmacVM.app: a VM window you cannot see (minimised, hidden, covered, on another Space) no longer
   draws the guest's frames until it shows again.
+- **Control centre**, every route: the Mac's **Escape combo** (this monitor or all monitors) and
+  **Swipe out to macOS** next to **Magic Mouse swipe**, the same settings as OmacVM.app's window.
+  On the Mac: `omacvm gestures` (`escape pointer|all`, `swipe-out on|off`, `mouse-swipe 3|4`).
 
 ## 3.0.18
 

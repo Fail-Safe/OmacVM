@@ -250,7 +250,7 @@ final class Control {
     switch negotiateProto(headers["x-omacvm-proto"]) { case .success(let p): proto = p; case .failure(let e): return refuse(e) }
     let version = macVersion(cli)
     // Graphics memory and the Magic Mouse swipe are asked while the control centre is open.
-    quiet = route == .gpuMemory || route == .mouseSwipe
+    quiet = route == .gpuMemory || route == .mouseSwipe || route == .gestureSettings
     // The VM list as it is for graphics memory (asked every 2 s): a new run of
     // omacvm vms only when the VM is not in it, not each minute.
     let fresh = route != .gpuMemory
@@ -259,7 +259,7 @@ final class Control {
       let v = ProcessInfo.processInfo.operatingSystemVersion
       return answer(200, ["proto": proto, "proto_min": controlProtoMin, "omacvm": version,
                           "requests": ["hello", "status", "updates", "updates/check", "settings/update-checks", "jobs",
-                                       "gpu-memory", "settings/mouse-swipe", "app-update", "theme"],
+                                       "gpu-memory", "settings/mouse-swipe", "settings/gestures", "app-update", "theme"],
                           "features": known.sorted(), "macos": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
                           "chip": chipName()])
     }
@@ -351,6 +351,14 @@ final class Control {
     case .setMouseSwipe(let n):
       setMouseSwipe(n)
       answer(200, mouseSwipeAnswer(magicMouse: magicMouseConnected(), fingers: mouseSwipeNow()), "mouse swipe \(n) fingers")
+    case .gestureSettings:
+      answer(200, gestureSettingsNow())
+    case .setGestureSettings(let escape, let swipeOut):
+      if let e = escape { CFPreferencesSetAppValue("EscapeSwipe" as CFString, e as CFString, gesturesDomain) }
+      if let w = swipeOut { CFPreferencesSetAppValue("SwipeOut" as CFString, w as CFBoolean, gesturesDomain) }
+      CFPreferencesAppSynchronize(gesturesDomain)
+      answer(200, gestureSettingsNow(), [escape.map { "escape \($0)" }, swipeOut.map { "swipe out \($0 ? "on" : "off")" }]
+        .compactMap { $0 }.joined(separator: ", "))
     case .status:
       answer(200, statusAnswer(cli, vm, version))
     case .gpuMemory:
@@ -830,6 +838,16 @@ final class Control {
   private func setMouseSwipe(_ n: Int) {
     CFPreferencesSetAppValue("MouseSwipeFingers" as CFString, (n == 3 ? 3 : 4) as CFNumber, gesturesDomain)
     CFPreferencesAppSynchronize(gesturesDomain)
+  }
+
+  // ---- The escape combo and Swipe out to macOS: Gestures' own settings ----
+  private func gestureSettingsNow() -> [String: Any] {
+    CFPreferencesAppSynchronize(gesturesDomain)
+    var valid: DarwinBoolean = false
+    let swipeOut = CFPreferencesGetAppBooleanValue("SwipeOut" as CFString, gesturesDomain, &valid)
+    return gestureSettingsAnswer(escape: escapeChoice(stored: CFPreferencesCopyAppValue("EscapeSwipe" as CFString, gesturesDomain)),
+                                 swipeOut: valid.boolValue && swipeOut, magicMouse: magicMouseConnected(),
+                                 fingers: mouseSwipeNow())
   }
 
   /// A Magic Mouse connected now (Bluetooth or USB), looked for as the app does.

@@ -713,3 +713,47 @@ def mouse_swipe_row(answer: dict | None, gestures_on: bool = True, offline: bool
 def next_fingers(n) -> int:
     """Space on the Magic Mouse swipe row: 4 -> 3 -> 4."""
     return 4 if n == 3 else 3
+
+
+# ---- The escape combo and Swipe out to macOS (GET/POST /omacvm/settings/gestures) ----
+# Mac-wide settings of OmacVM Gestures, the same keys and words as OmacVM.app's
+# window (EscapeSwipe: "pointer" | "all"; SwipeOut, off by default).
+ESCAPE_FEATURE = Feature(
+    name="escape-combo", default="pointer", sides=("mac",), tags=(), needs=None, title="Escape combo",
+    summary="What ⌃⌥ Esc takes back to macOS in full screen: the monitor under the pointer, or every monitor "
+            "that shows the VM.")
+SWIPE_OUT_FEATURE = Feature(
+    name="swipe-out", default="off", sides=("mac",), tags=(), needs="gestures", title="Swipe out to macOS",
+    summary="Swipe past the first or last workspace to the macOS Space beside the VM, the way ⌃⌥ Esc goes.")
+ESCAPE_TITLES = {"pointer": "this monitor", "all": "all monitors"}
+
+
+def escape_row(answer: dict | None, offline: bool = False) -> Row | None:
+    """The escape combo's row: from the Mac's answer (none from a Mac
+    without the request)."""
+    if not isinstance(answer, dict) or answer.get("escape") not in ESCAPE_TITLES:
+        return None
+    word = ESCAPE_TITLES[answer["escape"]]
+    if offline:
+        return Row(ESCAPE_FEATURE, True, Status.UNKNOWN, f"{word} (needs the Mac)")
+    return Row(ESCAPE_FEATURE, True, Status.WORKS, word)
+
+
+def swipe_out_row(answer: dict | None, gestures_on: bool = True, offline: bool = False) -> Row | None:
+    """Swipe out to macOS: on or off on the Mac. Trackpad gestures off in
+    this VM: the setting stays, the row says why nothing swipes."""
+    if not isinstance(answer, dict) or not isinstance(answer.get("swipe_out"), bool):
+        return None
+    on = answer["swipe_out"]
+    if offline:
+        return Row(SWIPE_OUT_FEATURE, on, Status.UNKNOWN, f"{'on' if on else 'off'} (needs the Mac)")
+    if not on:
+        return Row(SWIPE_OUT_FEATURE, False, Status.OFF, "off")
+    if not gestures_on:
+        return Row(SWIPE_OUT_FEATURE, False, Status.OFF, "on (Trackpad gestures is off)")
+    return Row(SWIPE_OUT_FEATURE, True, Status.WORKS, "on")
+
+
+def next_escape(word) -> str:
+    """Space on the escape combo's row: this monitor <-> all monitors."""
+    return "pointer" if word == "all" else "all"

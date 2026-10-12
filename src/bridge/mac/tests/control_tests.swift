@@ -36,6 +36,15 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(ok(route("GET", "/omacvm/settings/mouse-swipe")) == .mouseSwipe, "mouse swipe")
     expect(ok(route("POST", "/omacvm/settings/mouse-swipe", #"{"fingers": 3}"#)) == .setMouseSwipe(3), "mouse swipe 3")
     expect(ok(route("POST", "/omacvm/settings/mouse-swipe", #"{"fingers": 4}"#)) == .setMouseSwipe(4), "mouse swipe 4")
+    expect(ok(route("GET", "/omacvm/settings/gestures")) == .gestureSettings, "gesture settings")
+    expect(ok(route("POST", "/omacvm/settings/gestures", #"{"escape": "all"}"#)) == .setGestureSettings(escape: "all", swipeOut: nil),
+           "escape combo: all monitors")
+    expect(ok(route("POST", "/omacvm/settings/gestures", #"{"escape": "pointer"}"#)) == .setGestureSettings(escape: "pointer", swipeOut: nil),
+           "escape combo: this monitor")
+    expect(ok(route("POST", "/omacvm/settings/gestures", #"{"swipe_out": true}"#)) == .setGestureSettings(escape: nil, swipeOut: true),
+           "swipe out on")
+    expect(ok(route("POST", "/omacvm/settings/gestures", #"{"escape": "all", "swipe_out": false}"#))
+           == .setGestureSettings(escape: "all", swipeOut: false), "both at once")
     // The Touch ID panel's colours: the body goes to touchid_theme.swift's rules (tests/touchid_panel_tests.swift).
     expect(ok(route("POST", "/omacvm/theme", ##"{"background": "#1a1b26"}"##)) == .theme(Data(##"{"background": "#1a1b26"}"##.utf8)), "theme")
     expect(err(route("GET", "/omacvm/theme"))?.status == 405, "theme: POST only")
@@ -97,6 +106,14 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
            "mouse swipe: no other key")
     expect(err(route("GET", "/omacvm/settings/mouse-swipe", #"{"fingers": 3}"#))?.code == "body", "mouse swipe: GET with a body")
     expect(err(route("DELETE", "/omacvm/settings/mouse-swipe"))?.status == 405, "mouse swipe: method")
+    for b in [#"{"escape": "ALL"}"#, #"{"escape": "everything"}"#, #"{"escape": 1}"#, #"{"escape": null}"#,
+              #"{"swipe_out": 1}"#, #"{"swipe_out": "true"}"#, #"{"swipe_out": null}"#, "{}", ""] {
+      expect(err(route("POST", "/omacvm/settings/gestures", b))?.code == "bad-body", "gesture settings: \(b) refused")
+    }
+    expect(err(route("POST", "/omacvm/settings/gestures", #"{"swipe_out": true, "MouseSwipeFingers": 3}"#))?.code == "unknown-key",
+           "gesture settings: no other key (no way to write any setting)")
+    expect(err(route("GET", "/omacvm/settings/gestures", "{}"))?.code == "body", "gesture settings: GET with a body")
+    expect(err(route("PUT", "/omacvm/settings/gestures"))?.status == 405, "gesture settings: method")
     expect(err(route("GET", "/omacvm/jobs/../../etc"))?.status == 404, "job path")
     expect(err(route("GET", "/omacvm/jobs/ABCDEF0123456789"))?.status == 404, "job id upper case")
     expect(err(route("GET", "/omacvm/run"))?.status == 404, "no other requests")
@@ -120,6 +137,18 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     let ms = mouseSwipeAnswer(magicMouse: true, fingers: 3)
     expect(ms["magic_mouse"] as? Bool == true && ms["fingers"] as? Int == 3 && ms.count == 2, "answer: two keys")
     expect(mouseSwipeAnswer(magicMouse: false, fingers: 7)["fingers"] as? Int == 4, "answer: never another number")
+
+    // ---- The escape combo and Swipe out: Gestures' rules ----
+    expect(escapeChoice(stored: nil) == "pointer" && escapeChoice(stored: "pointer") == "pointer", "escape: not set: this monitor")
+    expect(escapeChoice(stored: "all") == "all" && escapeChoice(stored: "All") == "all", "escape: all (any case)")
+    expect(escapeChoice(stored: NSNumber(value: 1)) == "pointer" && escapeChoice(stored: "every") == "pointer", "escape: anything else: this monitor")
+    let gs = gestureSettingsAnswer(escape: "all", swipeOut: true, magicMouse: false, fingers: 3)
+    expect(gs["escape"] as? String == "all" && gs["swipe_out"] as? Bool == true && gs["magic_mouse"] as? Bool == false
+           && gs["fingers"] as? Int == 3 && gs.count == 4, "gesture settings answer: four keys")
+    expect(gestureSettingsAnswer(escape: "x", swipeOut: false, magicMouse: true, fingers: 9)["escape"] as? String == "pointer",
+           "answer: never another escape word")
+    expect(!routeNeedsSSH(.gestureSettings) && !routeNeedsSSH(.setGestureSettings(escape: "all", swipeOut: nil)),
+           "gesture settings: the Mac's own, no SSH")
 
     // ---- protocol ----
     if case .success(let p) = negotiateProto(nil) { expect(p == 1, "no header: 1") } else { expect(false, "no header") }

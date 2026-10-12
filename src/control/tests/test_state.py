@@ -402,6 +402,29 @@ def test_mouse_swipe_row_says_when_gestures_is_off():
     assert r.status is S.Status.OFF and r.note == "3 fingers (Trackpad gestures is off)"
 
 
+def test_escape_row():
+    assert S.escape_row(None) is None and S.escape_row({"swipe_out": True}) is None   # an older Mac
+    assert S.escape_row({"escape": "pointer"}).note == "this monitor"
+    assert S.escape_row({"escape": "all"}).note == "all monitors"
+    assert S.escape_row({"escape": "everything"}) is None
+    r = S.escape_row({"escape": "all"}, offline=True)
+    assert r.status is S.Status.UNKNOWN and r.note == "all monitors (needs the Mac)"
+    assert S.next_escape("pointer") == "all" and S.next_escape("all") == "pointer" and S.next_escape(None) == "all"
+
+
+def test_swipe_out_row():
+    assert S.swipe_out_row(None) is None and S.swipe_out_row({"swipe_out": "yes"}) is None
+    r = S.swipe_out_row({"swipe_out": False})
+    assert (r.on, r.status, r.note) == (False, S.Status.OFF, "off")
+    r = S.swipe_out_row({"swipe_out": True})
+    assert (r.on, r.status, r.note) == (True, S.Status.WORKS, "on")
+    r = S.swipe_out_row({"swipe_out": True}, gestures_on=False)
+    assert (r.on, r.status, r.note) == (False, S.Status.OFF, "on (Trackpad gestures is off)")
+    assert S.swipe_out_row({"swipe_out": True}, offline=True).note == "on (needs the Mac)"
+    # The same words as the app window, short enough for an 80-column row.
+    assert S.ESCAPE_FEATURE.title == "Escape combo" and S.SWIPE_OUT_FEATURE.title == "Swipe out to macOS"
+
+
 def test_mouse_swipe_row_stays_while_the_mac_is_away():
     r = S.mouse_swipe_row({"magic_mouse": True, "fingers": 3}, offline=True)
     assert r.status is S.Status.UNKNOWN and r.note == "3 fingers (needs the Mac)"

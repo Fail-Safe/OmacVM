@@ -70,6 +70,10 @@ class Controller:
         # the row shows only while the Mac has a Magic Mouse.
         self.mouse_swipe: dict | None = None
         self.mouse_swipe_sets = 0   # bumped around each switch: an older look is not kept
+        # The escape combo and Swipe out to macOS ({"escape", "swipe_out", ...}),
+        # never cached; none from a Mac without the request.
+        self.gestures: dict | None = None
+        self.gestures_sets = 0
         # Features a job just switched or repaired: their checks from before
         # the job say nothing about them now, so they are left out until the
         # next look of each side (the VM's checks, the Mac's status).
@@ -116,6 +120,32 @@ class Controller:
         except BridgeError as e:
             self.mac_error = e
         self.refresh_mouse_swipe()
+        self.refresh_gestures()
+
+    def gestures_supported(self) -> bool:
+        return self.hello is not None and "settings/gestures" in self.hello.requests
+
+    def refresh_gestures(self) -> None:
+        """The Mac's escape combo and Swipe out, as the Magic Mouse swipe."""
+        if self.hello is not None and not self.gestures_supported():
+            self.gestures = None
+            return
+        if not self.linked:
+            return
+        sets = self.gestures_sets
+        try:
+            answer = self.bridge.gestures()
+        except BridgeError:
+            return
+        if sets == self.gestures_sets:
+            self.gestures = answer
+
+    def set_gestures(self, escape: str | None = None, swipe_out: bool | None = None) -> None:
+        self.gestures_sets += 1
+        try:
+            self.gestures = self.bridge.set_gestures(escape=escape, swipe_out=swipe_out)
+        finally:
+            self.gestures_sets += 1
 
     def mouse_swipe_supported(self) -> bool:
         return self.hello is not None and "settings/mouse-swipe" in self.hello.requests
@@ -323,10 +353,16 @@ class Controller:
                              offline=self.mac_error is not None)
         # A Mac setting: the last answer stays while the Mac is away for a moment.
         ms = S.mouse_swipe_row(self.mouse_swipe, on.get("gestures", True), offline=not self.linked)
-        if ms is not None:
-            # After Trackpad gestures and the features that need it.
+        # The Mac's gesture settings: after Trackpad gestures and the features
+        # that need it, in the app window's order (escape combo, Magic Mouse,
+        # Swipe out to macOS).
+        gs = getattr(self, "gestures", None)
+        extra = [r for r in (S.escape_row(gs, offline=not self.linked), ms,
+                             S.swipe_out_row(gs, on.get("gestures", True), offline=not self.linked))
+                 if r is not None]
+        if extra:
             at = max((i + 1 for i, r in enumerate(rows) if "gestures" in (r.feature.name, r.feature.needs)), default=len(rows))
-            rows.insert(at, ms)
+            rows[at:at] = extra
         return rows + [r for r in (g, m) if r is not None]
 
     def fixed_of(self, name: str) -> str:

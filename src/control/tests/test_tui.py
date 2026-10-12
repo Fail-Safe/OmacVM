@@ -1305,6 +1305,62 @@ def test_mouse_swipe_row_with_a_magic_mouse(world):
     asyncio.run(go())
 
 
+def test_escape_and_swipe_out_rows(world):
+    """The Mac's escape combo and Swipe out to macOS: after Trackpad gestures in
+    the app window's order; space switches each on the Mac (no job); r explains.
+    A Mac from before 3.1.0 (no settings/gestures): no rows."""
+    world.gestures = {"escape": "pointer", "swipe_out": False}
+    world.mouse_swipe = {"magic_mouse": True, "fingers": 4}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(80, 30)) as pilot:
+            assert await settle(pilot, lambda: "escape-combo" in rows(a) and "swipe-out" in rows(a))
+            names = [r.feature.name for r in a.rows]
+            i = names.index("escape-combo")
+            assert names[i:i + 3] == ["escape-combo", "mouse-swipe", "swipe-out"]
+            # Every row is a feature row (the gesture settings' answer is no row itself).
+            from omacvm_cc import state as S
+            assert all(isinstance(r, S.Row) for r in a.rows)
+            assert rows(a)["escape-combo"].note == "this monitor" and rows(a)["swipe-out"].note == "off"
+            from textual.widgets import DataTable
+            t = a.screen.query_one(DataTable)
+            t.move_cursor(row=i)
+            await pilot.press("space")
+            assert await settle(pilot, lambda: rows(a)["escape-combo"].note == "all monitors")
+            assert world.gestures["escape"] == "all"
+            t.move_cursor(row=names.index("swipe-out"))
+            await pilot.press("space")
+            assert await settle(pilot, lambda: world.gestures["swipe_out"] is True)
+            # Gestures is off in this VM: the setting is on, the row says why nothing swipes.
+            assert await settle(pilot, lambda: rows(a)["swipe-out"].note == "on (Trackpad gestures is off)")
+            posts = [b for m, p, b in world.requests if m == "POST" and p == "/omacvm/settings/gestures"]
+            assert posts == [{"escape": "all"}, {"swipe_out": True}]
+            await pilot.press("r")
+            await pilot.pause(0.1)
+            assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
+            # The rows fit 80 columns: the table is not wider than the screen.
+            assert t.virtual_size.width <= 80
+            # Changed on the Mac (the app window, omacvm gestures): the next look shows it.
+            world.gestures = {"escape": "pointer", "swipe_out": False}
+            a.live_refresh()
+            assert await settle(pilot, lambda: rows(a)["escape-combo"].note == "this monitor" and rows(a)["swipe-out"].note == "off")
+    asyncio.run(go())
+
+
+def test_no_escape_rows_on_an_older_mac(world):
+    world.gestures = None
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: "gestures" in rows(a))
+            await pilot.pause(0.3)
+            assert "escape-combo" not in rows(a) and "swipe-out" not in rows(a)
+            assert not any(p == "/omacvm/settings/gestures" for _, p, _ in world.requests)
+    asyncio.run(go())
+
+
 def test_mouse_swipe_row_follows_gestures(tmp_path, monkeypatch):
     mac, checks = FakeMac(), FakeChecks()
     mac.mouse_swipe = {"magic_mouse": True, "fingers": 3}
