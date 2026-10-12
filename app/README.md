@@ -81,15 +81,20 @@ The app updates itself ([ADR 0033](../docs/adr/0033-app-self-update.md)):
 - Once a week it looks at the latest release's update feed (signed with
   OmacVM's main or spare release key). A newer version is downloaded and
   checked: size and SHA-256 from the feed, then the app and its QEMU signed
-  with a Developer ID of a team the feed names. The window then offers it: What's New,
-  Skip This Version, Update to X…. **Check Now** next to the weekly switch (or
-  *OmacVM › Check for Updates…*) asks right away, also with weekly checks off.
-- A VM that runs from the app is never replaced under it. With the VM
-  running, *Update to X…* (or `u` in the VM's control centre) shuts the VM
-  down cleanly, updates, restarts the app and starts the VM again, after one
-  confirm. A VM that is still running after 3 minutes stops the update;
-  forcing it off needs a second confirm. A VM started another way (the CLI)
-  makes the update wait until nothing runs from the app any more.
+  with a Developer ID of a team the feed names. A banner under the window's
+  header then offers it: the first line of the new version's CHANGELOG
+  (read from the downloaded app itself), What's New (its whole section, with
+  Skip This Version), Later and Update Now. **Check Now** next to the weekly
+  switch (or *OmacVM › Check for Updates…*) asks right away, also with weekly
+  checks off.
+- A VM that runs from the app is never replaced under it: the banner's button
+  reads Update After Shutdown, and the update goes in once the VM has shut
+  down. *OmacVM › Check for Updates…* (or `u` in the VM's control centre)
+  shuts the VM down cleanly instead, updates, restarts the app and starts the
+  VM again, after one confirm. A VM that is still running after 3 minutes
+  stops that update; forcing it off needs a second confirm. A VM started
+  another way (the CLI) makes the update wait until nothing runs from the app
+  any more.
 - The new version must start (its QEMU too) within 90 s, or the old one
   comes back by itself and that version is skipped. The previous version is
   kept for one step back: *OmacVM › Go Back to <version>…*.
@@ -142,9 +147,10 @@ Accessibility of its own.
    Omarchy (omarchy-mac) on the disk, then OmacVM's VM side.
 3. Starts it: QEMU shows Omarchy in a window that follows its size. Quit
    shuts the VM down cleanly; the Mac's sleep pauses it.
-4. Before a start, the window has a Resources picker (the same tiers as the
-   create screen): it writes `CPUS` and `MEM_MB` into the VM's `vm.env`,
-   which applies on the next start. `omacvm resources --vm NAME` does the same
+4. Before a start, the window has every setting of the VM (docs/design/settings-3.1;
+   AGENTS.md lists each one's key or file). Resources (the create screen's tiers, or
+   Custom with − / + for CPUs and memory) writes `CPUS` and `MEM_MB` into the
+   VM's `vm.env`, for its next start. `omacvm resources --vm NAME` does the same
    from the terminal.
 
 The VM is a normal install: `omarchy update` and snapshots work.

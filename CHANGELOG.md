@@ -5,6 +5,22 @@ in more words.
 
 ## Unreleased
 
+A new window for the VM's settings.
+
+- OmacVM.app: **the VM's settings in one window**. A header with the VM, its state and Start; a
+  sidebar (General, Display, Input, Sharing & Devices, Storage & Updates) that scrolls to each
+  section and follows the scroll; every setting as a row with a short line under it. The window is
+  800 pt wide and opens as tall as the screen shows. Resources (Low to Best, or Custom with − and +)
+  and the disk's size change in the window itself; Start in and the escape combo are pictures to
+  pick. The settings keep their keys and files, so every choice you made stays. **Closing the
+  window** and **Swipe out to macOS** are new rows.
+- **Delete VM…** asks for the VM's name, typed exactly.
+- **Updates**: a banner under the header says what the new version brings, with What's New,
+  Later and Update Now (Update After Shutdown while the VM runs). No macOS notification.
+- **The app icon** has eight looks: click it in the window's header. OmacVM's own and seven
+  Omarchy themes (Tokyo Night, Catppuccin, Gruvbox, Flexoki Light, Catppuccin Latte, Rosé Pine,
+  Lupine). The Dock and the VM's window show it too; the app's own files stay as they are.
+- The new VM's setup, the USB devices list and All VMs have the same look, light and dark.
 - **Swipe out to macOS** (off by default): swipe past your first or last workspace and you are on
   the macOS Space beside the VM, the same way ⌃⌥ Esc takes you there (this monitor or all). On the
   right, the first swipe from your last workspace still opens a new empty one; swipe on from there.

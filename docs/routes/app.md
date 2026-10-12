@@ -36,8 +36,8 @@ VM runs, and goes back by itself when a new version does not start
 
 - Setup in the app: VM name, user, password, resources, disk size, the VMs
   folder (any APFS or Mac OS Extended drive).
-- The disk's size: Disk › Change… in the VM window (the VM shut down). The
-  slider goes from what Omarchy needs (btrfs' chunks plus 10 % or 5 GB,
+- The disk's size: Disk › Change… in the VM window (the VM shut down) opens
+  − / + for the new size in the row. It goes from what Omarchy needs (btrfs' chunks plus 10 % or 5 GB,
   never under 64 GB; read from the VM while it runs, else from disk.img)
   to the Mac's free space plus the size now, less 10 GB. Larger: Omarchy
   grows into it at the next start. Smaller: an APFS clone of disk.img
@@ -300,7 +300,8 @@ VM runs, and goes back by itself when a new version does not start
   others are hidden from it, not deleted.
 - **Sizes**: Storage shows the VM in the window with its size on disk and
   Show in Finder. **All VMs…** lists every VM with its size, Show in Finder
-  and Delete (to the Trash; not while it runs).
+  and Delete. **Delete VM…** asks for the VM's name, typed exactly, then
+  moves its folder to the Trash (not while it runs).
 - **Downloaded images**: the Omarchy images the app downloaded to set up
   VMs (try-omarchy's live system, prebuilt VMs), in `~/Library/Caches/omacvm`,
   or in `.downloads` inside the VMs folder when that is on another drive:
