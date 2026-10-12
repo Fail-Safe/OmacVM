@@ -166,9 +166,16 @@ VM runs, and goes back by itself when a new version does not start
   `omacvm disable vulkan` removes it. Numbers:
   [benchmarks](../benchmarks/README.md#gpu-compute-with-venus-2026-10-04),
   how it works: [ADR 0022](../adr/0022-webgpu-and-opencl-on-venus.md).
-- Quit, the window's close button, logging out and restarting the Mac shut
-  Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
+- Quit, logging out and restarting the Mac shut Omarchy down cleanly first.
+  The window's close button follows **Closing the window** (`closeAction` in
+  `org.omacvm.app`, for every VM): *Shut down* (the default, as Quit), *Keep
+  running* (the window goes away, the VM goes on; click OmacVM in the Dock to
+  come back to it) or *Ask*. A change counts from the next time you close the
+  window, also while the VM runs. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.
+- A window you cannot see (minimised, hidden, covered, on another Space) gets
+  no new frames drawn until it shows again: no GPU time for pictures nobody
+  sees (`OMACVM_PRESENT_HIDDEN=1` in QEMU's environment draws them anyway).
 - Full screen, like Parallels: macOS's own, in a Space of its own on every
   display; on a MacBook with a notch Omanotch puts Omarchy's bar beside the
   notch (below).

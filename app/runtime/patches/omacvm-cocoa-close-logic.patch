@@ -1,0 +1,73 @@
+From: OmacVM
+Subject: [PATCH] ui: what closing the VM window does, tested without AppKit
+
+What: a header with no AppKit in it: OmacVM.app's "Closing the window"
+(org.omacvm.app closeAction: shutdown, keepRunning, ask; anything else shuts
+down) and which value counts (the app's own setting when QEMU runs as the
+OmacVM app, else OMACVM_CLOSE_ACTION from the start). Used by
+omacvm-cocoa-close.patch (which explains the why).
+
+Why its own file: so the rules are tested without QEMU or a window
+(app/runtime/Tests/display/test-close.sh applies this patch to an empty
+folder; at build time and in CI).
+
+Upstream: not applicable (OmacVM.app's setting).
+Test: app/runtime/Tests/display/test-close.c.
+
+diff --git a/ui/omacvm-close.h b/ui/omacvm-close.h
+new file mode 100644
+--- /dev/null
++++ b/ui/omacvm-close.h
+@@ -0,0 +1,52 @@
++/*
++ * OmacVM: what closing the VM's window does (#358).
++ *
++ * No AppKit in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-close.c); ui/cocoa.m feeds it.
++ *
++ * OmacVM.app's "Closing the window" (org.omacvm.app closeAction): "shutdown"
++ * (the default) presses the guest's power button and quits when it is off,
++ * "keepRunning" hides the window and the VM goes on (a click on the Dock icon
++ * shows it again; Quit still shuts it down), "ask" asks which. Anything else
++ * shuts down, as before the setting. QEMU started as the OmacVM app reads the
++ * app's own setting when the window closes, so a change while the VM runs
++ * counts; otherwise (a development build, OMACVM_DOCK_SEPARATE) what the app
++ * passed at the start, OMACVM_CLOSE_ACTION.
++ */
++#ifndef OMACVM_CLOSE_H
++#define OMACVM_CLOSE_H
++
++#include <stdbool.h>
++#include <string.h>
++
++typedef enum OmacVMClose {
++    OMACVM_CLOSE_SHUTDOWN,
++    OMACVM_CLOSE_KEEP,
++    OMACVM_CLOSE_ASK,
++} OmacVMClose;
++
++static inline OmacVMClose omacvm_close_parse(const char *v)
++{
++    if (v && !strcmp(v, "keepRunning")) {
++        return OMACVM_CLOSE_KEEP;
++    }
++    if (v && !strcmp(v, "ask")) {
++        return OMACVM_CLOSE_ASK;
++    }
++    return OMACVM_CLOSE_SHUTDOWN;
++}
++
++/* app: QEMU runs as the OmacVM app (its own setting, live: NULL = never set). */
++static inline OmacVMClose omacvm_close_pick(bool app, const char *live,
++                                            const char *env)
++{
++    return omacvm_close_parse(app ? live : env);
++}
++
++static inline const char *omacvm_close_name(OmacVMClose c)
++{
++    return c == OMACVM_CLOSE_KEEP ? "keepRunning" :
++           c == OMACVM_CLOSE_ASK ? "ask" : "shutdown";
++}
++
++#endif

@@ -892,6 +892,17 @@ grep -q 'eventsTap = CGEventTapCreate(kCGHIDEventTap, place, kCGEventTapOptionDe
   die "ui/cocoa.m: the full-grab tap ignores OMACVM_KEYS_LAST (keys-last patch)"
 "$native_dir/Tests/keys/test-keys-last.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the full-grab tap's place is not as tested (test-keys-last.sh)"
+# OmacVM.app's "Closing the window" (#358): Shut down, Keep running (the app
+# hidden, the Dock icon brings it back), Ask. Its rules' test, then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-close-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-close.patch"
+"$native_dir/Tests/display/test-close.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: closing the window is not wired as tested (test-close.sh)"
+# No frame copied for the window while it cannot be seen (hidden, minimised,
+# covered, another Space); the newest one as it shows again.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-unseen.patch"
+"$native_dir/Tests/display/test-present-unseen.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: frames are drawn for a window out of sight (test-present-unseen.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
