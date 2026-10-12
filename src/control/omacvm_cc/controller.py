@@ -356,9 +356,9 @@ class Controller:
         # The Mac's gesture settings: after Trackpad gestures and the features
         # that need it, in the app window's order (escape combo, Magic Mouse,
         # Swipe out to macOS).
-        g = getattr(self, "gestures", None)
-        extra = [r for r in (S.escape_row(g, offline=not self.linked), ms,
-                             S.swipe_out_row(g, on.get("gestures", True), offline=not self.linked))
+        gs = getattr(self, "gestures", None)
+        extra = [r for r in (S.escape_row(gs, offline=not self.linked), ms,
+                             S.swipe_out_row(gs, on.get("gestures", True), offline=not self.linked))
                  if r is not None]
         if extra:
             at = max((i + 1 for i, r in enumerate(rows) if "gestures" in (r.feature.name, r.feature.needs)), default=len(rows))

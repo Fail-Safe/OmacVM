@@ -1319,6 +1319,9 @@ def test_escape_and_swipe_out_rows(world):
             names = [r.feature.name for r in a.rows]
             i = names.index("escape-combo")
             assert names[i:i + 3] == ["escape-combo", "mouse-swipe", "swipe-out"]
+            # Every row is a feature row (the gesture settings' answer is no row itself).
+            from omacvm_cc import state as S
+            assert all(isinstance(r, S.Row) for r in a.rows)
             assert rows(a)["escape-combo"].note == "this monitor" and rows(a)["swipe-out"].note == "off"
             from textual.widgets import DataTable
             t = a.screen.query_one(DataTable)
