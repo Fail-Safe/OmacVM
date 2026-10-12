@@ -8,7 +8,7 @@
  * around 32-38), and external displays without an inset. Then a window
  * that moves between them, Split View, AppKit's camera-safe re-asks, the
  * guest's size over the whole panel and the menu bar's reveal at the top
- * edge.
+ * edge (only without "Keep the Dock away").
  *
  * cc -Wall -Werror -I<qemu>/ui test-fullpanel.c -o t && ./t
  */
@@ -287,8 +287,9 @@ static void test_reveal(void)
 
 /*
  * The app's presentation options while the window covers the strip, with
- * "Keep the Dock away" on (QEMU's immersive=on: the full screen's own
- * options hide the menu bar for good) and off (macOS's own auto-hide).
+ * "Keep the Dock away" on (QEMU's immersive=on, the default: the menu bar
+ * never comes down, as in normal full screen) and off (it comes down at the
+ * top edge: macOS's own auto-hide once the pointer touched the top row).
  */
 #define HELD (OMACVM_FP_FULL_SCREEN | OMACVM_FP_HIDE_MENU_BAR | OMACVM_FP_HIDE_DOCK)
 
@@ -302,11 +303,12 @@ static void test_presentation(void)
     uint64_t out;
 
     for (size_t i = 0; i < 2; i++) {
-        const char *name = i ? "Dock away off" : "Dock away on";
+        bool dock_away = i == 0;
+        const char *name = dock_away ? "Dock away on" : "Dock away off";
         uint64_t own = owns[i];
         OmacVMFPPresentIn in = {
             .valid = true, .covered = true, .allowed = false, .key = true,
-            .changed = false, .own = own,
+            .changed = false, .immersive = dock_away, .own = own,
         };
 
         /* The pointer in the VM: held back. */
@@ -315,27 +317,37 @@ static void test_presentation(void)
               "%s, held back: 0x%llx", name, (unsigned long long)out);
         in.changed = out != own;
 
-        /* The top row touched: the menu bar may come down (auto-hidden). */
+        /* The top row touched. */
         in.allowed = true;
         out = 0;
-        CHECK(omacvm_fp_presentation(&in, &out), "%s, allowed: options set", name);
-        CHECK(out & OMACVM_FP_AUTO_HIDE_MENU_BAR, "%s, allowed: menu bar auto-hides (0x%llx)",
-              name, (unsigned long long)out);
-        CHECK(!(out & OMACVM_FP_HIDE_MENU_BAR), "%s, allowed: not hidden for good (0x%llx)",
-              name, (unsigned long long)out);
-        CHECK(out & OMACVM_FP_FULL_SCREEN, "%s, allowed: still full screen", name);
+        CHECK(omacvm_fp_presentation(&in, &out), "%s, top row: options set", name);
+        if (dock_away) {
+            /* The menu bar never comes down (3.0.16 brought it down). */
+            CHECK(out == HELD, "%s, top row: menu bar still hidden for good (0x%llx)",
+                  name, (unsigned long long)out);
+            CHECK(!(out & OMACVM_FP_AUTO_HIDE_MENU_BAR), "%s, top row: never auto-hidden (0x%llx)",
+                  name, (unsigned long long)out);
+        } else {
+            /* The menu bar may come down (auto-hidden). */
+            CHECK(out & OMACVM_FP_AUTO_HIDE_MENU_BAR, "%s, top row: menu bar auto-hides (0x%llx)",
+                  name, (unsigned long long)out);
+            CHECK(!(out & OMACVM_FP_HIDE_MENU_BAR), "%s, top row: not hidden for good (0x%llx)",
+                  name, (unsigned long long)out);
+        }
+        CHECK(out & OMACVM_FP_FULL_SCREEN, "%s, top row: still full screen", name);
         CHECK((out & (OMACVM_FP_HIDE_DOCK | OMACVM_FP_AUTO_HIDE_DOCK)) ==
               (own & (OMACVM_FP_HIDE_DOCK | OMACVM_FP_AUTO_HIDE_DOCK)),
-              "%s, allowed: the Dock as it was (0x%llx)", name, (unsigned long long)out);
+              "%s, top row: the Dock as it was (0x%llx)", name, (unsigned long long)out);
         in.changed = out != own;
 
         /* Down and back up (the menu bar went away): held back again. */
         in.allowed = false;
         CHECK(omacvm_fp_presentation(&in, &out) && out == HELD, "%s, hidden again", name);
-        in.changed = true;
+        in.changed = out != own;
 
         /* Another app is key: the own options again, once. */
         in.key = false;
+        in.changed = true;
         CHECK(omacvm_fp_presentation(&in, &out) && out == own, "%s, not key: own", name);
         in.changed = false;
         CHECK(!omacvm_fp_presentation(&in, &out), "%s, not key: then left alone", name);
@@ -356,17 +368,20 @@ static void test_presentation(void)
         CHECK(!omacvm_fp_presentation(&in, &out), "%s, not read: nothing set", name);
     }
 
-    /* With the Dock away on, the menu bar is auto-hidden, the Dock stays hidden. */
+    /* Dock away on, top row touched: hidden for good, whatever the own options say. */
     OmacVMFPPresentIn on = {
-        .valid = true, .covered = true, .allowed = true, .key = true, .own = immersive,
+        .valid = true, .covered = true, .allowed = true, .key = true, .immersive = true,
+        .own = immersive,
     };
-    CHECK(omacvm_fp_presentation(&on, &out) &&
-          out == (OMACVM_FP_FULL_SCREEN | OMACVM_FP_HIDE_DOCK | OMACVM_FP_AUTO_HIDE_MENU_BAR),
-          "Dock away on, allowed: 0x%llx", (unsigned long long)out);
-    /* Dock away off: macOS's own options, unchanged. */
+    CHECK(omacvm_fp_presentation(&on, &out) && out == HELD,
+          "Dock away on, top row: 0x%llx", (unsigned long long)out);
     on.own = plain;
+    CHECK(omacvm_fp_presentation(&on, &out) && out == HELD,
+          "Dock away on, macOS's own options: still held back (0x%llx)", (unsigned long long)out);
+    /* Dock away off: macOS's own options, unchanged. */
+    on.immersive = false;
     CHECK(omacvm_fp_presentation(&on, &out) && out == plain,
-          "Dock away off, allowed: own 0x%llx", (unsigned long long)out);
+          "Dock away off, top row: own 0x%llx", (unsigned long long)out);
     /* Own options without a Dock setting: AppKit wants one with an auto-hidden menu bar. */
     on.own = OMACVM_FP_FULL_SCREEN;
     CHECK(omacvm_fp_presentation(&on, &out) && (out & OMACVM_FP_AUTO_HIDE_DOCK),

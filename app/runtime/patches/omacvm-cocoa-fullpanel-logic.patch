@@ -9,7 +9,8 @@ camera-safe re-ask, or AppKit's own: Split View, a smaller tile, an
 external display), when a frame change is refused, when the strip is lost
 for the rest of a full screen, whether the guest may be a few rows
 shorter (never over the whole panel), when macOS's menu bar may come down
-from the top row and the app's presentation options for it. Used by
+from the top row and the app's presentation options for it (never with
+"Keep the Dock away", QEMU's immersive=on). Used by
 omacvm-cocoa-fullpanel.patch (which explains the why).
 
 Why its own file: so the rules are tested on the sizes of every notched
@@ -24,7 +25,7 @@ diff --git a/ui/omacvm-fullpanel.h b/ui/omacvm-fullpanel.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-fullpanel.h
-@@ -0,0 +1,222 @@
+@@ -0,0 +1,223 @@
 +/*
 + * OmacVM: FullPanel, the VM's full-screen window over the whole notched
 + * display, the strip beside the camera housing included (experimental,
@@ -199,6 +200,7 @@ new file mode 100644
 +    bool allowed;    /* omacvm_fp_reveal_allowed: the pointer touched the top row */
 +    bool key;        /* the window is the key window */
 +    bool changed;    /* options other than the own ones are set */
++    bool immersive;  /* "Keep the Dock away" (QEMU's immersive=on) */
 +    uint64_t own;    /* the full screen's own options */
 +} OmacVMFPPresentIn;
 +
@@ -207,14 +209,14 @@ new file mode 100644
 + * false to leave them as they are.
 + *
 + * Held back: the menu bar (and the Dock) hidden for good, so the top rows
-+ * are the VM's. Allowed: the full screen's own options with the menu bar
-+ * auto-hidden, so macOS brings it down at the top edge as in other
-+ * full-screen apps. "Keep the Dock away" (QEMU's immersive=on, the app's
-+ * default) makes the own options hide the menu bar for good: given back
-+ * as they were, the menu bar never came down. The Dock stays as it was
-+ * (AppKit wants it hidden or auto-hidden with an auto-hidden menu bar).
-+ * Not covered any more, or not key: the own options, once, if they were
-+ * changed.
++ * are the VM's. With "Keep the Dock away" (QEMU's immersive=on, the app's
++ * default) it stays held back: the menu bar never comes down, as in normal
++ * full screen with that setting (the user, 2026-10-12). Without it,
++ * allowed (the pointer touched the top row): the full screen's own options
++ * with the menu bar auto-hidden, so macOS brings it down at the top edge as
++ * in other full-screen apps. The Dock stays as it was (AppKit wants it
++ * hidden or auto-hidden with an auto-hidden menu bar). Not covered any
++ * more, or not key: the own options, once, if they were changed.
 + */
 +static inline bool omacvm_fp_presentation(const OmacVMFPPresentIn *in, uint64_t *out)
 +{
@@ -223,7 +225,7 @@ new file mode 100644
 +    if (!in->valid) {
 +        return false;
 +    }
-+    if (in->covered && in->key && !in->allowed) {
++    if (in->covered && in->key && (in->immersive || !in->allowed)) {
 +        *out = OMACVM_FP_FULL_SCREEN | OMACVM_FP_HIDE_MENU_BAR | OMACVM_FP_HIDE_DOCK;
 +        return true;
 +    }

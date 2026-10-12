@@ -43,6 +43,8 @@ grep -q 'typedef void (\*OmacVMSLSTransactionCommitFn)(CFTypeRef, int32_t);' "$m
 ! grep -q '= omacvm_fullpanel_sls_transaction_commit(' "$m" || fail "SLSTransactionCommit's leftover w0 is read as a status"
 # The menu bar's presentation goes through the tested rule, AppKit's bits checked.
 grep -q 'if (!omacvm_fp_presentation(&in, &options)) {' "$m" || fail "the presentation options are not omacvm_fp_presentation's"
+# Keep the Dock away (immersive=on): the menu bar never comes down in FullPanel.
+grep -q '        .immersive = immersive_mode_enabled,' "$m" || fail "the presentation rule is not told about Keep the Dock away"
 [[ $(grep -c 'QEMU_BUILD_BUG_ON(NSApplicationPresentation' "$m") == 5 ]] || fail "the presentation bits are not checked against AppKit's"
 # What omacvm check reads.
 grep -q '"omacvm: full panel: strip covered: ' "$m" || fail "no 'strip covered' line for omacvm check"

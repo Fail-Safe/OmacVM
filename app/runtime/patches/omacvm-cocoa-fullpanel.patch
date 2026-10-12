@@ -10,11 +10,12 @@ QemuWindow and OmacVMHeadWindow) becomes the whole display while the
 window has the display to itself, and stays so for that full screen;
 frame changes AppKit tries during relayouts are refused, Split View still
 goes through. The full-screen Space's menu bar is made transparent
-(SkyLight, that Space only) and comes down from the display's top row as
-usual, also with "Keep the Dock away" (QEMU's immersive=on, whose own
-options hide the menu bar for good: while the pointer is at the top row
-the menu bar is auto-hidden instead); AppKit's full-screen toolbar window
-is hidden with it. SLSTransactionCommit returns nothing (macOS 27: w0 is
+(SkyLight, that Space only). With "Keep the Dock away" (QEMU's
+immersive=on, the app's default) it never comes down, as in normal full
+screen with that setting (3.0.16 brought it down at the top edge; the
+user did not want that). Without it, it comes down from the display's top
+row as usual (auto-hidden while the pointer is at the top row). AppKit's
+full-screen toolbar window is hidden with it. SLSTransactionCommit returns nothing (macOS 27: w0 is
 left over), so it is not read as a status. The guest's
 size, the full-screen area and the display arrangement sent to the guest
 then start at the display's top edge, and the guest is the whole panel:
@@ -101,7 +102,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -2969,9 +2980,994 @@
+@@ -2969,9 +2980,1001 @@
  @interface QemuWindow : NSWindow
  @end
  
@@ -126,7 +127,9 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 + *     (ui/omacvm-fullpanel.h, omacvm_fp_frame), and stays so for that full
 + *     screen when AppKit asks again with its camera-safe tile;
 + *   - the menu bar layer of that one full-screen Space is transparent
-+ *     (SkyLight), and comes down as usual from the display's top row;
++ *     (SkyLight); with "Keep the Dock away" (immersive=on, the default)
++ *     the menu bar never comes down, as in normal full screen; without it
++ *     it comes down as usual from the display's top row;
 + *   - AppKit's full-screen toolbar window is hidden while the menu bar is.
 + *
 + * Every private class, selector, function and type encoding is looked up at
@@ -703,6 +706,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        .allowed = menu_bar_reveal_allowed,
 +        .key = [window isKeyWindow],
 +        .changed = presentation_forced,
++        .immersive = immersive_mode_enabled,
 +        .own = revealable_presentation,
 +    };
 +    uint64_t options;
@@ -820,14 +824,17 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +               options:NSKeyValueObservingOptionNew context:NULL];
 +    presentation_observing = true;
 +
-+    OmacVMFullPanelState *state = self;
-+    top_edge_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:
-+        (NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
-+         NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged)
-+        handler:^NSEvent *(NSEvent *event) {
-+            [state pointerDidMove];
-+            return event;
-+        }];
++    /* Only without "Keep the Dock away": with it the menu bar never comes down. */
++    if (!immersive_mode_enabled) {
++        OmacVMFullPanelState *state = self;
++        top_edge_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:
++            (NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
++             NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged)
++            handler:^NSEvent *(NSEvent *event) {
++                [state pointerDidMove];
++                return event;
++            }];
++    }
 +
 +    menu_bar_reveal_allowed = false;
 +    menu_bar_revealed = false;
@@ -838,9 +845,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        return;   /* no menu bar transaction: normal full screen (logged) */
 +    }
 +    /* omacvm check reads this line: the strip beside the notch shows the VM. */
-+    fprintf(stderr, "omacvm: full panel: strip covered: full-screen Space %llu, display %.0fx%.0f, notch %.0f\n",
++    fprintf(stderr, "omacvm: full panel: strip covered: full-screen Space %llu, display %.0fx%.0f, notch %.0f, %s\n",
 +            (unsigned long long)space, [screen frame].size.width, [screen frame].size.height,
-+            [screen safeAreaInsets].top);
++            [screen safeAreaInsets].top, immersive_mode_enabled ?
++            "menu bar hidden (Keep the Dock away)" : "menu bar at the top edge");
 +}
 +
 +- (void)menuRevealChanged:(bool)menu toolbar:(bool)toolbar
@@ -1096,7 +1104,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  @end
  
  static BOOL notchFull;
-@@ -3290,6 +4286,11 @@
+@@ -3290,6 +4293,11 @@
  /* OmacVM: macOS says how big the full-screen area is: remember where it starts. */
  - (NSSize)window:(NSWindow *)window willUseFullScreenContentSize:(NSSize)proposedSize
  {
@@ -1108,7 +1116,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      NSSize display = [[window screen] frame].size;
      CGFloat top = display.height - proposedSize.height;
  
-@@ -7432,7 +8433,7 @@
+@@ -7443,7 +8451,7 @@
      CGRect r = CGDisplayBounds(omacvm_screen_id(s));
      OmacVMBox b = { r.origin.x, r.origin.y, r.size.width, r.size.height };
  
@@ -1117,7 +1125,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          NSEdgeInsets in = [s safeAreaInsets];
          b.x += in.left;
          b.y += in.top;
-@@ -7840,6 +8841,55 @@
+@@ -7851,6 +8859,55 @@
  @implementation OmacVMHeadWindow
  - (BOOL)canBecomeKeyWindow { return YES; }
  - (BOOL)canBecomeMainWindow { return NO; }
