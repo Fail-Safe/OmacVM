@@ -24,28 +24,68 @@ public enum WindowSize {
     }
 }
 
-/// Which section the sidebar marks while the settings scroll: the last one
-/// whose top has reached `threshold` below the top of the visible part, and
-/// the last one once the list is scrolled to its end (a short last section
-/// never reaches the threshold).
+/// Which section the sidebar marks while the settings scroll. A probe line
+/// starts `inset` below the top of the visible part and moves down with the
+/// scroll's progress: at the top it is `inset` down, at the end it is at the
+/// end of the content. The marked section is the last one whose top the probe
+/// has reached. The probe only moves forward and runs over the whole content,
+/// so every section is marked once on the way down, also short ones at the
+/// end that can never scroll up to the top.
 public enum ScrollSpy {
-    public static let threshold: Double = 90
+    public static let inset: Double = 90
 
-    /// - tops: each section's top, in points below the top of the visible part
-    ///   (negative once scrolled past).
-    /// - atEnd: the list is scrolled to its end.
-    public static func current(tops: [Double], atEnd: Bool, threshold: Double = threshold) -> Int {
-        guard !tops.isEmpty else { return 0 }
-        if atEnd { return tops.count - 1 }
-        var i = tops.count - 1
-        while i > 0 && tops[i] > threshold { i -= 1 }
+    /// - tops: each section's top in the content, from the content's top (in order).
+    /// - offset: how far the content is scrolled (0 at the top).
+    /// - maxOffset: how far it can scroll (0 or less: it fits, nothing scrolls).
+    /// - viewport: the height of the visible part.
+    public static func current(tops: [Double], offset: Double, maxOffset: Double, viewport: Double,
+                               inset: Double = inset) -> Int {
+        guard !tops.isEmpty, maxOffset > 0 else { return 0 }
+        let p = min(max(offset / maxOffset, 0), 1)
+        let probe = probe(offset: offset, progress: p, viewport: viewport, inset: inset)
+        var i = 0
+        for (k, top) in tops.enumerated() where top <= probe { i = k }
         return i
     }
 
-    /// Scrolled to the end, give or take a few points.
-    public static func atEnd(offset: Double, visible: Double, content: Double) -> Bool {
-        content > visible && offset + visible >= content - 4
+    /// The probe line in content coordinates: `inset` down at the top, the
+    /// content's end (offset + viewport) at the end.
+    public static func probe(offset: Double, progress p: Double, viewport: Double, inset: Double = inset) -> Double {
+        let start = min(inset, viewport)
+        return offset + start + p * (viewport - start)
     }
+}
+
+/// A click in the sidebar marks its section at once and keeps it marked
+/// while the click's scroll runs and afterwards (the last sections cannot
+/// bring their heading to the top), until the person scrolls by hand.
+public struct ScrollSpyPin: Equatable, Sendable {
+    public private(set) var pinned: Int?
+    /// The click's own scroll is still running: its moves are not the person's.
+    public private(set) var scrolling = false
+
+    public init() {}
+
+    public mutating func click(_ section: Int) {
+        pinned = section
+        scrolling = true
+    }
+
+    /// The click's scroll has ended (or never started: nothing to scroll).
+    public mutating func clickScrollEnded() { scrolling = false }
+
+    /// A scroll by the person (wheel, trackpad, scroll bar).
+    public mutating func scrolledByHand() {
+        pinned = nil
+        scrolling = false
+    }
+
+    /// The content moved: after the click's scroll that is the person's.
+    public mutating func moved() {
+        if !scrolling { pinned = nil }
+    }
+
+    public func marked(_ computed: Int) -> Int { pinned ?? computed }
 }
 
 /// "Closing the window" (org.omacvm.app closeAction): what closing a running

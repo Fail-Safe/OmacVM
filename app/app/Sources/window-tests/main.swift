@@ -364,15 +364,67 @@ expect(WindowSize.defaultHeight(visible: 400) == 500, "a tiny screen: never belo
 
 // MARK: The sidebar follows the scroll (ScrollSpy)
 
-expect(ScrollSpy.current(tops: [0, 300, 700, 1000, 1300], atEnd: false) == 0, "at the top: the first section")
-expect(ScrollSpy.current(tops: [-320, -20, 380, 680, 980], atEnd: false) == 1, "scrolled into the second: the second")
-expect(ScrollSpy.current(tops: [-320, 80, 380, 680, 980], atEnd: false) == 1, "a section 80 pt down counts (90 pt threshold)")
-expect(ScrollSpy.current(tops: [-320, 120, 380, 680, 980], atEnd: false) == 0, "120 pt down: not yet")
-expect(ScrollSpy.current(tops: [-1300, -1000, -600, 200, 500], atEnd: true) == 4, "at the end: the last, also when it never reaches the top")
-expect(ScrollSpy.current(tops: [], atEnd: false) == 0, "no sections: the first")
-expect(ScrollSpy.atEnd(offset: 1196, visible: 600, content: 1800), "4 pt short of the end counts as the end")
-expect(!ScrollSpy.atEnd(offset: 1100, visible: 600, content: 1800), "100 pt short: not the end")
-expect(!ScrollSpy.atEnd(offset: 0, visible: 900, content: 800), "content shorter than the window: no end to snap to")
+// The settings page as the window lays it out: five sections, their tops in
+// the content, and the content's height (General, Display, Input, Sharing &
+// Devices, Storage & Updates; the last two never reach the top).
+let spyTops: [Double] = [10, 384, 1135, 1406, 1690]
+let spyContent = 2330.0
+// The visible part under the 52 pt header: the 500 pt minimum, a 13-inch
+// MacBook Air (760 and 860 pt windows), a tall window, and the Air with the
+// update banner (52 + 52 pt).
+for window: Double in [500, 760, 860, 1400, 808] {
+    let viewport = window - 52
+    let maxOffset = spyContent - viewport
+    func at(_ offset: Double) -> Int { ScrollSpy.current(tops: spyTops, offset: offset, maxOffset: maxOffset, viewport: viewport) }
+    expect(at(0) == 0, "\(Int(window)) pt window: at the top, General")
+    expect(at(maxOffset) == 4, "\(Int(window)) pt window: at the very bottom, the last section")
+    // A slow scroll down marks every section once, in order.
+    var seen: [Int] = []
+    var offset = 0.0
+    while offset <= maxOffset {
+        let i = at(offset)
+        if seen.last != i { seen.append(i) }
+        offset += 0.5
+    }
+    if seen.last != at(maxOffset) { seen.append(at(maxOffset)) }
+    expect(seen == [0, 1, 2, 3, 4], "\(Int(window)) pt window: scrolling down marks each section once, in order (\(seen))")
+    // Scrolling back up goes back through them.
+    var back: [Int] = []
+    offset = maxOffset
+    while offset >= 0 {
+        let i = at(offset)
+        if back.last != i { back.append(i) }
+        offset -= 0.5
+    }
+    expect(back == [4, 3, 2, 1, 0], "\(Int(window)) pt window: scrolling back up, in reverse (\(back))")
+}
+// Near the top the line is 90 pt down, as before: a section 80 pt down counts, one 120 pt down not yet.
+expect(ScrollSpy.current(tops: [0, 80, 1000], offset: 0, maxOffset: 2000, viewport: 700) == 1, "top: a section 80 pt down is marked")
+expect(ScrollSpy.current(tops: [0, 120, 1000], offset: 0, maxOffset: 2000, viewport: 700) == 0, "top: a section 120 pt down not yet")
+expect(ScrollSpy.probe(offset: 0, progress: 0, viewport: 700) == 90 && ScrollSpy.probe(offset: 300, progress: 1, viewport: 700) == 1000,
+       "the probe: 90 pt down at the top, the content's end at the bottom")
+// Everything fits (a tall window): nothing scrolls, the first section is marked.
+expect(ScrollSpy.current(tops: [10, 300, 500], offset: 0, maxOffset: -400, viewport: 1348) == 0, "it all fits: the first section")
+expect(ScrollSpy.current(tops: [], offset: 0, maxOffset: 100, viewport: 500) == 0, "no sections: the first")
+
+// A click marks its section at once and keeps it, also when the page cannot
+// bring the heading to the top, until a scroll by hand.
+var pin = ScrollSpyPin()
+expect(pin.marked(2) == 2, "no click: the scroll decides")
+pin.click(4)
+expect(pin.marked(1) == 4, "click on Storage & Updates: marked at once")
+pin.moved()
+expect(pin.marked(2) == 4, "the click's own scroll does not unmark it")
+pin.clickScrollEnded()
+expect(pin.marked(3) == 4, "after the click's scroll, at the end: still the clicked one")
+pin.moved()
+expect(pin.marked(3) == 3, "then a move (the keyboard, the scroll bar): the scroll decides again")
+pin.click(3)
+pin.scrolledByHand()
+expect(pin.marked(4) == 4, "a scroll by hand while the click's scroll runs: the scroll decides")
+pin.click(1)
+pin.clickScrollEnded()
+expect(pin.marked(0) == 1, "nothing to scroll (it all fits): the click selects and stays")
 
 // MARK: Settings 3.1 adds (the plan's contract keys)
 
