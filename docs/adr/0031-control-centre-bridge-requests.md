@@ -29,7 +29,10 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
 `settings/mouse-swipe`, Gestures' Magic Mouse swipe: GET says whether the
 Mac has a Magic Mouse and 3 or 4 fingers, POST takes `{"fingers": 3|4}`
 only, 3.0.2. It is a Mac-wide setting: a switch from one VM applies to all
-VMs and to OmacVM.app.)
+VMs and to OmacVM.app. `settings/gestures`, 3.1.0: GET gives Gestures'
+escape combo (`"escape": "pointer"|"all"`), Swipe out to macOS
+(`"swipe_out"`) and the Magic Mouse swipe; POST takes `{"escape": ...}`
+and/or `{"swipe_out": true|false}` only. Mac-wide as well.)
 
 - The Mac decides which VM: the peer address must match exactly one running
   VM that OmacVM set up (pinned host key); otherwise 409 and nothing runs.

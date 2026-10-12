@@ -27,6 +27,7 @@ enum ControlRoute: Equatable {
   case hello, status, updates, updatesCheck, gpuMemory, appUpdate
   case setUpdateChecks(Bool)
   case mouseSwipe, setMouseSwipe(Int)
+  case gestureSettings, setGestureSettings(escape: String?, swipeOut: Bool?)
   case startJob(JobRequest)
   case job(String)
   case theme(Data)   // the Touch ID panel's colours (touchid_theme.swift checks the body)
@@ -99,6 +100,24 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
         throw PolicyError(400, "bad-body", "send {\"fingers\": 3|4}")
       }
       return .success(.setMouseSwipe(n))
+    case ("GET", "settings/gestures"):
+      guard body.isEmpty else { throw PolicyError(400, "body", "no body for GET") }
+      return .success(.gestureSettings)
+    case ("POST", "settings/gestures"):
+      let usage = "send {\"escape\": \"pointer\"|\"all\"} and/or {\"swipe_out\": true|false}"
+      guard let o = try strictObject(body, allowed: ["escape", "swipe_out"]), !o.isEmpty else {
+        throw PolicyError(400, "bad-body", usage)
+      }
+      var escape: String?, swipeOut: Bool?
+      if let e = o["escape"] {
+        guard let s = e as? String, escapeChoices.contains(s) else { throw PolicyError(400, "bad-body", usage) }
+        escape = s
+      }
+      if let w = o["swipe_out"] {
+        guard let b = strictBool(w) else { throw PolicyError(400, "bad-body", usage) }
+        swipeOut = b
+      }
+      return .success(.setGestureSettings(escape: escape, swipeOut: swipeOut))
     case ("POST", "jobs"):
       guard let o = try strictObject(body, allowed: ["action", "features", "graphics", "notch"]),
             let a = o["action"] as? String, let action = ControlAction(rawValue: a) else {
@@ -140,7 +159,7 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
       guard validJobID(id), body.isEmpty else { throw PolicyError(404, "not-found", "no such job") }
       return .success(.job(id))
     case (_, "hello"), (_, "status"), (_, "updates"), (_, "updates/check"), (_, "settings/update-checks"), (_, "jobs"),
-         (_, "gpu-memory"), (_, "settings/mouse-swipe"), (_, "app-update"), (_, "theme"):
+         (_, "gpu-memory"), (_, "settings/mouse-swipe"), (_, "settings/gestures"), (_, "app-update"), (_, "theme"):
       throw PolicyError(405, "method", "method not allowed")
     default:
       throw PolicyError(404, "not-found", "not found")
@@ -184,6 +203,24 @@ func isMagicMouse(vendor: Int?, product: Int?, family: Int?) -> Bool {
 
 func mouseSwipeAnswer(magicMouse: Bool, fingers: Int) -> [String: Any] {
   ["magic_mouse": magicMouse, "fingers": fingers == 3 ? 3 : 4]
+}
+
+// ---- The escape combo and Swipe out to macOS (GET/POST /omacvm/settings/gestures) ----
+// OmacVM Gestures' EscapeSwipe ("all": every monitor that shows the VM,
+// anything else the one under the pointer) and SwipeOut (#342, off by
+// default): Mac-wide, the same keys as OmacVM.app's window
+// (EscapeSetting.swift, AppSettings.swift) and `omacvm gestures`. The answer
+// also carries the Magic Mouse swipe, so one request reads all three.
+let escapeChoices: Set<String> = ["pointer", "all"]
+
+/// What Gestures does with a stored EscapeSwipe (escapeAll in omacvm-gestures.c).
+func escapeChoice(stored: Any?) -> String {
+  (stored as? String)?.lowercased() == "all" ? "all" : "pointer"
+}
+
+func gestureSettingsAnswer(escape: String, swipeOut: Bool, magicMouse: Bool, fingers: Int) -> [String: Any] {
+  ["escape": escape == "all" ? "all" : "pointer", "swipe_out": swipeOut, "magic_mouse": magicMouse,
+   "fingers": fingers == 3 ? 3 : 4]
 }
 
 /// The protocol both sides speak: the guest's (X-OmacVM-Proto, 1 when
@@ -354,7 +391,7 @@ func peerListed(_ peer: String, _ vms: [VMEntry]) -> Bool {
 /// network moving) still gets them; checks and new jobs need SSH.
 func routeNeedsSSH(_ r: ControlRoute) -> Bool {
   switch r {
-  case .job, .gpuMemory, .mouseSwipe, .setMouseSwipe, .theme: return false
+  case .job, .gpuMemory, .mouseSwipe, .setMouseSwipe, .gestureSettings, .setGestureSettings, .theme: return false
   default: return true
   }
 }

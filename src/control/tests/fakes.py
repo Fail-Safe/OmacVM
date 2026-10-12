@@ -61,6 +61,7 @@ class FakeMac:
         self.gpu_memory: dict | None = None  # an OmacVM.app VM's graphics memory (None: an older Mac without it)
         self.gpu_memory_at: list[float] = []  # when each gpu-memory request came
         self.mouse_swipe: dict | None = None   # {"magic_mouse", "fingers"} (None: an older Mac without it)
+        self.gestures: dict | None = None   # {"escape", "swipe_out"} (None: a Mac from before 3.1.0)
         self.notch = False   # a MacBook with a notch: Omanotch can go on
         self.mac_app: bool | None = None  # the Mac's omacvm is OmacVM.app's copy (None: an older Mac says nothing)
         self.app_update: tuple | None = None  # (status, body) for POST /omacvm/app-update (None: an older Mac)
@@ -142,10 +143,13 @@ class FakeMac:
                     reqs = ["hello", "status", "updates", "jobs"] + (["gpu-memory"] if fake.gpu_memory is not None else []) \
                         + (["app-update"] if fake.app_update is not None else [])
                     reqs += ["settings/mouse-swipe"] if fake.mouse_swipe is not None else []
+                    reqs += ["settings/gestures"] if fake.gestures is not None else []
                     return self.send(200, {"proto": 1, "proto_min": 1, "omacvm": fake.version, "features": names,
                                            "requests": reqs, "macos": "15.7.4", "chip": "Apple M4 Max"})
                 if p == "/omacvm/settings/mouse-swipe" and fake.mouse_swipe is not None:
                     return self.send(200, fake.mouse_swipe)
+                if p == "/omacvm/settings/gestures" and fake.gestures is not None:
+                    return self.send(200, dict(fake.gestures, **(fake.mouse_swipe or {"magic_mouse": False, "fingers": 4})))
                 if p == "/omacvm/gpu-memory" and fake.gpu_memory is not None:
                     fake.gpu_memory_at.append(time.monotonic())
                     return self.send(200, fake.gpu_memory)
@@ -220,6 +224,13 @@ class FakeMac:
                         return self.send(400, {"error": "send {\"fingers\": 3|4}", "code": "bad-body"})
                     fake.mouse_swipe = dict(fake.mouse_swipe, fingers=b["fingers"])
                     return self.send(200, fake.mouse_swipe)
+                if self.path == "/omacvm/settings/gestures" and fake.gestures is not None:
+                    ok = b and set(b) <= {"escape", "swipe_out"} and b.get("escape", "all") in ("pointer", "all") \
+                        and isinstance(b.get("swipe_out", False), bool)
+                    if not ok:
+                        return self.send(400, {"error": "send escape and/or swipe_out", "code": "bad-body"})
+                    fake.gestures = dict(fake.gestures, **b)
+                    return self.send(200, dict(fake.gestures, **(fake.mouse_swipe or {"magic_mouse": False, "fingers": 4})))
                 if self.path == "/omacvm/theme":   # the Touch ID panel's colours (touchid_theme.swift)
                     if fake.refuse_theme:
                         st, code, err = fake.refuse_theme

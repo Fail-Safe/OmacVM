@@ -296,6 +296,19 @@ class Bridge:
     def set_mouse_swipe(self, fingers: int) -> dict:
         return self.call("POST", "/omacvm/settings/mouse-swipe", {"fingers": 3 if fingers == 3 else 4})
 
+    def gestures(self) -> dict:
+        """The Mac's gesture settings: {"escape": "pointer"|"all", "swipe_out": bool,
+        "magic_mouse": bool, "fingers": 3|4}."""
+        return self.call("GET", "/omacvm/settings/gestures", timeout=3.0)
+
+    def set_gestures(self, escape: str | None = None, swipe_out: bool | None = None) -> dict:
+        body: dict = {}
+        if escape is not None:
+            body["escape"] = "all" if escape == "all" else "pointer"
+        if swipe_out is not None:
+            body["swipe_out"] = bool(swipe_out)
+        return self.call("POST", "/omacvm/settings/gestures", body)
+
     def start_job(self, action: str, features: list[str] | tuple[str, ...] = ()) -> dict:
         body: dict = {"action": action}
         if action == "graphics":

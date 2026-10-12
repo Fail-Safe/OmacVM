@@ -713,6 +713,7 @@ class ControlCentre(App):
         self.last_result = ""   # the last job's outcome and what to do next (the banner)
         self.gpu_asking = False  # a look at graphics memory is under way
         self.mouse_swipe_sending = False   # a Magic Mouse swipe switch is under way
+        self.gestures_sending = False      # an escape combo or Swipe out switch is under way
         self.omarchy_waiting: int | None = None   # package updates waiting (checkupdates)
         # The update through OmacVM.app: (release, step 1-4 of state.APP_STEPS), None otherwise.
         self.app_step: tuple[str, int] | None = None
@@ -1039,6 +1040,12 @@ class ControlCentre(App):
         if r.feature.name == "mouse-swipe":
             self.switch_mouse_swipe()
             return
+        if r.feature.name == "escape-combo":
+            self.switch_gestures(escape=S.next_escape((self.c.gestures or {}).get("escape")))
+            return
+        if r.feature.name == "swipe-out":
+            self.switch_gestures(swipe_out=not (self.c.gestures or {}).get("swipe_out"))
+            return
         if r.status is S.Status.UNAVAILABLE:
             self.notify(f"{r.feature.title}: {r.note}", severity="warning")
             return
@@ -1126,6 +1133,38 @@ class ControlCentre(App):
         self.mouse_swipe_sending = False
         self.refresh_all()
 
+    def switch_gestures(self, escape: str | None = None, swipe_out: bool | None = None) -> None:
+        """Space on Escape combo (this monitor <-> all monitors) or Swipe out to
+        macOS (on <-> off): the Mac's own settings, from the next use. Nothing
+        to install, so no job and no question."""
+        problem = self.c.mac_problem()
+        if problem:
+            self.notify(f"needs the Mac: {problem}", severity="warning")
+            return
+        if self.gestures_sending:
+            return
+        self.gestures_sending = True
+        self.send_gestures(escape, swipe_out)
+
+    @work(thread=True, group="gestures")
+    def send_gestures(self, escape: str | None, swipe_out: bool | None) -> None:
+        try:
+            self.c.set_gestures(escape=escape, swipe_out=swipe_out)
+            if escape is not None:
+                text = f"Escape combo: {S.ESCAPE_TITLES[escape]}"
+            else:
+                text = f"Swipe out to macOS: {'on' if swipe_out else 'off'}"
+            self.call_from_thread(self.notify, text)
+        except BridgeError as e:
+            self.call_from_thread(self.notify, f"{'Escape combo' if escape is not None else 'Swipe out to macOS'}: {e}",
+                                  severity="warning")
+        finally:
+            self.call_from_thread(self.gestures_sent)
+
+    def gestures_sent(self) -> None:
+        self.gestures_sending = False
+        self.refresh_all()
+
     def choose_graphics(self) -> None:
         """Space on Graphics: the next choice, asked first (it applies at the
         VM's next start; Vulkan builds the VM's driver the first time)."""
@@ -1168,6 +1207,12 @@ class ControlCentre(App):
             return
         if r.feature.name == "mouse-swipe":
             self.notify("Magic Mouse swipe is a setting: space switches 3 and 4 fingers")
+            return
+        if r.feature.name == "escape-combo":
+            self.notify("Escape combo is a setting: space switches this monitor and all monitors")
+            return
+        if r.feature.name == "swipe-out":
+            self.notify("Swipe out to macOS is a setting: space turns it on or off")
             return
         if r.feature.name == "gpu-memory":
             self.notify(f"Graphics memory is measured, not switched. {S.GPU_MEMORY_EXPLAINER}")
