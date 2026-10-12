@@ -36,6 +36,9 @@ A new window for the VM's settings.
   screen" on, it now covers the notch strip anyway while **Keep the Dock and hot corners away** is
   on (the default); before, it fell back to normal full screen. With that setting off it still
   falls back, and `omacvm check` now warns about it (#356, thanks @brianmerchant).
+- OmacVM.app, **Full screen including notch**: macOS's own reveal of the menu bar on the way into
+  full screen no longer shows over the strip, and qemu.log no longer says the menu bar came down
+  at the top edge when the pointer was elsewhere.
 
 ## 3.0.18
 

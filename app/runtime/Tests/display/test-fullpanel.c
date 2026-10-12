@@ -283,6 +283,11 @@ static void test_reveal(void)
     CHECK(allowed, "menu open: stays while the pointer is in a menu");
     allowed = omacvm_fp_reveal_allowed(allowed, false, top - notch - 1, top, notch);
     CHECK(!allowed, "below the strip, menu closed: held back again");
+
+    /* AppKit's own reveal on the way into full screen (pointer elsewhere): not shown. */
+    CHECK(!omacvm_fp_reveal_shown(true, false), "AppKit's reveal, not allowed (entry, Keep the Dock away): stays hidden");
+    CHECK(omacvm_fp_reveal_shown(true, true), "AppKit's reveal after the pointer touched the top row: shown");
+    CHECK(!omacvm_fp_reveal_shown(false, true) && !omacvm_fp_reveal_shown(false, false), "no reveal: nothing shown");
 }
 
 /*

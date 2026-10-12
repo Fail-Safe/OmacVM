@@ -10,7 +10,9 @@ external display), when a frame change is refused, when the strip is lost
 for the rest of a full screen, whether the guest may be a few rows
 shorter (never over the whole panel), when macOS's menu bar may come down
 from the top row and the app's presentation options for it (never with
-"Keep the Dock away", QEMU's immersive=on). Used by
+"Keep the Dock away", QEMU's immersive=on), whether "Always show the menu
+bar in full screen" is in the way (only without "Keep the Dock away") and
+whether AppKit's own reveal is shown (only when allowed). Used by
 omacvm-cocoa-fullpanel.patch (which explains the why).
 
 Why its own file: so the rules are tested on the sizes of every notched
@@ -25,7 +27,7 @@ diff --git a/ui/omacvm-fullpanel.h b/ui/omacvm-fullpanel.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-fullpanel.h
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,249 @@
 +/*
 + * OmacVM: FullPanel, the VM's full-screen window over the whole notched
 + * display, the strip beside the camera housing included (experimental,
@@ -195,6 +197,19 @@ new file mode 100644
 +        return false;
 +    }
 +    return allowed;
++}
++
++/*
++ * AppKit's menu bar companion reveals the menu bar (and the full-screen
++ * toolbar) on its own at the end of the way into full screen. That reveal is
++ * shown over the strip only when it was allowed (the pointer at the top row,
++ * never with "Keep the Dock away"); else the menu bar stays transparent.
++ * Before, the entry's own reveal was shown for a moment and logged as "came
++ * down at the top edge" with the pointer elsewhere (MacBook Air, 3.0.18).
++ */
++static inline bool omacvm_fp_reveal_shown(bool appkit_reveal, bool allowed)
++{
++    return appkit_reveal && allowed;
 +}
 +
 +/*
