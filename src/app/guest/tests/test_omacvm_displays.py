@@ -602,11 +602,12 @@ class Scale(unittest.TestCase):
 
     def test_agent_tells_the_mac(self):
         a, sent = self.agent()
-        a.send_scale(od.wanted_scale())
+        a.lua_scale = None
+        a.lua_changed()
         self.assertEqual(sent, [])                                    # automatic: nothing
         self.lua.write_text("local omarchy_monitor_scale = 2\n")
-        a.send_scale(od.wanted_scale())
-        a.send_scale(od.wanted_scale())
+        a.lua_changed()
+        a.lua_changed()
         self.assertEqual(sent, [{"scale": 2.0}])                      # once
         a.on_poke([b"scale 1.6"])
         self.assertEqual(sent[-1], {"scale": 1.6})                    # picked: at once
@@ -615,6 +616,23 @@ class Scale(unittest.TestCase):
         self.assertEqual(len(sent), 2)                                # nonsense: nothing
         a.on_poke([b"layout"])
         a.layout_changed.assert_called_once()
+
+    def test_a_picked_scale_is_not_undone_by_the_old_file(self):
+        # The MacBook Air, 2026-10-12: 1.25 picked while monitors.lua still said 1.6;
+        # the next report sent 1.6 again and the Mac went back to 1.6's size.
+        a, sent = self.agent()
+        a.lua_scale = None
+        self.lua.write_text("local omarchy_monitor_scale = 1.6\n")
+        a.lua_changed()
+        a.on_poke([b"scale 1.25"])
+        a.lua_changed()                                               # the report, the file not written yet
+        self.assertEqual(sent, [{"scale": 1.6}, {"scale": 1.25}])
+        self.lua.write_text("local omarchy_monitor_scale = 1.25\n")  # Omarchy's command wrote it
+        a.lua_changed()
+        self.assertEqual(sent, [{"scale": 1.6}, {"scale": 1.25}])     # the same: nothing more
+        self.lua.write_text("local omarchy_monitor_scale = 2\n")     # changed in the file (a key binding)
+        a.lua_changed()
+        self.assertEqual(sent[-1], {"scale": 2.0})
 
     def set_scale(self, sizes, fullpanel=True, focused="Virtual-1", value="1.6"):
         """set_scale with the focused output's sizes one after the other (the Mac's change)."""

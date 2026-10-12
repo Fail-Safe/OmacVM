@@ -663,6 +663,7 @@ class Agent:
         self.config_watch = ConfigWatch(CONFIG.parent)
         self.poke = Poke(POKE)
         self.scale: float | None = None   # the scale last told to the Mac
+        self.lua_scale: float | None = None   # monitors.lua's, when last looked at
 
     def send(self, message: dict) -> None:
         self.outbox += json.dumps(message, separators=(",", ":")).encode() + b"\n"
@@ -709,7 +710,16 @@ class Agent:
         if current is not None and current != self.reported:
             self.reported = current
             self.send({"monitors": current})
-        self.send_scale(wanted_scale())
+        self.lua_changed()
+
+    def lua_changed(self) -> None:
+        """monitors.lua's scale to the Mac when it changed there. A scale just
+        picked (a poke, `scale`) is not undone by the old value still in the
+        file: that is sent only once the file itself changes."""
+        lua = wanted_scale()
+        if lua != getattr(self, "lua_scale", None):
+            self.lua_scale = lua
+            self.send_scale(lua)
 
     def send_scale(self, scale: float | None) -> None:
         """The main output's scale to the Mac when it changed (#355)."""
@@ -855,7 +865,7 @@ class Agent:
 
     def run(self) -> None:
         self.send({"hello": 1, "external": self.external})
-        self.send_scale(wanted_scale())
+        self.lua_changed()
         # Started in the middle of a change (a config reload restarts it):
         # the first report may be a passing layout.
         self.follow()
