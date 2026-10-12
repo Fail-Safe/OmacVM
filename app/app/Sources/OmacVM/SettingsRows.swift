@@ -473,7 +473,18 @@ struct UpdateRow: View {
         if let o = updater.lastOutcome, let l = Updater.outcomeLine(o, current: updater.currentVersion) { return l }
         if !updater.enabled { return "Off: no checks and no messages. Check Now still works." }
         guard Version(updater.currentVersion) != nil else { return "Check Now looks for a newer version." }
+        if let d = updater.lastCheckDate { return "Checked \(Self.when(d)). \(Product.name) \(updater.currentVersion) is the newest version." }
         return "You have \(Product.name) \(updater.currentVersion)."
+    }
+
+    static func when(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        f.doesRelativeDateFormatting = true
+        let s = f.string(from: d)
+        // "Today at 14:02" -> "today at 14:02"
+        return Calendar.current.isDateInToday(d) || Calendar.current.isDateInYesterday(d) ? s.prefix(1).lowercased() + s.dropFirst() : "on \(s)"
     }
 
     var body: some View {

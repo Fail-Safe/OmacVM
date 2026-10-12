@@ -2,60 +2,118 @@ import AppKit
 import OmacVMWindow
 import SwiftUI
 
-/// Under the header: a ready update (never while update checks are off,
-/// unless a check by hand found it).
+/// Under the header when a check (weekly, or Check Now) found a new version
+/// and it is downloaded and checked: what it brings and Update Now. While a
+/// VM runs from this app the update waits until it has shut down. Hidden
+/// while update checks are off, unless a check by hand found it; Later hides
+/// it until the next launch.
 struct UpdateBanner: View {
     @ObservedObject var updater: Updater
+    var running: Bool
+    var whatsNew: () -> Void
 
     var body: some View {
-        // Weekly checks on, or a check by hand in this session.
-        let banner = updater.staged != nil && (updater.enabled || updater.lastOutcome != nil)
-        if banner, let s = updater.staged {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("\(Product.name) \(s.version) is ready", systemImage: "arrow.down.circle.fill")
-                    .font(.headline)
-                Text(bannerText)
-                    .font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    if let n = s.notes { Button("What's New") { NSWorkspace.shared.open(n) } }
-                    Button("Skip This Version") { updater.skip() }.disabled(updater.restarting)
-                    Spacer()
-                    if !updater.installWhenIdle && !updater.restarting {
-                        Button("Update to \(s.version)…") { update(s.version) }
-                    }
+        if let s = updater.staged, updater.enabled || updater.lastOutcome != nil, updater.later != s.version {
+            let news = updater.whatsNew(s)
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.white, Color.accentColor)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(Product.name) \(s.version) is ready").font(.system(size: 13, weight: .semibold))
+                    Text(line(news))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if news != nil || s.notes != nil {
+                    Button("What’s New") { if news != nil { whatsNew() } else if let n = s.notes { NSWorkspace.shared.open(n) } }
+                        .buttonStyle(.link)
+                        .layoutProbe("whats-new")
+                }
+                if !updater.installWhenIdle && !updater.restarting {
+                    Button("Later") { updater.later = s.version }
+                    Button(UpdateBanner.updateTitle(running: running)) { UpdateBanner.update(updater) }
+                        .buttonStyle(.borderedProminent)
+                        .layoutProbe("update-now")
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 9)
             .background(Look.banner, ignoresSafeAreaEdges: [])
             .overlay(alignment: .bottom) { Rectangle().fill(Look.bannerLine).frame(height: 1) }
+            .accessibilityElement(children: .contain)
             .layoutProbe("update-banner")
         }
     }
 
-    private var bannerText: String {
-        if updater.restarting { return "The VM shuts down for the update; it starts again with the new version." }
-        if updater.installWhenIdle {
-            return "You have \(updater.currentVersion). It goes in once the VM has shut down; your VMs are not changed."
-        }
-        if updater.runningVM() != nil {
-            return "You have \(updater.currentVersion). Your VM shuts down cleanly, \(Product.name) updates and restarts, then starts the VM again."
-        }
-        return "You have \(updater.currentVersion). \(Product.name) restarts with the new version; your VMs are not changed."
+    private func line(_ news: WhatsNew?) -> String {
+        if updater.restarting { return "The VM shuts down for the update and starts again with the new version." }
+        if updater.installWhenIdle { return "It goes in once the VM has shut down. Your VMs are not changed." }
+        return news?.summary() ?? "You have \(updater.currentVersion). Your VMs are not changed."
     }
 
-    /// One confirm, then the update: with a VM restart when this launcher runs the VM.
-    private func update(_ version: String) {
-        let current = updater.currentVersion
-        if updater.runningVM() != nil {
-            guard Updater.restartAlert(version, current: current).runModal() == .alertFirstButtonReturn else { return }
-            Task { await updater.restartFromMac() }
-            return
+    static func updateTitle(running: Bool) -> String { running ? "Update After Shutdown" : "Update Now" }
+
+    /// Now (the app restarts with the new version), or once the VM has shut
+    /// down (Updater.install waits for it).
+    static func update(_ updater: Updater) {
+        updater.install()
+    }
+}
+
+/// What's New: the new version's section of its CHANGELOG.md.
+struct WhatsNewSheet: View {
+    @ObservedObject var updater: Updater
+    var running: Bool
+    var done: () -> Void
+
+    var body: some View {
+        let s = updater.staged
+        let news = s.flatMap { updater.whatsNew($0) }
+        SheetFrame(title: "What’s New in \(Product.name) \(s?.version ?? "")") {
+            if let intro = news?.intro {
+                Text(Self.markdown(intro)).fixedSize(horizontal: false, vertical: true)
+            }
+            ScrollView {
+                Card {
+                    ForEach(Array((news?.items ?? []).enumerated()), id: \.offset) { _, item in
+                        HStack(alignment: .firstTextBaseline, spacing: 9) {
+                            Circle().fill(Color.accentColor).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                            Text(Self.markdown(item))
+                                .font(.system(size: 12.5))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxHeight: 440)
+            .fixedSize(horizontal: false, vertical: true)
+            if let n = s?.notes {
+                Link("Release notes on GitHub", destination: n).font(.subheadline)
+            }
+        } buttons: {
+            Button("Skip This Version") { updater.skip(); done() }
+                .disabled(updater.restarting)
+            Spacer()
+            Button("Later") { if let v = s?.version { updater.later = v }; done() }
+                .keyboardShortcut(.cancelAction)
+            if !updater.installWhenIdle && !updater.restarting {
+                Button(UpdateBanner.updateTitle(running: running)) { done(); UpdateBanner.update(updater) }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
         }
-        let alert = Updater.checkAlert(.ready(version), current: current, busy: updater.busyNow)
-        if alert.runModal() == .alertFirstButtonReturn { updater.install() }
+    }
+
+    static func markdown(_ s: String) -> AttributedString {
+        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
     }
 }
 
