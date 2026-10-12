@@ -374,6 +374,32 @@ expect(ScrollSpy.atEnd(offset: 1196, visible: 600, content: 1800), "4 pt short o
 expect(!ScrollSpy.atEnd(offset: 1100, visible: 600, content: 1800), "100 pt short: not the end")
 expect(!ScrollSpy.atEnd(offset: 0, visible: 900, content: 800), "content shorter than the window: no end to snap to")
 
+// MARK: Settings 3.1 adds (the plan's contract keys)
+
+expect(CloseAction.key == "closeAction" && CloseAction.parse(nil) == .shutdown, "closeAction: not set = shut down")
+expect(CloseAction.parse("keepRunning") == .keepRunning && CloseAction.parse("ask") == .ask && CloseAction.parse("shutdown") == .shutdown,
+       "closeAction: the three words")
+expect(CloseAction.parse("KeepRunning") == .shutdown && CloseAction.parse(1) == .shutdown, "closeAction: anything else = shut down")
+expect(CloseAction.allCases.map(\.rawValue) == ["shutdown", "keepRunning", "ask"], "closeAction: the values QEMU gets")
+expect(SwipeOut.key == "SwipeOut" && !SwipeOut.isOn(stored: nil), "SwipeOut: not set = off")
+expect(SwipeOut.isOn(stored: true) && SwipeOut.isOn(stored: 1) && SwipeOut.isOn(stored: "YES") && SwipeOut.isOn(stored: "true")
+       && SwipeOut.isOn(stored: "1"), "SwipeOut: a bool, a number, true or yes (as CFPreferences reads it)")
+expect(!SwipeOut.isOn(stored: false) && !SwipeOut.isOn(stored: 0) && !SwipeOut.isOn(stored: "no") && !SwipeOut.isOn(stored: "off"),
+       "SwipeOut: false, 0, no: off")
+
+// The keys in a settings domain, as the app reads and writes them.
+let suite = "org.omacvm.test.window-tests.\(getpid())"
+if let d = UserDefaults(suiteName: suite) {
+    expect(CloseAction.parse(d.object(forKey: CloseAction.key)) == .shutdown && !SwipeOut.isOn(stored: d.object(forKey: SwipeOut.key)),
+           "an empty domain: every default")
+    d.set(CloseAction.ask.rawValue, forKey: CloseAction.key)
+    d.set(true, forKey: SwipeOut.key)
+    let again = UserDefaults(suiteName: suite)!
+    expect(CloseAction.parse(again.object(forKey: CloseAction.key)) == .ask && SwipeOut.isOn(stored: again.object(forKey: SwipeOut.key)),
+           "written values read back")
+    d.removePersistentDomain(forName: suite)
+}
+
 // MARK: Window sides (the pictures' frames: OmacVM --render-vm-window)
 
 expect(WindowLayout.width == 800 && WindowLayout.contentWidth == 552 && WindowLayout.inset == 16, "800 pt window, 552 pt of settings, 16 pt margin")
