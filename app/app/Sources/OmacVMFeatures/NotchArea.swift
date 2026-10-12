@@ -180,6 +180,14 @@ public enum NotchArea {
         return g.valid ? g : nil
     }
 
+    /// macOS keeps the menu bar in full screen ("Automatically hide and show
+    /// the menu bar: never", NSGlobalDomain AppleMenuBarVisibleInFullscreen;
+    /// #356). With Keep the Dock away on, QEMU's immersive full screen hides it
+    /// anyway; without, a FullPanel start goes below it.
+    public static func menuBarAlwaysShown(_ d: UserDefaults = .standard) -> Bool {
+        d.object(forKey: "AppleMenuBarVisibleInFullscreen") as? Bool ?? false
+    }
+
     /// What the VM window says under the switch while FullPanel is set but
     /// the VM's side is not ready (guestReady); nil: nothing to say.
     public static let notReady = "Including notch needs Omanotch on in the VM and an update first (Update VM); until then it starts with the notch via Omanotch."

@@ -186,6 +186,16 @@ for c in StartIn.allCases {
     expect(StartIn.current(fullScreen: c.fullScreen, mode: m, hasNotch: true) == c, "Start in: \(c) round trip")
 }
 
+// The menu bar in full screen (#356): macOS's global preference.
+if let d = UserDefaults(suiteName: "org.omacvm.test.features-menubar.\(getpid())") {
+    // (Not set, the Mac's own global setting counts: not checked here.)
+    d.set(false, forKey: "AppleMenuBarVisibleInFullscreen")
+    expect(!NotchArea.menuBarAlwaysShown(d), "menu bar: hidden in full screen when macOS is set so")
+    d.set(true, forKey: "AppleMenuBarVisibleInFullscreen")
+    expect(NotchArea.menuBarAlwaysShown(d), "menu bar: always shown when macOS is set so")
+    d.removePersistentDomain(forName: "org.omacvm.test.features-menubar.\(getpid())")
+}
+
 shareKeyboardTests()
 
 print(failures == 0 ? "all passed" : "\(failures) failed")

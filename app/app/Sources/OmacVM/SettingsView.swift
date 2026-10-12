@@ -170,7 +170,7 @@ struct SettingsSections: View {
         VStack(alignment: .leading, spacing: 0) {
             SectionTitle(text: "Display")
             Card {
-                StartInRow(state: state, previewNotch: preview?.notch)
+                StartInRow(state: state, previewNotch: preview?.notch, previewMenuBar: preview?.menuBar)
                 KeepDockAwayRow(tick: state.tick)
                 EscapeRow(tick: state.tick)
                 if preview?.magicMouse ?? mouse.connected {

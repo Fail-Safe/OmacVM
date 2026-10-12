@@ -29,6 +29,8 @@ enum RenderVMWindow {
         var section: String? = nil
         var sheet: ReadyView.ReadySheet? = nil
         var magicMouse: Bool? = false
+        /// macOS keeps the menu bar in full screen (#356).
+        var menuBar: Bool? = false
         /// Disk › Change… open: what Omarchy needs, the size chosen.
         var disk: (need: DiskSize.Need, gb: Int)? = nil
     }
@@ -101,6 +103,16 @@ enum RenderVMWindow {
         page("page-3-all-on", state, allOn)
         allOn.section = "general"
         window("window-6-custom-resources", state, allOn)
+        // Including notch, ready, Keep the Dock away off, and macOS keeping
+        // the menu bar in full screen: the note with Open Menu Bar Settings.
+        try? Data().write(to: folder.appendingPathComponent(NotchArea.readyFileName))
+        Settings.keepDockAway = false
+        var menuBar = usual
+        menuBar.menuBar = true
+        menuBar.section = "display"
+        window("window-15-notch-menu-bar", state, menuBar)
+        Settings.keepDockAway = true
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent(NotchArea.readyFileName))
         try? NotchArea.write(.native, folder: folder)
         try? VMDisk.setJobs([], config)
         try? config.writeResources()
