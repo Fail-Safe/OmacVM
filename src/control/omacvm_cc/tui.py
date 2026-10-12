@@ -1134,7 +1134,7 @@ class ControlCentre(App):
         self.refresh_all()
 
     def switch_gestures(self, escape: str | None = None, swipe_out: bool | None = None) -> None:
-        """Space on Escape combo (this monitor <-> all monitors) or Swipe out to
+        """Space on Escape combo (focused monitor <-> all monitors) or Swipe out to
         macOS (on <-> off): the Mac's own settings, from the next use. Nothing
         to install, so no job and no question."""
         problem = self.c.mac_problem()
@@ -1209,7 +1209,7 @@ class ControlCentre(App):
             self.notify("Magic Mouse swipe is a setting: space switches 3 and 4 fingers")
             return
         if r.feature.name == "escape-combo":
-            self.notify("Escape combo is a setting: space switches this monitor and all monitors")
+            self.notify("Escape combo is a setting: space switches focused monitor and all monitors")
             return
         if r.feature.name == "swipe-out":
             self.notify("Swipe out to macOS is a setting: space turns it on or off")

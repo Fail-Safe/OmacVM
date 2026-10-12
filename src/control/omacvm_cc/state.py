@@ -725,7 +725,7 @@ ESCAPE_FEATURE = Feature(
 SWIPE_OUT_FEATURE = Feature(
     name="swipe-out", default="off", sides=("mac",), tags=(), needs="gestures", title="Swipe out to macOS",
     summary="Swipe past the first or last workspace to the macOS Space beside the VM, the way ⌃⌥ Esc goes.")
-ESCAPE_TITLES = {"pointer": "this monitor", "all": "all monitors"}
+ESCAPE_TITLES = {"pointer": "focused monitor", "all": "all monitors"}
 
 
 def escape_row(answer: dict | None, offline: bool = False) -> Row | None:
@@ -755,5 +755,5 @@ def swipe_out_row(answer: dict | None, gestures_on: bool = True, offline: bool =
 
 
 def next_escape(word) -> str:
-    """Space on the escape combo's row: this monitor <-> all monitors."""
+    """Space on the escape combo's row: focused monitor <-> all monitors."""
     return "pointer" if word == "all" else "all"

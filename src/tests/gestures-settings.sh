@@ -19,7 +19,8 @@ t "  SwipeOut a bool" 1 "$(defaults read "$OMACVM_GESTURES_DOMAIN" SwipeOut)"
 t "  MouseSwipeFingers a number" 3 "$(defaults read "$OMACVM_GESTURES_DOMAIN" MouseSwipeFingers)"
 out=$(g); [[ $out == *"Escape combo (⌃⌥ Esc): all monitors"* && $out == *"Swipe out to macOS: on"* && $out == *"Magic Mouse swipe: 3 fingers"* ]] &&
   echo "ok   the plain words" || { echo "FAIL plain: $out"; fail=1; }
-t "escape display (an alias): this monitor" pointer "$(g escape display --json | sed 's/.*"escape": "\([a-z]*\)".*/\1/')"
+t "escape display (an alias): focused monitor" pointer "$(g escape display --json | sed 's/.*"escape": "\([a-z]*\)".*/\1/')"
+t "escape focused (an alias): focused monitor" pointer "$(g escape focused --json | sed 's/.*"escape": "\([a-z]*\)".*/\1/')"
 t "  stored as pointer" pointer "$(defaults read "$OMACVM_GESTURES_DOMAIN" EscapeSwipe)"
 defaults write "$OMACVM_GESTURES_DOMAIN" EscapeSwipe -string ALL
 defaults write "$OMACVM_GESTURES_DOMAIN" SwipeOut -string yes
