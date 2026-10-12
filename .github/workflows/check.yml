@@ -461,6 +461,9 @@ jobs:
       - name: Sound does not hang on Chromium's video decoder (WirePlumber rule, install order, off); its device starts the daemon
         run: src/tests/vdec-wireplumber.sh
 
+      - name: Chrome's WebRTC encoder flags survive Update VM and come back at a start
+        run: src/tests/video-encode-flags.sh
+
       - name: CI builds OmacVM.app on the mini (the app job, its runtime cache)
         run: src/tests/ci-app-build.sh
 

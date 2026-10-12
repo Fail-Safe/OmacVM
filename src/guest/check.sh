@@ -554,7 +554,7 @@ app)
       vainfo --display drm 2>/dev/null | sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointEncSlice$/\1/p' | tr '\n' ' ')
   if [[ -n $e ]]; then
     ok "video encoding" "the Mac's media engine: $e"
-    check "WebRTC encoding" "Chrome, Brave: VA-API encoder features in their flags (omacvm apply)" \
+    check "WebRTC encoding" "Chrome, Brave: VA-API encoder features in their flags (missing: each start puts them back, or omacvm apply)" \
       python3 /usr/local/share/omacvm/app/guest/browser-video-encode.py "$U" check
   elif command -v vainfo >/dev/null; then skip "video encoding" "none offered (OmacVM.app older than the video encoding?)"; fi
   # The frozen screen of screenshots and the recording picker (hyprpicker -r -z): OmacVM's build

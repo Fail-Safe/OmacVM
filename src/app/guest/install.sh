@@ -12,7 +12,7 @@
 #  * video decoding on the Mac's media engine (VA-API: vainfo, a driver shim
 #    so Firefox gets NV12 surfaces, Firefox's VA-API switch)
 #  * video encoding on it: Chrome's and Brave's VA-API encoder for WebRTC
-#    (browser-video-encode.py)
+#    (browser-video-encode.py; omacvm-video-encode at apply and each start)
 #  * a hyprpicker that draws the frozen screen of screenshots only when it
 #    changes (hyprpicker/; the package's drew every display on every frame)
 #  * every Mac display in full screen (omacvm-displays; the switch
@@ -135,10 +135,10 @@ install -Dm644 hyprpicker/95-omacvm-hyprpicker.hook /etc/pacman.d/hooks/95-omacv
 hyprpicker/build.sh "$U" || true
 # Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
 # nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
-if vainfo --display drm 2>/dev/null | grep -q VAEntrypointEncSlice; then
-  python3 browser-video-encode.py "$U" on
-  echo "OmacVM.app: display sync, every Mac display, guest agent, video decoding and encoding"
-else
-  python3 browser-video-encode.py "$U" off
-  echo "OmacVM.app: display sync, every Mac display, guest agent, video decoding"
-fi
+# Without the VM's GPU (Update VM's run) the flags stay as they are; each
+# start puts back what is missing (omacvm-video-encode).
+install -m755 omacvm-video-encode /usr/local/bin/
+install -m644 omacvm-video-encode.service /etc/systemd/system/
+systemctl enable omacvm-video-encode.service >/dev/null 2>&1 || true
+OMACVM_VIDEO_ENCODE_PY=$PWD/browser-video-encode.py ./omacvm-video-encode apply "$U"
+echo "OmacVM.app: display sync, every Mac display, guest agent, video decoding and encoding"

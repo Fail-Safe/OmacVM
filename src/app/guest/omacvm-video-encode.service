@@ -1,0 +1,10 @@
+[Unit]
+Description=OmacVM.app: Chrome's WebRTC encoder flags while the Mac offers an encoder
+After=local-fs.target systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/omacvm-video-encode boot
+
+[Install]
+WantedBy=multi-user.target
