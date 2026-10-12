@@ -7,11 +7,17 @@
 // creates a tap again until it is back (issue #192).
 #include <CoreFoundation/CoreFoundation.h>
 #include <ApplicationServices/ApplicationServices.h>
+// shareKeyboard (#350) is read from a throwaway domain (test.sh), never the app's.
+#ifndef SHARE_KEYBOARD_DOMAIN
+#error "build with -DSHARE_KEYBOARD_DOMAIN=CFSTR(\"<throwaway domain>\")"
+#endif
 static int created, failNext, enabled = 1;
+static CGEventTapPlacement lastPlace = (CGEventTapPlacement)-1;
 static CFMachPortRef fakeTapCreate(CGEventTapLocation l, CGEventTapPlacement p, CGEventTapOptions o, CGEventMask m,
                                    CGEventTapCallBack cb, void *u) {
-  (void)l; (void)p; (void)o; (void)m; (void)cb; (void)u;
+  (void)l; (void)o; (void)m; (void)cb; (void)u;
   if (failNext) return NULL;
+  lastPlace = p;
   created++;
   enabled = 1;   // a new tap is enabled
   return CFMachPortCreate(NULL, NULL, NULL, NULL);
@@ -230,5 +236,27 @@ int main(void) {
   perm = PERM_AX | PERM_IM | PERM_POST;
   checkPermissions();
   check(tapPort && created == 14 && !inputPaused, "... back with it");
+
+  // Keyboard sharing apps (#350): OmacVM.app's hidden shareKeyboard puts the
+  // tap at the end of the chain, read whenever a tap is made.
+  check(lastPlace == kCGHeadInsertEventTap, "shareKeyboard not set: the tap at the head of the chain");
+  CFPreferencesSetAppValue(CFSTR("shareKeyboard"), kCFBooleanTrue, SHARE_KEYBOARD_DOMAIN);
+  CFPreferencesAppSynchronize(SHARE_KEYBOARD_DOMAIN);
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1600, NET_APP, 1, "Omarchy", 0, 0);
+  check(tapPort && created == 15 && lastPlace == kCGTailAppendEventTap,
+        "shareKeyboard true: the next tap at the end of the chain");
+  CFPreferencesSetAppValue(CFSTR("shareKeyboard"), kCFBooleanFalse, SHARE_KEYBOARD_DOMAIN);
+  CFPreferencesAppSynchronize(SHARE_KEYBOARD_DOMAIN);
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1700, NET_APP, 1, "Omarchy", 0, 0);
+  check(tapPort && created == 16 && lastPlace == kCGHeadInsertEventTap, "shareKeyboard false: at the head again");
+  CFPreferencesSetAppValue(CFSTR("shareKeyboard"), CFSTR("no"), SHARE_KEYBOARD_DOMAIN);
+  CFPreferencesAppSynchronize(SHARE_KEYBOARD_DOMAIN);
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1800, NET_APP, 1, "Omarchy", 0, 0);
+  check(tapPort && lastPlace == kCGHeadInsertEventTap, "shareKeyboard \"no\" (a string): at the head");
+  CFPreferencesSetAppValue(CFSTR("shareKeyboard"), NULL, SHARE_KEYBOARD_DOMAIN);
+  CFPreferencesAppSynchronize(SHARE_KEYBOARD_DOMAIN);
   return fail;
 }

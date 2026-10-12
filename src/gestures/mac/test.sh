@@ -16,7 +16,8 @@
 #    the trackpads are let go at once, nothing enables or creates a tap again
 #    until it is back (issue #192). A tap macOS (or the watchdog) disabled is
 #    removed, never enabled again; a new one after 2 s, then 30 s; the third
-#    in 10 minutes parks it until the Accessibility list changes (#290)
+#    in 10 minutes parks it until the Accessibility list changes (#290).
+#    OmacVM.app's hidden shareKeyboard puts it at the end of the chain (#350)
 #    (test-tap.c).
 # 5. Ctrl+Option+Esc (and the old Ctrl+Option+Cmd+Esc, exact modifiers only): in the VM the display under the pointer moves out
 #    with macOS's own Space shortcut as the user set it (or every display
@@ -55,7 +56,8 @@ T=$(mktemp -d)
 killtree() { local p; for p in "$@"; do pkill -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true; done; }
 # Its own settings domain per run: two runs at once on one Mac (CI) keep apart.
 MOUSE_DOMAIN=org.omacvm.test.mouse-fingers.$$
-trap 'killtree ${PIDS:-}; rm -rf "$T"; defaults delete "$MOUSE_DOMAIN" >/dev/null 2>&1 || true' EXIT
+SHARE_DOMAIN=org.omacvm.test.share-keyboard.$$
+trap 'killtree ${PIDS:-}; rm -rf "$T"; defaults delete "$MOUSE_DOMAIN" >/dev/null 2>&1 || true; defaults delete "$SHARE_DOMAIN" >/dev/null 2>&1 || true; rm -f "$HOME/Library/Preferences/$SHARE_DOMAIN.plist"' EXIT
 trap 'exit 130' INT TERM
 clang -O1 -Wall -Wno-unused-function -o "$T/test-gestures" "$HERE/test-gestures.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
@@ -209,8 +211,8 @@ expect "$T/out2" "accepted 2"
 if (( took <= 4 )); then echo "ok   connected again ${took} s after the switch"; else echo "FAIL connected again only after ${took} s" >&2; fail=1; fi
 expect "$T/out2" "live App VM 127.0.0.1"         # one connection: the old one was dropped
 reject "$T/out2" "live App VM 192.168.77.2"
-# 4. The event tap after a VM app (re)starts.
-clang -O1 -Wall -Wno-unused-function -o "$T/test-tap" "$HERE/test-tap.c" "$HERE/scroll_ns.m" \
+# 4. The event tap after a VM app (re)starts; its place with shareKeyboard (a throwaway domain).
+clang -O1 -Wall -Wno-unused-function "-DSHARE_KEYBOARD_DOMAIN=CFSTR(\"$SHARE_DOMAIN\")" -o "$T/test-tap" "$HERE/test-tap.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
   -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-tap" > "$T/tap" 2>&1 || fail=1

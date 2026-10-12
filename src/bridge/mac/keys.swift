@@ -216,6 +216,7 @@ final class MediaKeys {
   private var disabledBy: String?        // main thread: what the tap's callback last heard from macOS
   private var askedAX = false
   private var createFailing = false      // main thread: a first tap could not be made (logged once)
+  private var tapAtEnd = false           // main thread: the last tap was made at the end of the chain (shareKeyboard)
   private var tapOK = false              // main thread: the last "media keys: event tap|waiting|cannot" line says it works (omacvm check)
   private var slowPerms = MediaKeys.slowPermsNow()   // main thread: Input Monitoring + "control the computer", asked off it
   private var askingSlow = false         // main thread
@@ -384,7 +385,9 @@ final class MediaKeys {
   /// never reach a session-level tap, only play/next/previous do.
   private func install(again why: String?, _ perms: TapPermissions) {
     let mask = CGEventMask(1 << 14)   // NX_SYSDEFINED: media/brightness/illumination keys
-    guard let t = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap, options: .defaultTap,
+    // At the end of the chain with OmacVM.app's shareKeyboard (#350, keys-model.swift).
+    let atEnd = ShareKeyboard.on(UserDefaults(suiteName: ShareKeyboard.domain(testIdentity: testIdentity)))
+    guard let t = CGEvent.tapCreate(tap: .cghidEventTap, place: ShareKeyboard.place(atEnd), options: .defaultTap,
                                     eventsOfInterest: mask, callback: { _, type, event, _ in
       // Never enabled again here (#290); check() removes it. Not from inside its own callback.
       if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -415,6 +418,11 @@ final class MediaKeys {
                                                        reason: "media-key event tap")
     }
     keyTap.created(perms)
+    if atEnd != tapAtEnd {
+      tapAtEnd = atEnd
+      // Not "media keys: event tap ...": omacvm check reads those (media_keys_state).
+      log("media keys: keyboard sharing (shareKeyboard) \(atEnd ? "on: the tap at the end of the chain" : "off: the tap at the head of the chain")")
+    }
     createFailing = false
     if !tapOK || why != nil { tapOK = true; log(why.map { "media keys: event tap created again (\($0))" } ?? "media keys: event tap installed") }
   }

@@ -1,6 +1,22 @@
 // When the media-key tap is created again, without AppKit (keys.swift uses it;
 // test.sh's offline tests check it). Same rule as the Gestures helper's tap.
+import CoreGraphics
 import Foundation
+
+/// Keyboard sharing apps (#350): Synergy, Deskflow, Barrier or Input Leap
+/// tap the keys at the head of the HID chain too, and the newest tap runs
+/// first. OmacVM.app's hidden setting (defaults write org.omacvm.app
+/// shareKeyboard -bool true; the test Bridge reads OmacVM Test.app's
+/// org.omacvm.app.test) puts the media-key tap, Gestures' and QEMU's at the
+/// end of the chain, so the sharing app sees the keys first. Read whenever
+/// the tap is made.
+enum ShareKeyboard {
+  static let key = "shareKeyboard"
+  static func domain(testIdentity: Bool) -> String { testIdentity ? "org.omacvm.app.test" : "org.omacvm.app" }
+  /// Read as the app reads it (UserDefaults.bool).
+  static func on(_ defaults: UserDefaults?) -> Bool { defaults?.bool(forKey: key) ?? false }
+  static func place(_ on: Bool) -> CGEventTapPlacement { on ? .tailAppendEventTap : .headInsertEventTap }
+}
 
 /// A new event tap goes to the head of its chain, so a tap made by a VM app
 /// started after the Bridge (each OmacVM VM is its own QEMU process) sits

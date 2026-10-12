@@ -21,6 +21,10 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   show it. System Settings › Menu Bar (on older macOS: Control Center) ›
   Automatically hide and show the menu bar: **In Full Screen Only** (or Always).
   `omacvm check` points this out.
+- **A keyboard sharing app (Synergy, Deskflow, Barrier, Input Leap) loses
+  the keyboard to the VM**: the VM types what was meant for the other
+  computer. Turn on the hidden switch in
+  [34](#34-app-keyboard-sharing-apps-the-vm-takes-the-keys-meant-for-the-other-computer).
 - **The Mac's pointer shows over the full-screen VM**: menu bar tools that keep
   their own window across the top of the screen (Bartender, for one) can bring
   it back. Quit them while you work in the VM.
@@ -853,3 +857,37 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   (`logs/qemu.log` in the VM folder) has "cocoa: mac-ime: ..." lines, the
   VM's Fcitx5 log `journalctl --user -u omarchy-fcitx5` has "omacvm-ime"
   lines.
+
+## 34. app: Keyboard sharing apps: the VM takes the keys meant for the other computer
+
+- **Symptom:** with a keyboard and mouse sharing app on the Mac (Synergy,
+  Deskflow, Barrier, Input Leap) and an OmacVM.app VM running, the pointer
+  moves to the other computer but the keys still go to the VM. The mouse
+  works. Starting the sharing app after the VM fixes it until the next VM
+  start.
+- **Cause:** the order of macOS's event taps. QEMU's keyboard grab and the
+  sharing app's tap both go to the front of macOS's input chain, and the
+  newest tap runs first. A VM started after the sharing app sees the keys
+  before it and keeps them. The mouse is not affected: QEMU's tap only
+  takes keys.
+- **Fix (3.0.18, hidden, off by default):**
+
+      defaults write org.omacvm.app shareKeyboard -bool true
+
+  Then restart the VM. OmacVM's taps (QEMU's, OmacVM Gestures', the
+  Bridge's media keys) go to the end of the chain, so the sharing app sees
+  the keys first. QEMU's log says "full-grab tap at the end of the event
+  tap chain". To turn it off: `defaults delete org.omacvm.app
+  shareKeyboard`, then restart the VM.
+- **Limits:** trackpad gestures (swipes, the scroll momentum) still go to
+  Omarchy while the pointer is on the other computer: OmacVM Gestures reads
+  them from the trackpad itself, not from the tap. On Parallels, UTM and
+  VMware Fusion the switch moves only OmacVM Gestures' and the Bridge's
+  taps; how those apps take the keyboard is their own.
+- **Where:** `app/runtime/patches/omacvm-cocoa-keys-last.patch`
+  (`OMACVM_KEYS_LAST=1`), `app/app/Sources/OmacVMFeatures/ShareKeyboard.swift`,
+  `src/gestures/mac/omacvm-gestures.c` (`shareKeyboard`),
+  `src/bridge/mac/keys-model.swift` (`ShareKeyboard`); tests
+  `app/runtime/Tests/keys/test-keys-last.sh`, `swift run features-tests`,
+  `src/gestures/mac/test.sh` (test-tap.c), `src/bridge/mac/test-models.sh`.
+  Issue [#350](https://github.com/gillesgoetsch/OmacVM/issues/350).

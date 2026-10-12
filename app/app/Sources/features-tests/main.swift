@@ -1,4 +1,5 @@
-// The features a new OmacVM.app VM starts with (OmacVMFeatures), without a VM:
+// The features a new OmacVM.app VM starts with (OmacVMFeatures) and the
+// hidden keyboard sharing switch (ShareKeyboardTests.swift), without a VM:
 //   cd app/app && swift run features-tests
 // Exit 0 when all pass. CI runs it on every pull request.
 import Foundation
@@ -186,6 +187,8 @@ for c in StartIn.allCases {
 expect(StartIn.info(hasNotch: true).contains("The VM uses the whole built-in display, including the strip beside the camera notch, and draws its bar there itself. Omanotch is not needed for this. Experimental."),
        "Start in: the (i) says what including notch does")
 expect(!StartIn.info(hasNotch: false).contains("notch"), "Start in: no notch words on a Mac without one")
+
+shareKeyboardTests()
 
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
