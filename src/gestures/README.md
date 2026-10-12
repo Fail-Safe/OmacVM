@@ -55,7 +55,7 @@ workspaces' way (`gestures:workspace_swipe_invert`); past the lowest workspace o
 focused display = left; on the right the first swipe from the last workspace makes a
 new empty one (as Hyprland does), a swipe past that empty one = right
 (`workspace_swipe_create_new` off: the last one at once). Sideways travel at least
-`OMACVM_SWIPE_OUT_MIN` (0.15) of the trackpad's width, 1.5 times more sideways than up
+`OMACVM_SWIPE_OUT_MIN` (0.12, where Hyprland changes the workspace) of the trackpad's width, 1.5 times more sideways than up
 or down; a Magic Mouse's swipe counts (its virtual fingers). It says `X left|right` over
 its connection (only after the Mac's `X on`); the Mac takes it only from the VM in
 front while captured, at most once a second, and moves the way ⌃⌥ Esc does

@@ -617,7 +617,9 @@ def escape_notice(keys):
 # last workspace makes a new empty one (workspace_swipe_create_new, as
 # Hyprland does), a swipe past that empty one goes to the Space on the right.
 # The Mac moves (or, without a Space there, does nothing) as ⌃⌥ Esc does.
-SWIPE_OUT_MIN = env_float("OMACVM_SWIPE_OUT_MIN", 0.15)   # sideways travel, share of the trackpad's width
+# Sideways travel, share of the trackpad's width: Hyprland 0.56 (Omarchy's
+# settings) changes the workspace from about 0.11-0.13 (mini, 2026-10-12).
+SWIPE_OUT_MIN = env_float("OMACVM_SWIPE_OUT_MIN", 0.12)
 SWIPE_OUT_RATIO = 1.5                                      # ... and this much more sideways than up or down
 HYPR_WAIT = 0.3                                            # s to wait at the lift for the workspaces read at its start
 
