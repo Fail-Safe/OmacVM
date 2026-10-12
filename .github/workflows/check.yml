@@ -389,6 +389,9 @@ jobs:
       - name: FullPanel's rules (every notched MacBook, external displays, moves between them)
         run: app/runtime/Tests/display/test-fullpanel.sh
 
+      - name: Every scale in full screen including notch (sizes for each notched MacBook, issue 355)
+        run: app/runtime/Tests/display/test-fullpanel-scale.sh
+
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
 

@@ -39,6 +39,11 @@ A new window for the VM's settings.
 - OmacVM.app, **Full screen including notch**: macOS's own reveal of the menu bar on the way into
   full screen no longer shows over the strip, and qemu.log no longer says the menu bar came down
   at the top edge when the pointer was elsewhere.
+- OmacVM.app, **Full screen including notch**: every one of Omarchy's scales (1, 1.25, 1.6, 2, 3,
+  4) now works there, without a black band. For a scale the panel's size does not fit, the VM gets
+  a few pixels more (2944x1912 for 1.6 on a 13-inch MacBook Air), scaled onto the panel; the next
+  start begins at that size. Before, 1.25 and 1.6 became 1.33 and 2 there. Thanks @brianmerchant,
+  whose PR #355 and its tests were the reference (#355).
 
 ## 3.0.18
 

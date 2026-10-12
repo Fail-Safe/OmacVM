@@ -368,6 +368,8 @@ final class Runner {
         env["OMACVM_PRODUCT_NAME"] = Product.name
         // QEMU's FullPanel (omacvm-cocoa-fullpanel.patch): only for this start.
         if notchStart.fullPanel { env["OMACVM_FULLPANEL"] = "1" } else { env.removeValue(forKey: "OMACVM_FULLPANEL") }
+        // The scale the guest asked for, kept for FullPanel's next start (#355, omacvm-cocoa-fullpanel-scale.patch).
+        env["OMACVM_FULLPANEL_SCALE_FILE"] = c.folder.appendingPathComponent("fullpanel-scale").path
         // Named under the boot logo when the VM is slow to show anything.
         env["OMACVM_LOGS"] = c.folder.appendingPathComponent("logs").path
         // The icon in the look chosen in the window (AppIcon), else the bundle's.

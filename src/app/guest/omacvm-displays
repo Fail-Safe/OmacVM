@@ -17,7 +17,12 @@ org.omacvm.display, one JSON object per line:
                 {"monitors": [{"name": "Virtual-1", "x": 0, "y": 0,
                  "width": 1728, "height": 1085}, ...]}
                 where Hyprland put its outputs (logical pixels), so the
-                Mac points the pointer at the right one.
+                Mac points the pointer at the right one,
+                {"scale": 1.6}                  the scale the main output
+                wants (Omarchy's omarchy_monitor_scale, or the one just
+                picked): in "Full screen including notch" the Mac gives it a
+                size that scale fits, a few pixels more than the panel, shown
+                scaled onto it (#355); the Mac keeps it for the next start.
 
 Hyprland's event socket has no event when an output only moves (display-sync
 and Omanotch move them with hyprctl eval, a config reload puts them back to
@@ -41,6 +46,10 @@ The switch "Use external displays" is ~/.config/omacvm/displays.conf
   omacvm-displays status            the switch and the outputs, as JSON
   omacvm-displays desktop           displays that show no desktop, as JSON
   omacvm-displays poke              tell the agent the layout moved (Hyprland's hook)
+  omacvm-displays fullpanel         the output in "Full screen including notch" (nothing otherwise)
+  omacvm-displays scale SCALE       Omarchy's scale for the focused output (the display
+                                    panel's buttons): in "Full screen including notch" the Mac
+                                    first gives a size that fits it, then Omarchy sets it
 
 A display can come up without wallpaper or bar, only Hyprland's dark grey:
 when the shell lost its GPU context (QEMU refused a large texture's memory,
@@ -81,6 +90,10 @@ STATE = RUNTIME / "omacvm/displays.json"
 BUILTIN = RUNTIME / "omacvm/builtin"
 POKE = RUNTIME / "omacvm/displays.poke"
 SYNC = "/usr/local/bin/omacvm-display-sync"
+MONITORS_LUA = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hypr/monitors.lua"
+HOST_ENV = Path(os.environ.get("OMACVM_HOST_ENV", "/run/omacvm/host.env"))
+# How long `scale` waits for the Mac's new size before Omarchy sets the scale anyway.
+SCALE_WAIT = 4.0
 WIDGET = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "omarchy/plugins/omacvm.monitor"
 WIDGET_BUILD = Path("/usr/local/share/omacvm/app/guest/monitor-widget/build.py")
 OMARCHY_PANEL = Path("/usr/share/omarchy/shell/plugins/panels/monitor/Panel.qml")
@@ -118,6 +131,74 @@ def config_mtime() -> float:
         return CONFIG.stat().st_mtime
     except OSError:
         return 0.0
+
+
+def wanted_scale() -> float | None:
+    """Omarchy's scale for the main output (omarchy_monitor_scale in
+    monitors.lua, which its scale buttons write); None for automatic."""
+    try:
+        m = re.search(r"^\s*local\s+omarchy_monitor_scale\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*(?:--[^\n]*)?$",
+                      MONITORS_LUA.read_text(), re.MULTILINE)
+    except OSError:
+        return None
+    if not m:
+        return None
+    value = float(m.group(1))
+    return round(value, 6) if 1 <= value <= 4 else None
+
+
+def fullpanel_output() -> str | None:
+    """The output in "Full screen including notch" this start (the app's
+    SMBIOS line omacvm.fullpanel in host.env), else None."""
+    try:
+        if not any(line.startswith("OMACVM_FULLPANEL=") for line in HOST_ENV.read_text().splitlines()):
+            return None
+    except OSError:
+        return None
+    try:
+        return BUILTIN.read_text().strip() or "Virtual-1"
+    except OSError:
+        return "Virtual-1"
+
+
+def scale_fits(width: int, height: int, scale: float) -> bool:
+    """Hyprland takes the scale as it is (whole logical pixels, 1/120 steps)."""
+    k = round(scale * 120)
+    return k > 0 and (width * 120) % k == 0 and (height * 120) % k == 0
+
+
+def focused_monitor() -> dict | None:
+    data = hypr_json("j/monitors")
+    for m in data if isinstance(data, list) else []:
+        if isinstance(m, dict) and m.get("focused"):
+            return m
+    return None
+
+
+def set_scale(value: str, wait: float = SCALE_WAIT) -> int:
+    """A scale button of the display panel. In "Full screen including notch"
+    on that output the Mac first gives the output a size the scale fits (the
+    agent passes it on), then Omarchy's own command sets and keeps it, so
+    every one of its scales takes; elsewhere Omarchy's command as it is."""
+    try:
+        scale = float(value)
+    except ValueError:
+        scale = 0.0
+    if not 1 <= scale <= 4:
+        print("usage: omacvm-displays scale SCALE (1 to 4)", file=sys.stderr)
+        return 2
+    out, focused = fullpanel_output(), focused_monitor()
+    if out and focused and focused.get("name") == out:
+        poke(message=f"scale {scale:g}\n".encode())
+        end = time.monotonic() + wait
+        while time.monotonic() < end:
+            m = focused_monitor()
+            if m and scale_fits(int(m.get("width", 0)), int(m.get("height", 0)), scale):
+                break
+            time.sleep(0.1)
+        else:
+            log(f"scale {scale:g}: the Mac gave {out} no size that fits it (older OmacVM.app?): Omarchy's nearest")
+    return subprocess.call(["omarchy-hyprland-monitor-scaling", value])
 
 
 class ConfigWatch:
@@ -527,13 +608,12 @@ class Poke:
     def fileno(self) -> int:
         return self.sock.fileno() if self.sock else -1
 
-    def drain(self) -> bool:
-        """Reads the pending pokes; True when there was one."""
-        got = False
+    def drain(self) -> list[bytes]:
+        """Reads the pending pokes: their lines (b"layout", b"scale 1.6")."""
+        got: list[bytes] = []
         while self.sock:
             try:
-                self.sock.recv(64)
-                got = True
+                got.append(self.sock.recv(64).strip())
             except BlockingIOError:
                 break
             except OSError:
@@ -546,12 +626,13 @@ class Poke:
             self.sock = None
 
 
-def poke(path: Path = POKE) -> None:
-    """Tells a running agent the layout moved. Nothing listening: nothing to do."""
+def poke(path: Path = POKE, message: bytes = b"layout\n") -> None:
+    """Tells a running agent the layout moved (or the scale just picked).
+    Nothing listening: nothing to do."""
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
             s.setblocking(False)
-            s.sendto(b"layout\n", str(path))
+            s.sendto(message, str(path))
     except OSError:
         pass
 
@@ -581,6 +662,8 @@ class Agent:
         self.said: list[str] = []
         self.config_watch = ConfigWatch(CONFIG.parent)
         self.poke = Poke(POKE)
+        self.scale: float | None = None   # the scale last told to the Mac
+        self.lua_scale: float | None = None   # monitors.lua's, when last looked at
 
     def send(self, message: dict) -> None:
         self.outbox += json.dumps(message, separators=(",", ":")).encode() + b"\n"
@@ -627,6 +710,36 @@ class Agent:
         if current is not None and current != self.reported:
             self.reported = current
             self.send({"monitors": current})
+        self.lua_changed()
+
+    def lua_changed(self) -> None:
+        """monitors.lua's scale to the Mac when it changed there. A scale just
+        picked (a poke, `scale`) is not undone by the old value still in the
+        file: that is sent only once the file itself changes."""
+        lua = wanted_scale()
+        if lua != getattr(self, "lua_scale", None):
+            self.lua_scale = lua
+            self.send_scale(lua)
+
+    def send_scale(self, scale: float | None) -> None:
+        """The main output's scale to the Mac when it changed (#355)."""
+        if scale is not None and scale != getattr(self, "scale", None):
+            self.scale = scale
+            self.send({"scale": scale})
+
+    def on_poke(self, lines: list[bytes]) -> None:
+        for line in lines:
+            word, _, value = line.decode(errors="replace").partition(" ")
+            if word == "scale":
+                try:
+                    scale = float(value)
+                except ValueError:
+                    continue
+                if 1 <= scale <= 4:
+                    self.send_scale(round(scale, 6))
+        if any(not line.startswith(b"scale") for line in lines):
+            self.layout_changed()
+            self.soon(0.05)
 
     def look_in(self, delay: float) -> None:
         self.looks.append(time.monotonic() + delay)
@@ -752,6 +865,7 @@ class Agent:
 
     def run(self) -> None:
         self.send({"hello": 1, "external": self.external})
+        self.lua_changed()
         # Started in the middle of a change (a config reload restarts it):
         # the first report may be a passing layout.
         self.follow()
@@ -766,9 +880,8 @@ class Agent:
             ready, writable, _ = select.select(readers, writers, [], self.timeout(time.monotonic()))
             if self.config_watch in ready:
                 self.config_watch.drain()
-            if self.poke in ready and self.poke.drain():
-                self.layout_changed()
-                self.soon(0.05)
+            if self.poke in ready:
+                self.on_poke(self.poke.drain())
             if writable:
                 self.flush()
             if self.fd in ready:
@@ -874,6 +987,13 @@ def main(argv: list[str]) -> int:
     if len(argv) >= 2 and argv[1] == "poke":
         poke()
         return 0
+    if len(argv) >= 2 and argv[1] == "fullpanel":
+        out = fullpanel_output()
+        if out:
+            print(out)
+        return 0
+    if len(argv) == 3 and argv[1] == "scale":
+        return set_scale(argv[2])
     if len(argv) >= 2 and argv[1] not in ("run",):
         print(__doc__.strip(), file=sys.stderr)
         return 2

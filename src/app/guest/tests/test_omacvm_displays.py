@@ -547,5 +547,131 @@ class ConfigWatchTest(unittest.TestCase):
             self.assertFalse(w.ok)
 
 
+class Scale(unittest.TestCase):
+    """#355: every scale in "Full screen including notch". The agent tells the
+    Mac the scale the main output wants; `scale` asks the Mac for a size that
+    fits before Omarchy sets it."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.tmp)
+        self.lua = self.tmp / "monitors.lua"
+        self.env = self.tmp / "host.env"
+        self.builtin = self.tmp / "builtin"
+        for target, value in [("MONITORS_LUA", self.lua), ("HOST_ENV", self.env), ("BUILTIN", self.builtin)]:
+            patcher = mock.patch.object(od, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_wanted_scale(self):
+        self.assertIsNone(od.wanted_scale())                          # no monitors.lua
+        self.lua.write_text("local omarchy_monitor_scale = 1.6\nlocal omarchy_gdk_scale = 2\n")
+        self.assertEqual(od.wanted_scale(), 1.6)
+        self.lua.write_text("local omarchy_monitor_scale = 1.666667 -- clean\n")
+        self.assertEqual(od.wanted_scale(), 1.666667)
+        self.lua.write_text('local omarchy_monitor_scale = "auto"\n')
+        self.assertIsNone(od.wanted_scale())
+        self.lua.write_text("local omarchy_monitor_scale = 6\n")
+        self.assertIsNone(od.wanted_scale())                          # out of 1-4
+
+    def test_fullpanel_output(self):
+        self.assertIsNone(od.fullpanel_output())                      # no host.env
+        self.env.write_text("OMACVM_SCREEN=2940x1912\n")
+        self.assertIsNone(od.fullpanel_output())                      # a normal start
+        self.env.write_text("OMACVM_FULLPANEL=645.5x824.5x34x1470x956\n")
+        self.assertEqual(od.fullpanel_output(), "Virtual-1")
+        self.builtin.write_text("Virtual-2\n")
+        self.assertEqual(od.fullpanel_output(), "Virtual-2")
+
+    def test_fits(self):
+        self.assertTrue(od.scale_fits(2944, 1912, 1.6))               # the 13" Air at 1.6
+        self.assertFalse(od.scale_fits(2940, 1912, 1.6))              # its panel: not
+        self.assertTrue(od.scale_fits(2940, 1915, 1.25))
+        self.assertTrue(od.scale_fits(2940, 1912, 2))
+        self.assertFalse(od.scale_fits(2940, 1912, 1.25))
+
+    def agent(self):
+        sent = []
+        a = od.Agent.__new__(od.Agent)
+        a.send = sent.append
+        a.scale = None
+        a.layout_changed = mock.Mock()
+        a.soon = mock.Mock()
+        return a, sent
+
+    def test_agent_tells_the_mac(self):
+        a, sent = self.agent()
+        a.lua_scale = None
+        a.lua_changed()
+        self.assertEqual(sent, [])                                    # automatic: nothing
+        self.lua.write_text("local omarchy_monitor_scale = 2\n")
+        a.lua_changed()
+        a.lua_changed()
+        self.assertEqual(sent, [{"scale": 2.0}])                      # once
+        a.on_poke([b"scale 1.6"])
+        self.assertEqual(sent[-1], {"scale": 1.6})                    # picked: at once
+        a.layout_changed.assert_not_called()
+        a.on_poke([b"scale 9", b"scale x"])
+        self.assertEqual(len(sent), 2)                                # nonsense: nothing
+        a.on_poke([b"layout"])
+        a.layout_changed.assert_called_once()
+
+    def test_a_picked_scale_is_not_undone_by_the_old_file(self):
+        # The MacBook Air, 2026-10-12: 1.25 picked while monitors.lua still said 1.6;
+        # the next report sent 1.6 again and the Mac went back to 1.6's size.
+        a, sent = self.agent()
+        a.lua_scale = None
+        self.lua.write_text("local omarchy_monitor_scale = 1.6\n")
+        a.lua_changed()
+        a.on_poke([b"scale 1.25"])
+        a.lua_changed()                                               # the report, the file not written yet
+        self.assertEqual(sent, [{"scale": 1.6}, {"scale": 1.25}])
+        self.lua.write_text("local omarchy_monitor_scale = 1.25\n")  # Omarchy's command wrote it
+        a.lua_changed()
+        self.assertEqual(sent, [{"scale": 1.6}, {"scale": 1.25}])     # the same: nothing more
+        self.lua.write_text("local omarchy_monitor_scale = 2\n")     # changed in the file (a key binding)
+        a.lua_changed()
+        self.assertEqual(sent[-1], {"scale": 2.0})
+
+    def set_scale(self, sizes, fullpanel=True, focused="Virtual-1", value="1.6"):
+        """set_scale with the focused output's sizes one after the other (the Mac's change)."""
+        if fullpanel:
+            self.env.write_text("OMACVM_FULLPANEL=645.5x824.5x34x1470x956\n")
+        sizes = list(sizes)
+        pokes, calls = [], []
+
+        def monitors(cmd):
+            w, h = sizes.pop(0) if len(sizes) > 1 else sizes[0]
+            return [{"name": focused, "focused": True, "width": w, "height": h}]
+        with mock.patch.object(od, "hypr_json", monitors), \
+             mock.patch.object(od, "poke", lambda path=None, message=b"": pokes.append(message)), \
+             mock.patch.object(od.subprocess, "call", lambda argv: calls.append(argv) or 0), \
+             mock.patch.object(od.time, "sleep", lambda s: None), mock.patch("sys.stderr"):
+            rc = od.set_scale(value, wait=0.5)
+        return rc, pokes, calls
+
+    def test_scale_in_fullpanel(self):
+        rc, pokes, calls = self.set_scale([(2940, 1912), (2940, 1912), (2944, 1912)])
+        self.assertEqual((rc, pokes), (0, [b"scale 1.6\n"]))
+        self.assertEqual(calls, [["omarchy-hyprland-monitor-scaling", "1.6"]])   # once the size fits
+
+    def test_scale_elsewhere_is_omarchys(self):
+        rc, pokes, calls = self.set_scale([(2940, 1840)], fullpanel=False)
+        self.assertEqual((pokes, calls), ([], [["omarchy-hyprland-monitor-scaling", "1.6"]]))
+        rc, pokes, calls = self.set_scale([(3840, 2160)], focused="Virtual-2")   # an external display
+        self.assertEqual(pokes, [])
+
+    def test_scale_old_mac_falls_back(self):
+        # An OmacVM.app without #355 never changes the size: Omarchy's nearest after the wait.
+        rc, pokes, calls = self.set_scale([(2940, 1912)])
+        self.assertEqual(calls, [["omarchy-hyprland-monitor-scaling", "1.6"]])
+
+    def test_scale_usage(self):
+        with mock.patch("sys.stderr"):
+            self.assertEqual(od.set_scale("0.5"), 2)
+            self.assertEqual(od.set_scale("big"), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
