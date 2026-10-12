@@ -119,7 +119,7 @@ struct MessageStrip: View {
     }
 }
 
-/// Where each section starts, below the top of the visible part.
+/// Where each section starts in the settings' content.
 private struct SectionTops: PreferenceKey {
     static let defaultValue: [String: CGFloat] = [:]
     static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
@@ -127,29 +127,47 @@ private struct SectionTops: PreferenceKey {
     }
 }
 
+/// The scrolling content's own coordinates (0 at its top).
+private let spyContent = "spy-content"
+
 extension View {
     /// A section the sidebar can scroll to and marks while it is in view.
     func spySection(_ id: String) -> some View {
         self.id(id).background(GeometryReader { g in
-            Color.clear.preference(key: SectionTops.self, value: [id: g.frame(in: .scrollView).minY])
+            Color.clear.preference(key: SectionTops.self, value: [id: g.frame(in: .named(spyContent)).minY])
         })
     }
 }
 
-/// The sidebar and the scrolling settings: a click in the sidebar scrolls to
-/// its section; while the settings scroll, the sidebar marks the section in
-/// view (ScrollSpy), and the last one at the end.
+/// How far the settings are scrolled, how far they can, and how much shows.
+private struct SpyGeometry: Equatable {
+    var offset = 0.0
+    var maxOffset = 0.0
+    var viewport = 0.0
+}
+
+/// The sidebar and the scrolling settings: a click in the sidebar marks and
+/// scrolls to its section; while the settings scroll, the sidebar marks the
+/// section the probe line has reached (ScrollSpy), every one in turn down to
+/// the last at the end.
 struct SpyScroll<Content: View>: View {
     let nav: [NavItem]
     @ViewBuilder var content: Content
     /// The window pictures: start scrolled to this section.
     @Environment(\.spyStart) private var start
-    @State private var current = 0
     @State private var tops: [String: CGFloat] = [:]
-    @State private var atEnd = false
-    /// After a click: the clicked one stays marked while the scroll runs.
-    @State private var pinnedUntil = Date.distantPast
+    @State private var geometry = SpyGeometry()
+    @State private var pin = ScrollSpyPin()
+    /// The last click: a late end of an earlier click's scroll is ignored.
+    @State private var clicks = 0
     private static var top: String { "spy-top" }
+    /// The window pictures (spyStart "end"): scrolled to the very bottom, nothing clicked.
+    static var end: String { "spy-end" }
+
+    private var current: Int {
+        pin.marked(ScrollSpy.current(tops: nav.map { Double(tops[$0.id] ?? .infinity) }, offset: geometry.offset,
+                                     maxOffset: geometry.maxOffset, viewport: geometry.viewport))
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -159,50 +177,57 @@ struct SpyScroll<Content: View>: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Color.clear.frame(height: 0).id(Self.top)
                         content
+                        Color.clear.frame(height: 0).id(Self.end)
                     }
                         .padding(.horizontal, CGFloat(WindowLayout.contentInset))
                         .padding(.top, 10)
                         .padding(.bottom, 28)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .coordinateSpace(.named(spyContent))
                 }
                 .scrollBounceBehavior(.basedOnSize)
                 // Under the header, never over it.
                 .clipped()
-                .onPreferenceChange(SectionTops.self) { t in
-                    tops = t
-                    spy()
+                .onPreferenceChange(SectionTops.self) { tops = $0 }
+                .onScrollGeometryChange(for: SpyGeometry.self) { g in
+                    let visible = Double(g.containerSize.height - g.contentInsets.top - g.contentInsets.bottom)
+                    return SpyGeometry(offset: Double(g.contentOffset.y + g.contentInsets.top),
+                                       maxOffset: Double(g.contentSize.height) - visible, viewport: visible)
+                } action: { old, new in
+                    geometry = new
+                    if abs(new.offset - old.offset) > 0.5 { pin.moved() }
+                }
+                .onScrollPhaseChange { _, phase in
+                    switch phase {
+                    case .tracking, .interacting, .decelerating: pin.scrolledByHand()
+                    case .idle: pin.clickScrollEnded()
+                    default: break
+                    }
                 }
                 .onAppear {
+                    if start == Self.end {
+                        DispatchQueue.main.async { proxy.scrollTo(Self.end, anchor: .bottom) }
+                        return
+                    }
                     guard let start, let i = nav.firstIndex(where: { $0.id == start }) else { return }
-                    current = i
-                    pinnedUntil = .distantFuture
+                    pin.click(i)
                     DispatchQueue.main.async { proxy.scrollTo(start, anchor: .top) }
-                }
-                .onScrollGeometryChange(for: Bool.self) { g in
-                    ScrollSpy.atEnd(offset: Double(g.visibleRect.minY), visible: Double(g.containerSize.height),
-                                    content: Double(g.contentSize.height))
-                } action: { _, end in
-                    atEnd = end
-                    spy()
                 }
             }
         }
-    }
-
-    private func spy() {
-        guard Date() > pinnedUntil else { return }
-        let i = ScrollSpy.current(tops: nav.map { Double(tops[$0.id] ?? .infinity) }, atEnd: atEnd)
-        if i != current { current = i }
     }
 
     private func sidebar(_ proxy: ScrollViewProxy) -> some View {
         VStack(spacing: 1) {
             ForEach(Array(nav.enumerated()), id: \.element.id) { i, item in
                 Button {
-                    current = i
-                    pinnedUntil = Date().addingTimeInterval(0.8)
+                    pin.click(i)
+                    clicks += 1
+                    let click = clicks
                     // The first section: the very top, with the space above its title.
                     withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(i == 0 ? Self.top : item.id, anchor: .top) }
+                    // Ended by now also when there was nothing to scroll (no phase change).
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { if clicks == click { pin.clickScrollEnded() } }
                 } label: {
                     HStack(spacing: 8) {
                         NavIcon(symbol: item.symbol, color: Color(rgb: item.rgb))

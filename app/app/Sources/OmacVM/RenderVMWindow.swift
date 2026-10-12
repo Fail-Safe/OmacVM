@@ -76,6 +76,11 @@ enum RenderVMWindow {
             p.section = s.id
             window("window-\(i + 1)-\(s.id)", state, p)
         }
+        // Scrolled to the very bottom by hand: the last section is marked
+        // (the sidebar follows the scroll down to the end).
+        var end = usual
+        end.section = SpyScroll<EmptyView>.end
+        window("window-16-scrolled-to-end", state, end)
         // The whole page: as a Mac with a notch and as one without (the
         // Mac mini: Window and Full screen only).
         page("page-1-notch", state, usual)
