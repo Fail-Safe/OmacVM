@@ -94,6 +94,18 @@ out=$(fs --vm "Test notch"); [[ $out == *"Start in: Window"* ]] && ok "Window in
 defaults delete "$OMACVM_APP_ID" startFullScreen
 out=$(fs --vm "Test notch" notch standard); [[ $out == *"one setting"* ]] && ok "two settings: usage" || bad "two: $out"
 out=$(run --vm "Test notch" auto); [[ $? == 2 || $out == *usage* || $out == *"unknown option"* ]] && ok "a bad value: usage" || bad "bad value: $out"
+# "Always show the menu bar in full screen" (#356): in FullPanel's way only
+# without Keep the Dock away (the app's keepDockAway, on unless set to 0).
+# The global setting is not touched: the test reads it through a stand-in.
+defaults() { if [[ $1 == read && $2 == NSGlobalDomain ]]; then [[ ${MENU_ALWAYS:-0} == 1 ]] && echo 1 || return 1; else command defaults "$@"; fi; }
+APP_ID=$OMACVM_APP_ID
+MENU_ALWAYS=1; notch_keep_dock_away && ok "Keep the Dock away: on unless set (the app's default)" || bad "keepDockAway unset read as off"
+notch_menu_bar_in_the_way && bad "menu bar always shown, Keep the Dock away on: in the way" || ok "menu bar always shown, Keep the Dock away on: not in the way (#356)"
+command defaults write "$OMACVM_APP_ID" keepDockAway -bool false
+notch_menu_bar_in_the_way && ok "menu bar always shown, Keep the Dock away off: in the way (normal full screen)" || bad "not in the way without Keep the Dock away"
+MENU_ALWAYS=0; notch_menu_bar_in_the_way && bad "menu bar hidden by macOS: in the way" || ok "menu bar hidden by macOS: never in the way"
+command defaults delete "$OMACVM_APP_ID" keepDockAway
+unset -f defaults
 out=$(run --vm "No such VM" --json); [[ $out == *"no OmacVM.app VM named"* ]] && ok "unknown VM: says so" || bad "unknown VM: $out"
 out=$(run --vm "Test notch" --vm-type utm); [[ $out == *"OmacVM.app's setting"* ]] && ok "another route: says Omanotch fills the strip there" || bad "utm: $out"
 

@@ -283,6 +283,30 @@ static void test_reveal(void)
     CHECK(allowed, "menu open: stays while the pointer is in a menu");
     allowed = omacvm_fp_reveal_allowed(allowed, false, top - notch - 1, top, notch);
     CHECK(!allowed, "below the strip, menu closed: held back again");
+
+    /* AppKit's own reveal on the way into full screen (pointer elsewhere): not shown. */
+    CHECK(!omacvm_fp_reveal_shown(true, false), "AppKit's reveal, not allowed (entry, Keep the Dock away): stays hidden");
+    CHECK(omacvm_fp_reveal_shown(true, true), "AppKit's reveal after the pointer touched the top row: shown");
+    CHECK(!omacvm_fp_reveal_shown(false, true) && !omacvm_fp_reveal_shown(false, false), "no reveal: nothing shown");
+}
+
+/*
+ * "Always show the menu bar in full screen" (#356): in the way only without
+ * "Keep the Dock away" (the MacBook Air and the mini, 2026-10-12: with it,
+ * the menu bar stays hidden in full screen whatever that setting says).
+ */
+static void test_menu_bar_setting(void)
+{
+    for (size_t i = 0; i < sizeof builtins / sizeof builtins[0]; i++) {
+        const Display *d = &builtins[i];
+        CHECK(omacvm_fp_display_ok(true, d->notch, omacvm_fp_menu_bar_in_the_way(true, true)),
+              "%s: menu bar always shown, Keep the Dock away on: FullPanel", d->name);
+        CHECK(!omacvm_fp_display_ok(true, d->notch, omacvm_fp_menu_bar_in_the_way(true, false)),
+              "%s: menu bar always shown, Keep the Dock away off: normal full screen", d->name);
+        CHECK(omacvm_fp_display_ok(true, d->notch, omacvm_fp_menu_bar_in_the_way(false, false)) &&
+              omacvm_fp_display_ok(true, d->notch, omacvm_fp_menu_bar_in_the_way(false, true)),
+              "%s: menu bar hidden in full screen (macOS's default): FullPanel either way", d->name);
+    }
 }
 
 /*
@@ -398,6 +422,7 @@ int main(void)
     test_moves();
     test_guest_size();
     test_reveal();
+    test_menu_bar_setting();
     test_presentation();
     if (failures) {
         printf("test-fullpanel: %d of %d checks failed\n", failures, checks);

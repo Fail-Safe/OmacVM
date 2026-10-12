@@ -71,13 +71,14 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  #include <AppKit/NSOpenGL.h>
  #ifdef CONFIG_OPENGL
  #import <IOSurface/IOSurface.h>
-@@ -1578,9 +1580,16 @@
+@@ -1577,10 +1579,17 @@
+  * that view shrank it on every reboot.
   */
  static CGFloat omacvm_main_full_top = -1;
- 
++
 +/* OmacVM FullPanel (omacvm-cocoa-fullpanel.patch), defined below. */
 +static bool omacvm_fullpanel_window_usable(NSWindow *window);
-+
+ 
  - (NSSize) screenSafeAreaSize
  {
      NSSize size = [[[self window] screen] frame].size;
@@ -102,10 +103,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -2969,9 +2980,1001 @@
+@@ -2967,11 +2978,1006 @@
+  * always macOS's own (doToggleFullScreen:).
+  */
  @interface QemuWindow : NSWindow
- @end
- 
++@end
++
 +/*
 + * ---------------------------------------------------------------------------
 + * OmacVM FullPanel (experimental): the full-screen window over the whole
@@ -580,10 +583,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +- (bool)usable
 +{
 +    NSScreen *screen = window ? [window screen] : nil;
++    bool always = [[NSUserDefaults standardUserDefaults] boolForKey:@"AppleMenuBarVisibleInFullscreen"];
 +    if (!screen || !omacvm_fp_display_ok(omacvm_fullpanel_requested(),
 +                                         [screen safeAreaInsets].top,
-+                                         [[NSUserDefaults standardUserDefaults]
-+                                             boolForKey:@"AppleMenuBarVisibleInFullscreen"])) {
++                                         omacvm_fp_menu_bar_in_the_way(always, immersive_mode_enabled))) {
 +        return false;
 +    }
 +    return omacvm_fullpanel_class_hooked([window class]) &&
@@ -853,6 +856,9 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +- (void)menuRevealChanged:(bool)menu toolbar:(bool)toolbar
 +{
++    /* AppKit's own reveal (the way into full screen) stays hidden unless allowed. */
++    menu = omacvm_fp_reveal_shown(menu, menu_bar_reveal_allowed);
++    toolbar = omacvm_fp_reveal_shown(toolbar, menu_bar_reveal_allowed);
 +    if (menu_bar_revealed == menu && toolbar_revealed == toolbar) {
 +        return;
 +    }
@@ -878,7 +884,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    area_lost = false;
 +    if (![self usable] && !display_logged) {
 +        display_logged = true;
-+        fprintf(stderr, "omacvm: full panel: this window's display has no camera housing (or the menu bar is always shown): normal full screen\n");
++        fprintf(stderr, "omacvm: full panel: this window's display has no camera housing (or the menu bar is always shown and Keep the Dock away is off): normal full screen\n");
 +    }
 +}
 +
@@ -1015,8 +1021,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
 +}
 +
-+@end
-+
+ @end
+ 
 +/* Before a window enters full screen: its state, the hooks (once per class). */
 +static void omacvm_fullpanel_prepare_window(NSWindow *window)
 +{
@@ -1104,7 +1110,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  @end
  
  static BOOL notchFull;
-@@ -3290,6 +4293,11 @@
+@@ -3290,6 +4296,11 @@
  /* OmacVM: macOS says how big the full-screen area is: remember where it starts. */
  - (NSSize)window:(NSWindow *)window willUseFullScreenContentSize:(NSSize)proposedSize
  {
@@ -1116,7 +1122,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      NSSize display = [[window screen] frame].size;
      CGFloat top = display.height - proposedSize.height;
  
-@@ -7443,7 +8451,7 @@
+@@ -7445,7 +8456,7 @@
      CGRect r = CGDisplayBounds(omacvm_screen_id(s));
      OmacVMBox b = { r.origin.x, r.origin.y, r.size.width, r.size.height };
  
@@ -1125,7 +1131,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          NSEdgeInsets in = [s safeAreaInsets];
          b.x += in.left;
          b.y += in.top;
-@@ -7851,6 +8859,55 @@
+@@ -7853,6 +8864,55 @@
  @implementation OmacVMHeadWindow
  - (BOOL)canBecomeKeyWindow { return YES; }
  - (BOOL)canBecomeMainWindow { return NO; }
