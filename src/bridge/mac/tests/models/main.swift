@@ -395,5 +395,21 @@ check(ProcArgs.parse(procargs(["OmacVM", "-qmp", "unix:/s"])) == ["OmacVM", "-qm
 check(ProcArgs.parse([]) == nil && ProcArgs.parse([2, 0, 0, 0, 65, 0, 66]) == nil && ProcArgs.parse([0, 0, 0, 0]) == nil,
       "procargs: short, cut off or empty: nothing")
 
+// ---- ShareKeyboard (#350): the media-key tap's place ----
+check(ShareKeyboard.domain(testIdentity: false) == "org.omacvm.app"
+      && ShareKeyboard.domain(testIdentity: true) == "org.omacvm.app.test",
+      "share keyboard: OmacVM.app's setting (the test Bridge: OmacVM Test.app's)")
+// Its values in a throwaway domain's registration defaults (memory only, nothing written).
+if let d = UserDefaults(suiteName: "org.omacvm.test.share-keyboard.bridge.\(getpid())") {
+  check(ShareKeyboard.place(ShareKeyboard.on(d)) == .headInsertEventTap, "share keyboard: not set: the tap at the head of the chain")
+  d.register(defaults: ["shareKeyboard": true])
+  check(ShareKeyboard.place(ShareKeyboard.on(d)) == .tailAppendEventTap, "share keyboard: true: at the end of the chain")
+  d.register(defaults: ["shareKeyboard": false])
+  check(ShareKeyboard.place(ShareKeyboard.on(d)) == .headInsertEventTap, "share keyboard: false: at the head")
+} else {
+  check(false, "share keyboard: a throwaway defaults domain")
+}
+check(ShareKeyboard.place(ShareKeyboard.on(nil)) == .headInsertEventTap, "share keyboard: no domain: at the head")
+
 if failed > 0 { print("\(failed) failed"); exit(1) }
 print("models: all ok")
