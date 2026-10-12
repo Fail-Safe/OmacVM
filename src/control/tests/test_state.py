@@ -404,7 +404,7 @@ def test_mouse_swipe_row_says_when_gestures_is_off():
 
 def test_escape_row():
     assert S.escape_row(None) is None and S.escape_row({"swipe_out": True}) is None   # an older Mac
-    assert S.escape_row({"escape": "pointer"}).note == "this monitor"
+    assert S.escape_row({"escape": "pointer"}).note == "focused monitor"
     assert S.escape_row({"escape": "all"}).note == "all monitors"
     assert S.escape_row({"escape": "everything"}) is None
     r = S.escape_row({"escape": "all"}, offline=True)

@@ -21,7 +21,7 @@ while (( $# )); do
   case $1 in
     --json) JSON=1; shift ;;
     -h|--help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
-    escape) case ${2:-} in pointer|display) SETS+=("escape=pointer") ;; all) SETS+=("escape=all") ;; *) usage "escape pointer|all" ;; esac; shift 2 ;;
+    escape) case ${2:-} in pointer|display|focused) SETS+=("escape=pointer") ;; all) SETS+=("escape=all") ;; *) usage "escape pointer|all" ;; esac; shift 2 ;;
     swipe-out) [[ ${2:-} == on || ${2:-} == off ]] || usage "swipe-out on|off"; SETS+=("swipe-out=$2"); shift 2 ;;
     mouse-swipe) [[ ${2:-} == 3 || ${2:-} == 4 ]] || usage "mouse-swipe 3|4"; SETS+=("mouse-swipe=$2"); shift 2 ;;
     *) usage "unknown option $1 (see --help)" ;;
@@ -51,7 +51,7 @@ if (( JSON )); then
     "$(escape_now)" "$([[ $(swipe_out_now) == on ]] && echo true || echo false)" "$(mouse_now)" "$CHANGED"
   exit 0
 fi
-echo "Escape combo (⌃⌥ Esc): $([[ $(escape_now) == all ]] && echo "all monitors" || echo "this monitor")"
+echo "Escape combo (⌃⌥ Esc): $([[ $(escape_now) == all ]] && echo "all monitors" || echo "focused monitor")"
 echo "Swipe out to macOS: $(swipe_out_now)"
 echo "Magic Mouse swipe: $(mouse_now) fingers"
 [[ $CHANGED == true ]] && echo "(from the next use)"

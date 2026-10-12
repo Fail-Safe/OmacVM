@@ -67,7 +67,7 @@ expect "fresh: Start in full screen" true "$(val app.startFullScreen)"
 expect "fresh: Keep the Dock and hot corners away on" true "$(val app.keepDockAway)"
 expect "fresh: Closing the window shuts down" shutdown "$(val app.closeAction)"
 expect "fresh: OmacVM's own icon" default "$(val app.appIconTheme)"
-expect "fresh: escape combo: this monitor" pointer "$(val app.escapeSwipe)"
+expect "fresh: escape combo: focused monitor" pointer "$(val app.escapeSwipe)"
 expect "fresh: Magic Mouse swipe: 4 fingers" 4 "$(val app.mouseSwipeFingers)"
 expect "fresh: Swipe out to macOS off" false "$(val app.swipeOut)"
 expect "fresh: weekly update checks on" true "$(val app.updateChecks)"
@@ -130,7 +130,7 @@ dump
 expect "3.0.x Gamma: OpenGL, including notch" "opengl fullpanel" "$(val vms.2.graphics) $(val vms.2.notchMode)"
 expect "3.0.x Gamma: fast network, Mac folder, USB, Mac input" "true $H/Shared true true" \
   "$(val vms.2.fastNetwork) $(val vms.2.macFolder) $(val vms.2.usb) $(val vms.2.macIME)"
-expect "3.0.x app-wide: full screen, Dock away, this monitor, 4 fingers" "true true pointer 4" \
+expect "3.0.x app-wide: full screen, Dock away, focused monitor, 4 fingers" "true true pointer 4" \
   "$(val app.startFullScreen) $(val app.keepDockAway) $(val app.escapeSwipe) $(val app.mouseSwipeFingers)"
 expect "3.1's own stay: ask, Flexoki Light, Swipe out" "ask flexoki-light true" \
   "$(val app.closeAction) $(val app.appIconTheme) $(val app.swipeOut)"

@@ -19,7 +19,7 @@ enum EscapeSetting {
         case pointer, all
         var title: String {
             switch self {
-            case .pointer: "This monitor"
+            case .pointer: "Focused monitor"
             case .all: "All monitors"
             }
         }

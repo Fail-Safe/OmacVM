@@ -40,7 +40,7 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(ok(route("POST", "/omacvm/settings/gestures", #"{"escape": "all"}"#)) == .setGestureSettings(escape: "all", swipeOut: nil),
            "escape combo: all monitors")
     expect(ok(route("POST", "/omacvm/settings/gestures", #"{"escape": "pointer"}"#)) == .setGestureSettings(escape: "pointer", swipeOut: nil),
-           "escape combo: this monitor")
+           "escape combo: focused monitor")
     expect(ok(route("POST", "/omacvm/settings/gestures", #"{"swipe_out": true}"#)) == .setGestureSettings(escape: nil, swipeOut: true),
            "swipe out on")
     expect(ok(route("POST", "/omacvm/settings/gestures", #"{"escape": "all", "swipe_out": false}"#))
@@ -139,9 +139,9 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(mouseSwipeAnswer(magicMouse: false, fingers: 7)["fingers"] as? Int == 4, "answer: never another number")
 
     // ---- The escape combo and Swipe out: Gestures' rules ----
-    expect(escapeChoice(stored: nil) == "pointer" && escapeChoice(stored: "pointer") == "pointer", "escape: not set: this monitor")
+    expect(escapeChoice(stored: nil) == "pointer" && escapeChoice(stored: "pointer") == "pointer", "escape: not set: focused monitor")
     expect(escapeChoice(stored: "all") == "all" && escapeChoice(stored: "All") == "all", "escape: all (any case)")
-    expect(escapeChoice(stored: NSNumber(value: 1)) == "pointer" && escapeChoice(stored: "every") == "pointer", "escape: anything else: this monitor")
+    expect(escapeChoice(stored: NSNumber(value: 1)) == "pointer" && escapeChoice(stored: "every") == "pointer", "escape: anything else: focused monitor")
     let gs = gestureSettingsAnswer(escape: "all", swipeOut: true, magicMouse: false, fingers: 3)
     expect(gs["escape"] as? String == "all" && gs["swipe_out"] as? Bool == true && gs["magic_mouse"] as? Bool == false
            && gs["fingers"] as? Int == 3 && gs.count == 4, "gesture settings answer: four keys")

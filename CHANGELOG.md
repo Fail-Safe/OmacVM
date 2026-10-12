@@ -41,7 +41,7 @@ A new settings window, Swipe out to macOS, Closing the window, every scale in Fu
 - OmacVM.app: the new VM's setup, the USB devices list and All VMs have the same look, light and
   dark.
 - ⌃⌥ Esc no longer shows a notice in Omarchy.
-- **Control centre**, every route: the Mac's **Escape combo** (this monitor or all) and **Swipe
+- **Control centre**, every route: the Mac's **Escape combo** (focused monitor or all) and **Swipe
   out to macOS**, next to Magic Mouse swipe. On the Mac: `omacvm gestures` (`escape pointer|all`,
   `swipe-out on|off`, `mouse-swipe 3|4`).
 

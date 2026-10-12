@@ -158,7 +158,7 @@ a swipe or Mission Control works as well. Press **⌃⌥ Esc twice** quickly
 Mission Control, Esc closes it, and one **⌃⌥ Esc** closes it and takes you
 back into the VM.
 
-OmacVM.app's **Escape combo** setting: *This monitor* (the one under the
+OmacVM.app's **Escape combo** setting: *Focused monitor* (the one under the
 pointer, the default) or *All monitors*, every monitor that shows the VM. For
 every route also in the control centre (the VM's `omacvm`, rows *Escape
 combo*, *Magic Mouse swipe*, *Swipe out to macOS*) and on the Mac with
