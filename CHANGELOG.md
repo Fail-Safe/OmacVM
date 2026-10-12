@@ -18,6 +18,8 @@ in more words.
   OmacVM's box64 behind in such a VM. The check's Mac links row (under Omanotch) no longer fails
   for a VM started with Mac input methods on. Fcitx5 no longer shows a tip at login to unset
   `GTK_IM_MODULE`: Fcitx5 runs without it, GTK apps keep it. Reported by @Vocllum (#357).
+- OmacVM.app: the **start animation** (OMACVM turning into Omarchy's logo) now plays on every
+  start, also with macOS's Reduce motion on. Before, Reduce motion gave a still logo.
 
 ## 3.0.17
 

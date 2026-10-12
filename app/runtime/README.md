@@ -32,8 +32,8 @@ commit 82927e9. Changes here:
   both
 - `patches/omacvm-cocoa-boot-splash.patch`: when the window opens, OMACVM
   turns into Omarchy's logo (Core Animation: OMACVM 0.6 s, the morph about
-  2.6 s, done at 3.56 s; the still logo with Reduce motion or
-  `OMACVM_SPLASH_ANIMATION=0`). The logo holds over the firmware, GRUB and
+  2.6 s, done at 3.56 s; also with macOS's Reduce motion on; the still logo
+  only with `OMACVM_SPLASH_ANIMATION=0`). The logo holds over the firmware, GRUB and
   Linux's text until Omarchy's desktop is there (its display agent opens
   `org.omacvm.display`, or the picture is lit almost everywhere), then
   fades; also after a reboot. It gives way at once when the VM stops on an

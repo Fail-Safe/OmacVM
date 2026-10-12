@@ -25,9 +25,10 @@ it was. After that it still looks once a second for the desktop, so that
 an output the desktop turns off later is black, not the logo. The
 animation's frames come from a display link, which gives a window that is
 not visible none: once the animation is over by the clock and no frame came
-for 0.25 s, the logo fades without them (it stayed over the desktop). After a reboot the logo comes back, still, the same way. Reduce
-motion or OMACVM_SPLASH_ANIMATION=0: the logo without the morph. Only the
-main window has the animation.
+for 0.25 s, the logo fades without them (it stayed over the desktop). After a reboot the logo comes back, still, the same way. It
+plays with macOS's Reduce motion on too (the user wants it on every start);
+OMACVM_SPLASH_ANIMATION=0: the logo without the morph. Only the main window
+has the animation.
 Under it, in the GL layers of the main window and the other displays' windows:
 until the guest shows a picture on an output, and when it switches it off,
 Omarchy's logo on Omarchy's background instead of QEMU's placeholder text
@@ -84,7 +85,10 @@ desktop, not on the agent's hello alone, 2 s after the hello at most, at
 the time limit only without the agent, at once on an error); Tests/display/
 test-boot-splash-fade.m (the layer's no-action list has "opacity", so the
 fade into the desktop is only its own 0.4 s one: CA's implicit 0.25 s fade
-ended first and the logo came back at ~25 %). The build runs all four;
+ended first and the logo came back at ~25 %); Tests/display/
+test-boot-splash-motion.m (omacvm_intro_start: the animation with macOS's
+Reduce motion on and off, the still logo only with
+OMACVM_SPLASH_ANIMATION=0). The build runs all five;
 Tests/display/check-boot-splash.sh runs them from this patch alone (CI).
 The core's cells and glow at any time are the earlier core's (which matched
 the preview's frames) at the preview's time, frame for frame at 120 Hz.
@@ -138,7 +142,7 @@ QEMU; the logo layer now holds its link.
      /* Keep the corresponding Hyprland logical dimensions integral. */
      uint32_t cleanScaleDivisor = backingScale > 1.75 ? 2 :
                                   backingScale > 1.25 ? 3 : 1;
-@@ -3353,6 +3362,887 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
+@@ -3353,6 +3362,889 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
      CGLDestroyContext(ctx);
  }
  
@@ -623,7 +627,8 @@ QEMU; the logo layer now holds its link.
 + * preview did. Then the logo holds until the desktop is there (above); if
 + * that comes earlier, the animation still plays to its end, then fades. The
 + * guest is never held up: this is only drawing over the window.
-+ * Reduce motion (or OMACVM_SPLASH_ANIMATION=0): the logo without the morph.
++ * Also with macOS's Reduce motion on (the user wants it on every start);
++ * OMACVM_SPLASH_ANIMATION=0: the logo without the morph.
 + * After a reboot: the logo, still. Only the main window has it.
 + *
 + * Colours: GL's pixels reach the screen unconverted (the layer has no colour
@@ -1008,7 +1013,6 @@ QEMU; the logo layer now holds its link.
 +static void omacvm_intro_start(void)
 +{
 +    const char *v = getenv("OMACVM_SPLASH_ANIMATION");
-+    bool reduce = [[NSWorkspace sharedWorkspace] accessibilityDisplayShouldReduceMotion];
 +    bool off = v && !strcmp(v, "0");
 +
 +    if (!omacvm_splash_enabled() || getenv("OMACVM_COCOA_HIDDEN") ||
@@ -1016,17 +1020,19 @@ QEMU; the logo layer now holds its link.
 +          [[cocoaView layer] isKindOfClass:[CAOpenGLLayer class]])) {
 +        return;
 +    }
-+    info_report("cocoa: start animation %s", reduce ? "still (Reduce motion)" :
-+                off ? "still (OMACVM_SPLASH_ANIMATION=0)" : "on");
++    /* Reduce motion only named in the log: the animation plays with it too. */
++    info_report("cocoa: start animation %s", off ? "still (OMACVM_SPLASH_ANIMATION=0)" :
++                [[NSWorkspace sharedWorkspace] accessibilityDisplayShouldReduceMotion] ?
++                "on (macOS Reduce motion is on: it plays anyway)" : "on");
 +    omacvm_overlay_ok = true;
-+    omacvm_intro_show(reduce || off);
++    omacvm_intro_show(off);
 +    omacvm_hold_start();
 +}
 +
  static void cocoa_gl_update(DisplayChangeListener *dcl,
                              int x, int y, int w, int h)
  {
-@@ -3361,6 +4251,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
+@@ -3361,6 +4253,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
          gl_dirty = true;
      });
      cocoa_refresh_activity();
@@ -1034,7 +1040,7 @@ QEMU; the logo layer now holds its link.
  }
  
  static void cocoa_gl_switch(DisplayChangeListener *dcl,
-@@ -3374,6 +4265,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+@@ -3374,6 +4267,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
      cocoa_switch(dcl, new_surface);
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -1042,7 +1048,7 @@ QEMU; the logo layer now holds its link.
  }
  
  static void cocoa_gl_render(void)
-@@ -3451,6 +4343,8 @@ static void cocoa_gl_render(void)
+@@ -3451,6 +4345,8 @@ static void cocoa_gl_render(void)
              glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
              cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
          }
@@ -1051,7 +1057,7 @@ QEMU; the logo layer now holds its link.
      } else {
          glBindTexture(GL_TEXTURE_2D, surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -3689,6 +4583,11 @@ static bool cocoa_gl_present_init(void)
+@@ -3689,6 +4585,11 @@ static bool cocoa_gl_present_init(void)
      return true;
  }
  
@@ -1063,7 +1069,7 @@ QEMU; the logo layer now holds its link.
  static void cocoa_gl_present_free(void)
  {
      for (int i = 0; i < present_nsurf; i++) {
-@@ -3823,6 +4722,7 @@ static bool cocoa_gl_present(void)
+@@ -3823,6 +4724,7 @@ static bool cocoa_gl_present(void)
      bool flip;
      uint32_t w, h;
      GLint filter = qatomic_read(&zoom_interpolation) ? GL_LINEAR : GL_NEAREST;
@@ -1071,7 +1077,7 @@ QEMU; the logo layer now holds its link.
  
      if (gl_scanout_borrow) {
          DisplayGLTexture texture = gl_scanout_borrow(gl_scanout_id);
-@@ -3834,6 +4734,13 @@ static bool cocoa_gl_present(void)
+@@ -3834,6 +4736,13 @@ static bool cocoa_gl_present(void)
          h = texture.height;
          /* The surface's first row is the top of the window. */
          flip = !texture.y_0_top;
@@ -1085,7 +1091,7 @@ QEMU; the logo layer now holds its link.
      } else if (surface && surface->texture) {
          src = surface->texture;
          w = surface_width(surface);
-@@ -3852,14 +4759,16 @@ static bool cocoa_gl_present(void)
+@@ -3852,14 +4761,16 @@ static bool cocoa_gl_present(void)
  
      /* A 10-bit scanout keeps its depth: half-float surfaces. */
      GLint ifmt = 0;
@@ -1106,7 +1112,7 @@ QEMU; the logo layer now holds its link.
          info_report("cocoa: scanout format 0x%x, %s surfaces%s", ifmt,
                      deep ? "half-float" : "8-bit",
                      deep && cocoa_gl_present_hdr_wanted() ? ", HDR (PQ)" : "");
-@@ -3911,13 +4820,18 @@ static bool cocoa_gl_present(void)
+@@ -3911,13 +4822,18 @@ static bool cocoa_gl_present(void)
      glClear(GL_COLOR_BUFFER_BIT);
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
      glActiveTexture(GL_TEXTURE0);
@@ -1132,7 +1138,7 @@ QEMU; the logo layer now holds its link.
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
      glBindTexture(GL_TEXTURE_2D, 0);
      glBindFramebuffer(GL_FRAMEBUFFER, 0);
-@@ -4531,6 +5445,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
+@@ -4531,6 +5447,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
      gl_scanout_borrow = NULL;
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -1140,7 +1146,7 @@ QEMU; the logo layer now holds its link.
  
      cocoa_gl_log("scanout disable");
  }
-@@ -4543,8 +5458,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
+@@ -4543,8 +5460,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
  {
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
@@ -1154,7 +1160,7 @@ QEMU; the logo layer now holds its link.
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -4555,6 +5475,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -4555,6 +5477,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
                                     uint32_t w, uint32_t h)
  {
      gl_dirty = true;
@@ -1162,7 +1168,7 @@ QEMU; the logo layer now holds its link.
  
      /*
       * Show the guest's frame now, not on the next 30 ms refresh tick:
-@@ -5299,6 +6220,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
+@@ -5299,6 +6222,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
          qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
@@ -1171,7 +1177,7 @@ QEMU; the logo layer now holds its link.
      } else if (hd->surface && hd->surface->texture) {
          glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -5968,6 +6891,8 @@ static void omacvm_chan_line(NSData *data)
+@@ -5968,6 +6893,8 @@ static void omacvm_chan_line(NSData *data)
          NSDictionary *d = obj;
          bool update = false;
          if (d[@"hello"]) {
@@ -1180,7 +1186,7 @@ QEMU; the logo layer now holds its link.
              if (!omacvm_ptr.drawing) {
                  info_report("cocoa: the guest draws its own pointer now");
              }
-@@ -6332,6 +7257,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -6332,6 +7259,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          }
          info_report("cocoa: GL frames shown %s",
                      present_ctx ? "as IOSurfaces" : "with a CAOpenGLLayer");
