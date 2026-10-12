@@ -66,8 +66,10 @@ its bar there itself:
   with the bar hidden (Super+Shift+Space), when the wallpaper fills the
   strip up to the top edge; a full-screen window (a video, Super+F) turns
   the strip black;
-- macOS's menu bar stays hidden over the strip and comes down from the
-  display's top edge, as in other full-screen apps;
+- macOS's menu bar stays hidden over the strip, as in the app's normal
+  full screen. With **Keep the Dock and hot corners away** off (the app's
+  settings), it comes down from the display's top edge, as in other
+  full-screen apps;
 - Omanotch has nothing to do and stays idle for that start; its switch
   stays on, and the next start with the notch via Omanotch has it again.
 
