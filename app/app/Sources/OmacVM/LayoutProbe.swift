@@ -17,8 +17,8 @@ enum LayoutProbe {
 
 extension View {
     /// Records this view's frame under `name` while the pictures are drawn.
-    @ViewBuilder func layoutProbe(_ name: String) -> some View {
-        if LayoutProbe.on {
+    @ViewBuilder func layoutProbe(_ name: String?) -> some View {
+        if LayoutProbe.on, let name, !name.isEmpty {
             onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { LayoutProbe.frames[name] = $0 }
         } else {
             self

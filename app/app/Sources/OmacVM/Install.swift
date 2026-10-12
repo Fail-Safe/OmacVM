@@ -140,38 +140,44 @@ struct InstallView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Install").font(.title2.bold())
-            Text("Pick the app's name. It shows in the Dock and the menu bar while Omarchy runs.")
-                .foregroundStyle(.secondary)
-            Picker("Name", selection: $choice) {
-                Text("OmacVM").tag(0)
-                Text("Omarchy").tag(1)
-                Text("Your own").tag(2)
-            }
-            .pickerStyle(.radioGroup)
-            if choice == 2 {
-                TextField("Name", text: $custom)
-            }
-            HStack {
-                Text("Folder")
-                Spacer()
-                Text(folder.path).foregroundStyle(.secondary)
-                Button("Change…") { pick() }
-            }
-            if let replaced {
-                Text(replaced).font(.callout).foregroundStyle(.secondary)
-            }
-            if let error { Text(error).foregroundStyle(.red) }
-            HStack {
+        WindowShell {
+            WindowHeader(title: "Install \(Product.name)", facts: "Its name shows in the Dock and the menu bar while Omarchy runs.") {
+                AppIconButton()
+            } trailing: {
                 Button("Run Without Installing") {
                     memory.skip(Installer.thisCopy)
                     onDone()
                 }
-                Spacer()
                 Button("Install") { install() }
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!Installer.validName(name))
+                    .layoutProbe("start")
+            }
+        } notices: {
+            if let error { MessageStrip(text: error, error: true) }
+        } content: {
+            SectionTitle(text: "Install", first: true)
+            Card {
+                SettingRow(title: "Name", probe: "install-name") {
+                    if choice == 2 {
+                        TextField("Name", text: $custom).labelsHidden().frame(width: 180)
+                    }
+                    Picker("Name", selection: $choice) {
+                        Text("OmacVM").tag(0)
+                        Text("Omarchy").tag(1)
+                        Text("Your Own").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                SettingRow(title: "Folder", subtitle: replaced, probe: "install-folder") {
+                    Text(StorageModel.short(folder)).font(.subheadline).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).frame(maxWidth: 260, alignment: .trailing)
+                        .help(folder.path)
+                    Button("Change…") { pick() }
+                }
             }
         }
     }

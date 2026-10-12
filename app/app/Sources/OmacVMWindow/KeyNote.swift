@@ -37,6 +37,4 @@ public enum KeyNote: Equatable {
         }
         return line.contains("Accessibility (keys) allowed")
     }
-
-    public static let allowedText = "Allowed (takes effect at the next VM start)"
 }

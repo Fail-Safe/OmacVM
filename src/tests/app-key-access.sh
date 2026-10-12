@@ -67,7 +67,7 @@ has "... asked again in a new process (macOS keeps a process's first answer)" '"
 src=$R/app/app/Sources/OmacVM/main.swift
 has "the new process asks control the computer" 'print(CGPreflightPostEventAccess() ? "1" : "0")'
 hasnt "... not Input Monitoring there either" 'CGPreflightListenEventAccess() ? "1"'
-src=$R/app/app/Sources/OmacVM/Views.swift
+src=$R/app/app/Sources/OmacVM/SettingsRows.swift
 has "a red note clears an old entry once by itself" 'KeyAccess.clearOldEntryOnce'
 has "Allow… looks again when it is done" 'KeyAccess.request { refreshKeyNote() }'
 exit $fail

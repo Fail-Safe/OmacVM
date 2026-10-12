@@ -1,5 +1,6 @@
 import AppKit
 import OmacVMUpdate
+import OmacVMWindow
 import SwiftUI
 
 /// The launcher: sets up the VM, starts it and steps aside. QEMU shows the VM
@@ -138,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The control centre's Mac jobs run this app's omacvm when there is no checkout.
         ControlCLI.refresh()
         state.startVM = { [weak self] in self?.startVM() }
+        state.showVM = { Self.qemuApp?.activate() }
         state.vmRunning = { [weak self] in self?.runner?.isRunning == true || Self.qemuApp != nil }
         state.storage.appBusy = { [weak self] in
             guard let self else { return false }
@@ -343,22 +345,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defer { offerMoves() }
         NSApp.setActivationPolicy(.regular)
         if window == nil {
-            let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable],
-                             backing: .buffered, defer: false)
-            w.title = Product.name
-            w.contentViewController = NSHostingController(rootView: RootView(state: state))
-            w.isReleasedWhenClosed = false
-            w.isRestorable = false
+            let w = Self.makeWindow(RootView(state: state))
             window = w
-            centring = CentredWindow(w)
+            centring = CentredWindow(w, followsResize: false)
         }
-        // Each time it opens (first open, after closing it, after the VM):
-        // centred on the built-in display, and kept centred while SwiftUI
-        // sizes it. Left where the user put it while it stays open, sits in
-        // the Dock, or the app was hidden (Cmd-H).
-        if let w = window, let c = centring, c.needsPlace, !w.isMiniaturized { c.place() }
+        // Each time it opens (first open, after closing it, after the VM): as
+        // tall as the screen it opens on shows, centred on the built-in
+        // display. Left where the user put it (and as tall) while it stays
+        // open, sits in the Dock, or the app was hidden (Cmd-H).
+        if let w = window, let c = centring, c.needsPlace, !w.isMiniaturized {
+            w.setContentSize(NSSize(width: WindowSize.width, height: Self.defaultHeight))
+            c.place()
+        }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    /// The app's window (docs/design/settings-3.1): 800 pt wide, only the
+    /// height changes; the header sits under a transparent title bar, and an
+    /// empty unified toolbar gives the window's buttons the header's height.
+    static func makeWindow<V: View>(_ root: V) -> NSWindow {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: WindowSize.width, height: defaultHeight),
+                         styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                         backing: .buffered, defer: false)
+        w.title = Product.name
+        w.titleVisibility = .hidden
+        w.titlebarAppearsTransparent = true
+        let bar = NSToolbar(identifier: "OmacVM.window")
+        bar.allowsUserCustomization = false
+        w.toolbar = bar
+        w.toolbarStyle = .unified
+        w.collectionBehavior.insert(.fullScreenNone)
+        w.contentMinSize = NSSize(width: WindowSize.width, height: WindowSize.minHeight)
+        w.contentMaxSize = NSSize(width: WindowSize.width, height: 100_000)
+        let host = NSHostingController(rootView: root)
+        host.sizingOptions = []
+        w.contentViewController = host
+        w.setContentSize(NSSize(width: WindowSize.width, height: defaultHeight))
+        w.isReleasedWhenClosed = false
+        w.isRestorable = false
+        return w
+    }
+
+    /// The window's height on the screen it opens on.
+    static var defaultHeight: CGFloat {
+        CGFloat(WindowSize.defaultHeight(visible: Double(NSWindow.appScreen?.frame.height ?? CGFloat(WindowSize.smallScreenVisible))))
     }
 
     /// How a start takes the network: `.ask` checks the fast network's
@@ -459,10 +490,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.startVM(openGLOnce: fb.keep ? nil : fb.why, network: .decided(userNetwork))
                     if self.runner != nil {
                         self.state.message = fb.keep
-                            ? "\(Graphics.didNotStart) (\(fb.why)). \"Try Vulkan again\" under Graphics tries it once more."
+                            ? "\(Graphics.didNotStart) (\(fb.why)). \"Try Vulkan Again\" under Graphics tries it once more."
                             : "\(Graphics.didNotStart) for this start (\(fb.why)). The next start tries Vulkan again."
                         self.tellFallback(fb.keep
-                            ? "\(fb.why). \(Product.name) started the VM again on OpenGL and keeps OpenGL until you click \"Try Vulkan again\" under Graphics."
+                            ? "\(fb.why). \(Product.name) started the VM again on OpenGL and keeps OpenGL until you click \"Try Vulkan Again\" under Graphics."
                             : "\(fb.why). \(Product.name) started the VM again on OpenGL for this start; the next start tries Vulkan again.")
                     }
                     return

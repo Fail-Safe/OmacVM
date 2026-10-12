@@ -94,24 +94,22 @@ struct CommandLineRow: View {
 
     var body: some View {
         if TerminalCommand.available || preview != nil {
-            LabeledContent("omacvm in Terminal") {
-                HStack(spacing: 8) {
-                    if let s = preview ?? cli {
-                        Text(CommandLineInstall.shortText(s)).foregroundStyle(.secondary)
-                        if case .available = s {
-                            Button("Install") { install() }.disabled(busy)
-                        }
-                        if CommandLineInstall.text(s) != CommandLineInstall.shortText(s) {
-                            InfoButton(topic: "omacvm in Terminal", text: CommandLineInstall.text(s))
-                        }
+            let s = preview ?? cli
+            // An older omacvm first on the PATH (TerminalCommand.olderNote), or a failed install.
+            let problem = note ?? older
+            SettingRow(title: "omacvm in Terminal", subtitle: problem ?? "Control OmacVM from the Terminal.",
+                       subtitleIsError: problem != nil,
+                       info: s.flatMap { CommandLineInstall.text($0) != CommandLineInstall.shortText($0) ? CommandLineInstall.text($0) : nil },
+                       probe: "cli") {
+                if busy { ProgressView().controlSize(.small) }
+                if let s {
+                    Text(CommandLineInstall.shortText(s)).font(.subheadline).foregroundStyle(.secondary)
+                    if case .available = s {
+                        Button("Install") { install() }.disabled(busy)
                     }
-                    if busy { ProgressView().controlSize(.small) }
                 }
             }
             .onAppear { if preview == nil { refresh() } }
-            // An older omacvm first on the PATH (TerminalCommand.olderNote).
-            if let o = older { RowNote(o, error: true) }
-            if let n = note { RowNote(n, error: true) }
         }
     }
 

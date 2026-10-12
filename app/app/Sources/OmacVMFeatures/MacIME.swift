@@ -95,7 +95,8 @@ public enum MacIME {
         let p = pending(text)
         let on = p ?? isOn(features: record)
         if busy { return Row(on: on, enabled: false, note: nil) }
-        if !running { return Row(on: on, enabled: true, note: p == nil ? nil : "From the next start.") }
+        // Stopped: the whole window is for the next start, nothing to add.
+        if !running { return Row(on: on, enabled: true, note: nil) }
         return Row(on: on, enabled: cli, note: p == nil ? nil : "Being set up in the VM for this start.")
     }
 }

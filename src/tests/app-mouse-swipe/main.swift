@@ -47,23 +47,24 @@ MainActor.assumeIsolated {
     MagicMouse.override = false
     RunLoop.main.run(until: Date().addingTimeInterval(3.5))
     check(!watch.connected, "watch: switched off: gone within 3 s")
-    let row = draw(Form { MagicMouseRow() }.formStyle(.columns).padding(8), "row", out, width: 520)
+    let row = draw(Card { MagicMouseRow() }.padding(8), "row", out, width: 552)
     check(row.height >= 30, "row: label, picker and (i) drawn (\(Int(row.height)) pt)")
 
-    var readyWith: CGFloat = 0, setupWith: CGFloat = 0
+    // The whole window (tall enough for every row): the row is there with a
+    // Magic Mouse, not without.
+    LayoutProbe.on = true
     let state = AppState()
     state.storage.refresh(); settle()
     for (mouse, tag) in [(true, "mouse"), (false, "no-mouse")] {
         MagicMouse.override = mouse
         state.screen = .ready
-        let r = draw(RootView(state: state, scrolls: false), "ready-\(tag)", out)
+        RenderVMWindow.picture("ready-\(tag)", into: out, height: 2600) { RootView(state: state) }
+        let inReady = LayoutProbe.frames["trailing-magic-mouse"] != nil
         state.screen = .setup
-        let s = draw(RootView(state: state, scrolls: false), "setup-\(tag)", out)
-        print("sizes \(tag): ready \(Int(r.height)), setup \(Int(s.height))")
-        if mouse { readyWith = r.height; setupWith = s.height } else {
-            check(readyWith > r.height + 16, "VM window: the row shows with a Magic Mouse (\(Int(readyWith)) pt), not without (\(Int(r.height)) pt)")
-            check(setupWith > s.height + 16, "setup: the row shows with a Magic Mouse (\(Int(setupWith)) pt), not without (\(Int(s.height)) pt)")
-        }
+        RenderVMWindow.picture("setup-\(tag)", into: out, height: 2600) { RootView(state: state) }
+        let inSetup = LayoutProbe.frames["trailing-magic-mouse"] != nil
+        check(inReady == mouse, "VM window: the row \(mouse ? "shows with" : "is gone without") a Magic Mouse")
+        check(inSetup == mouse, "setup: the row \(mouse ? "shows with" : "is gone without") a Magic Mouse")
     }
     exit(fail ? 1 : 0)
 }

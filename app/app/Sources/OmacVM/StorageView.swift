@@ -365,45 +365,87 @@ final class StorageModel: ObservableObject {
     static let imagesHelp = "Omarchy images the app downloaded to set up VMs. Your VMs keep everything; a new VM downloads them again. Not your Mac's Downloads folder."
 }
 
-/// The VMs folder with its free space and a Change button (setup and settings).
+/// The VMs folder with its free space and Change… (setup and settings).
 struct VMsFolderRow: View {
     @ObservedObject var storage: StorageModel
-    /// The settings: an "Open Existing VM…" row below it (the setup has its own button).
-    var open: (() -> Void)? = nil
 
     var body: some View {
-        LabeledContent("VMs folder") {
-            // The path gives way (cut in the middle), never the free space
-            // or the button; the free space stays next to the path, and the
-            // row fills the column, so Change… ends where Start does.
-            HStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    Text(StorageModel.short(storage.root)).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-                        .frame(minWidth: 0)
-                        .help(storage.root.path)
-                    if let free = storage.free {
-                        Text("\(Storage.format(free)) free").foregroundStyle(.secondary).fixedSize()
-                    }
+        SettingRow(title: "VMs folder", subtitle: "Where new VMs are made.", probe: "folder") {
+            HStack(spacing: 0) {
+                Text(StorageModel.short(storage.root))
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: 200, alignment: .trailing)
+                    .help(storage.root.path)
+                    .layoutProbe("folder-path")
+                if let free = storage.free {
+                    Text(" · \(Storage.format(free)) free").fixedSize()
                 }
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                Button("Change…") { storage.changeRoot() }
-                    .disabled(storage.moving != nil)
-                    .fixedSize()
-                    .layoutProbe("folder-change")
             }
-            .frame(maxWidth: .infinity)
-            .layoutProbe("folder-row")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            Button("Change…") { storage.changeRoot() }
+                .disabled(storage.moving != nil)
+                .layoutProbe("folder-change")
         }
         .onAppear { storage.refresh() }
-        if let open {
-            LabeledContent("Another VM") {
-                HStack(spacing: 8) {
-                    Button("Open Existing VM…") { open() }
-                        .disabled(storage.moving != nil)
-                        .layoutProbe("folder-open")
-                    InfoButton(topic: "Open Existing VM", text: "Shows a VM that is somewhere else: copied from another Mac, or on an external drive. Pick its folder (the one with vm.env in it) or the folder it is in; that folder becomes the VMs folder. Nothing is copied.")
+    }
+}
+
+/// Storage in the VM window: the shown VM's size (All VMs… lists every one),
+/// the VMs folder, VMs in 2.9's hidden folder, a move, another VM, the
+/// downloaded images.
+struct StorageRows: View {
+    @ObservedObject var storage: StorageModel
+    /// The VM the window shows.
+    var selected: URL?
+    /// Open Existing VM… (AppState.openExisting).
+    var open: () -> Void
+    @State private var showAll = false
+
+    var body: some View {
+        SettingRow(title: "Size on the Mac", probe: "size") {
+            if let vm = storage.vms.first(where: { $0.folder.path == selected?.path }) {
+                Text(vm.size.map { Storage.format($0) } ?? "…").font(.subheadline).foregroundStyle(.secondary)
+                ChipButton(symbol: "folder", help: "Show \(vm.name) in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([vm.folder])
                 }
             }
+            Button("All VMs…") { showAll = true }
+                .disabled(storage.vms.isEmpty)
+        }
+        .sheet(isPresented: $showAll) {
+            AllVMsView(storage: storage, selected: selected) { showAll = false }
+        }
+        VMsFolderRow(storage: storage)
+        if !storage.legacyVMs.isEmpty && storage.moving == nil {
+            let n = storage.legacyVMs.count
+            SettingRow(title: "Older VMs", subtitle: n == 1 ? "1 VM is still in the old hidden folder." : "\(n) VMs are still in the old hidden folder.",
+                       info: "2.9 and older kept VMs hidden in ~/Library.", probe: "older") {
+                Button("Move to \(StorageModel.short(storage.root))") { storage.moveLegacy() }
+            }
+        }
+        if let m = storage.moving {
+            SettingRow(title: "Moving \(m.name)", subtitle: m.total > 0 ? m.phase : nil, probe: "moving") {
+                if m.total > 0 {
+                    UsageBar(fraction: Double(m.done) / Double(m.total))
+                    Text("\(Storage.format(m.done)) of \(Storage.format(m.total))").font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+                Button("Cancel") { storage.cancelMove() }
+            }
+        }
+        SettingRow(title: "Another VM",
+                   info: "Shows a VM that is somewhere else: copied from another Mac, or on an external drive. Pick its folder (the one with vm.env in it) or the folder it is in; that folder becomes the VMs folder. Nothing is copied.",
+                   probe: "open") {
+            Button("Open Existing VM…") { open() }
+                .disabled(storage.moving != nil)
+                .layoutProbe("folder-open")
+        }
+        SettingRow(title: "Downloaded images", subtitle: "Install images kept for new VMs.", info: StorageModel.imagesHelp, probe: "images") {
+            Text(storage.downloads.map { Storage.format($0) } ?? "…").font(.subheadline).foregroundStyle(.secondary)
+            Button("Remove…") { storage.removeImages() }
+                .disabled(storage.moving != nil || (storage.downloads ?? 0) == 0)
         }
     }
 }
@@ -419,71 +461,6 @@ struct VMSizeRow: View {
         } label: { Image(systemName: "folder") }
             .help("Show in Finder")
             .accessibilityLabel("Show \(vm.name) in Finder")
-    }
-}
-
-/// Storage in the VM window's form: the VMs folder, the shown VM's size
-/// (All VMs… lists every one), moves, downloaded images.
-struct StorageRows: View {
-    @ObservedObject var storage: StorageModel
-    /// The VM the window shows.
-    var selected: URL?
-    /// Open Existing VM… (AppState.openExisting).
-    var open: (() -> Void)? = nil
-    @State private var showAll = false
-
-    var body: some View {
-        VMsFolderRow(storage: storage, open: open)
-        ForEach(storage.disconnected, id: \.self) { line in RowNote(line, error: true) }
-        LabeledContent("Size on the Mac") {
-            HStack(spacing: 8) {
-                if let vm = storage.vms.first(where: { $0.folder.path == selected?.path }) {
-                    VMSizeRow(vm: vm)
-                }
-                Button("All VMs…") { showAll = true }
-                    .disabled(storage.vms.isEmpty)
-            }
-        }
-        .sheet(isPresented: $showAll) {
-            AllVMsView(storage: storage, selected: selected) { showAll = false }
-        }
-        if !storage.legacyVMs.isEmpty && storage.moving == nil {
-            LabeledContent("Older VMs") {
-                HStack(spacing: 8) {
-                    Button("Move to \(StorageModel.short(storage.root))") { storage.moveLegacy() }
-                    InfoButton(topic: "older VMs", text: "2.9 and older kept VMs hidden in ~/Library.")
-                }
-            }
-        }
-        if let m = storage.moving {
-            LabeledContent("Moving") {
-                VStack(alignment: .leading, spacing: 4) {
-                    if m.total > 0 {
-                        ProgressView(value: Double(m.done), total: Double(m.total))
-                    } else {
-                        ProgressView().progressViewStyle(.linear)
-                    }
-                    HStack {
-                        Text(m.total > 0
-                             ? "\(m.phase) \(m.name): \(Storage.format(m.done)) of \(Storage.format(m.total))"
-                             : "Moving \(m.name)")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Cancel") { storage.cancelMove() }
-                    }
-                }
-                .frame(width: RowNote.width)
-            }
-        }
-        LabeledContent("Downloaded images") {
-            HStack(spacing: 8) {
-                Text(storage.downloads.map { Storage.format($0) } ?? "…").foregroundStyle(.secondary)
-                Button("Remove…") { storage.removeImages() }
-                    .disabled(storage.moving != nil || (storage.downloads ?? 0) == 0)
-                InfoButton(topic: "downloaded images", text: StorageModel.imagesHelp)
-            }
-        }
-        if let n = storage.note { RowNote(n, error: storage.noteIsError) }
     }
 }
 
@@ -556,21 +533,27 @@ struct DriveMissingView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("\(drive?.name ?? "The drive") is not connected").font(.title2.bold())
-            Text("Your VMs are in \(drive?.root.path ?? "a folder on it"). Connect the drive, then click Try Again.")
-                .foregroundStyle(.secondary)
-            HStack {
-                Button("Use Another Folder…") {
-                    state.storage.changeRoot()
-                    state.reload()
-                }
-                Spacer()
+        WindowShell {
+            WindowHeader(title: "\(drive?.name ?? "The drive") is not connected",
+                         facts: "Your VMs are in \(drive.map { StorageModel.short($0.root) } ?? "a folder on it").") {
+                AppIconButton()
+            } trailing: {
                 Button("Try Again") { state.reload() }
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
+                    .layoutProbe("start")
             }
-            if let n = state.storage.note {
-                Text(n).font(.caption).foregroundStyle(state.storage.noteIsError ? .red : .secondary)
+        } notices: {
+            EmptyView()
+        } content: {
+            Card {
+                SettingRow(title: "Connect the drive, then click Try Again.",
+                           subtitle: state.storage.note, subtitleIsError: state.storage.noteIsError, probe: "drive") {
+                    Button("Use Another Folder…") {
+                        state.storage.changeRoot()
+                        state.reload()
+                    }
+                }
             }
         }
     }
@@ -586,22 +569,27 @@ struct UnavailableView: View {
     private var other: VMConfig? { VMConfig.existing() }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(state.config.name).font(.title2.bold())
-            let gone = Storage.driveGoneText(state.goneDrive ?? Storage.missingDrive(for: state.config.folder) ?? "its drive")
-            Text(gone).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-            Text("Its folder: \(state.config.folder.path)")
-                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            // A start asked for meanwhile (Dock, omacvm start) says the same: once.
-            if let m = state.message, m != gone { Text(m).foregroundStyle(.red) }
-            HStack {
+        let gone = Storage.driveGoneText(state.goneDrive ?? Storage.missingDrive(for: state.config.folder) ?? "its drive")
+        WindowShell {
+            WindowHeader(title: state.config.name, pill: StatusPill(text: "Unavailable", dot: Look.red),
+                         facts: StorageModel.short(state.config.folder)) {
+                AppIconButton()
+            } trailing: {
                 if let other {
                     Button("Show \(other.name)") { state.showOther(other) }
                 }
-                Spacer()
                 Button("Start") { state.startVM() }
-                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
                     .disabled(true)
+                    .layoutProbe("start")
+            }
+        } notices: {
+            MessageStrip(text: gone, error: true)
+            // A start asked for meanwhile (Dock, omacvm start) says the same: once.
+            if let m = state.message, m != gone { MessageStrip(text: m, error: true) }
+        } content: {
+            Card {
+                SettingRow(title: "Its folder", subtitle: state.config.folder.path, probe: "folder")
             }
         }
     }

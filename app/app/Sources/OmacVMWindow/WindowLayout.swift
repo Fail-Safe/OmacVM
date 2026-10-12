@@ -1,16 +1,19 @@
 import Foundation
 
-/// The app window's sides: one inset left and right for every part of it
-/// (title, form, notes, buttons), and the buttons at the end of a row
-/// (Change…, Update VM, Start) on one line at the right inset. Checked on
-/// the window pictures (`OmacVM --render-vm-window`, a CI step).
+/// The app window's sides: every part of it at least an inset from the
+/// window's edges, and the controls at the end of the rows of one card (or
+/// of the header) on one line. Checked on the window pictures
+/// (`OmacVM --render-vm-window`, a CI step).
 public enum WindowLayout {
-    /// The VM window's width.
-    public static let width: Double = 568
-    /// Left, right, top and bottom: macOS's usual window margin.
-    public static let inset: Double = 20
-    /// What the content has between the insets.
-    public static var contentWidth: Double { width - 2 * inset }
+    /// The window's width (WindowSize).
+    public static let width: Double = WindowSize.width
+    /// The header's side margin; the settings sit further in.
+    public static let inset: Double = 16
+    /// The settings' column: beside the sidebar, 24 pt in from each side.
+    public static let contentInset: Double = 24
+    public static var contentWidth: Double { width - WindowSize.sidebar - 2 * contentInset }
+    /// A card's rows: 16 pt in from the card's sides.
+    public static let rowInset: Double = 16
 
     /// Edges this close count as one line.
     public static let tolerance: Double = 1

@@ -43,7 +43,7 @@ rec() { cat "$V/features"; }
 
 # On while stopped: record + pending; the next start has the port and sets up the VM's part.
 printf 'bridge=on gestures=on mac-ime=off\n' > "$V/features"
-check "stopped, switched on: the row's note" "From the next start." "$("$T/ime" row "$V" on)"
+check "stopped, switched on: no note (the window is for the next start)" "-" "$("$T/ime" row "$V" on)"
 check "stopped, switched on: the record" "bridge=on gestures=on mac-ime=on" "$(rec)"
 check "start: the port, and apply for mac-ime=on" \
   "port=on apply=apply --vm Test VM --vm-type app --feature mac-ime=on --yes --transaction" "$("$T/ime" start "$V")"
@@ -57,7 +57,7 @@ rm "$V/mac-ime-pending"
 check "start after it was set up: the port, no apply" "port=on apply=none" "$("$T/ime" start "$V")"
 
 # Off while stopped: no port at the next start, apply takes the VM's part away.
-check "stopped, switched off: the row's note" "From the next start." "$("$T/ime" row "$V" off)"
+check "stopped, switched off: no note" "-" "$("$T/ime" row "$V" off)"
 check "start: no port, apply for mac-ime=off" \
   "port=off apply=apply --vm Test VM --vm-type app --feature mac-ime=off --yes --transaction" "$("$T/ime" start "$V")"
 # Off and on again before a start: the VM keeps what it had, nothing pending.

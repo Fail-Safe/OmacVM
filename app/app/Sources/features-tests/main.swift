@@ -96,7 +96,7 @@ expect(MacIME.applyArguments(vm: "My VM", on: true) ==
 let stopped = MacIME.row(record: "mac-ime=off", pending: nil, running: false, busy: false, cli: true)
 expect(stopped == MacIME.Row(on: false, enabled: true, note: nil), "row stopped: switchable (was greyed out, #316)")
 expect(MacIME.row(record: "mac-ime=on", pending: "on", running: false, busy: false, cli: false) ==
-       MacIME.Row(on: true, enabled: true, note: "From the next start."), "row stopped, pending: on, from the next start")
+       MacIME.Row(on: true, enabled: true, note: nil), "row stopped, pending: on, no note (the window is for the next start)")
 expect(MacIME.row(record: "mac-ime=off", pending: "off", running: false, busy: false, cli: true).on == false,
        "row stopped, pending off: off")
 expect(MacIME.row(record: "mac-ime=on", pending: nil, running: true, busy: false, cli: true) ==
@@ -176,17 +176,15 @@ expect(StartIn.current(fullScreen: true, mode: .fullpanel, hasNotch: false) == .
 expect(!StartIn.window.fullScreen && StartIn.window.mode == nil, "Start in: Window = startFullScreen off, notch-mode kept")
 expect(StartIn.fullScreen.fullScreen && StartIn.fullScreen.mode == .native, "Start in: Full screen = on + native")
 expect(StartIn.fullScreenNotch.fullScreen && StartIn.fullScreenNotch.mode == .fullpanel, "Start in: including notch = on + fullpanel")
-expect(StartIn.fullScreenNotch.shortTitle(hasNotch: true) == "Full screen including notch" &&
-       StartIn.fullScreen.shortTitle(hasNotch: true) == StartIn.fullScreen.title(hasNotch: true) &&
+expect(StartIn.allCases.map(\.caption) == ["Window", "Full screen", "Full screen including notch"] &&
+       StartIn.fullScreen.detail(hasNotch: true) == "Notch via Omanotch" && StartIn.fullScreen.detail(hasNotch: false) == nil &&
+       StartIn.fullScreenNotch.detail(hasNotch: true) == "Experimental" && StartIn.window.detail(hasNotch: true) == nil &&
        StartIn.notchNote.contains("No Omanotch needed") && StartIn.notchNote.contains("Experimental"),
-       "Start in: the closed picker's short title, the rest in the note")
+       "Start in: the pictures' names and lines, the rest in the note")
 for c in StartIn.allCases {
     let m = c.mode ?? .fullpanel
     expect(StartIn.current(fullScreen: c.fullScreen, mode: m, hasNotch: true) == c, "Start in: \(c) round trip")
 }
-expect(StartIn.info(hasNotch: true).contains("The VM uses the whole built-in display, including the strip beside the camera notch, and draws its bar there itself. Omanotch is not needed for this. Experimental."),
-       "Start in: the (i) says what including notch does")
-expect(!StartIn.info(hasNotch: false).contains("notch"), "Start in: no notch words on a Mac without one")
 
 shareKeyboardTests()
 

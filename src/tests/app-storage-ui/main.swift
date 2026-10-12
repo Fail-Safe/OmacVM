@@ -5,22 +5,9 @@ import SwiftUI
 
 @MainActor
 func render(_ state: AppState, _ name: String, _ out: URL) {
-    for (suffix, look) in [("", NSAppearance.Name.aqua), ("-dark", NSAppearance.Name.darkAqua)] {
-        let view = NSHostingView(rootView: RootView(state: state).background(Color(nsColor: .windowBackgroundColor)))
-        view.appearance = NSAppearance(named: look)
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 568, height: 200), styleMask: [.titled],
-                         backing: .buffered, defer: false)
-        w.appearance = NSAppearance(named: look)
-        w.contentView = view
-        view.setFrameSize(view.fittingSize)
-        settle()   // sizes are counted in the background
-        view.setFrameSize(view.fittingSize)
-        view.layoutSubtreeIfNeeded()
-        let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
-        view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: out.appendingPathComponent("\(name)\(suffix).png"))
-        print("rendered \(name)\(suffix).png \(Int(view.bounds.width))x\(Int(view.bounds.height))")
-    }
+    // The app's window as it opens, tall enough for every row.
+    RenderVMWindow.picture(name, into: out, height: 1800) { RootView(state: state) }
+    print("rendered \(name).png and \(name)-dark.png")
 }
 
 /// A view of its own (the All VMs sheet), light and dark.

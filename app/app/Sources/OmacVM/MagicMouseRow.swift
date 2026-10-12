@@ -20,23 +20,27 @@ final class MagicMouseWatch: ObservableObject {
     }
 }
 
-/// "Magic Mouse swipe: [4 fingers]" (MouseSwipeSetting), a row in the setup's
-/// and the VM window's forms; they show it only while MagicMouseWatch sees a
-/// Magic Mouse.
+/// "Magic Mouse swipe" (MouseSwipeSetting: org.omacvm.gestures
+/// MouseSwipeFingers), a row in the setup's and the VM window's cards; they
+/// show it only while MagicMouseWatch sees a Magic Mouse.
 struct MagicMouseRow: View {
+    var tick = 0
+    /// The shown VM has trackpad gestures off (the setup: they are switched off there).
+    var gesturesOff = false
     @State private var fingers = MouseSwipeSetting.current()
 
     var body: some View {
-        LabeledContent("Magic Mouse swipe") {
-            HStack(spacing: 8) {
-                Picker("Magic Mouse swipe", selection: $fingers) {
-                    ForEach(MouseSwipeSetting.choices, id: \.self) { Text("\($0) fingers").tag($0) }
-                }
-                .labelsHidden()
-                .fixedSize()
-                .onChange(of: fingers) { _, v in MouseSwipeSetting.set(v) }
-                InfoButton(topic: "the Magic Mouse swipe", text: MouseSwipeSetting.hint)
+        SettingRow(title: "Magic Mouse swipe",
+                   subtitle: "Two fingers on the mouse act as this many on a trackpad." + (gesturesOff ? " Trackpad gestures are off in this VM." : ""),
+                   info: MouseSwipeSetting.hint, probe: "magic-mouse") {
+            Picker("Magic Mouse swipe", selection: $fingers) {
+                ForEach(MouseSwipeSetting.choices, id: \.self) { Text("\($0) fingers").tag($0) }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
         }
+        .onChange(of: fingers) { _, v in if v != MouseSwipeSetting.current() { MouseSwipeSetting.set(v) } }
+        .onChange(of: tick) { _, _ in fingers = MouseSwipeSetting.current() }
     }
 }

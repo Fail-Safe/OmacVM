@@ -26,6 +26,25 @@ public enum NotchMode: String, CaseIterable, Sendable {
 public enum StartIn: String, CaseIterable, Sendable {
     case window, fullScreen, fullScreenNotch
 
+    /// The picture's name in the VM window's Start in.
+    public var caption: String {
+        switch self {
+        case .window: return "Window"
+        case .fullScreen: return "Full screen"
+        case .fullScreenNotch: return "Full screen including notch"
+        }
+    }
+
+    /// The grey line under the picture: how full screen treats the notch.
+    public func detail(hasNotch: Bool) -> String? {
+        switch self {
+        case .window: return nil
+        case .fullScreen: return hasNotch ? "Notch via Omanotch" : nil
+        case .fullScreenNotch: return "Experimental"
+        }
+    }
+
+    /// The full name, as the control centre and the docs say it.
     public func title(hasNotch: Bool) -> String {
         switch self {
         case .window: return "Window"
@@ -34,13 +53,7 @@ public enum StartIn: String, CaseIterable, Sendable {
         }
     }
 
-    /// The closed picker's text (the menu has the whole title): including
-    /// notch says the rest in the row's note (notchNote).
-    public func shortTitle(hasNotch: Bool) -> String {
-        self == .fullScreenNotch ? "Full screen including notch" : title(hasNotch: hasNotch)
-    }
-
-    /// Under the picker while including notch is chosen.
+    /// Under the pictures while including notch is chosen.
     public static let notchNote = "No Omanotch needed: the VM draws its bar beside the notch. Experimental."
 
     /// The choices the picker lists on this Mac.
@@ -65,15 +78,6 @@ public enum StartIn: String, CaseIterable, Sendable {
         case .fullScreen: return .native
         case .fullScreenNotch: return .fullpanel
         }
-    }
-
-    /// The (i) text of the picker.
-    public static func info(hasNotch: Bool) -> String {
-        var t = "Window: the VM starts in a window. Full screen: the VM starts in macOS full screen."
-        if hasNotch {
-            t = "Window: the VM starts in a window. Full screen, notch via Omanotch: macOS full screen below the camera notch; Omanotch shows Omarchy's bar in the strip beside it.\n\nFull screen including notch, no Omanotch needed (experimental). The VM uses the whole built-in display, including the strip beside the camera notch, and draws its bar there itself. Omanotch is not needed for this. Experimental. External displays stay as they are."
-        }
-        return t + (hasNotch ? "\n\nWindow and full screen are for every VM; the notch choice is this VM's." : "") + " From the VM's next start."
     }
 }
 

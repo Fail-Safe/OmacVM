@@ -38,7 +38,7 @@ enum RenderUpdateUI {
         ]
         for (name, s, notice, enabled, waiting) in windows {
             u.showForRendering(staged: s, notice: notice, enabled: enabled, waiting: waiting, previous: "2.9.0")
-            draw(name, into: dir) { RootView(state: state, scrolls: false) }
+            RenderVMWindow.picture(name, into: dir) { RootView(state: state) }
         }
         // Check Now: while it checks, and the results it leaves under the switch.
         let checks: [(String, Updater.Outcome?, Bool, Bool)] = [
@@ -52,12 +52,12 @@ enum RenderUpdateUI {
             let ready: Updater.Staged? = { if case .ready = outcome { return staged } else { return nil } }()
             u.showForRendering(staged: ready, notice: nil, enabled: name.hasSuffix("checking") || name.contains("macos"),
                                waiting: false, previous: nil, outcome: outcome, checking: checking)
-            draw(name, into: dir) { RootView(state: state, scrolls: false) }
+            RenderVMWindow.picture(name, into: dir) { RootView(state: state) }
         }
         // A VM runs from this launcher: Update shuts it down and starts it again.
         u.runningVM = { (URL(fileURLWithPath: "/nonexistent"), "Omarchy") }
         u.showForRendering(staged: staged, notice: nil, enabled: true, waiting: false, previous: nil)
-        draw("window-14-ready-vm-runs", into: dir) { RootView(state: state, scrolls: false) }
+        RenderVMWindow.picture("window-14-ready-vm-runs", into: dir) { RootView(state: state, preview: RenderVMWindow.Preview(running: true)) }
         u.runningVM = { nil }
 
         // The app menu as the menu bar shows it (the app delegate built it).
