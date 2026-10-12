@@ -44,6 +44,9 @@ A new window for the VM's settings.
   a few pixels more (2944x1912 for 1.6 on a 13-inch MacBook Air), scaled onto the panel; the next
   start begins at that size. Before, 1.25 and 1.6 became 1.33 and 2 there. Thanks @brianmerchant,
   whose PR #355 and its tests were the reference (#355).
+- OmacVM.app: **Closing the window** setting: *Shut down* (the default), *Keep running* (the VM
+  goes on without its window; click OmacVM in the Dock to come back to it; Quit still shuts it
+  down) or *Ask*. Asked for by @Vocllum (#358).
 
 ## 3.0.18
 
