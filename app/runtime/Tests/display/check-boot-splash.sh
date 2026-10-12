@@ -74,5 +74,13 @@ awk '/^\+- \(void\)(makeLink|dropLink)$/ { on = 1 } on { print substr($0, 2) } o
 cc -fno-objc-arc -Wall -Wextra -Werror -I"$tmp" "$here/test-boot-splash-link.m" \
   -framework Cocoa -framework QuartzCore -o "$tmp/test-boot-splash-link"
 "$tmp/test-boot-splash-link"
+# The start animation plays with macOS's Reduce motion on too; only
+# OMACVM_SPLASH_ANIMATION=0 gives the still logo (omacvm_intro_start).
+awk '/^\+static void omacvm_intro_start\(void\)$/ { on = 1 } on { print substr($0, 2) } on && /^\+}$/ { exit }' \
+  "$p" > "$tmp/intro-start.inc"
+cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$tmp" "$here/test-boot-splash-motion.m" \
+  -framework Cocoa -framework QuartzCore -o "$tmp/test-boot-splash-motion"
+"$tmp/test-boot-splash-motion"
 echo "check-boot-splash: the display agent counts by its hello when the window talks to it"
 echo "check-boot-splash: the logo waits for the wallpaper; a desktop after the time limit is marked"
+echo "check-boot-splash: the start animation plays with Reduce motion on (only OMACVM_SPLASH_ANIMATION=0 stops it)"
