@@ -62,6 +62,9 @@ class Build(unittest.TestCase):
         self.assertIn('root.macFullPanelFocused() ? ["omacvm-displays", "scale", String(scale)]', text)
         self.assertIn('command: ["omacvm-displays", "fullpanel"]', text)
         self.assertIn("if (!macFullPanelProc.running) macFullPanelProc.running = true", text)
+        # The labels are the presets (1x 1.25x 1.6x 2x 3x 4x), not what the current size rounds them to.
+        self.assertIn('display.name === root.macFullPanel ? normalizeScale(scale)\n'
+                      '          : Model.cleanScale(scale, display.width, display.height)', text)
 
     def test_scale_buttons_changed_still_builds(self):
         (self.source / "Panel.qml").write_text(panel(optional=False))
@@ -69,6 +72,7 @@ class Build(unittest.TestCase):
         text = (self.out / "Panel.qml").read_text()
         self.assertIn('"MAC DISPLAYS"', text)
         self.assertNotIn("? scalePresets", text)
+        self.assertNotIn("? normalizeScale(scale)", text)
 
     def test_without_omanotch_patch(self):
         # Omanotch's patch missing or no longer fitting: the widget still builds.

@@ -239,7 +239,7 @@ EDITS = [
 
 # Every one of Omarchy's scales in "Full screen including notch" (#355): its
 # presets on that output whatever the size (the Mac gives a size that fits
-# the one picked), set through omacvm-displays. Not found (Omarchy changed its
+# the one picked), labelled as they are, set through omacvm-displays. Not found (Omarchy changed its
 # panel): the panel as Omarchy has it, and the widget still builds.
 OPTIONAL_EDITS = [
     ("        return Model.availableScales(scalePresets, display.width, display.height)\n",
@@ -248,6 +248,12 @@ OPTIONAL_EDITS = [
     ('    actionProc.command = ["bash", "-c", "omarchy-hyprland-monitor-scaling " + scale]\n',
      '    actionProc.command = root.macFullPanelFocused() ? ["omacvm-displays", "scale", String(scale)]\n'
      '      : ["bash", "-c", "omarchy-hyprland-monitor-scaling " + scale]\n'),
+    # The buttons' labels: the preset itself there, not the scale the current
+    # size would round it to (at 1.67 on 2940x1915 that read 1x 1.25x 1.67x
+    # 2.5x 5x 5x): the Mac gives each preset a size that fits it.
+    ("        return Model.cleanScale(scale, display.width, display.height)\n",
+     "        return root.macFullPanel !== \"\" && display.name === root.macFullPanel ? normalizeScale(scale)\n"
+     "          : Model.cleanScale(scale, display.width, display.height)\n"),
 ]
 
 
