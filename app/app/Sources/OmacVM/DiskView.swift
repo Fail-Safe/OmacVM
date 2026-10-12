@@ -81,7 +81,7 @@ enum VMDisk {
     /// done yet (the partition table is not at the new end), or a drive
     /// without APFS clones (the copy kept while it shrinks). nil: it can.
     static func smallerBlocked(_ c: VMConfig) -> String? {
-        if jobs(c).contains(.grow) { return "Omarchy grows into the last change at the next start first." }
+        if jobs(c).contains(.grow) { return "Omarchy grows into the last change first, when the VM starts." }
         if (try? c.folder.resourceValues(forKeys: [.volumeSupportsFileCloningKey]))?.volumeSupportsFileCloning == false {
             return "making it smaller needs the VM on a Mac-formatted (APFS) drive."
         }
@@ -362,71 +362,204 @@ enum VMDisk {
     }
 }
 
-/// Disk in the VM window's form: what it takes of its size, and Change….
+/// Disk in the VM window: what it takes of its size, and Change…, which
+/// opens a − / + for the new size in the row, from what Omarchy needs to
+/// what the Mac has free (DiskSize.bounds). Larger: done at once (the guest
+/// grows into it at its start). Smaller: the VM starts, makes room and
+/// restarts once (VMDisk).
 struct DiskRow: View {
     @ObservedObject var state: AppState
     @State private var info: VMDisk.Info?
     @State private var jobs: [DiskSize.Job] = []
     @State private var resize: DiskSize.Resize?
-    @State private var changing = false
     @State private var error: String?
+    @State private var editing = false
+    @State private var bounds: DiskSize.Bounds?
+    @State private var newGB = 0
+    /// The window pictures: no disk to read, the size open and chosen.
+    var preview: (need: DiskSize.Need, gb: Int)? = nil
+
+    private var currentGB: Int { info.map { DiskSize.wholeGB($0.maxBytes) } ?? state.config.diskGB }
 
     var body: some View {
-        LabeledContent("Disk") {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingRow(title: "Disk", subtitle: pending.text, subtitleIsError: pending.error, probe: "disk") {
                 if let i = info {
-                    Text("\(DiskSize.text(i.usedBytes)) used of \(DiskSize.text(i.maxBytes))")
+                    UsageBar(fraction: Double(i.usedBytes) / Double(max(1, i.maxBytes)))
+                    Text("\(DiskSize.text(i.usedBytes)) used of \(DiskSize.text(i.maxBytes))").font(.subheadline).foregroundStyle(.secondary)
                 } else {
-                    Text("No disk.img").foregroundStyle(.secondary)
+                    Text("No disk.img").font(.subheadline).foregroundStyle(.secondary)
                 }
-                Button("Change…") { changing = true }
-                    .disabled(info == nil || resize != nil || state.storage.moving != nil)
+                Button("Change…") { open() }
+                    .disabled(info == nil || resize != nil || state.storage.moving != nil || editing)
             }
+            if let r = resize { resizeButtons(r) }
+            if editing { editor }
         }
         .onAppear(perform: refresh)
         .onChange(of: state.config) { _, _ in refresh() }
-        .sheet(isPresented: $changing, onDismiss: refresh) {
-            if let i = info {
-                DiskSizeSheet(state: state, info: i) { changing = false }
+        .onChange(of: state.tick) { _, _ in refresh() }
+    }
+
+    /// The grey (or red) line under "Disk": a change on its way, or an error.
+    private var pending: (text: String?, error: Bool) {
+        if let e = error { return (e, true) }
+        if let r = resize {
+            switch r.step {
+            case .shrink: return ("Making it \(r.toGB) GB: the VM starts, makes room and restarts once.", false)
+            case .cut, .check: return ("Making it \(r.toGB) GB: finished and checked when the VM starts.", false)
+            case .failed: return (r.note ?? "Could not make the disk smaller.", true)
             }
         }
-        if let r = resize {
-            resizeNote(r)
-        } else if !jobs.isEmpty {
-            RowNote(jobs.map { $0 == .grow ? "Omarchy grows into the new size at the next start." : "Free space goes back to the Mac at the next start." }
-                .joined(separator: " "))
-        }
-        if let e = error { RowNote(e, error: true) }
+        if jobs.isEmpty { return (nil, false) }
+        return (jobs.map { $0 == .grow ? "Omarchy grows into the new size when the VM starts." : "Free space goes back to the Mac when the VM starts." }
+            .joined(separator: " "), false)
     }
 
     @ViewBuilder
-    private func resizeNote(_ r: DiskSize.Resize) -> some View {
-        switch r.step {
-        case .shrink:
-            RowNote("Making it \(r.toGB) GB at the next start: Omarchy makes room, then the VM restarts once.")
-            Button("Cancel the Change") { VMDisk.dropResize(state.config); refresh() }
-                .disabled(state.vmRunning())
-        case .cut, .check:
-            RowNote("Making it \(r.toGB) GB: finished and checked at the next start.")
-            backButtons(r)
-        case .failed:
-            RowNote(r.note ?? "Could not make the disk smaller.", error: true)
-            if FileManager.default.fileExists(atPath: VMDisk.clone(state.config).path) {
+    private func resizeButtons(_ r: DiskSize.Resize) -> some View {
+        HStack(spacing: 8) {
+            Spacer()
+            switch r.step {
+            case .shrink:
+                Button("Cancel the Change") { VMDisk.dropResize(state.config); refresh() }
+            case .cut, .check:
                 backButtons(r)
-            } else {
-                Button("OK") { VMDisk.dropResize(state.config); refresh() }
+            case .failed:
+                if FileManager.default.fileExists(atPath: VMDisk.clone(state.config).path) {
+                    backButtons(r)
+                } else {
+                    Button("OK") { VMDisk.dropResize(state.config); refresh() }
+                }
             }
         }
+        .disabled(state.vmRunning())
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
     }
 
     /// The disk from before the change (the clone), or this one as it is.
     @ViewBuilder
     private func backButtons(_ r: DiskSize.Resize) -> some View {
-        HStack {
-            Button("Go Back to \(r.fromGB) GB") { act { try VMDisk.goBack(state.config) } }
-            Button("Keep This Disk") { VMDisk.dropResize(state.config); refresh() }
+        Button("Go Back to \(r.fromGB) GB") { act { try VMDisk.goBack(state.config) } }
+        Button("Keep This Disk") { VMDisk.dropResize(state.config); refresh() }
+    }
+
+    /// The new size, in the row: − / +, what limits it, Cancel and Apply.
+    @ViewBuilder private var editor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let b = bounds {
+                HStack(spacing: 12) {
+                    ValueStepper(label: "New size", value: $newGB, range: b.minGB...max(b.minGB, b.maxGB), step: 8,
+                                 unit: "GB", minWidth: 62)
+                    Text(Self.limit(b, currentGB: currentGB))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if newGB < currentGB {
+                    Text("Smaller: the VM starts, makes room and restarts once while the disk is cut. A copy of the disk is kept until a check passes.")
+                        .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else if newGB > currentGB {
+                    Text("Larger: Omarchy grows into it. It takes space on the Mac only as Omarchy fills it.")
+                        .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                if let p = DiskSize.changeProblem(currentGB: currentGB, newGB: newGB, bounds: b, vmRunning: state.vmRunning()) {
+                    Text(p).font(.subheadline).foregroundStyle(Look.red)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading what Omarchy uses…").font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Cancel") { editing = false; error = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("Apply") { apply() }
+                    .disabled(!canApply)
+                    .layoutProbe("disk-apply")
+            }
         }
-        .disabled(state.vmRunning())
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
+
+    /// "Shrinking is not possible" where it is not, else how small it can go.
+    static func limit(_ b: DiskSize.Bounds, currentGB: Int) -> String {
+        guard b.minGB >= currentGB else { return b.why }
+        for p in ["Only larger for now: ", "Only larger: "] where b.why.hasPrefix(p) {
+            return "Shrinking is not possible: " + b.why.dropFirst(p.count)
+        }
+        return "Shrinking is not possible."
+    }
+
+    private var canApply: Bool {
+        guard let b = bounds, newGB != currentGB else { return false }
+        return DiskSize.changeProblem(currentGB: currentGB, newGB: newGB, bounds: b, vmRunning: state.vmRunning()) == nil
+    }
+
+    private func open() {
+        error = nil
+        editing = true
+        bounds = nil
+        newGB = currentGB
+        let c = state.config
+        let current = currentGB
+        let free = info?.freeBytes
+        if let p = preview {
+            bounds = DiskSize.bounds(currentGB: current, need: p.need, freeBytes: free)
+            newGB = p.gb
+            return
+        }
+        let running = state.vmRunning()
+        Task.detached {
+            // Running: the guest's own numbers; off (or no answer): disk.img's.
+            var why = VMDisk.smallerBlocked(c) ?? ""
+            var need = running && why.isEmpty ? VMDisk.liveNeed(c) : nil
+            if need == nil, why.isEmpty {
+                switch VMDisk.need(c) {
+                case .success(let n): need = n
+                case .failure(let p): why = p.description
+                }
+            }
+            let b = DiskSize.bounds(currentGB: current, need: need, unknownWhy: why, freeBytes: free)
+            await MainActor.run {
+                bounds = b
+                newGB = current
+            }
+        }
+    }
+
+    private func apply() {
+        guard let b = bounds else { return }
+        // Checked again: the VM may have started meanwhile.
+        if let p = DiskSize.changeProblem(currentGB: currentGB, newGB: newGB, bounds: b, vmRunning: state.vmRunning()) {
+            error = p
+            return
+        }
+        // A test build never changes the disk of a VM of the installed app.
+        if let p = Paths.startProblem(state.config.folder) {
+            error = p
+            return
+        }
+        if newGB < currentGB {
+            let alert = NSAlert()
+            alert.messageText = "Make the disk \(newGB) GB?"
+            alert.informativeText = "The VM starts and Omarchy moves its files below \(newGB) GB. Then the VM restarts once while disk.img is cut, and the app checks the file system. Until that check passes, a copy of the disk from now is kept."
+            alert.addButton(withTitle: "Make Smaller")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        do {
+            let change = try VMDisk.change(state.config, to: newGB)
+            if let c = VMConfig.load(from: state.config.folder) { state.config = c }
+            editing = false
+            refresh()
+            if change == .smaller { state.startVM() }
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     private func act(_ f: () throws -> Void) {
@@ -444,184 +577,6 @@ struct DiskRow: View {
         info = VMDisk.info(state.config)
         jobs = VMDisk.jobs(state.config)
         resize = VMDisk.resize(state.config)
-    }
-}
-
-/// Behind Disk › Change…: the disk's size on a slider, from what Omarchy
-/// needs to what the Mac has free (DiskSize.bounds).
-struct DiskSizeSheet: View {
-    @ObservedObject var state: AppState
-    let info: VMDisk.Info
-    var done: () -> Void
-    /// The window pictures: no disk to read, and the size chosen.
-    var preview: DiskSize.Need?
-    var previewGB: Int?
-    @State private var bounds: DiskSize.Bounds?
-    @State private var newGB = 0
-    @State private var field = ""
-    @State private var note: String?
-
-    private var currentGB: Int { DiskSize.wholeGB(info.maxBytes) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Disk Size").font(.title3.bold())
-            if let b = bounds {
-                HStack(spacing: 10) {
-                    slider(b)
-                    TextField("GB", text: $field)
-                        .accessibilityLabel("Disk size in GB")
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 64)
-                        .onSubmit { typed(b) }
-                        .onChange(of: field) { _, v in
-                            // As typed, when it is a size inside the ends.
-                            if let gb = DiskSize.parseGB(v), gb >= b.minGB, gb <= b.maxGB { newGB = gb }
-                        }
-                    Text("GB").accessibilityHidden(true)
-                }
-                Text(b.why).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if newGB < currentGB {
-                    Text("Smaller: the VM starts, Omarchy makes room, and it restarts once while the disk is cut. A copy of the disk is kept until a check passes.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                } else if newGB > currentGB {
-                    Text("Larger: Omarchy grows into it at the next start. The disk takes space on the Mac only as Omarchy fills it.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-                if let p = DiskSize.changeProblem(currentGB: currentGB, newGB: newGB, bounds: b, vmRunning: state.vmRunning()) {
-                    Text(p).font(.caption).foregroundStyle(.red)
-                }
-            } else {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Reading what Omarchy uses…").foregroundStyle(.secondary)
-                }
-            }
-            if let n = note { Text(n).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
-            HStack {
-                Spacer()
-                Button("Cancel", action: done).keyboardShortcut(.cancelAction)
-                Button("Apply") { apply() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canApply)
-            }
-        }
-        .padding(20)
-        .frame(width: 440)
-        .onAppear(perform: load)
-    }
-
-    private var canApply: Bool {
-        guard let b = bounds, newGB != currentGB else { return false }
-        return DiskSize.changeProblem(currentGB: currentGB, newGB: newGB, bounds: b, vmRunning: state.vmRunning()) == nil
-    }
-
-    /// The slider with the size now marked under it.
-    private func slider(_ b: DiskSize.Bounds) -> some View {
-        let value = Binding<Double>(get: { Double(newGB) }, set: { set(DiskSize.snap($0, b)) })
-        return VStack(spacing: 2) {
-            Group {
-                if b.maxGB > b.minGB {
-                    Slider(value: value, in: Double(b.minGB)...Double(b.maxGB))
-                } else {
-                    Slider(value: .constant(0), in: 0...1).disabled(true)
-                }
-            }
-            .accessibilityLabel("Disk size")
-            .accessibilityValue("\(newGB) GB")
-            .accessibilityHint("Now \(currentGB) GB. \(b.minGB) to \(b.maxGB) GB.")
-            GeometryReader { g in
-                // The knob's centre runs about 10 pt inside each end.
-                let span = Double(max(1, b.maxGB - b.minGB))
-                let x = 10 + (g.size.width - 20) * Double(currentGB - b.minGB) / span
-                Text("now \(currentGB) GB")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .fixedSize()
-                    .position(x: min(max(x, 30), g.size.width - 30), y: 6)
-                Text("\(b.minGB)").font(.caption2).foregroundStyle(.tertiary).position(x: 10, y: 6)
-                    .opacity(abs(x - 10) > 44 ? 1 : 0)
-                Text("\(b.maxGB)").font(.caption2).foregroundStyle(.tertiary).position(x: g.size.width - 12, y: 6)
-                    .opacity(abs(g.size.width - 10 - x) > 44 ? 1 : 0)
-            }
-            .frame(height: 12)
-            .accessibilityHidden(true)
-        }
-    }
-
-    private func set(_ gb: Int) {
-        newGB = gb
-        field = "\(gb)"
-    }
-
-    private func typed(_ b: DiskSize.Bounds) {
-        if let gb = DiskSize.parseGB(field) {
-            set(min(b.maxGB, max(b.minGB, gb)))
-        } else {
-            set(newGB)
-        }
-    }
-
-    private func load() {
-        let c = state.config
-        let current = currentGB
-        let free = info.freeBytes
-        if let p = preview {
-            bounds = DiskSize.bounds(currentGB: current, need: p, freeBytes: free)
-            set(previewGB ?? current)
-            return
-        }
-        let running = state.vmRunning()
-        Task.detached {
-            // Running: the guest's own numbers; off (or no answer): disk.img's.
-            var why = VMDisk.smallerBlocked(c) ?? ""
-            var need = running && why.isEmpty ? VMDisk.liveNeed(c) : nil
-            if need == nil, why.isEmpty {
-                switch VMDisk.need(c) {
-                case .success(let n): need = n
-                case .failure(let p): why = p.description
-                }
-            }
-            let b = DiskSize.bounds(currentGB: current, need: need, unknownWhy: why, freeBytes: free)
-            await MainActor.run {
-                bounds = b
-                set(current)
-            }
-        }
-    }
-
-    private func apply() {
-        guard let b = bounds else { return }
-        // A typed size outside the ends: shown as kept inside them, not applied yet.
-        if DiskSize.parseGB(field) != newGB {
-            typed(b)
-            note = "\(b.minGB) to \(b.maxGB) GB."
-            return
-        }
-        // Checked again: the VM may have started meanwhile.
-        if let p = DiskSize.changeProblem(currentGB: currentGB, newGB: newGB, bounds: b, vmRunning: state.vmRunning()) {
-            note = p
-            return
-        }
-        // A test build never changes the disk of a VM of the installed app.
-        if let p = Paths.startProblem(state.config.folder) {
-            note = p
-            return
-        }
-        if newGB < currentGB {
-            let alert = NSAlert()
-            alert.messageText = "Make the disk \(newGB) GB?"
-            alert.informativeText = "The VM starts and Omarchy moves its files below \(newGB) GB. Then the VM restarts once while disk.img is cut, and the app checks the file system. Until that check passes, a copy of the disk from now is kept."
-            alert.addButton(withTitle: "Make Smaller")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
-        do {
-            let change = try VMDisk.change(state.config, to: newGB)
-            if let c = VMConfig.load(from: state.config.folder) { state.config = c }
-            done()
-            if change == .smaller { state.startVM() }
-        } catch {
-            note = error.localizedDescription
-        }
+        if preview != nil, !editing { open() }
     }
 }

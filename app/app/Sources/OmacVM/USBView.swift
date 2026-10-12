@@ -2,42 +2,45 @@ import Combine
 import OmacVMUSB
 import SwiftUI
 
-/// The VM's USB devices (docs/usb.md) in the VM window's form: a switch, off
-/// by default. On: the VM gets a USB controller at its start, and while it
-/// runs the app asks for each device plugged in (USBSession). Devices… opens
-/// the list of remembered devices.
+/// The VM's USB devices (docs/usb.md) in the VM window: a switch, off by
+/// default (the VM folder's usb-enabled file). On: the VM gets a USB
+/// controller at its start, and while it runs the app asks for each device
+/// plugged in (USBSession). Devices… opens the list of remembered devices.
 struct USBRow: View {
-    let folder: URL
+    @ObservedObject var state: AppState
     @State private var on = false
     @State private var memory = USBMemory()
-    @State private var note: String?
+    @State private var error: String?
     @State private var showDevices = false
+
+    private var folder: URL { state.config.folder }
 
     static let explanation = "When it’s on and you plug in a device while the VM runs, OmacVM asks whether to connect it to the VM or keep it on the Mac. Your answer counts for that plug-in only, unless you check “Always do this for this device”. Devices… lists the remembered ones, to change or forget. macOS lets a VM have only devices it doesn’t use itself: debug probes, SDR sticks, logic analysers, phones in fastboot. Keyboards, security keys, USB disks, serial adapters, audio and cameras stay with the Mac and are never asked about."
 
     var body: some View {
-        SwitchRow("USB devices (experimental)", isOn: Binding(get: { on }, set: { setOn($0) })) {
+        SettingRow(title: "USB devices", badge: "experimental",
+                   subtitle: error ?? (on ? USBListRows.summary(memory: memory) : "Debug probes, SDR sticks and other devices the Mac doesn’t use."),
+                   subtitleIsError: error != nil, info: Self.explanation, probe: "usb") {
             if on {
                 Button("Devices…") { showDevices = true }
                     .accessibilityLabel("USB devices list")
             }
-            InfoButton(topic: "USB devices", text: Self.explanation)
+            RowSwitch(title: "USB devices", isOn: Binding(get: { on }, set: { setOn($0) }))
         }
         .sheet(isPresented: $showDevices, onDismiss: refresh) {
-            USBDeviceList(source: .before(folder), vmName: VMConfig.load(from: folder)?.name ?? "the VM") { showDevices = false }
+            USBDeviceList(source: .before(folder), vmName: state.config.name) { showDevices = false }
         }
         .onAppear(perform: refresh)
-        .onChange(of: folder) { _, _ in note = nil; refresh() }
-        if on { RowNote(USBListRows.summary(memory: memory)) }
-        if let n = note { RowNote(n, error: true) }
+        .onChange(of: state.config.folder) { _, _ in error = nil; refresh() }
+        .onChange(of: state.tick) { _, _ in refresh() }
     }
 
     private func setOn(_ value: Bool) {
         do {
             try USBSwitch.set(value, folder: folder)
-            note = nil
+            error = nil
         } catch {
-            note = "Could not save: \(error.localizedDescription)"
+            self.error = "Could not save: \(error.localizedDescription)"
         }
         refresh()
     }

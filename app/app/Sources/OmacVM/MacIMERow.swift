@@ -18,22 +18,23 @@ struct MacIMERow: View {
     @State private var busy = false
     @State private var note: String?
 
-    static let info = "Experimental. Type in Omarchy with the Mac's input method for Chinese, Japanese, Korean, Vietnamese and other languages that use a candidate window; normal keyboard layouts (accents included) do not need it. With it: the Mac's candidate window opens at the text cursor in the VM, and the chosen text goes into the VM's text field. Keys, shortcuts and the VM's own input methods stay as they are; password fields always get plain keys. Switched while the VM is stopped, it is set up at the VM's next start; switched while it runs, it works from the VM's next start."
+    static let info = "Experimental. Type in Omarchy with the Mac's input method for Chinese, Japanese, Korean, Vietnamese and other languages that use a candidate window; normal keyboard layouts (accents included) do not need it. With it: the Mac's candidate window opens at the text cursor in the VM, and the chosen text goes into the VM's text field. Keys, shortcuts and the VM's own input methods stay as they are; password fields always get plain keys."
 
     var body: some View {
         let running = state.vmRunning()
         let row = MacIME.row(record: record, pending: pending, running: running, busy: busy, cli: TerminalCommand.available)
-        SwitchRow("Mac input (Chinese, Japanese, Korean)",
-                  isOn: Binding(get: { row.on }, set: { v in if v != row.on { flip(v, running: running) } }),
-                  enabled: row.enabled) {
+        let n = note ?? row.note
+        SettingRow(title: "Mac input (Chinese, Japanese, Korean)", subtitle: n,
+                   subtitleIsError: n?.hasPrefix("Could not") == true, info: Self.info, probe: "mac-ime") {
             if busy { ProgressView().controlSize(.small) }
-            InfoButton(topic: "the Mac's input methods", text: Self.info)
+            RowSwitch(title: "Mac input", isOn: Binding(get: { row.on }, set: { v in if v != row.on { flip(v, running: running) } }),
+                      enabled: row.enabled)
         }
         .onAppear(perform: refresh)
         .onChange(of: state.config) { _, _ in note = nil; refresh() }
+        .onChange(of: state.tick) { _, _ in if !busy { refresh() } }
         .onChange(of: running) { _, _ in note = nil; refresh() }
         .onReceive(NotificationCenter.default.publisher(for: MacIMEStart.done)) { _ in refresh() }
-        if let n = note ?? row.note { RowNote(n, error: n.hasPrefix("Could not")) }
     }
 
     private func refresh() {
@@ -75,7 +76,7 @@ struct MacIMERow: View {
                 busy = false
                 refresh()
                 if let err { note = "Could not switch: \(err)" }
-                else { note = value ? "On from the VM's next start: shut it down, then start it again." : "Off. The VM's next start has no port for it." }
+                else { note = value ? "Restart the VM to use it." : nil }
             }
         }
     }

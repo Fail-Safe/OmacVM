@@ -355,31 +355,38 @@ for (name, script) in [("grow", DiskSize.growScript), ("compact", DiskSize.compa
     expect(sh.terminationStatus == 0, "\(name) script: sh -n")
 }
 
-// MARK: Window height (the window itself: OmacVM --render-vm-window, a CI step)
+// MARK: Window size (the window itself: OmacVM --render-vm-window, a CI step)
 
-expect(WindowFit.fitsSmallScreen(content: 700, titleBar: 28) && !WindowFit.fitsSmallScreen(content: 740, titleBar: 28),
-       "13-inch MacBook: 760 pt with the title bar")
-expect(WindowFit.contentHeight(content: 650, visible: 860, titleBar: 28) == 650, "fits: the whole content, no scrolling")
-expect(WindowFit.contentHeight(content: 900, visible: 700, titleBar: 28) == 672, "too tall: stops at the screen, the rest scrolls")
-expect(WindowFit.contentHeight(content: 900, visible: 200, titleBar: 28) == WindowFit.minimumContent, "a tiny screen: a few rows stay")
+expect(WindowSize.width == 800 && WindowSize.sidebar == 200 && WindowSize.minHeight == 500, "800 pt wide, 200 pt sidebar, 500 pt at least")
+expect(WindowSize.defaultHeight(visible: WindowSize.smallScreenVisible) == 760, "13-inch MacBook Air: 760 pt (as tall as before 3.1)")
+expect(WindowSize.defaultHeight(visible: 1400) == 1368, "a 5K display: its whole height less the margins")
+expect(WindowSize.defaultHeight(visible: 400) == 500, "a tiny screen: never below 500 pt")
+
+// MARK: The sidebar follows the scroll (ScrollSpy)
+
+expect(ScrollSpy.current(tops: [0, 300, 700, 1000, 1300], atEnd: false) == 0, "at the top: the first section")
+expect(ScrollSpy.current(tops: [-320, -20, 380, 680, 980], atEnd: false) == 1, "scrolled into the second: the second")
+expect(ScrollSpy.current(tops: [-320, 80, 380, 680, 980], atEnd: false) == 1, "a section 80 pt down counts (90 pt threshold)")
+expect(ScrollSpy.current(tops: [-320, 120, 380, 680, 980], atEnd: false) == 0, "120 pt down: not yet")
+expect(ScrollSpy.current(tops: [-1300, -1000, -600, 200, 500], atEnd: true) == 4, "at the end: the last, also when it never reaches the top")
+expect(ScrollSpy.current(tops: [], atEnd: false) == 0, "no sections: the first")
+expect(ScrollSpy.atEnd(offset: 1196, visible: 600, content: 1800), "4 pt short of the end counts as the end")
+expect(!ScrollSpy.atEnd(offset: 1100, visible: 600, content: 1800), "100 pt short: not the end")
+expect(!ScrollSpy.atEnd(offset: 0, visible: 900, content: 800), "content shorter than the window: no end to snap to")
+
 // MARK: Window sides (the pictures' frames: OmacVM --render-vm-window)
 
-expect(WindowLayout.contentWidth == 528 && WindowLayout.inset >= 16, "568 pt window, 20 pt each side")
+expect(WindowLayout.width == 800 && WindowLayout.contentWidth == 552 && WindowLayout.inset == 16, "800 pt window, 552 pt of settings, 16 pt margin")
 typealias Box = WindowLayout.Box
-let even = [Box("title", minX: 20, maxX: 200), Box("change", minX: 460, maxX: 548),
-            Box("update", minX: 470, maxX: 548), Box("start", minX: 500, maxX: 548.4)]
-expect(WindowLayout.problems(even, width: 568, trailing: ["change", "update", "start"]).isEmpty, "20 pt each side, one right edge: fine")
-// The window of 2026-10-08 16:2x: a long VMs folder widened the form.
-let tight = [Box("title", minX: 4, maxX: 200), Box("change", minX: 470, maxX: 566),
-             Box("update", minX: 420, maxX: 486), Box("start", minX: 440, maxX: 486)]
-let found = WindowLayout.problems(tight, width: 568, trailing: ["change", "update", "start"])
+let even = [Box("title", minX: 92, maxX: 300), Box("update-vm", minX: 600, maxX: 690), Box("start", minX: 700, maxX: 784)]
+expect(WindowLayout.problems(even, width: 800, trailing: ["start"]).isEmpty, "16 pt each side: fine")
+let tight = [Box("title", minX: 4, maxX: 200), Box("start", minX: 700, maxX: 798)]
+let found = WindowLayout.problems(tight, width: 800, trailing: [])
 expect(found.contains { $0.hasPrefix("title: 4 pt from the left") }, "4 pt from the left edge: too close")
-expect(found.contains { $0.hasPrefix("change: 2 pt from the right") }, "Change… at the right edge: too close")
-expect(found.contains { $0.hasPrefix("right edges not on one line") }, "Change… 80 pt past Start: not one line")
-expect(WindowLayout.problems([Box("row", minX: -10, maxX: 600)], width: 568, trailing: []).count == 2, "past both edges")
-expect(WindowLayout.problems([Box("form", minX: 16, maxX: 552)], width: 568, trailing: []).count == 2,
-       "4 pt into the inset on each side (a row wider than the form's column): wrong")
-expect(WindowLayout.problems([Box("form", minX: 19.5, maxX: 548.5)], width: 568, trailing: []).isEmpty, "half a point: fine")
+expect(found.contains { $0.hasPrefix("start: 2 pt from the right") }, "Start at the right edge: too close")
+expect(WindowLayout.problems([Box("a", minX: 300, maxX: 760), Box("b", minX: 500, maxX: 740)], width: 800, trailing: ["a", "b"])
+       .contains { $0.hasPrefix("right edges not on one line") }, "row ends 20 pt apart: not one line")
+expect(WindowLayout.problems([Box("row", minX: -10, maxX: 900)], width: 800, trailing: []).count == 2, "past both edges")
 
 expect(CommandLineInstall.shortText(.installed(at: "/x")) == "Installed"
        && CommandLineInstall.shortText(.available(target: "/x", needsAdmin: true)) == "Not installed",

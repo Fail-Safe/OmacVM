@@ -8,12 +8,7 @@ extension NSWindow {
     /// nothing brings back an old place on another display.
     /// Main thread. src/tests/app-window-real.sh runs it on real displays.
     func centreOnAppScreen() {
-        func id(_ s: NSScreen) -> UInt32? {
-            s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
-        }
-        let screens = NSScreen.screens.compactMap { s in id(s).map { WindowPlacement.Screen(id: $0, frame: s.visibleFrame) } }
-        let builtIn = screens.first { CGDisplayIsBuiltin($0.id) != 0 }?.id
-        guard let s = WindowPlacement.appScreen(screens: screens, builtIn: builtIn, main: NSScreen.main.flatMap(id)) else { return }
+        guard let s = NSWindow.appScreen else { return }
         // SwiftUI sizes the window from its content: lay it out first.
         contentView?.layoutSubtreeIfNeeded()
         var size = frame.size
@@ -22,14 +17,27 @@ extension NSWindow {
         }
         setFrameOrigin(WindowPlacement.centred(size, in: s.frame))
     }
+
+    /// The display the app's window opens on (its visible frame).
+    static var appScreen: WindowPlacement.Screen? {
+        func id(_ s: NSScreen) -> UInt32? {
+            s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+        }
+        let screens = NSScreen.screens.compactMap { s in id(s).map { WindowPlacement.Screen(id: $0, frame: s.visibleFrame) } }
+        let builtIn = screens.first { CGDisplayIsBuiltin($0.id) != 0 }?.id
+        return WindowPlacement.appScreen(screens: screens, builtIn: builtIn, main: NSScreen.main.flatMap(id))
+    }
 }
 
 /// Keeps the app's window centred while SwiftUI sizes it (AppKit grows it
 /// from the top left corner, so a taller screen would hang below the middle),
-/// until the user moves it. Main thread.
+/// until the user moves it. followsResize false: a window the app sizes
+/// itself (the VM window since 3.1, which the user may make taller or
+/// shorter) is centred when it opens and then left where it is. Main thread.
 @MainActor
 final class CentredWindow {
     private weak var window: NSWindow?
+    private let followsResize: Bool
     private var placed: CGPoint?   // top left corner after the last placement
     private var observers: [NSObjectProtocol] = []
     /// Not yet placed, or closed / taken off screen by the app since: the next
@@ -37,8 +45,9 @@ final class CentredWindow {
     /// Space, so a window the user moved stays where it is then.
     private(set) var needsPlace = true
 
-    init(_ w: NSWindow) {
+    init(_ w: NSWindow, followsResize: Bool = true) {
         window = w
+        self.followsResize = followsResize
         let nc = NotificationCenter.default
         observers.append(nc.addObserver(forName: NSWindow.didResizeNotification, object: w, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.resized() }
@@ -66,7 +75,7 @@ final class CentredWindow {
     }
 
     private func resized() {
-        guard let w = window, let p = placed else { return }
+        guard followsResize, let w = window, let p = placed else { return }
         // Moved by the user (or grown from another corner): leave it there.
         if Self.topLeft(w) != p { placed = nil; return }
         guard w.isVisible else { return }

@@ -6,29 +6,44 @@ import SwiftUI
 import OmacVMFeatures
 
 /// --render-vm-window DIR (test builds and `swift build`, never the released
-/// app): draws the VM window before Start for a made-up VM in a temporary
-/// folder, light and dark, into DIR/*.png, writes each window's height into
-/// DIR/heights.txt and exits 1 when the usual state or the keyboard warning
-/// is taller than a 13-inch MacBook shows (WindowFit), or when a part of a
-/// window is closer than its 20 pt inset to a side or its buttons at the end of a
-/// row do not end on one line (WindowLayout). CI runs it.
+/// app): draws the app's window (header, window buttons, sidebar, settings)
+/// for made-up VMs in a temporary folder, light and dark, into DIR/*.png: at
+/// the height it opens with on a 13-inch MacBook Air (WindowSize), scrolled to
+/// each section, each state and sheet; and the whole page of settings at
+/// once. Writes DIR/heights.txt and exits 1 when something does not fit that
+/// window (a sheet taller than it, a part outside the window's sides) or the
+/// controls at the end of the rows are not on one line (WindowLayout). CI
+/// runs it.
 @MainActor
 enum RenderVMWindow {
     /// What the pictures show instead of this Mac's answers.
     struct Preview {
         var keyNote: KeyNote?
         var terminal: CommandLineInstall.State?
-        /// The app's OmacVM: "OmacVM in this VM" and Update VM when the VM's is older.
+        /// The app's OmacVM: Update VM when the VM's is older.
         var appVersion: String? = nil
-        /// Draw the window as on a Mac with a notch (Start in lists including notch).
+        /// As on a Mac with a notch (Start in has "including notch").
         var notch = false
+        var running: Bool? = nil
+        /// Scrolled to this section.
+        var section: String? = nil
+        var magicMouse: Bool? = false
+        /// Disk › Change… open: what Omarchy needs, the size chosen.
+        var disk: (need: DiskSize.Need, gb: Int)? = nil
     }
 
     static func allowed(bundleID: String?) -> Bool {
         bundleID == nil || TestHooks.allowed(bundleID: bundleID)
     }
 
+    /// The window's height on a 13-inch MacBook Air.
+    nonisolated static let smallHeight = WindowSize.defaultHeight(visible: WindowSize.smallScreenVisible)
+
+    private static var lines: [String] = []
+    private static var failed = false
+
     static func run(into dir: URL) -> Never {
+        dirURL = dir
         NSApp.setActivationPolicy(.prohibited)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("omacvm-render-\(getpid())")
@@ -37,6 +52,8 @@ enum RenderVMWindow {
             print("could not make the VM folder in \(tmp.path)")
             exit(1)
         }
+        // The settings the pictures change are this run's own, put back after.
+        let saved = SavedDefaults()
         LayoutProbe.on = true
         let state = AppState(watchDrives: false)
         state.storage.shownRoot = tmp
@@ -45,57 +62,79 @@ enum RenderVMWindow {
         state.screen = .ready
         state.message = nil
         let u = Updater.shared
-        let terminal = CommandLineInstall.State.available(target: "/usr/local/bin/omacvm", needsAdmin: true)
-        let titleBar = Double(FitScrollScreen.titleBar)
-        var lines: [String] = []
-        var failed = false
+        let terminal = CommandLineInstall.State.installed(at: "/usr/local/bin/omacvm")
+        let usual = Preview(keyNote: KeyNote.none, terminal: terminal, notch: true)
 
-        func sides(_ name: String, trailing: [String]) {
-            let p = WindowLayout.problems(LayoutProbe.boxes(), width: Double(lastWidth), trailing: trailing)
-            lines.append("\(name): sides " + (p.isEmpty ? "ok" : "WRONG: " + p.joined(separator: "; ")))
-            // The frames: on a failure, or always with OMACVM_RENDER_BOXES=1.
-            if !p.isEmpty || ProcessInfo.processInfo.environment["OMACVM_RENDER_BOXES"] != nil {
-                lines.append("  width \(Int(lastWidth)): " + LayoutProbe.boxes().map { "\($0.name) \(Int($0.minX.rounded()))-\(Int($0.maxX.rounded()))" }.joined(separator: ", "))
-            }
-            if !p.isEmpty { failed = true }
+        // The usual state at its defaults, no update waiting: each section
+        // as the window shows it on a 13-inch MacBook Air (with a notch).
+        u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil, outcome: .upToDate)
+        for (i, s) in SettingsNav.items.enumerated() {
+            var p = usual
+            p.section = s.id
+            window("window-\(i + 1)-\(s.id)", state, p)
         }
+        // The whole page: as a Mac with a notch and as one without (the
+        // Mac mini: Window and Full screen only).
+        page("page-1-notch", state, usual)
+        var noNotch = usual
+        noNotch.notch = false
+        page("page-2-no-notch", state, noNotch)
 
-        func picture(_ name: String, _ preview: Preview, mustFit: Bool) {
-            let h = draw(name, into: dir) { RootView(state: state, scrolls: false, preview: preview) }
-            sides(name, trailing: ["folder-change", "update-vm", "start"])
-            let window = WindowFit.windowHeight(content: h, titleBar: titleBar)
-            let fits = WindowFit.fitsSmallScreen(content: h, titleBar: titleBar)
-            lines.append("\(name): window \(Int(window.rounded())) pt (content \(Int(h.rounded())) + title bar \(Int(titleBar)))"
-                         + (mustFit ? (fits ? ", fits" : ", TOO TALL (\(Int(WindowFit.smallScreenHeight)) at most)") : ""))
-            if mustFit && !fits { failed = true }
-        }
-
-        // The usual state: everything at its default, no update waiting.
-        u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil)
-        // As on a MacBook Air 13": its notch adds "including notch" to Start in.
-        picture("vm-window-1-usual", Preview(keyNote: KeyNote.none, terminal: terminal, notch: true), mustFit: true)
-        picture("vm-window-2-keyboard", Preview(keyNote: .needsUser, terminal: terminal, notch: true), mustFit: true)
-
-        // Everything on: the lines under the switches, a disk job, a check's result.
+        // Everything on: notes under the switches, a disk job, a Magic Mouse,
+        // custom resources, "including notch" chosen, keyboard not allowed.
         try? Data("on\n".utf8).write(to: folder.appendingPathComponent("fast-network"))
         try? USBSwitch.set(true, folder: folder)
         try? USBMemory(devices: [.init(vendor: "0483", product: "3748", name: "STM32 STLink", maker: "STMicroelectronics",
                                        choice: .omarchy, since: "2026-10-07")]).save(folder: folder)
         try? MacFolder.set(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents"), for: config)
         try? VMDisk.setJobs([.grow], config)
-        u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil, outcome: .upToDate)
         try? NotchArea.write(.fullpanel, folder: folder)
-        picture("vm-window-3-all-on", Preview(keyNote: .allowedNextStart, terminal: .installed(at: "/usr/local/bin/omacvm"), notch: true), mustFit: false)
+        var custom = config
+        custom.cpus = 3
+        custom.memoryMB = 6 * 1024
+        try? custom.writeResources()
+        state.config = custom
+        var allOn = usual
+        allOn.keyNote = .needsUser
+        allOn.magicMouse = true
+        page("page-3-all-on", state, allOn)
+        allOn.section = "general"
+        window("window-6-custom-resources", state, allOn)
         try? NotchArea.write(.native, folder: folder)
+        try? VMDisk.setJobs([], config)
+        try? config.writeResources()
+        state.config = config
 
-        // An update waits: the banner above Start.
-        let staged = Updater.Staged(version: "3.0.5", app: URL(fileURLWithPath: "/nonexistent.app"),
-                                    notes: URL(string: "https://github.com/gillesgoetsch/omacvm/releases"), teams: [])
+        // Disk › Change… open: a 128 GB disk with 9 GB used, a smaller size
+        // chosen; and a 64 GB one, which cannot shrink, made larger.
+        var disk = usual
+        disk.section = "storage"
+        _ = truncate(config.disk.path, 128 << 30)
+        try? config.writeEnv(["DISK_GB": "128"])
+        state.config = VMConfig.load(from: folder) ?? config
+        disk.disk = (DiskSize.Need(allocated: 13 * DiskSize.gib, used: 9 * DiskSize.gib, rootStart: 2 * DiskSize.gib), 96)
+        window("window-7-disk-smaller", state, disk)
+        _ = truncate(config.disk.path, 64 << 30)
+        try? config.writeEnv(["DISK_GB": "64"])
+        state.config = config
+        disk.disk = (DiskSize.Need(allocated: 13 * DiskSize.gib, used: 9 * DiskSize.gib, rootStart: 2 * DiskSize.gib), 128)
+        window("window-8-disk-larger", state, disk)
+
+        // An update is ready: the banner, stopped and while the VM runs.
+        let staged = Updater.Staged(version: "3.1.1", app: URL(fileURLWithPath: "/nonexistent.app"),
+                                    notes: URL(string: "https://github.com/gillesgoetsch/OmacVM/releases"), teams: [])
         u.showForRendering(staged: staged, notice: nil, enabled: true, waiting: false, previous: nil)
-        picture("vm-window-4-update", Preview(keyNote: KeyNote.none, terminal: terminal), mustFit: false)
+        window("window-9-update", state, usual)
+        var runs = usual
+        runs.running = true
+        window("window-10-update-vm-runs", state, runs)
+        u.showForRendering(staged: staged, notice: Updater.waitingNotice("A VM runs from \(Product.name)", version: "3.1.1"),
+                           enabled: true, waiting: true, previous: nil)
+        window("window-11-update-waits", state, runs)
+        u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil)
 
-        // Long names: a VMs folder deep in a long path, a VM name of 62
-        // characters, a message and an older OmacVM in the VM (Update VM).
+        // Long names: a VM name of 62 characters, a deep VMs folder, a
+        // message, an older OmacVM in the VM (Update VM).
         let longRoot = tmp.appendingPathComponent("A folder with a rather long name for the VMs of this Mac/and-one-more-level-light-test/vms")
         let longFolder = longRoot.appendingPathComponent("OmacVM Test with a very long VM name to check the window sides")
         if let long = makeVM(longFolder, name: longFolder.lastPathComponent) {
@@ -103,63 +142,49 @@ enum RenderVMWindow {
             state.storage.shownRoot = longRoot
             state.storage.refresh()
             state.config = long
-            state.message = "OmacVM in \(long.name) is now 3.0.5."
-            u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil)
-            picture("vm-window-8-long-names", Preview(keyNote: .needsUser, terminal: terminal, appVersion: "3.0.7"), mustFit: false)
-            // The new VM's form with the same VMs folder.
+            state.tell("OmacVM in \(long.name) is now 3.0.5.")
+            var p = usual
+            p.appVersion = "3.1.0"
+            p.keyNote = .needsUser
+            window("window-13-long-names", state, p)
+            p.section = "storage"
+            window("window-14-long-names-storage", state, p)
             state.message = nil
+            // The new VM's setup with the same VMs folder.
             state.screen = .setup
-            draw("setup-1-long-names", into: dir) { RootView(state: state, scrolls: false) }
-            sides("setup-1-long-names", trailing: ["folder-change", "start"])
+            window("setup-1", state, p)
+            page("setup-2-page", state, p)
             state.screen = .ready
             state.config = config
             state.storage.shownRoot = tmp
             state.storage.refresh()
         } else {
-            lines.append("vm-window-8-long-names: could not make the VM folder")
-            failed = true
+            note("window-13-long-names: could not make the VM folder", fail: true)
         }
-        // The VMs folder of the window of 2026-10-08 (a test identity's, in
-        // the home folder; not read: no such folder).
-        state.storage.shownRoot = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("OmacVM-render-none/work/night-test/vms")
-        state.storage.refresh()
-        try? Data("3.0.5\n".utf8).write(to: folder.appendingPathComponent("omacvm-version"))
-        picture("vm-window-9-home-folder", Preview(keyNote: KeyNote.none, terminal: terminal, appVersion: "3.0.6"), mustFit: false)
-        try? FileManager.default.removeItem(at: folder.appendingPathComponent("omacvm-version"))
-        state.storage.shownRoot = tmp
-        state.storage.refresh()
 
-        // All VMs… with long names.
+        // The other screens.
+        state.screen = .driveMissing
+        window("screen-1-drive-missing", state, usual)
+        state.screen = .unavailable
+        window("screen-2-unavailable", state, usual)
+        state.screen = .install
+        window("screen-3-install", state, usual)
+        state.screen = .ready
+
+        // The sheets: All VMs, USB devices.
         let all = StorageModel()
+        all.shownRoot = longRoot
+        all.root = longRoot
         all.vms = [("Omarchy", 41), ("OmacVM Test with a very long VM name to check the window sides", 23), ("Bench", 9)].compactMap { n, gb in
             var c = VMConfig()
             c.name = n
             c.location = longRoot.appendingPathComponent(n)
-            return StorageModel.Entry(config: c, size: Int64(gb) * DiskSize.gib, legacy: false)
+            return StorageModel.Entry(config: c, size: Int64(gb) * DiskSize.gib, legacy: n == "Bench")
         }
-        draw("all-vms-long-names", into: dir) { AllVMsView(storage: all, selected: all.vms.first?.folder) {} }
-        sides("all-vms-long-names", trailing: ["all-vms-row", "all-vms-done"])
+        sheet("sheet-4-all-vms") { AllVMsView(storage: all, selected: all.vms.first?.folder) {} }
+        usbPictures(folder: folder, into: dir)
 
-        // A short screen: the window stops at its height and the rest scrolls.
-        let limit: CGFloat = 480
-        u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil)
-        let h = draw("vm-window-5-scrolls", into: dir) {
-            FitScroll(limit: limit) { RootView(state: state, scrolls: false, preview: Preview(keyNote: .needsUser, terminal: terminal)) }
-                .frame(width: WindowLayout.width)
-        }
-        let scrolls = h <= Double(limit) + 1
-        lines.append("vm-window-5-scrolls: content \(Int(h.rounded())) pt for a limit of \(Int(limit))" + (scrolls ? ", scrolls" : ", DOES NOT STOP"))
-        if !scrolls { failed = true }
-
-        // Disk › Change…: the size slider for a 128 GB disk with 9 GB used (on a Mac with 300 GB free).
-        let info = VMDisk.Info(maxBytes: 128 * DiskSize.gib, usedBytes: 11 * DiskSize.gib, freeBytes: 300 * DiskSize.gib)
-        let need = DiskSize.Need(allocated: 13 * DiskSize.gib, used: 9 * DiskSize.gib, rootStart: 2 * DiskSize.gib)
-        draw("vm-window-6-disk-size", into: dir) { DiskSizeSheet(state: state, info: info, done: {}, preview: need) }
-        draw("vm-window-7-disk-smaller", into: dir) { DiskSizeSheet(state: state, info: info, done: {}, preview: need, previewGB: 96) }
-        // USB devices: the list before a start and while the VM runs, and the question.
-        usbPictures(folder: folder, into: dir, lines: &lines)
-
+        saved.restore()
         try? FileManager.default.removeItem(at: tmp)
         let text = lines.joined(separator: "\n") + "\n"
         try? text.write(to: dir.appendingPathComponent("heights.txt"), atomically: true, encoding: .utf8)
@@ -167,6 +192,103 @@ enum RenderVMWindow {
         print("rendered into \(dir.path)")
         exit(failed ? 1 : 0)
     }
+
+    private static func note(_ s: String, fail: Bool = false) {
+        lines.append(s)
+        if fail { failed = true }
+    }
+
+    // MARK: Pictures
+
+    /// The window as the app makes it (main.swift), never on screen, at the
+    /// 13-inch MacBook Air's height; checks that every part is inside it and
+    /// the rows' controls end on one line.
+    private static func window(_ name: String, _ state: AppState, _ preview: Preview, height: Double = smallHeight) {
+        picture(name, into: dirURL, height: height) { RootView(state: state, preview: preview) }
+        sides(name, height: height)
+    }
+
+    /// The window with this content, light and dark (the frames of the dark one stay in LayoutProbe).
+    static func picture<V: View>(_ name: String, into dir: URL, height: Double = smallHeight, _ root: () -> V) {
+        for dark in [false, true] {
+            LayoutProbe.frames = [:]
+            let w = PictureWindow.make(root().environment(\.controlActiveState, .key))
+            w.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            w.setContentSize(NSSize(width: WindowSize.width, height: height))
+            settle(w)
+            if let frame = w.contentView?.superview { WindowPicture.write(frame, "\(name)\(dark ? "-dark" : "")", into: dir) }
+            w.contentViewController = nil
+        }
+    }
+
+    /// The whole page of settings at once: a window tall enough for all of it.
+    private static func page(_ name: String, _ state: AppState, _ preview: Preview) {
+        window(name, state, preview, height: 2600)
+        // Cut at the end of the content (the window's own pictures are the
+        // check; this one is for reading).
+    }
+
+    /// A sheet's content on its own, light and dark: it must fit the window
+    /// below its header.
+    private static func sheet<V: View>(_ name: String, _ content: () -> V) {
+        var height = 0.0
+        for dark in [false, true] {
+            LayoutProbe.frames = [:]
+            let view = NSHostingView(rootView: content().environment(\.controlActiveState, .key))
+            let w = PictureWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.borderless],
+                                  backing: .buffered, defer: false)
+            w.isReleasedWhenClosed = false
+            w.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            w.contentView = view
+            for _ in 0..<3 {
+                view.frame = NSRect(origin: .zero, size: view.fittingSize)
+                view.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+            }
+            height = Double(view.fittingSize.height)
+            WindowPicture.write(view, "\(name)\(dark ? "-dark" : "")", into: dirURL)
+            w.contentView = nil
+        }
+        let room = smallHeight - Double(Look.headerHeight) - 16
+        let fits = height <= room
+        note("\(name): \(Int(height.rounded())) pt" + (fits ? ", fits" : ", TOO TALL for the window (\(Int(room)) at most)"), fail: !fits)
+    }
+
+    private static func settle(_ w: NSWindow) {
+        for _ in 0..<4 {
+            w.contentView?.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        }
+    }
+
+    /// Every part inside the window's sides; the rows' controls on one line
+    /// (16 pt in from the card), the header's buttons at its margin.
+    private static func sides(_ name: String, height: Double) {
+        // The strips under the header and the sidebar run edge to edge.
+        let boxes = LayoutProbe.boxes().filter { !["update-banner", "message"].contains($0.name) && !$0.name.hasPrefix("nav-") }
+        let rowEnd = WindowLayout.width - WindowLayout.contentInset - WindowLayout.rowInset
+        var problems = WindowLayout.problems(boxes, width: WindowLayout.width, trailing: ["start"])
+        let rows = boxes.filter { $0.name.hasPrefix("trailing-") }
+        // A legacy (always shown) scroll bar takes 15 pt off every row alike.
+        if let first = rows.first {
+            let off = rows.filter { abs($0.maxX - first.maxX) > WindowLayout.tolerance }
+            if !off.isEmpty { problems.append("row ends not on one line: " + rows.map { "\($0.name) \(Int($0.maxX.rounded()))" }.joined(separator: ", ")) }
+            if first.maxX > rowEnd + WindowLayout.tolerance { problems.append("rows end at \(Int(first.maxX)), past \(Int(rowEnd))") }
+        }
+        if let start = boxes.first(where: { $0.name == "start" }),
+           abs(start.maxX - (WindowLayout.width - WindowLayout.inset)) > WindowLayout.tolerance {
+            problems.append("Start ends at \(Int(start.maxX)), not at \(Int(WindowLayout.width - WindowLayout.inset))")
+        }
+        note("\(name): \(Int(WindowLayout.width)) x \(Int(height)) pt, sides " + (problems.isEmpty ? "ok" : "WRONG: " + problems.joined(separator: "; ")),
+             fail: !problems.isEmpty)
+        if ProcessInfo.processInfo.environment["OMACVM_RENDER_BOXES"] != nil {
+            lines.append("  " + boxes.map { "\($0.name) \(Int($0.minX.rounded()))-\(Int($0.maxX.rounded()))" }.joined(separator: ", "))
+        }
+    }
+
+    private static var dirURL = URL(fileURLWithPath: CommandLine.arguments.last ?? ".")
+
+    // MARK: Made-up things
 
     /// Made-up devices: two remembered (one plugged in), one new, two macOS keeps.
     static let usbDevices: [USBDevice] = {
@@ -187,24 +309,17 @@ enum RenderVMWindow {
         ]
     }()
 
-    private static func usbPictures(folder: URL, into dir: URL, lines: inout [String]) {
+    private static func usbPictures(folder: URL, into dir: URL) {
         let memory = USBMemory(devices: [
             .init(vendor: "0483", product: "3748", name: "STM32 STLink", maker: "STMicroelectronics", choice: .omarchy, since: "2026-10-07"),
             .init(vendor: "1d50", product: "6089", name: "HackRF One", maker: "Great Scott Gadgets", choice: .mac, since: "2026-10-07"),
         ])
         let before = USBListRows.make(memory: memory, devices: usbDevices, states: nil, vmName: "Omarchy")
-        let h1 = draw("usb-list-1-before-start", into: dir) {
-            USBDeviceList(source: .picture(before, running: false), vmName: "Omarchy") {}
-        }
+        sheet("sheet-5-usb-before-start") { USBDeviceList(source: .picture(before, running: false), vmName: "Omarchy") {} }
         let running = USBListRows.make(memory: memory, devices: usbDevices,
                                        states: [0x0110_0000: .connected, 0x0120_0000: .onMac(remembered: false)], vmName: "Omarchy")
-        let h2 = draw("usb-list-2-running", into: dir) {
-            USBDeviceList(source: .picture(running, running: true), vmName: "Omarchy") {}
-        }
-        let h3 = draw("usb-list-3-empty", into: dir) {
-            USBDeviceList(source: .picture(USBListRows(), running: false), vmName: "Omarchy") {}
-        }
-        lines.append("usb-list: before start \(Int(h1.rounded())) pt, running \(Int(h2.rounded())) pt, empty \(Int(h3.rounded())) pt")
+        sheet("sheet-6-usb-running") { USBDeviceList(source: .picture(running, running: true), vmName: "Omarchy") {} }
+        sheet("sheet-7-usb-empty") { USBDeviceList(source: .picture(USBListRows(), running: false), vmName: "Omarchy") {} }
         // The question, as USBAlertAsker shows it (light and dark).
         let q = USBQuestion(device: usbDevices[0], vmName: "Omarchy", waiting: 0)
         for dark in [false, true] {
@@ -226,7 +341,9 @@ enum RenderVMWindow {
         let fm = FileManager.default
         do {
             try fm.createDirectory(at: folder.appendingPathComponent("logs"), withIntermediateDirectories: true)
-            try "NAME='\(name)'\nCPUS=6\nMEM_MB=12288\nDISK_GB=64\nSSH_PORT=52222\nVM_USER=omarchy\n"
+            // Balanced on this Mac: the usual choice.
+            let t = Mac.tier(1)
+            try "NAME='\(name)'\nCPUS=\(t.cpus)\nMEM_MB=\(t.memoryGB * 1024)\nDISK_GB=64\nSSH_PORT=52222\nVM_USER=omarchy\n"
                 .write(to: folder.appendingPathComponent("vm.env"), atomically: true, encoding: .utf8)
             fm.createFile(atPath: folder.appendingPathComponent("efi-vars.fd").path, contents: Data())
             fm.createFile(atPath: folder.appendingPathComponent("ready").path, contents: Data())
@@ -238,39 +355,42 @@ enum RenderVMWindow {
         }
         return VMConfig.load(from: folder)
     }
+}
 
-    /// The width of the last picture drawn.
-    private static var lastWidth: CGFloat = 0
+/// An offscreen window that draws as the window in front would.
+@MainActor
+final class PictureWindow: NSWindow {
+    override var isKeyWindow: Bool { true }
+    override var isMainWindow: Bool { true }
 
-    /// In an offscreen window that is never ordered in, light and dark (a
-    /// new view each); returns the content's height. LayoutProbe then has
-    /// the frames of the dark one.
-    @discardableResult
-    private static func draw<V: View>(_ name: String, into dir: URL, _ content: () -> V) -> Double {
-        var height = 0.0
-        for dark in [false, true] {
-            LayoutProbe.frames = [:]
-            let view = NSHostingView(rootView: content().background(Color(nsColor: .windowBackgroundColor)))
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: WindowLayout.width, height: 400), styleMask: [.borderless],
-                             backing: .buffered, defer: false)
-            w.isReleasedWhenClosed = false
-            w.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-            w.contentView = view
-            // SwiftUI settles on the next passes of the run loop (FitScroll
-            // learns its content's height there).
-            for _ in 0..<3 {
-                view.frame = NSRect(origin: .zero, size: view.fittingSize)
-                view.layoutSubtreeIfNeeded()
-                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-            }
-            height = Double(view.fittingSize.height)
-            lastWidth = view.fittingSize.width
-            view.frame = NSRect(origin: .zero, size: view.fittingSize)
-            view.layoutSubtreeIfNeeded()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-            WindowPicture.write(view, "\(name)\(dark ? "-dark" : "")", into: dir)
-            w.contentView = nil
-        }
-        return height
+    static func make<V: View>(_ root: V) -> NSWindow {
+        let w = PictureWindow(contentRect: NSRect(x: 0, y: 0, width: WindowSize.width, height: RenderVMWindow.smallHeight),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        w.titleVisibility = .hidden
+        w.titlebarAppearsTransparent = true
+        let bar = NSToolbar(identifier: "OmacVM.picture")
+        bar.allowsUserCustomization = false
+        w.toolbar = bar
+        w.toolbarStyle = .unified
+        w.isReleasedWhenClosed = false
+        let host = NSHostingController(rootView: root)
+        host.sizingOptions = []
+        w.contentViewController = host
+        return w
+    }
+}
+
+/// The app's own settings, put back as they were after the pictures.
+@MainActor
+private struct SavedDefaults {
+    let app: [String: Any]
+
+    init() {
+        app = UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "") ?? [:]
+    }
+
+    func restore() {
+        if let id = Bundle.main.bundleIdentifier { UserDefaults.standard.setPersistentDomain(app, forName: id) }
     }
 }
