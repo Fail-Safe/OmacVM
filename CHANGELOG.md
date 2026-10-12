@@ -3,55 +3,47 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.0
 
-A new window for the VM's settings.
+A new settings window, Swipe out to macOS, Closing the window, every scale in Full screen including notch.
 
 - OmacVM.app: **the VM's settings in one window**. A header with the VM, its state and Start; a
   sidebar (General, Display, Input, Sharing & Devices, Storage & Updates) that scrolls to each
-  section and follows the scroll; every setting as a row with a short line under it. The window is
-  800 pt wide and opens as tall as the screen shows. Resources (Low to Best, or Custom with − and +)
-  and the disk's size change in the window itself; Start in and the escape combo are pictures to
-  pick. The settings keep their keys and files, so every choice you made stays. **Closing the
-  window** and **Swipe out to macOS** are new rows.
-- **Delete VM…** asks for the VM's name, typed exactly.
-- **Updates**: a banner under the header says what the new version brings, with What's New,
-  Later and Update Now (Update After Shutdown while the VM runs). No macOS notification.
-- **The app icon** has eight looks: click it in the window's header. OmacVM's own and seven
-  Omarchy themes (Tokyo Night, Catppuccin, Gruvbox, Flexoki Light, Catppuccin Latte, Rosé Pine,
-  Lupine). The Dock and the VM's window show it too; the app's own files stay as they are.
-- The new VM's setup, the USB devices list and All VMs have the same look, light and dark.
-- **Swipe out to macOS** (off by default): swipe past your first or last workspace and you are on
-  the macOS Space beside the VM, the same way ⌃⌥ Esc takes you there (this monitor or all). On the
-  right, the first swipe from your last workspace still opens a new empty one; swipe on from there.
-  Nothing happens when macOS has no Space on that side. A Magic Mouse's swipe counts too. Every
-  route: OmacVM.app's setting, the control centre, or `defaults write org.omacvm.gestures SwipeOut
-  -bool true`. Asked for by @epicoun (#342).
-- ⌃⌥ Esc no longer shows a notice in Omarchy, also when macOS could not switch the Space.
-- OmacVM.app: **Update VM** no longer turns off Chrome's and Brave's WebRTC video encoding on the
-  Mac's media engine (it runs the VM without its display, so it saw no encoder). Each start now
-  puts the flags back when they are missing, so a VM updated with 3.0.18 is fixed by its next start
-  (`omacvm check` said "WebRTC encoding" FAIL).
+  section. Resources and the disk's size change in the window itself (− and +). Every setting
+  keeps its key or file, so the choices you made stay.
+- OmacVM.app: **Closing the window**: *Shut down* (the default), *Keep running* (the VM goes on;
+  click OmacVM in the Dock to come back; Quit still shuts it down) or *Ask*. Asked for by
+  @Vocllum (#358).
+- **Swipe out to macOS** (off by default): swipe past your first or last workspace to the macOS
+  Space beside the VM, the same way ⌃⌥ Esc goes. On the right, the first swipe from your last
+  workspace still opens a new one. A Magic Mouse swipe counts too. Every route: OmacVM.app's
+  window, the control centre or `defaults write org.omacvm.gestures SwipeOut -bool true`. Asked
+  for by @epicoun (#342).
+- OmacVM.app, **Full screen including notch**: every Omarchy scale (1, 1.25, 1.6, 2, 3, 4) works,
+  without a black band, and the next start begins at that scale. Before, 1.25 and 1.6 became
+  1.33 and 2. Thanks @brianmerchant, whose PR and tests were the reference (#355).
 - OmacVM.app, **Full screen including notch**: with macOS's "Always show the menu bar in full
-  screen" on, it now covers the notch strip anyway while **Keep the Dock and hot corners away** is
-  on (the default); before, it fell back to normal full screen. With that setting off it still
-  falls back, and `omacvm check` now warns about it (#356, thanks @brianmerchant).
-- OmacVM.app, **Full screen including notch**: macOS's own reveal of the menu bar on the way into
-  full screen no longer shows over the strip, and qemu.log no longer says the menu bar came down
-  at the top edge when the pointer was elsewhere.
-- OmacVM.app, **Full screen including notch**: every one of Omarchy's scales (1, 1.25, 1.6, 2, 3,
-  4) now works there, without a black band. For a scale the panel's size does not fit, the VM gets
-  a few pixels more (2944x1912 for 1.6 on a 13-inch MacBook Air), scaled onto the panel; the next
-  start begins at that size. Before, 1.25 and 1.6 became 1.33 and 2 there. Thanks @brianmerchant,
-  whose PR #355 and its tests were the reference (#355).
-- OmacVM.app: **Closing the window** setting: *Shut down* (the default), *Keep running* (the VM
-  goes on without its window; click OmacVM in the Dock to come back to it; Quit still shuts it
-  down) or *Ask*. Asked for by @Vocllum (#358).
-- OmacVM.app: a VM window you cannot see (minimised, hidden, covered, on another Space) no longer
-  draws the guest's frames until it shows again.
-- **Control centre**, every route: the Mac's **Escape combo** (this monitor or all monitors) and
-  **Swipe out to macOS** next to **Magic Mouse swipe**, the same settings as OmacVM.app's window.
-  On the Mac: `omacvm gestures` (`escape pointer|all`, `swipe-out on|off`, `mouse-swipe 3|4`).
+  screen" on, the strip is covered anyway while **Keep the Dock and hot corners away** is on (the
+  default). With that off it still falls back to normal full screen, and `omacvm check` warns
+  (#356, @brianmerchant).
+- OmacVM.app, **Full screen including notch**: macOS's own menu bar reveal on the way into full
+  screen no longer shows over the strip.
+- OmacVM.app: **Update VM** no longer turns off Chrome's and Brave's WebRTC video encoding. Each
+  start puts the flags back when they are missing, so a VM updated with 3.0.18 is fixed by its
+  next start.
+- OmacVM.app: a VM window you cannot see (minimised, hidden, covered, on another Space) draws no
+  frames until it shows again.
+- OmacVM.app: **updates** show as a banner under the header, with What's New, Later and Update
+  Now (Update After Shutdown while the VM runs). No macOS notification.
+- OmacVM.app: **Delete VM…** asks for the VM's name, typed exactly.
+- OmacVM.app: **the app icon** has eight looks (OmacVM's own and seven Omarchy themes): click it in
+  the window's header. The Dock and the VM's window show it too.
+- OmacVM.app: the new VM's setup, the USB devices list and All VMs have the same look, light and
+  dark.
+- ⌃⌥ Esc no longer shows a notice in Omarchy.
+- **Control centre**, every route: the Mac's **Escape combo** (this monitor or all) and **Swipe
+  out to macOS**, next to Magic Mouse swipe. On the Mac: `omacvm gestures` (`escape pointer|all`,
+  `swipe-out on|off`, `mouse-swipe 3|4`).
 
 ## 3.0.18
 
