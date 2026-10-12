@@ -454,8 +454,9 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 | Closing the window | `closeAction`: `shutdown`, `keepRunning`, `ask` (QEMU: `OMACVM_CLOSE_ACTION`) | `shutdown` | app |
 | Start in: Window / Full screen | `startFullScreen` (bool) | `true` | app |
 | Start in: Full screen including notch | `notch-mode`: `fullpanel` (`omacvm fullscreen`) | native (no file) | VM |
+| (no row) The guest's scale, for Full screen including notch's next start | `fullpanel-scale`: 1/120 steps, written by QEMU from the VM's display agent (#355) | none (the panel's own size) | VM |
 | Keep the Dock and hot corners away | `keepDockAway` (bool) | `true` | app |
-| Escape combo | Gestures `EscapeSwipe`: `pointer`, `all` | `pointer` (This monitor) | app |
+| Escape combo | Gestures `EscapeSwipe`: `pointer`, `all` (also the control centre, `omacvm gestures`) | `pointer` (This monitor) | app |
 | Magic Mouse swipe (with a Magic Mouse) | Gestures `MouseSwipeFingers`: 3, 4 | 4 | app |
 | Keyboard access | macOS: Accessibility ("control the computer") for the app | asked | Mac |
 | Mac input | `features` `mac-ime=on` (+ `mac-ime-pending` while stopped) | off | VM |
