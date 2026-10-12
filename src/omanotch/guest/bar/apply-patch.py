@@ -36,16 +36,18 @@ What the patch adds:
     covers the strip itself (/run/omacvm/host.env: OMACVM_FULLPANEL, the
     camera housing in Mac points), the bar on the built-in display sits in
     the strip, as tall as it, split around the housing, and reserves it
-    (windows start below it; black over full-screen windows and while the
-    bar is hidden). Only while the app says that output covers the whole
-    display in full screen ($XDG_RUNTIME_DIR/omacvm/displays.json); else
-    the bar is the normal one. notchcast does not run in such a boot.
+    (windows start below it; black over full-screen windows). Hidden
+    (Super+Shift+Space), it still reserves the strip but is see-through, so
+    Omarchy's wallpaper shows there up to the top edge. Only while the app
+    says that output covers the whole display in full screen
+    ($XDG_RUNTIME_DIR/omacvm/displays.json); else the bar is the normal one.
+    notchcast does not run in such a boot.
 """
 import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 20
+VERSION = 21
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -626,11 +628,14 @@ def main():
     // omarchy-notch-bar: role of this copy ("notch", "parked" or "").
     readonly property string notchRole: root.notchRoleFor(screen)
     // Over fullscreen the NOTCH copy stays mapped, even with the bar off, to
-    // paint the strip black. FullPanel's bar too, and while the bar is hidden
-    // it stays as a black strip, so the windows never go under the notch.
-    readonly property bool notchBlack: (notchRole === "notch" && root.notchFullscreen) ||
-                                       (notchRole === "fullpanel" && (root.notchFullscreen || root.barHidden))
-    readonly property bool parked: (root.barHidden && !notchBlack) || notchRole === "parked"
+    // paint the strip black. FullPanel's bar too.
+    readonly property bool notchBlack: (notchRole === "notch" || notchRole === "fullpanel") && root.notchFullscreen
+    // FullPanel's bar while the bar is hidden: it stays in the strip, so the
+    // windows never go under the notch, but shows nothing, so the wallpaper
+    // (Omarchy's background, over the whole output) shows up to the top edge.
+    readonly property bool notchClear: notchRole === "fullpanel" && root.barHidden && !root.notchFullscreen
+    readonly property bool parked: (root.barHidden && !notchBlack && !notchClear) || notchRole === "parked"
+    Binding { target: barWindow; property: "color"; value: "transparent"; when: barWindow.notchClear }
     readonly property bool notchLayout: notchRole !== ""
     // The parked copy is 1 px tall: panels open at its height + gap, so they
     // appear right below the notch strip instead of a bar height lower.
@@ -715,6 +720,7 @@ def main():
       anchors.fill: parent
       anchors.topMargin: barWindow.notchPadTop
       anchors.bottomMargin: barWindow.notchPadBottom
+      visible: !barWindow.notchClear
       sourceComponent: root.vertical ? verticalBar : horizontalBar
 ''')
 
@@ -818,16 +824,18 @@ def main():
     // omarchy-notch-bar: repaint trigger, see notchPokeSerial.
     Rectangle {
       x: 0; y: 0; width: 1; height: 1; z: -1
+      visible: !barWindow.notchClear
       color: root.transparent ? "transparent" : root.background
       opacity: root.notchPokeSerial % 2 ? 0.999 : 1
     }
-    // omarchy-notch-bar: black strip over fullscreen windows (FullPanel: also
-    // while the bar is hidden; it takes the clicks the hidden bar would get).
+    // omarchy-notch-bar: black strip over fullscreen windows. FullPanel's
+    // strip (black, or the wallpaper while the bar is hidden) takes the
+    // clicks, which would otherwise reach nothing there.
     Rectangle {
       anchors.fill: parent
       z: 1000
-      visible: barWindow.notchBlack
-      color: "black"
+      visible: barWindow.notchBlack || barWindow.notchClear
+      color: barWindow.notchBlack ? "black" : "transparent"
       MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; enabled: barWindow.notchRole === "fullpanel" }
     }
 ''')
