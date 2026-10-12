@@ -10,9 +10,13 @@ import SwiftUI
 /// centre's Full screen row.
 struct StartInRow: View {
     @ObservedObject var state: AppState
-    /// The window pictures: as on a Mac with or without a notch.
+    /// The window pictures: as on a Mac with or without a notch, with or
+    /// without macOS keeping the menu bar in full screen.
     var previewNotch: Bool?
+    var previewMenuBar: Bool? = nil
     @State private var fullScreen = Settings.startFullScreen
+    /// Keep the Dock away (its own row): the menu bar note follows it at once.
+    @AppStorage("keepDockAway") private var keepDockAway = true
     @State private var mode = NotchMode.native
     @State private var hasNotch = false
     @State private var ready = false
@@ -40,6 +44,21 @@ struct StartInRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 8)
             }
+            if menuBarNote {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("macOS always shows the menu bar in full screen, so the VM starts below it. Keep the Dock and hot corners away hides it.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Open Menu Bar Settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .layoutProbe("menu-bar-settings")
+                }
+                .padding(.top, 8)
+            }
         }
         .padding(EdgeInsets(top: 14, leading: 16, bottom: 12, trailing: 16))
         .onAppear { refresh() }
@@ -64,17 +83,14 @@ struct StartInRow: View {
         if let error { return (error, true) }
         guard current == .fullScreenNotch else { return nil }
         if !ready { return (NotchArea.notReady, false) }
-        if !Settings.keepDockAway && Self.menuBarAlwaysShown {
-            return ("macOS shows the menu bar in full screen (Control Center settings), so the VM starts below it. Keep the Dock and hot corners away hides it.", false)
-        }
-        return (StartIn.notchNote, false)
+        return menuBarNote ? nil : (StartIn.notchNote, false)
     }
 
-    /// macOS's "Automatically hide and show the menu bar: never" in full
-    /// screen (#356). With Keep the Dock away on, QEMU's immersive full screen
-    /// hides it anyway (b-3018); without, the VM starts below it.
-    static var menuBarAlwaysShown: Bool {
-        UserDefaults.standard.object(forKey: "AppleMenuBarVisibleInFullscreen") as? Bool ?? false
+    /// Including notch, macOS set to keep the menu bar in full screen, and
+    /// Keep the Dock away off: only then does the menu bar push the VM down
+    /// (#356, tested on a MacBook Air's notch).
+    private var menuBarNote: Bool {
+        current == .fullScreenNotch && (previewMenuBar ?? NotchArea.menuBarAlwaysShown()) && !keepDockAway
     }
 
     private func refresh() {
