@@ -26,7 +26,10 @@ echo "pacman $*" >> "$CALLS"
 case $1 in
   -T) for p in "${@:2}"; do [[ " $MISSING " == *" $p "* ]] && echo "$p"; done; exit 0 ;;
   -Q) [[ -s $S/$2.ver ]] || exit 1; echo "$2 $(cat "$S/$2.ver")" ;;
-  -Qi) [[ -s $S/$2.ver ]] || exit 1; printf 'Name            : %s\nPackager        : %s\n' "$2" "$(cat "$S/$2.packager")" ;;
+  # Field names in the user's language, as pacman's (here Chinese), unless the locale is C.
+  -Qi) [[ -s $S/$2.ver ]] || exit 1
+       if [[ ${LC_ALL:-${LANG:-C}} == C* ]]; then n=Name p=Packager; else n=名字 p=打包者; fi
+       printf '%-16s: %s\n%-16s: %s\n' "$n" "$2" "$p" "$(cat "$S/$2.packager")" ;;
   -Rns) for a in "${@:2}"; do [[ $a == -* ]] || { rm -f "$S/$a.ver"; [[ $a == omacvm-fcitx5-ime ]] && rm -f "$ROOT/usr/lib/omacvm-ime/build-info"; }; done ;;
   -U) for a in "$@"; do
         [[ $a == *.pkg.tar.* ]] || continue
@@ -82,7 +85,8 @@ run() {   # ARGS... ; env: INSTALLED BUILT_FOR FCITX MISSING MAKEPKG PKGADD KEEP
     fi
   fi
   : > "$T/calls"
-  OUT=$(CALLS=$T/calls S=$S ROOT=$ROOT OMACVM_IME_ROOT=$ROOT BUILT_SRC=$SRC MISSING=${MISSING:-} MAKEPKG=${MAKEPKG:-ok} \
+  # A VM in Chinese (#357): only what install.sh reads in C is in English.
+  OUT=$(LANG=zh_CN.UTF-8 LC_ALL= CALLS=$T/calls S=$S ROOT=$ROOT OMACVM_IME_ROOT=$ROOT BUILT_SRC=$SRC MISSING=${MISSING:-} MAKEPKG=${MAKEPKG:-ok} \
     PKGADD=${PKGADD:-ok} OMACVM_PKG_ADD=$T/bin/pkg-add PATH="$T/bin:$PATH" bash "$G/install.sh" me "$@" 2>&1); CODE=$?
 }
 called() { grep -qF -- "$1" "$T/calls" && echo yes || echo no; }

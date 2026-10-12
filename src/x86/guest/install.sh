@@ -29,7 +29,8 @@ HELLO=f0VMRgIBAQAAAAAAAAAAAAIAPgABAAAAeABAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAOA
 # (pacman's output read whole first: grep -q could end the pipe early, and pipefail
 # would count pacman's SIGPIPE as "not ours")
 PKG=omacvm-box64
-ours() { local i; i=$(pacman -Qi "$1" 2>/dev/null) || return 1; grep -q "^Packager *: $PACKAGER" <<<"$i"; }
+# pacman's field names follow the locale ("Packager" is 打包者 in Chinese): read in C.
+ours() { local i; i=$(LC_ALL=C pacman -Qi "$1" 2>/dev/null) || return 1; grep -q "^Packager *: $PACKAGER" <<<"$i"; }
 ver() { pacman -Q "$1" 2>/dev/null | awk '{ print $2 }' || true; }
 have() { ver $PKG; }
 old() { [[ -n $(ver box64) ]] && ours box64; }   # OmacVM's, under the old name

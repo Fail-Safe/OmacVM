@@ -28,7 +28,8 @@ LOG=$ROOT/var/log/omacvm-mac-ime.log
 PKG_ADD=${OMACVM_PKG_ADD:-$PWD/../../guest/pkg-add}
 SOURCES=(addon/omacvmime.cpp addon/protocol.cpp addon/protocol.h addon/omacvmime.conf)
 
-ours() { local i; i=$(pacman -Qi "$PKG" 2>/dev/null) || return 1; grep -q "^Packager *: $PACKAGER" <<<"$i"; }
+# pacman's field names follow the locale ("Packager" is 打包者 in Chinese): read in C.
+ours() { local i; i=$(LC_ALL=C pacman -Qi "$PKG" 2>/dev/null) || return 1; grep -q "^Packager *: $PACKAGER" <<<"$i"; }
 source_digest() { cat "${SOURCES[@]}" | sha256sum | cut -c1-16; }
 fcitx_version() { pacman -Q fcitx5 2>/dev/null | awk '{ print $2 }' || true; }
 built() { sed -n "s/^$1 //p" "$INFO" 2>/dev/null || true; }
