@@ -23,6 +23,11 @@ in more words.
 - OmacVM.app: in **Full screen including notch**, macOS's menu bar no longer slides in at the top
   edge while **Keep the Dock and hot corners away** is on (the default), as in normal full screen.
   With that setting off it still comes down at the top edge (3.0.16).
+- OmacVM.app: **keyboard sharing apps** (Synergy, Deskflow, Barrier, Input Leap) could lose the
+  keyboard to a VM started after them. A hidden switch puts OmacVM's keyboard taps at the end of
+  macOS's chain, so the sharing app sees the keys first: `defaults write org.omacvm.app
+  shareKeyboard -bool true`, then restart the VM. Trackpad gestures still go to Omarchy.
+  Reported by @javierburongarcia (#350).
 
 ## 3.0.17
 

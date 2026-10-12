@@ -321,7 +321,12 @@ OmacVM.app (QEMU's window code, mac-ime on only): ◀▶ Omarchy's Fcitx5 + Omac
   default true) → `OMACVM_MAC_SHORTCUTS=1` keeps them with macOS; false
   turns the switch on. Gestures' tap still takes ⌃⌥ Esc (and the old ⌃⌥⌘ Esc) first;
   QEMU's tap lets both through to it (omacvm-cocoa-escape-combo-tap.patch); the Bridge
-  still routes media keys.
+  still routes media keys. Keyboard sharing apps (Synergy, Deskflow, #350): the
+  hidden `shareKeyboard` (org.omacvm.app, off by default; the test identity's
+  org.omacvm.app.test) puts QEMU's tap (`OMACVM_KEYS_LAST=1`,
+  `omacvm-cocoa-keys-last.patch`), Gestures' and the Bridge's media-key tap at the
+  end of the chain (kCGTailAppendEventTap) instead of the head, so the sharing app
+  sees the keys first (docs/troubleshooting.md, 34).
 - Escape combo (Gestures): NEVER take the VM out of full screen or hide it
   (user, 2026-10-05). Out = macOS's own "Move left/right a space" shortcut
   (symbolic hotkeys 79/81, read per press: key, modifiers, enabled), posted
