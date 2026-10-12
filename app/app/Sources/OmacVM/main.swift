@@ -136,6 +136,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // The icon's look (the header's easter egg) in the Dock.
         AppIcon.apply()
+        // Test builds: pictures of the running app's windows on request.
+        TestSnapshots.start()
         // Before any VM start reads the Graphics setting.
         Settings.migrateVenusSwitch()
         // The control centre's Mac jobs run this app's omacvm when there is no checkout.
@@ -818,6 +820,11 @@ if CommandLine.arguments.dropFirst().first == "--key-access" {
 if CommandLine.arguments.dropFirst().first == "--vms-folder" {
     print(Paths.vmsRoot.path)
     exit(0)
+}
+
+// `OmacVM --settings-dump`: the VM window's settings as JSON (SettingsDump.swift).
+if CommandLine.arguments.dropFirst().first == SettingsDump.flag {
+    MainActor.assumeIsolated { SettingsDump.main() }
 }
 
 MainActor.assumeIsolated {

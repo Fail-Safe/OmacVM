@@ -435,6 +435,40 @@ guest's gateway is `.2`.
 | guest `/etc/environment.d/90-omacvm-utm.conf` | `WLR_NO_HARDWARE_CURSORS=1 AQ_NO_MODIFIERS=1 WLR_RENDERER_ALLOW_SOFTWARE=1` | hardware cursors and DRM modifiers misbehave on virtio-gpu |
 | guest user unit `omacvm-vdagent.service` (stock `spice-vdagent.service` masked globally) | reports the largest Hyprland monitor to spice-vdagentd, clipboard text via wl-copy/wl-paste | the stock agent is X11: on XWayland it sees Omanotch's notch strip beside the screen, reports 2× the width and vdagentd's pointer tablet then only reaches the left half |
 
+### OmacVM.app's VM window (`SettingsView.swift`, docs/design/settings-3.1)
+
+Every setting in the window, where it is kept, its default and whether it is
+per VM or for the app (every VM). The window reads them again when it comes to
+the front, so `omacvm` and the control centre changes show; 3.1 kept 3.0's keys,
+so an update keeps every choice. App-wide keys are in the app's domain
+(`org.omacvm.app`; the test identity `org.omacvm.app.test`) or Gestures'
+(`org.omacvm.gestures`; the test identity `org.omacvm.test.gestures`). VM files
+are in the VM's folder. `OmacVM --settings-dump` prints them all as the window
+reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
+3.0's files and the CLI.
+
+| Setting | Key or file | Default | Scope |
+|---|---|---|---|
+| Resources | `vm.env` `CPUS`, `MEM_MB` (`omacvm resources`) | the tier chosen at setup (Balanced) | VM |
+| Graphics | `graphics`: `auto`, `opengl`, `vulkan` (`omacvm graphics`) | `auto` (no file) | VM |
+| Closing the window | `closeAction`: `shutdown`, `keepRunning`, `ask` (QEMU: `OMACVM_CLOSE_ACTION`) | `shutdown` | app |
+| Start in: Window / Full screen | `startFullScreen` (bool) | `true` | app |
+| Start in: Full screen including notch | `notch-mode`: `fullpanel` (`omacvm fullscreen`) | native (no file) | VM |
+| Keep the Dock and hot corners away | `keepDockAway` (bool) | `true` | app |
+| Escape combo | Gestures `EscapeSwipe`: `pointer`, `all` | `pointer` (This monitor) | app |
+| Magic Mouse swipe (with a Magic Mouse) | Gestures `MouseSwipeFingers`: 3, 4 | 4 | app |
+| Keyboard access | macOS: Accessibility ("control the computer") for the app | asked | Mac |
+| Mac input | `features` `mac-ime=on` (+ `mac-ime-pending` while stopped) | off | VM |
+| Swipe out to macOS | Gestures `SwipeOut` (bool) | `false` | app |
+| Mac folder | `mac-folder` (the folder's path) | off (no file) | VM |
+| USB devices | `usb-enabled`, remembered devices `usb.json` | off | VM |
+| Fast network | `fast-network` + `features` `fast-network=on` | off | VM |
+| Disk | `disk.img`'s length, `vm.env` `DISK_GB`; `disk-jobs`, `disk-resize` | 64 GB at setup | VM |
+| VMs folder | `vmsRoot`, `otherVMsRoots` | `~/OmacVM` | app |
+| omacvm in Terminal | a link to the app's `omacvm` on the PATH | not installed | Mac |
+| Check for updates once a week | `~/Library/Application Support/omacvm/settings.json` `update_checks` (shared with the control centre) | `true` | app |
+| The icon's look (click the header's icon) | `appIconTheme`: `default` or an Omarchy theme's id | `default` | app |
+
 ## 5. Build pipeline (omacvm build)
 
 1. Questionnaire (see `build.sh` above); keyboard, timezone, language from the

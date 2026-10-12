@@ -1,0 +1,1014 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmacVM — VM settings, final</title>
+<style>
+:root{
+  --page:#E2E1DF; --win:#F4F4F2; --side:#E9E8E6; --bar:#F0EFED; --card:#ffffff;
+  --text:#1d1d1f; --sub:#66666c; --hair:rgba(0,0,0,0.07); --winborder:rgba(0,0,0,0.12);
+  --cardborder:rgba(0,0,0,0.07); --btn:#ffffff; --btnborder:rgba(0,0,0,0.16); --btntext:#1d1d1f;
+  --chip:rgba(0,0,0,0.06); --chev:#66666c; --accent:#0A84FF; --accentbtn:#007AFF;
+  --off:rgba(0,0,0,0.16); --tile:#F4F4F6; --tileborder:rgba(0,0,0,0.08); --icon:#48484e;
+  --panel:#FAFAF9; --keybg:#ffffff; --esc:#0A84FF;
+  --macsq:#ECECEE; --macsqs:#C9C9CE; --macsqt:#3C3C43; --svghair:rgba(0,0,0,0.1);
+  --red:#D70015; --green:#28A745; --amber:#FF9F0A; --track:rgba(0,0,0,0.1);
+  --pillbg:rgba(0,0,0,0.05); --segsel:#ffffff; --segselborder:rgba(0,0,0,0.1);
+  --knobborder:rgba(0,0,0,0.08); --cap:#3c3c43; --scroll:rgba(0,0,0,0.25);
+  --banner:#E4F0FE; --bannerbd:rgba(10,132,255,0.3);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --page:#1B1B1D; --win:#262628; --side:#202023; --bar:#2A2A2C; --card:#2C2C2E;
+    --text:#F5F5F7; --sub:#A1A1A6; --hair:rgba(255,255,255,0.09); --winborder:rgba(0,0,0,0.65);
+    --cardborder:rgba(255,255,255,0.06); --btn:#505053; --btnborder:rgba(255,255,255,0.07); --btntext:#F5F5F7;
+    --chip:rgba(255,255,255,0.12); --chev:#B5B5BA; --off:rgba(255,255,255,0.25);
+    --tile:#3A3A3C; --tileborder:rgba(255,255,255,0.07); --icon:#D5D5DA;
+    --panel:#333336; --keybg:#48484B; --esc:#6CB2FF;
+    --macsq:#48484B; --macsqs:#5A5A5E; --macsqt:#E5E5EA; --svghair:rgba(255,255,255,0.08);
+    --red:#FF453A; --green:#30D158; --track:rgba(255,255,255,0.15);
+    --pillbg:rgba(255,255,255,0.1); --segsel:#636366; --segselborder:rgba(255,255,255,0.08);
+    --knobborder:rgba(0,0,0,0.2); --cap:#D5D5DA; --scroll:rgba(255,255,255,0.3);
+    --banner:#1C3250; --bannerbd:rgba(10,132,255,0.4);
+  }
+}
+:root[data-theme="dark"]{
+  --page:#1B1B1D; --win:#262628; --side:#202023; --bar:#2A2A2C; --card:#2C2C2E;
+  --text:#F5F5F7; --sub:#A1A1A6; --hair:rgba(255,255,255,0.09); --winborder:rgba(0,0,0,0.65);
+  --cardborder:rgba(255,255,255,0.06); --btn:#505053; --btnborder:rgba(255,255,255,0.07); --btntext:#F5F5F7;
+  --chip:rgba(255,255,255,0.12); --chev:#B5B5BA; --off:rgba(255,255,255,0.25);
+  --tile:#3A3A3C; --tileborder:rgba(255,255,255,0.07); --icon:#D5D5DA;
+  --panel:#333336; --keybg:#48484B; --esc:#6CB2FF;
+  --macsq:#48484B; --macsqs:#5A5A5E; --macsqt:#E5E5EA; --svghair:rgba(255,255,255,0.08);
+  --red:#FF453A; --green:#30D158; --track:rgba(255,255,255,0.15);
+  --pillbg:rgba(255,255,255,0.1); --segsel:#636366; --segselborder:rgba(255,255,255,0.08);
+  --knobborder:rgba(0,0,0,0.2); --cap:#D5D5DA; --scroll:rgba(255,255,255,0.3);
+  --banner:#1C3250; --bannerbd:rgba(10,132,255,0.4);
+}
+
+body{margin:0;background:var(--page);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;align-items:center;
+  gap:14px;padding:36px 20px 64px}
+a{color:var(--accentbtn)}a:hover{text-decoration:underline}
+button{font-family:inherit}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.page-head{display:flex;align-items:center;gap:16px;max-width:900px;width:100%;justify-content:center;flex-wrap:wrap}
+.appbtn{border:none;background:none;padding:0;cursor:pointer;flex:none;line-height:0}
+.icnpop{position:absolute;top:44px;left:0;z-index:8;background:var(--card);border:1px solid var(--winborder);
+  border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,0.28);padding:10px;display:none;
+  grid-template-columns:repeat(4,36px);gap:8px}
+.icnpop.open{display:grid}
+.icnpop button{border:none;background:none;padding:2px;border-radius:8px;cursor:pointer;line-height:0}
+.icnpop button.sel{outline:2px solid var(--accent);outline-offset:1px}
+.expand{display:flex;flex-direction:column;gap:10px;padding:2px 0 2px}
+.expand .xrow{display:flex;align-items:center;gap:12px}
+.expand input[type=range]{flex:1;accent-color:var(--accent);margin:0}
+.cap{font-size:13px;color:var(--cap);line-height:1.5}
+.cap a{text-decoration:none}
+.themeseg{display:inline-flex;background:var(--chip);border-radius:7px;padding:2px;gap:1px;flex:none}
+.themeseg button{font-size:12px;color:var(--text);background:none;border:none;border-radius:5px;padding:3px 12px}
+.themeseg button.active{background:var(--segsel);border:0.5px solid var(--segselborder);font-weight:500}
+
+.window{width:800px;height:860px;min-height:500px;max-height:1400px;resize:vertical;overflow:hidden;
+  box-sizing:border-box;display:flex;flex-direction:column;background:var(--win);
+  border:1px solid var(--winborder);border-radius:10px;position:relative}
+.shroud{position:absolute;inset:0;background:rgba(0,0,0,0.25);display:none;align-items:flex-start;justify-content:center;z-index:5}
+.shroud.open{display:flex}
+.sheet{margin-top:52px;width:500px;max-width:90%;box-sizing:border-box;background:var(--win);
+  border:1px solid var(--winborder);border-radius:10px;box-shadow:0 16px 36px rgba(0,0,0,0.25);
+  display:flex;flex-direction:column;gap:12px;padding:16px;max-height:76%;overflow-y:auto;
+  animation:sheetin .18s ease}
+@keyframes sheetin{from{transform:translateY(-14px);opacity:0.4}to{transform:translateY(0);opacity:1}}
+.sheettitle{font-size:15px;font-weight:600}
+.sheetfoot{display:flex;justify-content:flex-end;gap:8px;padding-top:2px}
+.sheet input[type=range]{flex:1;accent-color:var(--accent);margin:0}
+.danger{background:var(--red);border:1px solid var(--red);color:#fff;font-weight:500}
+.danger:disabled{opacity:0.4;cursor:default}
+.sheet input[type=text]{font-family:inherit;font-size:13px;color:var(--text);background:var(--card);
+  border:1px solid var(--btnborder);border-radius:6px;padding:5px 9px;width:100%;box-sizing:border-box}
+.sheet .shdr{font-size:12px;font-weight:600;color:var(--sub);margin:2px 2px 0}
+
+.toolbar{flex:none;display:flex;align-items:center;gap:13px;padding:13px 20px 11px;
+  background:var(--bar);border-bottom:1px solid var(--hair)}
+.upbanner{flex:none;display:flex;align-items:center;gap:12px;padding:9px 16px;
+  background:var(--banner);border-bottom:1px solid var(--bannerbd)}
+.upbanner .bt{font-size:13px;font-weight:600}
+.lights{display:flex;gap:8px}
+.lights span{width:12px;height:12px;border-radius:6px;box-sizing:border-box;border:0.5px solid rgba(0,0,0,0.15)}
+.idname{display:flex;align-items:center;gap:8px}
+.idname b{font-size:14px;font-weight:600}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--sub);
+  background:var(--pillbg);padding:1.5px 8px;border-radius:9px}
+.dot{width:6px;height:6px;border-radius:3px;background:#98989D;flex:none}
+.sub{font-size:11px;color:var(--sub);line-height:1.45}
+
+.card{background:var(--card);border:1px solid var(--cardborder);border-radius:10px;box-sizing:border-box}
+.sep{height:1px;background:var(--hair);margin-left:16px}
+.hdr{font-size:13px;font-weight:600;margin:20px 2px 8px}
+.hdr:first-child{margin-top:4px}
+.row{display:flex;align-items:center;gap:12px;padding:10px 16px}
+.lbl{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.l1{font-size:13px;display:flex;align-items:center;gap:6px}
+.val{font-size:12px;color:var(--sub);flex:none}
+
+.sw{position:relative;width:34px;height:20px;border-radius:10px;border:none;padding:0;flex:none;cursor:pointer;background:var(--off)}
+.sw span{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:8px;background:#fff;
+  border:0.5px solid var(--knobborder);box-sizing:border-box;transition:left .15s ease}
+.sw.on{background:var(--accent)}
+.sw.on span{left:16px}
+
+.btn{font-size:12px;color:var(--btntext);background:var(--btn);border:1px solid var(--btnborder);
+  border-radius:6px;padding:4px 11px;cursor:pointer}
+.primary{background:var(--accentbtn);border:1px solid var(--accentbtn);color:#fff;font-weight:500}
+.quietred{font-size:12px;color:var(--red);background:none;border:none;padding:0;cursor:pointer}
+.chip{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;
+  border-radius:5px;background:var(--chip);flex:none;border:none}
+.chipbtn{width:22px;height:22px;border-radius:6px;cursor:pointer}
+
+.popwrap{position:relative;display:inline-flex;align-items:center;flex:none}
+.popwrap select{appearance:none;-webkit-appearance:none;font-family:inherit;font-size:13px;
+  color:var(--text);background:transparent;border:none;padding:2px 24px 2px 2px;max-width:300px;cursor:pointer}
+.popwrap .chip{position:absolute;right:0;pointer-events:none}
+
+.seg{display:inline-flex;background:var(--chip);border-radius:7px;padding:2px;gap:1px;flex:none}
+.seg button{font-size:12px;color:var(--text);background:none;border:none;border-radius:5px;padding:3px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.seg button.sel{background:var(--segsel);border:0.5px solid var(--segselborder);font-weight:500}
+
+.opt{background:none;border:none;padding:0;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer}
+.ring{display:inline-block;padding:2px;border:2px solid transparent;border-radius:11px}
+.opt.sel .ring{border-color:var(--accent)}
+.optlab{font-size:12px;font-weight:500;color:var(--text);text-align:center}
+.opt.sel .optlab{font-weight:600}
+
+.resrow{display:flex;align-items:center;gap:12px}
+.reslab{font-size:12px;width:56px;flex:none}
+.resval{font-size:12px;color:var(--sub);width:92px;text-align:right;flex:none}
+.cpubar{flex:1;display:flex;gap:3px;height:8px}
+.cpubar i{flex:1;border-radius:2px;background:var(--track)}
+.cpubar i.on{background:var(--accent)}
+.membar{flex:1;height:8px;border-radius:4px;background:var(--track);position:relative;overflow:hidden;display:inline-block}
+.membar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:4px}
+.stepc{display:inline-flex;align-items:center;background:var(--chip);border-radius:6px;overflow:hidden}
+.stepc button{border:none;background:none;color:var(--text);width:24px;height:22px;font-size:14px;cursor:pointer;padding:0}
+.stepc b{min-width:50px;text-align:center;font-size:12px;font-weight:600}
+
+.body2{flex:1;display:flex;min-height:0}
+.toc{width:200px;flex:none;box-sizing:border-box;display:flex;flex-direction:column;gap:1px;
+  padding:12px 10px;background:var(--side);border-right:1px solid var(--hair)}
+.toc button{display:flex;align-items:center;gap:8px;padding:5px 8px;border:none;background:none;
+  border-radius:6px;font-size:13px;color:var(--text);text-align:left;width:100%;box-sizing:border-box;cursor:pointer}
+.toc button.cur{background:var(--accent);color:#fff}
+.navicon{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;border-radius:5.5px;flex:none}
+
+.content{flex:1;min-width:0;overflow-y:auto;padding:10px 24px 28px;position:relative;scroll-behavior:smooth}
+.content::-webkit-scrollbar{width:9px}
+.content::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:5px;border:2px solid transparent;background-clip:content-box}
+.content::-webkit-scrollbar-track{background:transparent}
+
+.bar{display:inline-block;width:110px;height:4px;border-radius:2px;background:var(--track);position:relative;overflow:hidden;flex:none}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}
+
+.svgPanel{fill:var(--panel)}
+.svgHair{stroke:var(--svghair)}
+.keyF{fill:var(--keybg)}
+.macsqF{fill:var(--macsq)} .macsqS{stroke:var(--macsqs)} .macsqT{fill:var(--macsqt)}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div class="cap"><b>Final — variant 1 as one page.</b> Fixed width 800 pt. Default height 860 pt; drag the window&rsquo;s bottom edge to resize (min 500 pt) &mdash; the list scrolls, sidebar and title bar stay. <a href="index.html">All variants</a></div>
+  <div class="themeseg" role="group" aria-label="Page appearance">
+    <button data-theme-btn="auto" class="active">Auto</button><button data-theme-btn="light">Light</button><button data-theme-btn="dark">Dark</button>
+  </div>
+  <div class="themeseg"><button id="bannerToggle" class="active" aria-pressed="true">Update banner</button></div>
+</div>
+
+<div class="window">
+
+  <div class="toolbar">
+    <div class="lights" aria-hidden="true">
+      <span style="background:#FF5F57"></span><span style="background:#FEBC2E"></span><span style="background:#28C840"></span>
+    </div>
+    <span style="position:relative;flex:none">
+      <button class="appbtn" id="appIcon" aria-label="OmacVM app icon">
+        <span id="appIconBox" style="display:block;width:34px;height:34px"><img src="omacvm-icon.png" width="34" height="34" alt="OmacVM"></span>
+      </button>
+      <div class="icnpop" id="icnPop" role="menu" aria-label="Icon look"></div>
+      <svg id="icnTpl" viewBox="0 0 1024 1024" width="30" height="30" style="display:none" aria-hidden="true">
+        <rect class="iBg" x="100" y="100" width="824" height="824" rx="185" fill="#26233a"></rect>
+        <circle class="iLoop" cx="330" cy="330" r="92" fill="none" stroke="#c4a7e7" stroke-width="44"></circle>
+        <circle class="iLoop" cx="694" cy="330" r="92" fill="none" stroke="#c4a7e7" stroke-width="44"></circle>
+        <circle class="iLoop" cx="330" cy="694" r="92" fill="none" stroke="#c4a7e7" stroke-width="44"></circle>
+        <circle class="iLoop" cx="694" cy="694" r="92" fill="none" stroke="#c4a7e7" stroke-width="44"></circle>
+        <rect class="iPad" x="330" y="330" width="364" height="364" fill="#1b1928"></rect>
+        <path class="iMark" fill="#e0def4" d="M362.00 367.56h300.60v22.82h-300.60zM362.00 389.78h22.82v22.82h-22.82zM500.89 389.78h22.82v22.82h-22.82zM639.78 389.78h22.82v22.82h-22.82zM362.00 412.00h22.82v22.82h-22.82zM406.44 412.00h117.27v22.82h-117.27zM573.11 412.00h45.04v22.82h-45.04zM639.78 412.00h22.82v22.82h-22.82zM362.00 434.22h22.82v22.82h-22.82zM406.44 434.22h22.82v22.82h-22.82zM595.33 434.22h22.82v22.82h-22.82zM639.78 434.22h22.82v22.82h-22.82zM362.00 456.44h22.82v22.82h-22.82zM406.44 456.44h22.82v22.82h-22.82zM595.33 456.44h22.82v22.82h-22.82zM639.78 456.44h22.82v22.82h-22.82zM362.00 478.67h22.82v22.82h-22.82zM406.44 478.67h22.82v22.82h-22.82zM595.33 478.67h22.82v22.82h-22.82zM639.78 478.67h22.82v22.82h-22.82zM362.00 500.89h67.27v22.82h-67.27zM595.33 500.89h22.82v22.82h-22.82zM639.78 500.89h22.82v22.82h-22.82zM362.00 523.11h22.82v22.82h-22.82zM406.44 523.11h22.82v22.82h-22.82zM595.33 523.11h22.82v22.82h-22.82zM639.78 523.11h22.82v22.82h-22.82zM362.00 545.33h22.82v22.82h-22.82zM406.44 545.33h22.82v22.82h-22.82zM595.33 545.33h22.82v22.82h-22.82zM639.78 545.33h22.82v22.82h-22.82zM362.00 567.56h22.82v22.82h-22.82zM406.44 567.56h22.82v22.82h-22.82zM595.33 567.56h22.82v22.82h-22.82zM639.78 567.56h22.82v22.82h-22.82zM362.00 589.78h22.82v22.82h-22.82zM406.44 589.78h211.71v22.82h-211.71zM639.78 589.78h22.82v22.82h-22.82zM362.00 612.00h22.82v22.82h-22.82zM500.89 612.00h22.82v22.82h-22.82zM639.78 612.00h22.82v22.82h-22.82zM362.00 634.22h161.71v22.82h-161.71zM550.89 634.22h111.71v22.82h-111.71z"></path>
+      </svg>
+    </span>
+    <div style="display:flex;flex-direction:column;gap:1px;min-width:0">
+      <div class="idname"><b>Omarchy</b><span class="pill"><span class="dot"></span>Stopped</span></div>
+      <div class="sub" style="display:flex;align-items:center;gap:5px">6 CPUs &middot; 12 GB memory &middot; 64 GB disk &middot; user omarchy
+        <svg width="13" height="13" viewBox="0 0 14 14" role="img" aria-label="About this VM"><title>Set when the VM was created. Change CPUs and memory under General, the disk under Storage.</title><circle cx="7" cy="7" r="5.6" fill="none" stroke="#A9A9AE" stroke-width="1.1"></circle><circle cx="7" cy="4.6" r="0.75" fill="#8E8E93"></circle><path d="M7 6.4v3.4" stroke="#8E8E93" stroke-width="1.2" stroke-linecap="round"></path></svg>
+      </div>
+    </div>
+    <span style="flex:1"></span>
+    <button class="btn" style="display:inline-flex;align-items:center;gap:6px" title="OmacVM in this VM is from an older app (3.0.17). Update VM brings it to 3.0.18."><span style="width:6px;height:6px;border-radius:3px;background:var(--amber)"></span>Update VM</button>
+    <button class="btn primary" style="padding:4px 18px">Start</button>
+  </div>
+
+  <div class="upbanner" id="upbanner">
+    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="10" fill="#0A84FF"></circle><path d="M11 5.5v8M7.4 10l3.6 3.7L14.6 10" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <div style="display:flex;flex-direction:column;gap:1px;min-width:0">
+      <span class="bt">OmacVM 3.0.19 is ready.</span>
+      <span class="sub">Faster Vulkan graphics, USB fixes and a smaller app.</span>
+    </div>
+    <span style="flex:1"></span>
+    <button style="font-size:12px;color:var(--accentbtn);background:none;border:none;padding:4px 6px;cursor:pointer" data-sheet="sheet-whatsnew">What&rsquo;s New</button>
+    <button class="btn" id="laterBtn">Later</button>
+    <button class="btn primary">Update Now</button>
+  </div>
+
+  <div class="body2">
+
+    <nav class="toc" aria-label="Sections">
+      <button data-target="sec-general" class="cur">
+        <span class="navicon" style="background:#8E8E93"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="#fff" stroke-width="1.3"><circle cx="7" cy="7" r="2.3"></circle><path d="M7 1.6v1.7M7 10.7v1.7M1.6 7h1.7M10.7 7h1.7M3.2 3.2l1.2 1.2M9.6 9.6l1.2 1.2M10.8 3.2 9.6 4.4M4.4 9.6 3.2 10.8"></path></svg></span>
+        General
+      </button>
+      <button data-target="sec-display">
+        <span class="navicon" style="background:#0A84FF"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="#fff" stroke-width="1.3"><rect x="1.8" y="2.8" width="10.4" height="6.8" rx="1.2"></rect><path d="M7 9.6v1.9M4.6 11.8h4.8" stroke-linecap="round"></path></svg></span>
+        Display
+      </button>
+      <button data-target="sec-input">
+        <span class="navicon" style="background:#FF9F0A"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="#fff" stroke-width="1.3"><rect x="1.5" y="3.6" width="11" height="6.8" rx="1.2"></rect><path d="M3.6 5.8h.9M5.9 5.8h.9M8.2 5.8h.9M3.6 8.2h6.8" stroke-linecap="round"></path></svg></span>
+        Input
+      </button>
+      <button data-target="sec-sharing">
+        <span class="navicon" style="background:#2DB44E"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="#fff" stroke-width="1.3"><circle cx="7" cy="7" r="5.2"></circle><ellipse cx="7" cy="7" rx="2.3" ry="5.2"></ellipse><path d="M1.8 7h10.4"></path></svg></span>
+        Sharing &amp; Devices
+      </button>
+      <button data-target="sec-storage">
+        <span class="navicon" style="background:#5E5CE6"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="#fff" stroke-width="1.3"><rect x="1.5" y="4.2" width="11" height="5.6" rx="1.3"></rect><circle cx="9.9" cy="7" r="0.9" fill="#fff" stroke="none"></circle></svg></span>
+        Storage &amp; Updates
+      </button>
+    </nav>
+
+    <div class="content" id="scroller">
+
+      <section id="sec-general">
+        <div class="hdr">General</div>
+        <div class="card">
+
+          <div style="padding:12px 16px 14px;display:flex;flex-direction:column;gap:11px">
+            <div style="display:flex;align-items:flex-start;gap:12px">
+              <div class="lbl">
+                <div class="l1">Resources</div>
+              </div>
+              <span class="seg" id="preseg" role="group" aria-label="Resource preset">
+                <button data-cpu="2" data-mem="4">Low</button>
+                <button data-cpu="4" data-mem="8">Balanced</button>
+                <button data-cpu="6" data-mem="16">High</button>
+                <button data-cpu="8" data-mem="24">Best</button>
+                <button data-custom="1" class="sel">Custom</button>
+              </span>
+            </div>
+            <div class="resrow">
+              <span class="reslab">CPUs</span>
+              <span class="cpubar" id="cpubar" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+              <span class="resval" id="cpuCap">6 of 12</span>
+            </div>
+            <div class="resrow">
+              <span class="reslab">Memory</span>
+              <span class="membar" aria-hidden="true"><i id="memFill" style="width:25%"></i></span>
+              <span class="resval" id="memCap">12 of 48 GB</span>
+            </div>
+            <div class="expand" id="resCustom">
+              <div class="xrow" style="gap:24px">
+                <span style="display:inline-flex;align-items:center;gap:8px;font-size:12px">CPUs
+                  <span class="stepc"><button id="cpuMinus" aria-label="Fewer CPUs">&minus;</button><b id="cpuVal">6</b><button id="cpuPlus" aria-label="More CPUs">+</button></span>
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:8px;font-size:12px">Memory
+                  <span class="stepc"><button id="memMinus" aria-label="Less memory">&minus;</button><b id="memVal">12 GB</b><button id="memPlus" aria-label="More memory">+</button></span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Graphics</div>
+              <div class="sub" id="gfxnote">Next start: Vulkan.</div>
+            </div>
+            <span class="popwrap">
+              <select aria-label="Graphics" id="gfxsel">
+                <option selected data-next="Vulkan">Automatic (Vulkan on this Mac)</option>
+                <option data-next="OpenGL">OpenGL</option>
+                <option data-next="Vulkan">Vulkan (experimental)</option>
+              </select>
+              <span class="chip" aria-hidden="true"><svg width="8" height="12" viewBox="0 0 8 12"><path d="M1.5 4.2 4 1.7l2.5 2.5M1.5 7.8 4 10.3l2.5-2.5" fill="none" stroke="var(--chev)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+            </span>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Closing the window</div>
+            </div>
+            <span class="seg" data-pick role="group" aria-label="Closing the window">
+              <button class="sel"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.3 3.6a4.3 4.3 0 1 0 5.4 0"></path><path d="M6 1.3v4.2"></path></svg>Shut down</button>
+              <button><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.3" y="2.8" width="9.4" height="6.4" rx="1.4"></rect><circle cx="8.6" cy="4.6" r="1" fill="currentColor" stroke="none"></circle></svg>Keep running</button>
+              <button><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6" cy="6" r="4.7"></circle><path d="M4.6 4.9a1.4 1.4 0 1 1 2 1.6c-.4.3-.6.5-.6 1" stroke-linecap="round"></path><circle cx="6" cy="9" r="0.6" fill="currentColor" stroke="none"></circle></svg>Ask</button>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section id="sec-display">
+        <div class="hdr">Display</div>
+        <div class="card">
+          <div style="padding:14px 16px 12px;display:flex;flex-direction:column;gap:4px">
+            <div class="l1" style="font-weight:600">Start in</div>
+            <div style="display:flex;justify-content:center;gap:16px;padding:12px 0 0" data-pick>
+              <button class="opt sel" style="width:166px">
+                <span class="ring"><svg width="150" height="91.9" viewBox="0 0 160 98" role="img" aria-label="Omarchy in a macOS window on the desktop">
+                  <defs><clipPath id="sA"><rect width="160" height="98" rx="8"></rect></clipPath><clipPath id="sAw"><rect x="40" y="22" width="80" height="58" rx="4"></rect></clipPath></defs>
+                  <g clip-path="url(#sA)">
+                    <rect width="160" height="98" fill="#D8E3F0"></rect>
+                    <rect width="160" height="10" fill="#F7F7F8"></rect>
+                    <circle cx="8" cy="5" r="1.4" fill="#8E8E93"></circle>
+                    <rect x="14" y="3.8" width="16" height="2.4" rx="1.2" fill="#B9B9BF"></rect>
+                    <rect x="138" y="3.8" width="14" height="2.4" rx="1.2" fill="#B9B9BF"></rect>
+                    <rect x="60" y="89" width="40" height="5" rx="2.5" fill="rgba(255,255,255,0.85)"></rect>
+                    <g clip-path="url(#sAw)">
+                      <rect x="40" y="22" width="80" height="58" fill="#E9E0D6"></rect>
+                      <rect x="40" y="22" width="80" height="10" fill="#F2ECE4"></rect>
+                      <circle cx="46.5" cy="27" r="1.6" fill="#FF5F57"></circle>
+                      <circle cx="51.5" cy="27" r="1.6" fill="#FEBC2E"></circle>
+                      <circle cx="56.5" cy="27" r="1.6" fill="#28C840"></circle>
+                      <rect x="40" y="32" width="80" height="5" fill="#FAF4ED"></rect>
+                      <rect x="43" y="33.2" width="2.6" height="2.6" rx="0.8" fill="#D7827E"></rect>
+                      <rect x="47" y="33.2" width="2.6" height="2.6" rx="0.8" fill="#D5CCC2"></rect>
+                      <rect x="51" y="33.2" width="2.6" height="2.6" rx="0.8" fill="#D5CCC2"></rect>
+                      <rect x="76" y="33.6" width="9" height="1.8" rx="0.9" fill="#575279"></rect>
+                      <rect x="44" y="41" width="44" height="35" rx="2" fill="#FFFAF3" stroke="#D7827E" stroke-width="1"></rect>
+                      <rect x="92" y="41" width="24" height="16" rx="2" fill="#FFFAF3" stroke="#DCD3C9"></rect>
+                      <rect x="92" y="60" width="24" height="16" rx="2" fill="#FFFAF3" stroke="#DCD3C9"></rect>
+                      <rect x="48" y="46" width="18" height="2.2" rx="1.1" fill="#286983"></rect>
+                      <rect x="48" y="51" width="28" height="2.2" rx="1.1" fill="#B5AFB8"></rect>
+                      <rect x="48" y="56" width="22" height="2.2" rx="1.1" fill="#B5AFB8"></rect>
+                      <rect x="48" y="61" width="14" height="2.2" rx="1.1" fill="#EA9D34"></rect>
+                    </g>
+                    <rect x="40" y="22" width="80" height="58" rx="4" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="0.7"></rect>
+                  </g>
+                  <rect x="0.5" y="0.5" width="159" height="97" rx="8" fill="none" class="svgHair"></rect>
+                </svg></span>
+                <span class="optlab">Window</span>
+              </button>
+              <button class="opt" style="width:166px">
+                <span class="ring"><svg width="150" height="91.9" viewBox="0 0 160 98" role="img" aria-label="Full screen, Omarchy's bar beside the notch via Omanotch">
+                  <defs><clipPath id="sB"><rect width="160" height="98" rx="8"></rect></clipPath></defs>
+                  <g clip-path="url(#sB)">
+                    <rect width="160" height="98" fill="#E9E0D6"></rect>
+                    <rect width="160" height="9" fill="#FAF4ED"></rect>
+                    <rect x="4" y="2.5" width="4" height="4" rx="1" fill="#D7827E"></rect>
+                    <rect x="10" y="2.5" width="4" height="4" rx="1" fill="#D5CCC2"></rect>
+                    <rect x="16" y="2.5" width="4" height="4" rx="1" fill="#D5CCC2"></rect>
+                    <rect x="22" y="2.5" width="4" height="4" rx="1" fill="#D5CCC2"></rect>
+                    <rect x="28" y="2.5" width="4" height="4" rx="1" fill="#D5CCC2"></rect>
+                    <rect x="74" y="3.2" width="13" height="2.6" rx="1.3" fill="#575279"></rect>
+                    <circle cx="147" cy="4.5" r="1.2" fill="#9893A5"></circle>
+                    <circle cx="152" cy="4.5" r="1.2" fill="#9893A5"></circle>
+                    <circle cx="157" cy="4.5" r="1.2" fill="#9893A5"></circle>
+                    <rect x="66" y="0" width="28" height="7.5" rx="2.5" fill="#0F0F10"></rect>
+                    <rect x="0" y="9" width="160" height="0.7" fill="rgba(0,0,0,0.18)"></rect>
+                    <rect x="6" y="15" width="90" height="75" rx="3" fill="#FFFAF3" stroke="#D7827E" stroke-width="1.2"></rect>
+                    <rect x="100" y="15" width="54" height="35" rx="3" fill="#FFFAF3" stroke="#DCD3C9"></rect>
+                    <rect x="100" y="54" width="54" height="36" rx="3" fill="#FFFAF3" stroke="#DCD3C9"></rect>
+                    <rect x="12" y="22" width="30" height="2.6" rx="1.3" fill="#286983"></rect>
+                    <rect x="12" y="28" width="52" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                    <rect x="12" y="34" width="40" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                    <rect x="12" y="40" width="58" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                    <rect x="12" y="46" width="24" height="2.6" rx="1.3" fill="#EA9D34"></rect>
+                    <rect x="106" y="22" width="24" height="2.6" rx="1.3" fill="#286983"></rect>
+                    <rect x="106" y="28" width="34" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                    <rect x="106" y="61" width="30" height="2.6" rx="1.3" fill="#907AA9"></rect>
+                    <rect x="106" y="67" width="22" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                  </g>
+                  <rect x="0.5" y="0.5" width="159" height="97" rx="8" fill="none" class="svgHair"></rect>
+                </svg></span>
+                <span class="optlab">Full screen</span>
+                <span class="sub">Notch via Omanotch</span>
+              </button>
+              <button class="opt" style="width:166px">
+                <span class="ring"><svg width="150" height="91.9" viewBox="0 0 160 98" role="img" aria-label="Full screen including notch, the VM draws to the top edge">
+                  <defs><clipPath id="sC"><rect width="160" height="98" rx="8"></rect></clipPath></defs>
+                  <g clip-path="url(#sC)">
+                    <rect width="160" height="98" fill="#E9E0D6"></rect>
+                    <rect width="160" height="9" fill="#FAF4ED"></rect>
+                    <rect x="4" y="2.5" width="4" height="4" rx="1" fill="#D7827E"></rect>
+                    <rect x="10" y="2.5" width="4" height="4" rx="1" fill="#D5CCC2"></rect>
+                    <rect x="16" y="2.5" width="4" height="4" rx="1" fill="#D5CCC2"></rect>
+                    <rect x="22" y="2.5" width="4" height="4" rx="1" fill="#D5CCC2"></rect>
+                    <rect x="28" y="2.5" width="4" height="4" rx="1" fill="#D5CCC2"></rect>
+                    <rect x="74" y="3.2" width="13" height="2.6" rx="1.3" fill="#575279"></rect>
+                    <circle cx="147" cy="4.5" r="1.2" fill="#9893A5"></circle>
+                    <circle cx="152" cy="4.5" r="1.2" fill="#9893A5"></circle>
+                    <circle cx="157" cy="4.5" r="1.2" fill="#9893A5"></circle>
+                    <rect x="66" y="0" width="28" height="7.5" rx="2.5" fill="#0F0F10"></rect>
+                    <rect x="6" y="15" width="90" height="75" rx="3" fill="#FFFAF3" stroke="#D7827E" stroke-width="1.2"></rect>
+                    <rect x="100" y="15" width="54" height="35" rx="3" fill="#FFFAF3" stroke="#DCD3C9"></rect>
+                    <rect x="100" y="54" width="54" height="36" rx="3" fill="#FFFAF3" stroke="#DCD3C9"></rect>
+                    <rect x="12" y="22" width="30" height="2.6" rx="1.3" fill="#286983"></rect>
+                    <rect x="12" y="28" width="52" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                    <rect x="12" y="34" width="40" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                    <rect x="12" y="40" width="58" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                    <rect x="12" y="46" width="24" height="2.6" rx="1.3" fill="#EA9D34"></rect>
+                    <rect x="106" y="22" width="24" height="2.6" rx="1.3" fill="#286983"></rect>
+                    <rect x="106" y="28" width="34" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                    <rect x="106" y="61" width="30" height="2.6" rx="1.3" fill="#907AA9"></rect>
+                    <rect x="106" y="67" width="22" height="2.6" rx="1.3" fill="#B5AFB8"></rect>
+                  </g>
+                  <rect x="0.5" y="0.5" width="159" height="97" rx="8" fill="none" class="svgHair"></rect>
+                </svg></span>
+                <span class="optlab">Full screen including notch</span>
+                <span class="sub">Experimental</span>
+              </button>
+            </div>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Keep the Dock and hot corners away</div>
+              <div class="sub">In full screen, the Dock and hot corners don&rsquo;t pop up.</div>
+            </div>
+            <button class="sw on" aria-pressed="true" aria-label="Keep the Dock and hot corners away"><span></span></button>
+          </div>
+          <div class="sep"></div>
+          <div style="padding:12px 16px;display:flex;flex-direction:column;gap:4px">
+            <div class="l1">Escape combo (&#8963;&#8997; Esc)</div>
+            <div class="sub">Releases the keyboard and pointer from the VM.</div>
+            <div style="display:flex;justify-content:center;gap:26px;padding:10px 0 0" data-pick>
+              <button class="opt sel" style="width:196px">
+                <span class="ring"><svg width="170" height="100" viewBox="0 0 170 100" role="img" aria-label="This monitor: only the pointer's display goes to macOS">
+                  <defs><clipPath id="eTa"><rect x="10" y="30" width="70" height="44" rx="3"></rect></clipPath><clipPath id="eTb"><rect x="90" y="30" width="70" height="44" rx="3"></rect></clipPath></defs>
+                  <rect width="170" height="100" rx="8" class="svgPanel"></rect>
+                  <rect x="61" y="6" width="48" height="14" rx="3" class="keyF" stroke="#0A84FF" stroke-width="1.2"></rect>
+                  <text x="85" y="16" text-anchor="middle" font-size="7" fill="var(--esc)">&#8963;&#8997; esc</text>
+                  <g clip-path="url(#eTa)">
+                    <rect x="10" y="30" width="70" height="44" fill="#D8E3F0"></rect>
+                    <rect x="10" y="30" width="70" height="5" fill="#F7F7F8"></rect>
+                    <rect x="33" y="69" width="24" height="3" rx="1.5" fill="rgba(255,255,255,0.85)"></rect>
+                  </g>
+                  <rect x="10" y="30" width="70" height="44" rx="3" fill="none" stroke="#8E8E93" stroke-width="1.4"></rect>
+                  <path d="M45 74v5M34 79h22" stroke="#8E8E93" stroke-width="1.6" stroke-linecap="round" fill="none"></path>
+                  <path d="M42 46v9.2l2.1-2 1.5 3.2 1.5-.7-1.5-3.2 2.8-.2z" fill="#1d1d1f" stroke="#fff" stroke-width="0.6"></path>
+                  <g clip-path="url(#eTb)">
+                    <rect x="90" y="30" width="70" height="44" fill="#E9E0D6"></rect>
+                    <rect x="90" y="30" width="70" height="5" fill="#FAF4ED"></rect>
+                    <rect x="93" y="31.2" width="2.6" height="2.6" rx="0.8" fill="#D7827E"></rect>
+                    <rect x="97" y="31.2" width="2.6" height="2.6" rx="0.8" fill="#D5CCC2"></rect>
+                    <rect x="122" y="31.6" width="8" height="1.8" rx="0.9" fill="#575279"></rect>
+                    <rect x="94" y="39" width="34" height="31" rx="2" fill="#FFFAF3" stroke="#D7827E"></rect>
+                    <rect x="131" y="39" width="25" height="14" rx="2" fill="#FFFAF3" stroke="#DCD3C9"></rect>
+                    <rect x="131" y="56" width="25" height="14" rx="2" fill="#FFFAF3" stroke="#DCD3C9"></rect>
+                    <rect x="98" y="44" width="16" height="2" rx="1" fill="#286983"></rect>
+                    <rect x="98" y="49" width="22" height="2" rx="1" fill="#B5AFB8"></rect>
+                    <rect x="98" y="54" width="14" height="2" rx="1" fill="#EA9D34"></rect>
+                  </g>
+                  <rect x="90" y="30" width="70" height="44" rx="3" fill="none" stroke="#8E8E93" stroke-width="1.4"></rect>
+                  <path d="M125 74v5M114 79h22" stroke="#8E8E93" stroke-width="1.6" stroke-linecap="round" fill="none"></path>
+                  <rect x="0.5" y="0.5" width="169" height="99" rx="8" fill="none" class="svgHair"></rect>
+                </svg></span>
+                <span class="optlab">This monitor</span>
+              </button>
+              <button class="opt" style="width:196px">
+                <span class="ring"><svg width="170" height="100" viewBox="0 0 170 100" role="img" aria-label="All monitors: both displays go to macOS">
+                  <defs><clipPath id="eAa"><rect x="10" y="30" width="70" height="44" rx="3"></rect></clipPath><clipPath id="eAb"><rect x="90" y="30" width="70" height="44" rx="3"></rect></clipPath></defs>
+                  <rect width="170" height="100" rx="8" class="svgPanel"></rect>
+                  <rect x="61" y="6" width="48" height="14" rx="3" class="keyF" stroke="#0A84FF" stroke-width="1.2"></rect>
+                  <text x="85" y="16" text-anchor="middle" font-size="7" fill="var(--esc)">&#8963;&#8997; esc</text>
+                  <g clip-path="url(#eAa)">
+                    <rect x="10" y="30" width="70" height="44" fill="#D8E3F0"></rect>
+                    <rect x="10" y="30" width="70" height="5" fill="#F7F7F8"></rect>
+                    <rect x="33" y="69" width="24" height="3" rx="1.5" fill="rgba(255,255,255,0.85)"></rect>
+                  </g>
+                  <rect x="10" y="30" width="70" height="44" rx="3" fill="none" stroke="#8E8E93" stroke-width="1.4"></rect>
+                  <path d="M45 74v5M34 79h22" stroke="#8E8E93" stroke-width="1.6" stroke-linecap="round" fill="none"></path>
+                  <path d="M42 46v9.2l2.1-2 1.5 3.2 1.5-.7-1.5-3.2 2.8-.2z" fill="#1d1d1f" stroke="#fff" stroke-width="0.6"></path>
+                  <g clip-path="url(#eAb)">
+                    <rect x="90" y="30" width="70" height="44" fill="#D8E3F0"></rect>
+                    <rect x="90" y="30" width="70" height="5" fill="#F7F7F8"></rect>
+                    <rect x="113" y="69" width="24" height="3" rx="1.5" fill="rgba(255,255,255,0.85)"></rect>
+                  </g>
+                  <rect x="90" y="30" width="70" height="44" rx="3" fill="none" stroke="#8E8E93" stroke-width="1.4"></rect>
+                  <path d="M125 74v5M114 79h22" stroke="#8E8E93" stroke-width="1.6" stroke-linecap="round" fill="none"></path>
+                  <rect x="0.5" y="0.5" width="169" height="99" rx="8" fill="none" class="svgHair"></rect>
+                </svg></span>
+                <span class="optlab">All monitors</span>
+              </button>
+            </div>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Magic Mouse swipe</div>
+              <div class="sub">Swipe to switch workspaces.</div>
+            </div>
+            <span class="seg" data-pick>
+              <button class="sel">2 fingers</button><button>3 fingers</button>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section id="sec-input">
+        <div class="hdr">Input</div>
+        <div class="card">
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Keyboard access
+                <svg width="13" height="13" viewBox="0 0 14 14" role="img" aria-label="More about keyboard access"><title>Without this permission, shortcuts like Command-Tab act on macOS instead of the VM. Granted in System Settings, Privacy &amp; Security.</title><circle cx="7" cy="7" r="5.6" fill="none" stroke="#A9A9AE" stroke-width="1.1"></circle><circle cx="7" cy="4.6" r="0.75" fill="#8E8E93"></circle><path d="M7 6.4v3.4" stroke="#8E8E93" stroke-width="1.2" stroke-linecap="round"></path></svg>
+              </div>
+              <div class="sub">Lets Mac shortcuts like &#8984;Tab reach the VM.</div>
+            </div>
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:12px"><span style="width:7px;height:7px;border-radius:4px;background:var(--green)"></span>Allowed</span>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Mac input (Chinese, Japanese, Korean)</div>
+            </div>
+            <button class="sw" aria-pressed="false" aria-label="Mac input"><span></span></button>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Swipe out to macOS</div>
+              <div class="sub" style="max-width:280px">Swipe past the first or last workspace to the macOS Space beside it.</div>
+            </div>
+            <svg width="240" height="64" viewBox="0 0 240 64" role="img" aria-label="Swiping past the first or last workspace lands on the macOS Space beside it">
+              <rect width="240" height="64" rx="8" class="svgPanel"></rect>
+              <rect x="12" y="22" width="36" height="24" rx="3" fill="#D8E3F0"></rect>
+              <rect x="12" y="22" width="36" height="3.5" fill="#F7F7F8"></rect>
+              <rect x="24" y="42" width="12" height="2" rx="1" fill="rgba(255,255,255,0.9)"></rect>
+              <rect x="12.5" y="22.5" width="35" height="23" rx="3" fill="none" class="svgHair"></rect>
+              <rect x="56" y="24" width="28" height="20" rx="3" fill="#E9E0D6"></rect>
+              <rect x="56" y="24" width="28" height="2.5" fill="#FAF4ED"></rect>
+              <rect x="59" y="29" width="12" height="9" rx="1" fill="#FFFAF3" stroke="#DCD3C9" stroke-width="0.6"></rect>
+              <rect x="73" y="29" width="8" height="9" rx="1" fill="#FFFAF3" stroke="#DCD3C9" stroke-width="0.6"></rect>
+              <text x="80" y="42.5" text-anchor="middle" font-size="6" fill="#575279">1</text>
+              <rect x="56.5" y="24.5" width="27" height="19" rx="3" fill="none" stroke="#D7827E" stroke-width="0.8"></rect>
+              <rect x="90" y="24" width="28" height="20" rx="3" fill="#E9E0D6"></rect>
+              <rect x="90" y="24" width="28" height="2.5" fill="#FAF4ED"></rect>
+              <rect x="93" y="29" width="12" height="9" rx="1" fill="#FFFAF3" stroke="#DCD3C9" stroke-width="0.6"></rect>
+              <rect x="107" y="29" width="8" height="9" rx="1" fill="#FFFAF3" stroke="#DCD3C9" stroke-width="0.6"></rect>
+              <text x="114" y="42.5" text-anchor="middle" font-size="6" fill="#575279">2</text>
+              <rect x="90.5" y="24.5" width="27" height="19" rx="3" fill="none" class="svgHair"></rect>
+              <rect x="124" y="24" width="28" height="20" rx="3" fill="#E9E0D6"></rect>
+              <rect x="124" y="24" width="28" height="2.5" fill="#FAF4ED"></rect>
+              <rect x="127" y="29" width="12" height="9" rx="1" fill="#FFFAF3" stroke="#DCD3C9" stroke-width="0.6"></rect>
+              <rect x="141" y="29" width="8" height="9" rx="1" fill="#FFFAF3" stroke="#DCD3C9" stroke-width="0.6"></rect>
+              <text x="148" y="42.5" text-anchor="middle" font-size="6" fill="#575279">3</text>
+              <rect x="124.5" y="24.5" width="27" height="19" rx="3" fill="none" class="svgHair"></rect>
+              <rect x="158" y="24" width="28" height="20" rx="3" fill="#E9E0D6"></rect>
+              <rect x="158" y="24" width="28" height="2.5" fill="#FAF4ED"></rect>
+              <rect x="158.5" y="24.5" width="27" height="19" rx="3" fill="none" stroke="#C9C0B6" stroke-dasharray="2.4 2" stroke-width="0.8"></rect>
+              <rect x="192" y="22" width="36" height="24" rx="3" fill="#D8E3F0"></rect>
+              <rect x="192" y="22" width="36" height="3.5" fill="#F7F7F8"></rect>
+              <rect x="204" y="42" width="12" height="2" rx="1" fill="rgba(255,255,255,0.9)"></rect>
+              <rect x="192.5" y="22.5" width="35" height="23" rx="3" fill="none" class="svgHair"></rect>
+              <text x="30" y="57" text-anchor="middle" font-size="6" fill="var(--sub)">macOS</text>
+              <text x="121" y="57" text-anchor="middle" font-size="6" fill="var(--sub)">Omarchy</text>
+              <text x="210" y="57" text-anchor="middle" font-size="6" fill="var(--sub)">macOS</text>
+              <path d="M60 16 C 54 8, 38 8, 30 15" stroke="#0A84FF" stroke-width="1.6" fill="none" stroke-linecap="round"></path>
+              <path d="M35 11.6 29.8 15.2l4.8 3" stroke="#0A84FF" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+              <path d="M180 16 C 186 8, 202 8, 210 15" stroke="#0A84FF" stroke-width="1.6" fill="none" stroke-linecap="round"></path>
+              <path d="M205 11.6 210.2 15.2l-4.8 3" stroke="#0A84FF" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+              <rect x="0.5" y="0.5" width="239" height="63" rx="8" fill="none" class="svgHair"></rect>
+            </svg>
+            <button class="sw" aria-pressed="false" aria-label="Swipe out to macOS"><span></span></button>
+          </div>
+        </div>
+      </section>
+
+      <section id="sec-sharing">
+        <div class="hdr">Sharing &amp; Devices</div>
+        <div class="card">
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Mac folder</div>
+              <div class="sub">~/Documents appears at ~/Mac in the VM.</div>
+            </div>
+            <button class="btn">Choose&hellip;</button>
+            <button class="sw on" aria-pressed="true" aria-label="Mac folder"><span></span></button>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">USB devices <span class="sub">(experimental)</span></div>
+              <div class="sub">Asks when you plug in a device. 1 remembered.</div>
+            </div>
+            <button class="btn" data-sheet="sheet-usb">Devices&hellip;</button>
+            <button class="sw on" aria-pressed="true" aria-label="USB devices"><span></span></button>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Fast network <span class="sub">(experimental)</span></div>
+              <div class="sub" style="max-width:420px">On. The service on this Mac is from another app version. Update&hellip; fixes it and asks for your password once.</div>
+            </div>
+            <button class="btn">Update&hellip;</button>
+            <button class="sw on" aria-pressed="true" aria-label="Fast network"><span></span></button>
+          </div>
+        </div>
+      </section>
+
+      <section id="sec-storage">
+        <div class="hdr">Storage &amp; Updates</div>
+        <div class="card">
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Disk</div>
+            </div>
+            <span class="bar"><i style="width:4px"></i></span>
+            <span class="val">8 MB used of 64 GB</span>
+            <button class="btn" id="diskToggle">Change&hellip;</button>
+          </div>
+          <div class="expand" id="diskExpand" style="display:none;padding:0 16px 12px">
+            <div class="xrow" style="gap:8px">
+              <span style="display:inline-flex;align-items:center;gap:8px;font-size:12px">New size
+                <span class="stepc"><button id="diskMinus" aria-label="Smaller disk">&minus;</button><b id="diskVal" style="min-width:60px">64 GB</b><button id="diskPlus" aria-label="Larger disk">+</button></span>
+              </span>
+              <span class="sub" style="margin-left:12px">Shrinking is not possible.</span>
+            </div>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Size on the Mac</div>
+            </div>
+            <span class="val">8.4 MB</span>
+            <button class="chip chipbtn" aria-label="Show in Finder"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="var(--chev)" stroke-width="1.2"><path d="M1.5 3.5a1 1 0 0 1 1-1h2.2l1 1.2h4.8a1 1 0 0 1 1 1v4.8a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1Z"></path></svg></button>
+            <button class="btn" data-sheet="sheet-allvms">All VMs&hellip;</button>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">VMs folder</div>
+              <div class="sub">Where new VMs are created.</div>
+            </div>
+            <span class="val">~/OmacVM &middot; 11.88 GB free</span>
+            <button class="btn">Change&hellip;</button>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Older VMs</div>
+              <div class="sub">2 VMs are still in the old hidden folder.</div>
+            </div>
+            <button class="btn">Move&hellip;</button>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Moving the VMs folder</div>
+            </div>
+            <span class="bar"><i style="width:44px"></i></span>
+            <span class="val">4.8 GB of 11.9 GB</span>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Another VM</div>
+            </div>
+            <button class="btn">Open Existing VM&hellip;</button>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Downloaded images</div>
+              <div class="sub">Install images kept for new VMs.</div>
+            </div>
+            <span class="val">6.6 GB</span>
+            <button class="btn">Remove&hellip;</button>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">omacvm in Terminal</div>
+              <div class="sub">Control OmacVM from the Terminal.</div>
+            </div>
+            <span class="val">Installed</span>
+          </div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="lbl">
+              <div class="l1">Check for updates once a week</div>
+              <div class="sub" id="updSub">Checked today at 14:02. OmacVM 3.0.19 is ready to install.</div>
+            </div>
+            <button class="btn">Check Now</button>
+            <button class="sw on" aria-pressed="true" aria-label="Check for updates once a week"><span></span></button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 4px 0">
+          <button class="quietred" data-sheet="sheet-delete">Delete VM&hellip;</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <div class="shroud" id="sheet-usb">
+    <div class="sheet" role="dialog" aria-label="USB Devices">
+      <div class="sheettitle">USB Devices</div>
+      <div class="shdr">Plugged in now</div>
+      <div class="card">
+        <div class="row">
+          <div class="lbl"><div class="l1">Logitech USB Receiver</div></div>
+          <span class="popwrap">
+            <select aria-label="Logitech USB Receiver">
+              <option selected>Ask each time</option><option>Connect to VM</option><option>Keep on Mac</option>
+            </select>
+            <span class="chip" aria-hidden="true"><svg width="8" height="12" viewBox="0 0 8 12"><path d="M1.5 4.2 4 1.7l2.5 2.5M1.5 7.8 4 10.3l2.5-2.5" fill="none" stroke="var(--chev)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+          </span>
+        </div>
+      </div>
+      <div class="shdr">Remembered</div>
+      <div class="card">
+        <div class="row">
+          <div class="lbl"><div class="l1">SanDisk Ultra USB 3.0</div></div>
+          <span class="popwrap">
+            <select aria-label="SanDisk Ultra USB 3.0">
+              <option>Ask each time</option><option selected>Connect to VM</option><option>Keep on Mac</option>
+            </select>
+            <span class="chip" aria-hidden="true"><svg width="8" height="12" viewBox="0 0 8 12"><path d="M1.5 4.2 4 1.7l2.5 2.5M1.5 7.8 4 10.3l2.5-2.5" fill="none" stroke="var(--chev)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+          </span>
+        </div>
+      </div>
+      <div class="sub">OmacVM asks when you plug in a new device.</div>
+      <div class="sheetfoot"><button class="btn primary" data-close>Done</button></div>
+    </div>
+  </div>
+
+  <div class="shroud" id="sheet-allvms">
+    <div class="sheet" role="dialog" aria-label="All VMs">
+      <div class="sheettitle">All VMs</div>
+      <div class="card">
+        <div class="row">
+          <div class="lbl"><div class="l1">Omarchy <span class="pill" style="margin-left:4px">this VM</span></div></div>
+          <span class="val">8.4 MB</span>
+        </div>
+        <div class="sep"></div>
+        <div class="row">
+          <div class="lbl"><div class="l1">Omarchy Test</div></div>
+          <span class="val">6.2 GB</span>
+        </div>
+        <div class="sep"></div>
+        <div class="row">
+          <div class="lbl"><div class="l1">Arch Dev</div></div>
+          <span class="val">12.4 GB</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="sub" style="flex:1">18.6 GB in ~/OmacVM</span>
+        <button class="chip chipbtn" aria-label="Show in Finder"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="var(--chev)" stroke-width="1.2"><path d="M1.5 3.5a1 1 0 0 1 1-1h2.2l1 1.2h4.8a1 1 0 0 1 1 1v4.8a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1Z"></path></svg></button>
+      </div>
+      <div class="sheetfoot"><button class="btn primary" data-close>Done</button></div>
+    </div>
+  </div>
+
+  <div class="shroud" id="sheet-delete">
+    <div class="sheet" role="dialog" aria-label="Delete VM" style="width:430px">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true" style="flex:none"><path d="M15 4 27 25H3Z" fill="none" stroke="var(--red)" stroke-width="2" stroke-linejoin="round"></path><path d="M15 12v6" stroke="var(--red)" stroke-width="2" stroke-linecap="round"></path><circle cx="15" cy="21.5" r="1.2" fill="var(--red)"></circle></svg>
+        <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:0">
+          <div class="sheettitle">Delete &ldquo;Omarchy&rdquo;?</div>
+          <div class="sub" style="font-size:12px">Its disk (64 GB) and everything in Omarchy go to the Trash.</div>
+          <input type="text" id="delName" placeholder="Type Omarchy to confirm" aria-label="Type the VM name to confirm">
+          <!-- While the VM is running, the field is replaced by "Shut down Omarchy first." and Delete stays disabled. -->
+        </div>
+      </div>
+      <div class="sheetfoot"><button class="btn" data-close>Cancel</button><button class="btn danger" id="delBtn" disabled>Delete</button></div>
+    </div>
+  </div>
+
+  <div class="shroud" id="sheet-whatsnew">
+    <div class="sheet" role="dialog" aria-label="What's New">
+      <div class="sheettitle">What&rsquo;s New in OmacVM 3.0.19</div>
+      <div class="card">
+        <div class="row" style="gap:9px">
+          <span style="width:6px;height:6px;border-radius:3px;background:var(--accent);flex:none"></span>
+          <span style="font-size:12.5px">Vulkan graphics is faster and now the automatic choice on this Mac.</span>
+        </div>
+        <div class="sep"></div>
+        <div class="row" style="gap:9px">
+          <span style="width:6px;height:6px;border-radius:3px;background:var(--accent);flex:none"></span>
+          <span style="font-size:12.5px">USB devices reconnect after sleep.</span>
+        </div>
+        <div class="sep"></div>
+        <div class="row" style="gap:9px">
+          <span style="width:6px;height:6px;border-radius:3px;background:var(--accent);flex:none"></span>
+          <span style="font-size:12.5px">The app is smaller and starts faster.</span>
+        </div>
+      </div>
+      <div class="sheetfoot"><button class="btn" data-close>Later</button><button class="btn primary" data-close>Update Now</button></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="cap" style="font-size:11.5px;max-width:800px">Rows shown only when present: Magic Mouse swipe (a Magic Mouse is in use) &middot; Older VMs (old hidden folder not empty) &middot; Moving the VMs folder (while a move runs) &middot; &ldquo;Full screen including notch&rdquo; (Macs with a notch). While a VM runs, the banner&rsquo;s button reads &ldquo;Update After Shutdown&rdquo; and the Delete sheet says &ldquo;Shut down Omarchy first.&rdquo;</div>
+
+<script>
+(function(){
+  var root = document.documentElement;
+  var themeBtns = document.querySelectorAll('[data-theme-btn]');
+  themeBtns.forEach(function(b){
+    b.addEventListener('click', function(){
+      var v = b.getAttribute('data-theme-btn');
+      if (v === 'auto') root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', v);
+      themeBtns.forEach(function(x){ x.classList.toggle('active', x === b); });
+    });
+  });
+
+  document.querySelectorAll('.sw').forEach(function(b){
+    b.addEventListener('click', function(){
+      b.classList.toggle('on');
+      b.setAttribute('aria-pressed', b.classList.contains('on') ? 'true' : 'false');
+    });
+  });
+
+  document.querySelectorAll('[data-pick]').forEach(function(group){
+    var opts = group.querySelectorAll(':scope > button, :scope > .opt');
+    opts.forEach(function(o){
+      o.addEventListener('click', function(){
+        opts.forEach(function(x){ x.classList.remove('sel'); });
+        o.classList.add('sel');
+      });
+    });
+  });
+
+  // Resources
+  var cpus = 6, mem = 12, MAXC = 12, MAXM = 48;
+  var segsCpu = Array.prototype.slice.call(document.querySelectorAll('#cpubar i'));
+  var preBtns = Array.prototype.slice.call(document.querySelectorAll('#preseg button'));
+  function renderRes(){
+    segsCpu.forEach(function(s, i){ s.classList.toggle('on', i < cpus); });
+    document.getElementById('cpuCap').textContent = cpus + ' of ' + MAXC;
+    document.getElementById('memCap').textContent = mem + ' of ' + MAXM + ' GB';
+    document.getElementById('memFill').style.width = (mem / MAXM * 100) + '%';
+    document.getElementById('cpuVal').textContent = cpus;
+    document.getElementById('memVal').textContent = mem + ' GB';
+  }
+  function selectPreset(btn){
+    preBtns.forEach(function(x){ x.classList.toggle('sel', x === btn); });
+  }
+  var resC = document.getElementById('resCustom');
+  preBtns.forEach(function(b){
+    b.addEventListener('click', function(){
+      if (b.hasAttribute('data-custom')) { resC.style.display = 'flex'; }
+      else {
+        cpus = parseInt(b.getAttribute('data-cpu'), 10);
+        mem = parseInt(b.getAttribute('data-mem'), 10);
+        resC.style.display = 'none';
+      }
+      selectPreset(b);
+      renderRes();
+    });
+  });
+  var dT = document.getElementById('diskToggle'), dE = document.getElementById('diskExpand');
+  dT.addEventListener('click', function(){
+    var open = dE.style.display !== 'none';
+    dE.style.display = open ? 'none' : 'flex';
+    dT.textContent = open ? 'Change…' : 'Done';
+  });
+
+  // App icon easter egg
+  var themes = [
+    {n:'Rose Pine', png:true},
+    {n:'Tokyo Night', bg:'#1f2335', pad:'#16161e', loop:'#7aa2f7', mark:'#c0caf5'},
+    {n:'Catppuccin', bg:'#313244', pad:'#1e1e2e', loop:'#cba6f7', mark:'#cdd6f4'},
+    {n:'Kanagawa', bg:'#2a2a37', pad:'#1f1f28', loop:'#957fb8', mark:'#dcd7ba'},
+    {n:'Flexoki Light', bg:'#FFFCF0', pad:'#F2F0E5', loop:'#24837B', mark:'#100F0F', border:'rgba(0,0,0,0.15)'},
+    {n:'Catppuccin Latte', bg:'#eff1f5', pad:'#e6e9ef', loop:'#8839ef', mark:'#4c4f69', border:'rgba(0,0,0,0.15)'},
+    {n:'Rose Pine Dawn', bg:'#faf4ed', pad:'#fffaf3', loop:'#d7827e', mark:'#575279', border:'rgba(0,0,0,0.15)'},
+    {n:'Gruvbox Light', bg:'#fbf1c7', pad:'#f2e5bc', loop:'#b57614', mark:'#3c3836', border:'rgba(0,0,0,0.15)'}
+  ];
+  var pop = document.getElementById('icnPop'), tpl = document.getElementById('icnTpl');
+  var box = document.getElementById('appIconBox'), appBtn = document.getElementById('appIcon');
+  function makeIcon(t, size){
+    if (t.png) {
+      var im = document.createElement('img');
+      im.src = 'omacvm-icon.png'; im.width = size; im.height = size; im.alt = '';
+      return im;
+    }
+    var s = tpl.cloneNode(true);
+    s.removeAttribute('id'); s.style.display = 'block';
+    s.setAttribute('width', size); s.setAttribute('height', size);
+    s.querySelector('.iBg').setAttribute('fill', t.bg);
+    if (t.border) { var bgEl = s.querySelector('.iBg'); bgEl.setAttribute('stroke', t.border); bgEl.setAttribute('stroke-width', '14'); }
+    s.querySelector('.iPad').setAttribute('fill', t.pad);
+    Array.prototype.forEach.call(s.querySelectorAll('.iLoop'), function(c){ c.setAttribute('stroke', t.loop); });
+    s.querySelector('.iMark').setAttribute('fill', t.mark);
+    return s;
+  }
+  themes.forEach(function(t, i){
+    var b = document.createElement('button');
+    b.setAttribute('aria-label', t.n); b.title = t.n;
+    if (i === 0) b.className = 'sel';
+    b.appendChild(makeIcon(t, 30));
+    b.addEventListener('click', function(e){
+      e.stopPropagation();
+      box.innerHTML = ''; box.appendChild(makeIcon(t, 34));
+      Array.prototype.forEach.call(pop.querySelectorAll('button'), function(x){ x.classList.remove('sel'); });
+      b.classList.add('sel');
+      pop.classList.remove('open');
+    });
+    pop.appendChild(b);
+  });
+  appBtn.addEventListener('click', function(e){ e.stopPropagation(); pop.classList.toggle('open'); });
+  document.addEventListener('click', function(e){ if (!pop.contains(e.target)) pop.classList.remove('open'); });
+  function toCustom(){ selectPreset(preBtns[preBtns.length - 1]); resC.style.display = 'flex'; }
+  document.getElementById('cpuMinus').addEventListener('click', function(){ if (cpus > 1) cpus--; toCustom(); renderRes(); });
+  document.getElementById('cpuPlus').addEventListener('click', function(){ if (cpus < MAXC) cpus++; toCustom(); renderRes(); });
+  document.getElementById('memMinus').addEventListener('click', function(){ if (mem > 2) mem -= 2; toCustom(); renderRes(); });
+  document.getElementById('memPlus').addEventListener('click', function(){ if (mem < 40) mem += 2; toCustom(); renderRes(); });
+  var diskGB = 64;
+  function renderDisk(){ document.getElementById('diskVal').textContent = diskGB + ' GB'; }
+  document.getElementById('diskMinus').addEventListener('click', function(){ if (diskGB > 64) diskGB -= 8; renderDisk(); });
+  document.getElementById('diskPlus').addEventListener('click', function(){ if (diskGB < 512) diskGB += 8; renderDisk(); });
+  renderRes();
+
+  // Sheets
+  function openSheet(id){
+    var s = document.getElementById(id); if (!s) return;
+    s.classList.add('open');
+    var c = s.querySelector('[data-close]'); if (c) c.focus();
+  }
+  function closeSheets(){
+    Array.prototype.forEach.call(document.querySelectorAll('.shroud.open'), function(s){ s.classList.remove('open'); });
+  }
+  document.querySelectorAll('[data-sheet]').forEach(function(b){
+    b.addEventListener('click', function(){ openSheet(b.getAttribute('data-sheet')); });
+  });
+  document.querySelectorAll('.shroud').forEach(function(s){
+    s.addEventListener('click', function(e){ if (e.target === s) closeSheets(); });
+  });
+  document.querySelectorAll('[data-close]').forEach(function(b){
+    b.addEventListener('click', closeSheets);
+  });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeSheets(); });
+  var dn = document.getElementById('delName'), db = document.getElementById('delBtn');
+  dn.addEventListener('input', function(){ db.disabled = dn.value !== 'Omarchy'; });
+  db.addEventListener('click', function(){
+    if (db.disabled) return;
+    closeSheets(); dn.value = ''; db.disabled = true;
+  });
+
+  // App update banner
+  var bt2 = document.getElementById('bannerToggle');
+  var bn = document.getElementById('upbanner');
+  var us = document.getElementById('updSub');
+  function syncBanner(on){
+    bn.style.display = on ? 'flex' : 'none';
+    bt2.classList.toggle('active', on);
+    bt2.setAttribute('aria-pressed', on ? 'true' : 'false');
+    us.textContent = on
+      ? 'Checked today at 14:02. OmacVM 3.0.19 is ready to install.'
+      : 'Checked today at 14:02. OmacVM 3.0.18 is the newest version.';
+  }
+  bt2.addEventListener('click', function(){ syncBanner(bn.style.display === 'none'); });
+  document.getElementById('laterBtn').addEventListener('click', function(){ syncBanner(false); });
+  syncBanner(true);
+
+  var gfx = document.getElementById('gfxsel');
+  var note = document.getElementById('gfxnote');
+  if (gfx) gfx.addEventListener('change', function(){
+    note.textContent = 'Next start: ' + gfx.selectedOptions[0].getAttribute('data-next') + '.';
+  });
+
+  var scroller = document.getElementById('scroller');
+  var links = Array.prototype.slice.call(document.querySelectorAll('.toc button'));
+  var secs = links.map(function(b){ return document.getElementById(b.getAttribute('data-target')); });
+  links.forEach(function(b, i){
+    b.addEventListener('click', function(){
+      scroller.scrollTo({ top: secs[i].offsetTop - scroller.offsetTop - 2, behavior: 'smooth' });
+    });
+  });
+  function spy(){
+    var top = scroller.scrollTop + 90;
+    var i = secs.length - 1;
+    while (i > 0 && (secs[i].offsetTop - scroller.offsetTop) > top) i--;
+    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) i = secs.length - 1;
+    links.forEach(function(b, j){ b.classList.toggle('cur', j === i); });
+  }
+  scroller.addEventListener('scroll', spy);
+  spy();
+})();
+</script>
+</body>
+</html>
