@@ -3,7 +3,8 @@
 # experimental; docs/adr/0043-mac-ime.md), as root in the VM:
 #   install.sh USER on        build and install the Fcitx5 module if it is missing
 #                             or older, the port rule, GTK through Fcitx5 and the
-#                             Chromium/Electron flag (both from the next login)
+#                             Chromium/Electron flag (both from the next login);
+#                             Fcitx5 itself without GTK's variable (no tip to unset it)
 #   install.sh USER off       remove all of that again (silent when nothing is there)
 #   install.sh USER --status  one line: STATE DETAIL, STATE one of ok | off | needed
 # The module (package omacvm-fcitx5-ime) is built here against the VM's own
@@ -22,13 +23,15 @@ PACKAGER="OmacVM <omacvm@users.noreply.github.com>"
 INFO=$ROOT/usr/lib/omacvm-ime/build-info
 RULE=$ROOT/etc/udev/rules.d/70-omacvm-ime.rules
 ENVD=$H/.config/environment.d/90-omacvm-ime.conf
+DROPIN=$H/.config/systemd/user/omarchy-fcitx5.service.d/90-omacvm-ime.conf
 MARK=$H/.local/state/omacvm/ime-flags
 FLAG=--enable-wayland-ime
 LOG=$ROOT/var/log/omacvm-mac-ime.log
 PKG_ADD=${OMACVM_PKG_ADD:-$PWD/../../guest/pkg-add}
 SOURCES=(addon/omacvmime.cpp addon/protocol.cpp addon/protocol.h addon/omacvmime.conf)
 
-ours() { local i; i=$(pacman -Qi "$PKG" 2>/dev/null) || return 1; grep -q "^Packager *: $PACKAGER" <<<"$i"; }
+# pacman's field names follow the locale ("Packager" is 打包者 in Chinese): read in C.
+ours() { local i; i=$(LC_ALL=C pacman -Qi "$PKG" 2>/dev/null) || return 1; grep -q "^Packager *: $PACKAGER" <<<"$i"; }
 source_digest() { cat "${SOURCES[@]}" | sha256sum | cut -c1-16; }
 fcitx_version() { pacman -Q fcitx5 2>/dev/null | awk '{ print $2 }' || true; }
 built() { sed -n "s/^$1 //p" "$INFO" 2>/dev/null || true; }
@@ -46,6 +49,37 @@ status() {
 # or went (only while the desktop session runs it).
 restart_fcitx() {
   systemctl --user -M "$U@" try-restart omarchy-fcitx5.service >/dev/null 2>&1 || true
+}
+
+# Fcitx5 checks its own environment at its start, and with GTK_IM_MODULE set
+# it shows a tip to unset it. GTK apps need it (the caret's place), Fcitx5
+# does not: only Omarchy's Fcitx5 service runs without it.
+DROPIN_TEXT='# OmacVM mac-ime: GTK apps keep GTK_IM_MODULE (environment.d/90-omacvm-ime.conf),
+# Fcitx5 runs without it, so it shows no tip to unset it. omacvm disable mac-ime removes this file.
+[Service]
+UnsetEnvironment=GTK_IM_MODULE'
+
+user_dir() {   # DIR under $H: made with each missing level owned by the user
+  local d=$H p IFS=/
+  for p in ${1#"$H"/}; do
+    d+=/$p
+    [[ -d $d ]] || { mkdir "$d" && chown "$U:$U" "$d" 2>/dev/null || true; }
+  done
+}
+
+dropin_on() {
+  [[ $(cat "$DROPIN" 2>/dev/null) != "$DROPIN_TEXT" ]] || return 0
+  user_dir "$(dirname "$DROPIN")"
+  printf '%s\n' "$DROPIN_TEXT" > "$DROPIN"
+  chown "$U:$U" "$DROPIN" 2>/dev/null || true
+  systemctl --user -M "$U@" daemon-reload >/dev/null 2>&1 || true
+}
+
+dropin_off() {
+  [[ -f $DROPIN ]] || return 0
+  rm -f "$DROPIN"
+  rmdir "$(dirname "$DROPIN")" 2>/dev/null || true
+  systemctl --user -M "$U@" daemon-reload >/dev/null 2>&1 || true
 }
 
 flags_on() {
@@ -88,6 +122,7 @@ if [[ $ACTION == off ]]; then
   fi
   if [[ -f $RULE ]]; then rm -f "$RULE"; udevadm control --reload >/dev/null 2>&1 || true; fi
   rm -f "$ENVD"
+  dropin_off
   flags_off
   (( ! changed )) || restart_fcitx
   exit 0
@@ -108,6 +143,7 @@ if [[ ! -f $ENVD ]] || ! grep -qxF 'GTK_IM_MODULE=fcitx' "$ENVD"; then
   printf '# OmacVM mac-ime: GTK apps type through Fcitx5 (omacvm disable mac-ime removes this file).\nGTK_IM_MODULE=fcitx\n' > "$ENVD"
   chown -R "$U:$U" "$H/.config/environment.d" 2>/dev/null || true
 fi
+dropin_on
 flags_on
 
 s=$(status)

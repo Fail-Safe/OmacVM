@@ -373,6 +373,22 @@ expect "check, app: camera turned off while it runs: fails, says restart" \
 expect "check, app: both: one row with both" \
   "fail: off for this VM, but the app still serves it: camera; on, but closed to the VM since its start: Omanotch (shut the VM down and start it again)" \
   "$(check_app "bridge=off battery=off camera=off")"
+# mac-ime is in the row too (#357): a VM started with it on was "off for
+# this VM, but the app still serves it" (the row passed no mac-ime: off).
+printf '%s\n' "OmacVM: Mac links: Omanotch off, Gestures on, Bridge off, battery off, camera on, Mac input methods on" > "$V/logs/qemu.log"
+expect "check, app: mac-ime on, its port this start: ok" \
+  "ok: Omanotch off, Gestures on, Bridge off, battery off, camera on, Mac input methods on" \
+  "$(check_app "omanotch=off bridge=off battery=off mac_ime=on")"
+expect "check, app: mac-ime turned off while it runs: fails, says restart" \
+  "fail: off for this VM, but the app still serves it: the Mac's input methods (shut the VM down and start it again)" \
+  "$(check_app "omanotch=off bridge=off battery=off mac_ime=off")"
+printf '%s\n' "OmacVM: Mac links: Omanotch off, Gestures on, Bridge off, battery off, camera on, Mac input methods off" > "$V/logs/qemu.log"
+expect "check, app: mac-ime off (a VM from before it: not in its env): ok" \
+  "ok: Omanotch off, Gestures on, Bridge off, battery off, camera on, Mac input methods off" \
+  "$(check_app "omanotch=off bridge=off battery=off")"
+expect "check, app: mac-ime turned on while it runs: fails, says restart" \
+  "fail: on, but closed to the VM since its start: the Mac's input methods (shut the VM down and start it again)" \
+  "$(check_app "omanotch=off bridge=off battery=off mac_ime=on")"
 # Touch ID: from 3.0.4 every start has its port ("Touch ID port on"), so
 # turning it on while the VM runs needs no restart; 3.0.2/3.0.3 added it only
 # with touch-id on at the start. It is never in the Mac links row (off is

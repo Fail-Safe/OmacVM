@@ -708,12 +708,18 @@ FEATURE=omanotch   # the Mac links row below, as before
 # OmacVM.app: what of the Mac this start of the VM may use (the app reads
 # the VM's features at start and says so in qemu.log). A feature that is off
 # must get nothing; one switched on while the VM runs waits for its next start.
+# The features app_links_stale reads, as the VM has them now (mac-ime off unless named).
+links_features() {
+  local k
+  for k in omanotch gestures bridge battery camera; do printf '%s=%s ' "$k" "$(feat "$k" on)"; done
+  printf 'mac-ime=%s' "$(feat mac_ime off)"
+}
 if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
   l=$(sed -n 's/^OmacVM: Mac links: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1)
   if [[ -z $l ]]; then
     skip "Mac links (app)" "this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)"
   else
-    fs=$(for k in omanotch gestures bridge battery camera; do printf '%s=%s ' "$k" "$(feat "$k" on)"; done)
+    fs=$(links_features)
     open=$(app_links_stale "$d" "$fs" off) closed=$(app_links_stale "$d" "$fs" on)
     m=""
     [[ -z $open ]] || m="off for this VM, but the app still serves it: $open"

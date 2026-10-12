@@ -26,7 +26,10 @@ echo "pacman $*" >> "$CALLS"
 case $1 in
   -T) for p in "${@:2}"; do [[ " $MISSING " == *" $p "* ]] && echo "$p"; done; exit 0 ;;
   -Q) [[ -s $S/$2.ver ]] || exit 1; echo "$2 $(cat "$S/$2.ver")" ;;
-  -Qi) [[ -s $S/$2.ver ]] || exit 1; printf 'Name            : %s\nPackager        : %s\n' "$2" "$(cat "$S/$2.packager")" ;;
+  # Field names in the user's language, as pacman's (here Chinese), unless the locale is C.
+  -Qi) [[ -s $S/$2.ver ]] || exit 1
+       if [[ ${LC_ALL:-${LANG:-C}} == C* ]]; then n=Name p=Packager; else n=名字 p=打包者; fi
+       printf '%-16s: %s\n%-16s: %s\n' "$n" "$2" "$p" "$(cat "$S/$2.packager")" ;;
   -Rns) for a in "${@:2}"; do [[ $a == -* ]] || { rm -f "$S/$a.ver"; [[ $a == omacvm-fcitx5-ime ]] && rm -f "$ROOT/usr/lib/omacvm-ime/build-info"; }; done ;;
   -U) for a in "$@"; do
         [[ $a == *.pkg.tar.* ]] || continue
@@ -37,9 +40,10 @@ case $1 in
 esac
 exit 0
 EOF
+# (perl's shasum warns about a locale the runner lacks: the VM's Chinese)
 cat > "$T/bin/sha256sum" <<'EOF'
 #!/bin/bash
-shasum -a 256 "$@"
+LC_ALL=C exec shasum -a 256 "$@"
 EOF
 cat > "$T/bin/udevadm" <<'EOF'
 #!/bin/bash
@@ -82,7 +86,8 @@ run() {   # ARGS... ; env: INSTALLED BUILT_FOR FCITX MISSING MAKEPKG PKGADD KEEP
     fi
   fi
   : > "$T/calls"
-  OUT=$(CALLS=$T/calls S=$S ROOT=$ROOT OMACVM_IME_ROOT=$ROOT BUILT_SRC=$SRC MISSING=${MISSING:-} MAKEPKG=${MAKEPKG:-ok} \
+  # A VM in Chinese (#357): only what install.sh reads in C is in English.
+  OUT=$(LANG=zh_CN.UTF-8 LC_ALL= CALLS=$T/calls S=$S ROOT=$ROOT OMACVM_IME_ROOT=$ROOT BUILT_SRC=$SRC MISSING=${MISSING:-} MAKEPKG=${MAKEPKG:-ok} \
     PKGADD=${PKGADD:-ok} OMACVM_PKG_ADD=$T/bin/pkg-add PATH="$T/bin:$PATH" bash "$G/install.sh" me "$@" 2>&1); CODE=$?
 }
 called() { grep -qF -- "$1" "$T/calls" && echo yes || echo no; }
@@ -107,12 +112,19 @@ expect "on: builds and installs" "0 yes yes" "$CODE $(called makepkg) $(called '
 expect "on: Fcitx5 restarted to load it" yes "$(called 'try-restart omarchy-fcitx5.service')"
 expect "on: the port rule (uaccess)" yes "$(grep -q 'ATTR{name}=="org.omacvm.ime", TAG+="uaccess"' "$ROOT/etc/udev/rules.d/70-omacvm-ime.rules" && echo yes)"
 expect "on: GTK through Fcitx5 from the next login" yes "$(grep -qx 'GTK_IM_MODULE=fcitx' "$H/.config/environment.d/90-omacvm-ime.conf" && echo yes)"
+# Fcitx5 itself without GTK_IM_MODULE (#357): with it, Fcitx5 shows a tip to unset it.
+DI=$H/.config/systemd/user/omarchy-fcitx5.service.d/90-omacvm-ime.conf
+expect "on: Omarchy's Fcitx5 service runs without GTK_IM_MODULE" "[Service]
+UnsetEnvironment=GTK_IM_MODULE" "$(grep -v '^#' "$DI" 2>/dev/null)"
+expect "on: the drop-in is for the unit it restarts" yes "$(grep -q 'try-restart omarchy-fcitx5.service' "$T/calls" && [[ -f $DI ]] && echo yes)"
+expect "on: the user manager reads the drop-in" yes "$(called "systemctl --user -M me@ daemon-reload")"
 expect "on: says so" yes "$(grep -q 'Fcitx5 module for Fcitx5 5.1.23-1 (GTK apps and Chromium from the next login)' <<<"$OUT" && echo yes)"
 expect "on: build folder gone" "" "$(ls "$ROOT/var/tmp")"
 
 # Again: nothing built, nothing restarted.
 KEEP=1 run on
 expect "on again: no build, no restart" "0 no no" "$CODE $(called makepkg) $(called 'try-restart omarchy-fcitx5.service')"
+expect "on again: drop-in unchanged, no reload" no "$(called daemon-reload)"
 
 # Chromium's flag: added once, only where the file exists, removed only if ours.
 mkdir -p "$H/.config"; printf -- '--ozone-platform=wayland\n' > "$H/.config/chromium-flags.conf"
@@ -151,6 +163,12 @@ KEEP=1 run off
 expect "off: package removed" "0 yes" "$CODE $(called 'pacman -Rns --noconfirm omacvm-fcitx5-ime')"
 expect "off: rule, GTK line and marker gone" "no no no" "$(has "$ROOT/etc/udev/rules.d/70-omacvm-ime.rules") $(has "$H/.config/environment.d/90-omacvm-ime.conf") $(has "$H/.local/state/omacvm/ime-flags")"
 expect "off: our flag removed, the user's kept" "--ozone-platform=wayland" "$(cat "$H/.config/chromium-flags.conf")"
+expect "off: Fcitx5's drop-in and its folder gone, manager reloaded" "no no yes" \
+  "$(has "$DI") $(has "$(dirname "$DI")") $(called "systemctl --user -M me@ daemon-reload")"
+KEEP=1 run on
+printf '[Service]\nEnvironment=FOO=1\n' > "$(dirname "$DI")/50-mine.conf"
+KEEP=1 run off
+expect "off: a drop-in of the user's for Fcitx5 stays" "no yes" "$(has "$DI") $(has "$(dirname "$DI")/50-mine.conf")"
 expect "off: Fcitx5 restarted (the module goes)" yes "$(called 'try-restart omarchy-fcitx5.service')"
 expect "off: then status says not built" "needed" "$(KEEP=1 run --status; echo "${OUT%% *}")"
 printf 'someone <a@b>\n' > "$S/omacvm-fcitx5-ime.packager"; echo 1.0.0-1 > "$S/omacvm-fcitx5-ime.ver"

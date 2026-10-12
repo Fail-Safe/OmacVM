@@ -23,7 +23,10 @@ echo "pacman $*" >> "$CALLS"
 case $1 in
   -T) for p in "${@:2}"; do [[ " $MISSING " == *" $p "* ]] && echo "$p"; done; exit 0 ;;
   -Q) [[ -s $S/$2.ver ]] || exit 1; echo "$2 $(cat "$S/$2.ver")" ;;
-  -Qi) [[ -s $S/$2.ver ]] || exit 1; printf 'Name            : %s\nPackager        : %s\n' "$2" "$(cat "$S/$2.packager")" ;;
+  # Field names in the user's language, as pacman's (here Chinese), unless the locale is C.
+  -Qi) [[ -s $S/$2.ver ]] || exit 1
+       if [[ ${LC_ALL:-${LANG:-C}} == C* ]]; then n=Name p=Packager; else n=名字 p=打包者; fi
+       printf '%-16s: %s\n%-16s: %s\n' "$n" "$2" "$p" "$(cat "$S/$2.packager")" ;;
   -Rns|-Rdd) for a in "${@:2}"; do [[ $a == -* ]] || rm -f "$S/$a.ver"; done ;;
   -U) for a in "$@"; do
         [[ $a == *.pkg.tar.* ]] || continue
@@ -93,7 +96,8 @@ run() {   # ARGS... ; env: INSTALLED PACKAGER BOX64 BOX64_PACKAGER REGISTERED MI
   echo "${BOX64_PACKAGER:-someone <a@b>}" > "$S/box64.packager"
   [[ ${REGISTERED:-no} == yes ]] && echo enabled > "$T/root/proc/sys/fs/binfmt_misc/box64"
   : > "$T/calls"
-  OUT=$(V=$V CALLS=$T/calls VARTMP=$T/vartmp S=$S BINFMT=$T/root/proc/sys/fs/binfmt_misc OMACVM_X86_ROOT=$T/root \
+  # A VM in Chinese (#357): only what install.sh reads in C is in English.
+  OUT=$(LANG=zh_CN.UTF-8 LC_ALL= V=$V CALLS=$T/calls VARTMP=$T/vartmp S=$S BINFMT=$T/root/proc/sys/fs/binfmt_misc OMACVM_X86_ROOT=$T/root \
     MISSING=${MISSING:-} MAKEPKG=${MAKEPKG:-ok} PKGADD=${PKGADD:-ok} OMACVM_PKG_ADD=$T/bin/pkg-add BINFMT_RESTART=${BINFMT_RESTART:-works} X86_RUNS=${X86_RUNS:-yes} \
     PATH="$T/bin:$PATH" bash "$R/src/x86/guest/install.sh" "$@" 2>&1); CODE=$?
 }
