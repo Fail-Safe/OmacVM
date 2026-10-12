@@ -41,6 +41,9 @@ int main(int argc, char **argv) {
   if (argc < 3) return 2;
   int want = argc - 2;
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
+  // TEST_SWIPE_OUT=1: Swipe out to macOS on, so each guest gets "X on" with
+  // its hello; its lines are read and acted on (here: no VM in front).
+  if (getenv("TEST_SWIPE_OUT")) swipeOut = 1;
   int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
   setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
   struct sockaddr_in a = { .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
@@ -67,6 +70,8 @@ int main(int argc, char **argv) {
     printf("accepted %d\n", k + 1);
     fflush(stdout);
   }
+  // The guests' lines, read on their own threads, are acted on here (the main queue).
+  if (getenv("TEST_SWIPE_OUT")) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.5, false);
   for (int i = 0; i < MAX_CLIENTS; i++)
     if (clients[i].fd >= 0) printf("live %s %s\n", clients[i].name, clients[i].ip);
   for (int i = 0; i < MAX_CLIENTS; i++)

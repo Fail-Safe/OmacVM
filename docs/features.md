@@ -163,15 +163,23 @@ is checked, and a Space change that lands late is waited for before anything
 else is tried.
 If the shortcut is off or did not move the Space (macOS 15 ignores it on a
 MacBook's built-in display), OmacVM swipes the Space like a trackpad. If that
-did not move it either, or macOS gives no Spaces information, Omarchy shows
-a short notice (which setting to turn on) and
-nothing else happens; the trackpad is macOS's, so a swipe still works.
+did not move it either, or macOS gives no Spaces information, nothing else
+happens (no notice); the trackpad is macOS's, so a swipe still works.
 Back in, if the shortcut does not land, the VM's window comes to the front
 and macOS shows its Space.
 
 In an OmacVM.app window, ⌃⌥ Esc gives the keyboard back to macOS (the app
 you were in before, else Finder); press it again in macOS to get the window
 back with the keyboard.
+
+**Swipe out to macOS** (off by default; OmacVM.app's setting, the control
+centre, or `defaults write org.omacvm.gestures SwipeOut -bool true` for
+Parallels, UTM and VMware Fusion): swipe past your first or last workspace and
+you are on the macOS Space beside the VM, as with ⌃⌥ Esc (the same *This
+monitor* / *All monitors*). Left of the first workspace is the Space on the
+left. On the right, the first swipe from your last workspace opens a new empty
+one as usual; swipe on from there to the Space on the right. With no Space on
+that side nothing happens. A Magic Mouse's swipe counts too.
 
 A **Magic Mouse** in the full-screen VM: two fingers sideways swipe
 Omarchy's workspaces, as four fingers on a trackpad (macOS's own Space

@@ -62,6 +62,11 @@
 //   P                                 Glide: macOS recognized a pinch (magnify)
 //   K <code> <0|1|2>                  UTM: a Cmd shortcut as Super+key (Linux keycode)
 //                                     (any app: a Magic Mouse flick as Back/Forward, 158/159)
+//   X <on|off>                        Swipe out to macOS on or off (on connect and when it changes)
+// and from the guest, once the handshake holds:
+//   X <left|right>                    a swipe went past its first or last workspace: out to the
+//                                     macOS Space on that side (only after "X on"; acted on only
+//                                     for the VM in front while captured, at most once a second)
 // and first, the handshake (any VM on these networks, and any Mac program on
 // 127.0.0.1, can connect; neither side ever sends the Bridge's token itself):
 //   C <guest nonce>                   from the guest: 32 hex digits
@@ -220,10 +225,13 @@ static int vmOffSpace;
 // 1 = UTM, 2 = Fusion, 3 = OmacVM.app, the index into listenAddrs). One connection per VM used to mean
 // two running VMs pushed each other off every two seconds.
 #define MAX_CLIENTS 8
-static struct { int fd, net, gestures, glide, target; char ip[32], name[256]; } clients[MAX_CLIENTS];
+static struct { int fd, net, gestures, glide, target; unsigned gen; char ip[32], name[256]; } clients[MAX_CLIENTS];
 static volatile int frontNet = -1;
 static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
+// A guest's connection is also read (its reader holds a copy of the socket):
+// shut down first, so that reader ends too.
+static void closeClient(int fd) { shutdown(fd, SHUT_RDWR); close(fd); }
 static CFMachPortRef tapPort;
 static CFRunLoopSourceRef tapSource;
 static CGEventMask tapMask;
@@ -336,7 +344,7 @@ static void sendTo(int all, const char *line, size_t len) {
     if (clients[i].fd < 0 || (!all && !clients[i].target)) continue;
     if (send(clients[i].fd, line, len, MSG_NOSIGNAL) < 0) {
       logf_("guest disconnected: %s", clients[i].ip);
-      close(clients[i].fd); clients[i].fd = -1; dropped = 1;
+      closeClient(clients[i].fd); clients[i].fd = -1; dropped = 1;
     }
   }
   if (dropped) retargetLocked(capturing);
@@ -1165,9 +1173,11 @@ static void logPermissions(void) {
   permissionsSeen(permFn());
 }
 
+static void swipeOutLook(void);
 static void updateCapture(CFRunLoopTimerRef t, void *info) {
   (void)info;
   logPermissions();
+  swipeOutLook();
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
   int net = vmNet(pid, name, &frontForeign);
@@ -1347,9 +1357,9 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
 // -> a Dock swipe (the events a three/four-finger swipe makes; on macOS 15
 // the shortcut does nothing from the notched built-in display's full-screen
 // Space, the swipe does) -> still in the VM's Space, or macOS gives no Spaces
-// information -> one log line and a short notice in Omarchy ("N <why>"),
-// nothing else: never Mission Control from one press (user, 2026-10-06:
-// "never"; only twice in a row, see missionControl). Back in:
+// information -> one log line, nothing else: no notice in Omarchy (user,
+// 2026-10-12: "never a notice"), never Mission Control from one press (user,
+// 2026-10-06: "never"; only twice in a row, see missionControl). Back in:
 // the shortcut did not land -> the VM's window to the front (macOS shows its
 // Space).
 // An OmacVM VM in a window with the keyboard has no Space of its own: the
@@ -1922,6 +1932,17 @@ static int mouseSwipeFingers(void) {
   return n;
 }
 
+// "SwipeOut" (OmacVM.app's "Swipe out to macOS", off by default; defaults
+// write org.omacvm.gestures SwipeOut -bool true): a swipe past the VM's first
+// or last workspace goes on to the macOS Space beside the VM's (#342). A
+// bool, a number or "yes"/"true", as CFPreferences reads a bool.
+static int swipeOutSetting(void) {
+  CFPreferencesAppSynchronize(GESTURES_DOMAIN);
+  Boolean valid = false;
+  int on = CFPreferencesGetAppBooleanValue(CFSTR("SwipeOut"), GESTURES_DOMAIN, &valid);
+  return valid && on;
+}
+
 static void loadSwipeSign(void) {
   CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("SwipeSign"), GESTURES_DOMAIN);
   int s = 0;
@@ -1958,6 +1979,7 @@ static CFDictionaryRef (*hotkeysFn)(void) = readHotkeys;
 static int (*keyFn)(Hotkey) = postHotkey;
 static CGEventFlags (*heldFn)(void) = heldNow;
 static int (*missionControlOpenFn)(void) = missionControlOpen;
+static int (*swipeOutFn)(void) = swipeOutSetting;
 static double verifyAfter = 0.8;   // s: a Space's animation is over by then
 static double cameFromEvery = 0.5; // s: the Spaces read at most this often for the same app
 
@@ -2101,13 +2123,12 @@ static void missionControl(void) {
 
 // No way out to macOS (the Space shortcut is off, macOS did not move the
 // Space, not even with a Dock swipe, or it gives no Spaces information): one
-// log line and a short notice in Omarchy, nothing else. Never Mission
-// Control (user, 2026-10-06: "never"). The trackpad and keys stay macOS's, as after
+// log line, nothing else. No notice in Omarchy (user, 2026-10-12: "never a
+// notice"; up to 3.0.18 the guest got "N <why>"), never Mission Control
+// (user, 2026-10-06: "never"). The trackpad and keys stay macOS's, as after
 // any escape; the combo again takes them back.
-static void noWayOut(const char *why, const char *notice) {
+static void noWayOut(const char *why) {
   logf_("escape combo: %s: nothing done", why);
-  char b[48]; int n = snprintf(b, sizeof b, "N %s\n", notice);
-  sendTo(0, b, (size_t)n);
 }
 
 // ---- the moves of the last press: per display, from its Space to the one beside it ----
@@ -2248,8 +2269,8 @@ static void checkLeave(int by) {
   } else if (!moved && retryOtherWay(^{ checkLeave(BY_DOCK); })) {
     return;
   }
-  if (shortcutOff) noWayOut("macOS's \"Move left/right a space\" shortcut is off and the swipe did not move", "space-shortcut-off");
-  else noWayOut("the Space did not change", "space-unchanged");
+  if (shortcutOff) noWayOut("macOS's \"Move left/right a space\" shortcut is off and the swipe did not move");
+  else noWayOut("the Space did not change");
 }
 
 static void checkEnter(void) {
@@ -2317,8 +2338,94 @@ static void leaveVM(void) {
   // The pointer is on a display without the VM: nothing to move there, the
   // keyboard goes to what it shows.
   if (nd && nw && !pointerOnVM && !all) { focusPointerDisplay(); return; }
-  if (!nd) noWayOut("macOS gives no Spaces information", "no-spaces");
-  else noWayOut("the VM's Space has no neighbour", "space-unchanged");
+  if (!nd) noWayOut("macOS gives no Spaces information");
+  else noWayOut("the VM's Space has no neighbour");
+}
+
+// ---- Swipe out to macOS (#342) ----
+// The guest decides (its workspaces as they were when the swipe began, the
+// fingers' way at the lift) and says "X left|right"; the Mac moves the way
+// the combo does (EscapeSwipe: the pointer's display, or each display that
+// shows the VM), only to that side: no Space there = nothing, no notice
+// (user, 2026-10-12). Then the same checks as the combo's (its shortcut, a
+// Dock swipe, the other direction once). Pressed in macOS, the combo goes
+// back into the VM, as after the combo.
+static volatile int swipeOut = -1;   // the setting as last read (written on the main thread), -1: not yet
+static double swipeOutLooked = -1, swipeOutAt = -1;
+static double swipeOutEvery = 1.0;   // s between two looks at the setting (the offline test sets 0)
+static double swipeOutGap = 1.0;     // s: at most one swipe out in this time
+
+// The setting, looked at with the capture check (at most once a second):
+// every guest learns a change ("X on|off"), a new one on connect.
+static void swipeOutLook(void) {
+  double now = monoNow();
+  if (swipeOutLooked >= 0 && now - swipeOutLooked < swipeOutEvery) return;
+  swipeOutLooked = now;
+  int on = swipeOutFn() ? 1 : 0;
+  if (on == swipeOut) return;
+  swipeOut = on;
+  logf_("swipe out to macOS %s", on ? "on" : "off");
+  sendTo(1, on ? "X on\n" : "X off\n", on ? 5 : 6);
+}
+
+static void leaveVMToward(int dir) {
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
+  CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
+  CGPoint p = pointerFn();
+  const char *side = dir < 0 ? "left" : "right";
+  nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0; movesCancelled = 0;
+  for (int i = 0; i < nd; i++) {
+    const DisplaySpaces *d = &ds[i];
+    int at = spaceIndex(d, d->current);
+    if (at < 0 || !showsVM(d, wins, nw) || !(all || CGRectContainsPoint(d->bounds, p))) continue;
+    if (at + dir < 0 || at + dir >= d->n) continue;   // no Space on that side of this display
+    if (addMove(d, dir, d->spaces[at + dir])) rememberOn(left, d->id, d->current);
+  }
+  if (!nMoves) {
+    logf_("swipe out to the %s: %s", side, nd ? "no macOS Space on that side: nothing done" : "macOS gives no Spaces information: nothing done");
+    return;
+  }
+  // As the combo: macOS gets the trackpad and keys back at once (the guest
+  // lets go), and the Dock swipe below is not dropped by our own tap.
+  capturing = 0; escaped = 1;
+  logf_("swipe out to the %s: capture off", side);
+  sendState("esc");
+  whenKeysUp(^{
+    if (runMoves(BY_SHORTCUT, "swipe out")) after(^{ checkLeave(BY_SHORTCUT); });
+    else { shortcutOff = 1; checkLeave(BY_SHORTCUT); }
+  }, 50);
+}
+
+// "X left|right" from a guest (main thread): only the VM in front, captured,
+// with the setting on, and one at a time.
+static void swipeOutFrom(int fd, unsigned gen, int dir) {
+  int target = 0, known = 0;
+  char who[256] = "";
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i].fd == fd && clients[i].gen == gen) {
+      known = 1; target = clients[i].target;
+      snprintf(who, sizeof who, "%s", clients[i].name[0] ? clients[i].name : clients[i].ip);
+    }
+  pthread_mutex_unlock(&sendLock);
+  const char *side = dir < 0 ? "left" : "right", *no = NULL;
+  double now = monoNow();
+  if (!known) no = "that guest is gone";
+  else if (swipeOut != 1) no = "the setting is off";
+  else if (!target || !frontIsVM || frontForeign) no = "its VM is not the one in front";
+  else if (!capturing) no = "not captured";
+  else if (swipeOutAt >= 0 && now - swipeOutAt < swipeOutGap) no = "one a moment ago";
+  if (no) { logf_("swipe out to the %s from \"%s\": %s: ignored", side, who, no); return; }
+  swipeOutAt = now;
+  logf_("swipe out to the %s from \"%s\"", side, who);
+  leaveVMToward(dir);
+}
+
+// One line a guest sent after its handshake (its reader thread): acted on
+// on the main thread. Anything else is skipped.
+static void guestLine(int fd, unsigned gen, const char *line) {
+  int dir = !strcmp(line, "X left") ? -1 : !strcmp(line, "X right") ? 1 : 0;
+  if (dir) dispatch_async(dispatch_get_main_queue(), ^{ swipeOutFrom(fd, gen, dir); });
 }
 
 // Into the VM again: the pointer's display (or, with "all", each display the
@@ -2671,7 +2778,8 @@ static ssize_t recvLine(int fd, char *buf, size_t cap) {
   return n ? (ssize_t)n : -1;
 }
 
-static void addClient(int c, int net, const char *ip, int gestures, int glide, const char *name) {
+static unsigned addClient(int c, int net, const char *ip, int gestures, int glide, const char *name) {
+  static unsigned gens;
   pthread_mutex_lock(&sendLock);
   int slot = -1;
   // The same VM reconnecting replaces its old connection. OmacVM.app's VMs
@@ -2686,11 +2794,11 @@ static void addClient(int c, int net, const char *ip, int gestures, int glide, c
         ((!strcmp(clients[i].ip, ip) && (!loopback || !strcmp(clients[i].name, name))) ||
          (net == NET_APP && clients[i].net == NET_APP && name[0] && !strcmp(clients[i].name, name)))) {
       if (strcmp(clients[i].ip, ip)) logf_("guest %s now comes from %s: its old connection closed", clients[i].ip, ip);
-      close(clients[i].fd); slot = i; break;
+      closeClient(clients[i].fd); slot = i; break;
     }
   for (int i = 0; slot < 0 && i < MAX_CLIENTS; i++) if (clients[i].fd < 0) slot = i;
-  if (slot < 0) { close(clients[0].fd); slot = 0; }   // full: drop the oldest slot
-  clients[slot].fd = c; clients[slot].net = net;
+  if (slot < 0) { closeClient(clients[0].fd); slot = 0; }   // full: drop the oldest slot
+  clients[slot].fd = c; clients[slot].net = net; clients[slot].gen = ++gens;
   clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
   snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
   snprintf(clients[slot].name, sizeof clients[slot].name, "%s", name);
@@ -2699,12 +2807,60 @@ static void addClient(int c, int net, const char *ip, int gestures, int glide, c
         net == NET_APP && strncmp(ip, "127.", 4) ? ", OmacVM.app on its fast network" : "");
   retargetLocked(capturing);
   int front = clients[slot].target;
+  unsigned gen = clients[slot].gen;
   pthread_mutex_unlock(&sendLock);
   const char *st = capturing && front ? "on\n" : "off\n";
   char b[96]; int n = snprintf(b, sizeof b, "S %s", st);
   send(c, b, (size_t)n, MSG_NOSIGNAL);
   n = sizeLine(b, sizeof b);   // the Mac's scrolling direction and the trackpad's size
   send(c, b, (size_t)n, MSG_NOSIGNAL);
+  if (swipeOut == 1) send(c, "X on\n", 5, MSG_NOSIGNAL);   // Swipe out to macOS (else off, as the guest starts)
+  return gen;
+}
+
+// After the handshake: the guest's lines ("X left|right"), until it goes or
+// its connection is closed here (closeClient shuts the socket down). rd is
+// this thread's own copy of the socket, so a closed fd number taken by a new
+// connection is never read here. Lines longer than the buffer are skipped.
+static void readGuest(int rd, int fd, unsigned gen) {
+  struct timeval none = { 0 };
+  setsockopt(rd, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof none);
+  char buf[256]; size_t n = 0; int skipping = 0;
+  for (;;) {
+    ssize_t r = recv(rd, buf + n, sizeof buf - 1 - n, 0);
+    if (r <= 0) break;
+    n += (size_t)r;
+    char *start = buf, *nl;
+    while ((nl = memchr(start, '\n', n - (size_t)(start - buf)))) {
+      *nl = 0;
+      if (!skipping) guestLine(fd, gen, start);
+      skipping = 0;
+      start = nl + 1;
+    }
+    n -= (size_t)(start - buf);
+    memmove(buf, start, n);
+    if (n == sizeof buf - 1) { n = 0; skipping = 1; }   // too long: the rest of it too
+  }
+  close(rd);
+}
+
+struct readerArg { int rd, fd; unsigned gen; };
+static void *readerMain(void *arg) {
+  struct readerArg r = *(struct readerArg *)arg; free(arg);
+  readGuest(r.rd, r.fd, r.gen);
+  return NULL;
+}
+
+// Its own thread per guest (at most MAX_CLIENTS live: a replaced or dropped
+// guest's reader ends with its socket).
+static void startReader(int rd, int fd, unsigned gen) {
+  struct readerArg *r = malloc(sizeof *r);
+  pthread_t th; pthread_attr_t at;
+  if (!r) { close(rd); return; }
+  *r = (struct readerArg){ rd, fd, gen };
+  pthread_attr_init(&at); pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+  if (pthread_create(&th, &at, readerMain, r)) { free(r); close(rd); }
+  pthread_attr_destroy(&at);
 }
 
 // A guest whose path went away (OmacVM.app moved it to another network, a
@@ -2767,9 +2923,12 @@ static void *greet(void *arg) {
   }
   if (ok) {
     base64Name(name64, name, sizeof name);
+    // Its reader's own copy, taken before anyone else can close c.
+    int rd = dup(c);
     // OmacVM.app's VMs on its fast network are the app's (its window in
     // front), whichever address they came in on.
-    addClient(c, g.net == NET_APP_FAST ? NET_APP : g.net, ip, gestures, glide, name);
+    unsigned gen = addClient(c, g.net == NET_APP_FAST ? NET_APP : g.net, ip, gestures, glide, name);
+    if (rd >= 0) startReader(rd, c, gen);
   } else {
     // A refused daemon tries again every 2 s; only the log line is throttled.
     // Keeping its socket open instead would not save anything: a daemon from

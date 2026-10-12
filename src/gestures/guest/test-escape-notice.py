@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Offline test of the guest's escape notifications (src/gestures/mac/test.sh):
 the daemon's own handle() with evdev stubbed and notify-send replaced; the
-hint file in a temp folder. No VM, no uinput.
-  "S esc"               (Mac helper before 3.0.0)  -> ⌃⌥⌘ Esc to take them back
-  "S esc ctrl-opt"                                  -> ⌃⌥ Esc to take them back
+hint file in a temp folder. No VM, no uinput. No notice when the escape combo
+is used (user, 2026-10-12: "never a notice"):
+  "S esc", "S esc ctrl-opt"                         -> nothing
   "S esc ctrl-opt-cmd"  (the old combo)             -> once per VM "New shortcut: ⌃⌥ Esc"
-  "N <why>"             (no way out to macOS)       -> what to turn on, or "still in the VM"
+  "N <why>"             (Mac helpers up to 3.0.18)  -> nothing
 """
 import importlib.machinery
 import importlib.util
@@ -70,15 +70,13 @@ def send(g, line):
     return list(shown)
 
 
-NEW = ("Trackpad gestures → macOS (⌃⌥ Esc to take them back)", 2500)
-OLD = ("Trackpad gestures → macOS (⌃⌥⌘ Esc to take them back)", 2500)
 HINT = ("New shortcut: ⌃⌥ Esc (⌃⌥⌘ Esc goes away in a later version)", 8000)
 
 tmp = tempfile.mkdtemp()
 hint = os.path.join(tmp, "lib", "escape-hint-shown")
 g = load(hint)
-check(send(g, b"S esc") == [OLD], "escape notice: a Mac helper before 3.0.0 ('S esc'): names ⌃⌥⌘ Esc, the only one it knows")
-check(send(g, b"S esc ctrl-opt") == [NEW], "escape notice: 'S esc ctrl-opt': names ⌃⌥ Esc")
+check(send(g, b"S esc") == [], "escape notice: a Mac helper before 3.0.0 ('S esc'): none")
+check(send(g, b"S esc ctrl-opt") == [], "escape notice: 'S esc ctrl-opt': none")
 check(send(g, b"S on") == [] and send(g, b"S off") == [], "escape notice: 'S on' / 'S off': none")
 desktop[0] = False
 check(send(g, b"S esc ctrl-opt-cmd") == [] and not os.path.exists(hint),
@@ -86,10 +84,10 @@ check(send(g, b"S esc ctrl-opt-cmd") == [] and not os.path.exists(hint),
 desktop[0] = True
 check(send(g, b"S esc ctrl-opt-cmd") == [HINT], "escape notice: the old combo: 'New shortcut: ⌃⌥ Esc' once")
 check(os.path.exists(hint), "escape notice: ... remembered for this VM")
-check(send(g, b"S esc ctrl-opt-cmd") == [NEW], "escape notice: the old combo again: the usual notice, naming ⌃⌥ Esc")
+check(send(g, b"S esc ctrl-opt-cmd") == [], "escape notice: the old combo again: none")
 g = load(hint)
-check(send(g, b"S esc ctrl-opt-cmd") == [NEW], "escape notice: after a daemon restart: not again")
-check(send(g, b"S esc some-new-word") == [NEW], "escape notice: a word from a newer helper: names ⌃⌥ Esc")
+check(send(g, b"S esc ctrl-opt-cmd") == [], "escape notice: after a daemon restart: not again")
+check(send(g, b"S esc some-new-word") == [], "escape notice: a word from a newer helper: none")
 locked = os.path.join(tmp, "locked")
 os.mkdir(locked)
 os.chmod(locked, stat.S_IRUSR | stat.S_IXUSR)
@@ -98,13 +96,8 @@ if os.access(locked, os.W_OK):
 else:
     g = load(os.path.join(locked, "sub", "escape-hint-shown"))
     first, again = send(g, b"S esc ctrl-opt-cmd"), send(g, b"S esc ctrl-opt-cmd")
-    check(first == [HINT] and again == [NEW], "escape notice: hint file not writable: shown once while running, logged")
+    check(first == [HINT] and again == [], "escape notice: hint file not writable: shown once while running, logged")
 os.chmod(locked, stat.S_IRWXU)
-off = send(g, b"N space-shortcut-off")
-check(len(off) == 1 and "Move left/right a space" in off[0][0] and off[0][1] == 6000,
-      "no way out: the Space shortcut is off: names the setting")
-check(len(send(g, b"N space-unchanged")) == 1 and "did not switch" in send(g, b"N space-unchanged")[0][0],
-      "no way out: the Space did not change: said once")
-check(len(send(g, b"N no-spaces")) == 1, "no way out: no Spaces information: said once")
-check(len(send(g, b"N some-new-word")) == 1, "no way out: a word from a newer helper: the general notice")
+check(all(send(g, w) == [] for w in (b"N space-shortcut-off", b"N space-unchanged", b"N no-spaces", b"N some-new-word")),
+      "no way out (N <why> from a Mac helper up to 3.0.18): no notice")
 sys.exit(1 if fails else 0)

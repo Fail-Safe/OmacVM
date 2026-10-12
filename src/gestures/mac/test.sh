@@ -29,7 +29,11 @@
 #    shape and marker (test-escape.c, a made-up world of displays and Spaces:
 #    nothing posted, swiped or activated). The marker is the same in
 #    Gestures, the Bridge and QEMU's patch. The guest names the combo pressed,
-#    and after the old one the new one, once per VM, and the no-way-out notice (test-escape-notice.py).
+#    and after the old one the new one, once per VM; no other notice (test-escape-notice.py).
+#    Swipe out to macOS (#342): "X left|right" from the guest in front moves the same way,
+#    only to that side (test-escape.c); the guest decides at the lift from Hyprland's
+#    workspaces at the swipe's start (test-swipe-out.py, a made-up Hyprland); the line
+#    goes over the real connection (2b).
 # 6. Scroll momentum takes only a trackpad's scrolling (built-in or Magic
 #    Trackpad, also one connected later): wheel mice, smooth-scrolling mice and
 #    a Magic Mouse go to the VM app one to one (test-scroll.c, made-up events
@@ -103,7 +107,16 @@ class Stub:
     pending = held = None
     touch = types.SimpleNamespace(down=False)
     def __getattr__(self, name): return lambda *a, **k: None
-if mode == "once":
+if mode == "swipe":
+    # Swipe out: once the Mac says "X on", a swipe past the first workspace.
+    real_set = g.SWIPE.set
+    def set_(on):
+        real_set(on)
+        print(f"guest: swipe out {'on' if on else 'off'}", flush=True)
+        if on:
+            g.SWIPE.send(b"X left\n")
+    g.SWIPE.set = set_
+if mode in ("once", "swipe"):
     t = threading.Thread(target=lambda: g.run(Stub(), Stub(), Stub()), daemon=True)
     t.start(); t.join(1.5)
 else:
@@ -211,6 +224,20 @@ expect "$T/out2" "accepted 2"
 if (( took <= 4 )); then echo "ok   connected again ${took} s after the switch"; else echo "FAIL connected again only after ${took} s" >&2; fail=1; fi
 expect "$T/out2" "live App VM 127.0.0.1"         # one connection: the old one was dropped
 reject "$T/out2" "live App VM 192.168.77.2"
+# 2b. Swipe out to macOS (#342): with it on the guest hears "X on" with the Mac's
+#     hello, and its "X left" is read and acted on by the Mac (no VM in front here:
+#     ignored, and said so); with it off the guest never hears "X on".
+TEST_SWIPE_OUT=1 mac "$T/out4" 3
+guest "App VM" app "" swipe OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest4" 2>&1 || true
+wait "$MAC" || true
+expect "$T/guest4" "guest: swipe out on"
+grep -q 'swipe out to the left from "App VM": its VM is not the one in front: ignored' "$T/out4" &&
+  echo "ok   swipe out: the guest's X left reached the Mac over its connection (and was checked)" ||
+  { echo "FAIL swipe out: the Mac did not read the guest's X left" >&2; cat "$T/out4" >&2; fail=1; }
+mac "$T/out5" 3
+guest "App VM" app "" swipe OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest5" 2>&1 || true
+wait "$MAC" || true
+reject "$T/guest5" "guest: swipe out on"
 # 4. The event tap after a VM app (re)starts; its place with shareKeyboard (a throwaway domain).
 clang -O1 -Wall -Wno-unused-function "-DSHARE_KEYBOARD_DOMAIN=CFSTR(\"$SHARE_DOMAIN\")" -o "$T/test-tap" "$HERE/test-tap.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
@@ -234,9 +261,12 @@ if [[ -n $m_gest && $(( m_gest )) == $(( m_bridge )) && $(( m_gest )) == $(( m_q
 else
   echo "FAIL key markers differ: Gestures '$m_gest', Bridge '$m_bridge', QEMU '$m_qemu'" >&2; fail=1
 fi
-# The guest's notice for "S esc <keys>": the old combo names the new one once per VM.
+# The guest's notice for "S esc <keys>": none, but the old combo names the new one once per VM.
 python3 "$HERE/../guest/test-escape-notice.py" "$HERE/../guest/omacvm-gestures" > "$T/notice" 2>&1 || fail=1
 grep -E '^(ok|FAIL|skip) ' "$T/notice"
+# Swipe out to macOS in the guest, against a made-up Hyprland (#342).
+python3 "$HERE/../guest/test-swipe-out.py" "$HERE/../guest/omacvm-gestures" > "$T/swipe-out" 2>&1 || fail=1
+grep -E '^(ok|FAIL|skip) ' "$T/swipe-out"
 # 6. Which scrolling scroll momentum takes.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \

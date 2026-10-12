@@ -4,9 +4,11 @@
 // user set it in com.apple.symbolichotkeys); in macOS back into the VM. Each
 // move is checked: not moved or the shortcut off -> a Dock swipe (macOS 15
 // ignores the shortcut from the notched display's full-screen Space); still
-// not moved, or no Spaces information -> a log line and "N <why>" for
-// Omarchy's notice, nothing else (never Mission Control). The VM is never taken out of full screen and
-// never hidden. Drives the helper's own
+// not moved, or no Spaces information -> a log line, nothing else (no notice
+// in Omarchy, never Mission Control). The VM is never taken out of full screen and
+// never hidden. Swipe out to macOS (#342): "X left|right" from the guest in
+// front moves the same way, only to that side, silently nothing without a
+// Space there. Drives the helper's own
 // tapCb with made-up key events and its capture logic (frontChanged) with
 // made-up front apps, against a made-up world of displays and Spaces whose
 // "macOS" acts on the user's binding: the window server is not asked,
@@ -170,6 +172,11 @@ static pid_t fakeFront(void) { return front; }
 static pid_t fakeFinder(void) { return finder; }
 static int fakeAll(void) { return all; }
 static int fakeVMWindow(pid_t pid, CGWindowID win) { (void)win; return vmAlive && alive(pid); }
+static int soOn;   // the made-up SwipeOut setting
+static int fakeSwipeOut(void) { return soOn; }
+// A guest's reader (readGuest) on its own thread, as greet() runs it.
+typedef struct { int rd, fd; unsigned gen; volatile int done; } ReaderArg;
+static void *readerThread(void *a) { ReaderArg *r = a; readGuest(r->rd, r->fd, r->gen); r->done = 1; return NULL; }
 static pid_t launcher;   // OmacVM.app's launcher: the VMs' process name, but no QEMU
 static int fakeIsQemu(pid_t pid) { return pid != launcher; }
 
@@ -261,7 +268,7 @@ int main(void) {
   vmWindowsFn = fakeVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll;
   warpFn = fakeWarp; warpSettle = 0; isQemuFn = fakeIsQemu;
   hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld;
-  swipeFn = fakeSwipe; saveSignFn = fakeSaveSign;
+  swipeFn = fakeSwipe; saveSignFn = fakeSaveSign; swipeOutFn = fakeSwipeOut; swipeOutEvery = 0; swipeOutGap = 0;
   verifyAfter = 0.01; cameFromEvery = 0; doublePress = 0; missionAppFn = fakeMissionApp; missionControlOpenFn = fakeMCOpen;
   mcClosing = 0;
   initKeymap();
@@ -413,8 +420,8 @@ int main(void) {
   d.n = 1;
   check(leaveDir(&d, 0) == 0, "plan: a single Space: no move");
 
-  // ---- Checked; no way out -> a notice, nothing else; never out of full
-  // screen, never hidden, never Mission Control ----
+  // ---- Checked; no way out -> nothing (a log line, no notice); never out
+  // of full screen, never hidden, never Mission Control ----
   layout(1, mini, 2, NULL, 0);
   owner[101] = terminal; owner[102] = vm;
   front = terminal; world[0].cur = 101; settle(vm, NET_APP); inVM(vm, 102);
@@ -422,7 +429,7 @@ int main(void) {
   keysIgnored = 1;
   check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 2 && world[0].cur == 102,
         "shortcut did not move, nor the swipe (both ways): the VM's Space stays");
-  check(!strcmp(sent(), "S esc ctrl-opt|N space-unchanged|"), "... Omarchy is told (N space-unchanged)");
+  check(!strcmp(sent(), "S esc ctrl-opt|"), "... no notice in Omarchy (no N line)");
   check(!mcKeys && !hidden && !went && keys == 1, "... no Mission Control, nothing hidden, no app switch, one key only");
   check(!capturing && escaped, "... capture off (the trackpad and keys are macOS's, as after any escape)");
   int r = press(K, HID, 0); const char *got = sent();
@@ -452,17 +459,17 @@ int main(void) {
         "the swipe bounced at the edge: the other direction lands and is kept");
   keysIgnored = 0; swipeMoves = 0; sent();
   settle(vm, NET_APP); sent(); press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
-  // The shortcut off: nothing posted, Omarchy says which setting.
+  // The shortcut off: nothing posted, no notice.
   setKey(HOTKEY_SPACE_LEFT, kCFBooleanFalse, 123, 8650752);
   check(press(K, HID, 0) == 1 && !keys && swipes == 2 && world[0].cur == 102 && !mcKeys && !hidden && !went,
         "Move left a space off: no key posted, the swipe does not move either, no Mission Control");
-  check(!strcmp(sent(), "S esc ctrl-opt|N space-shortcut-off|"), "... Omarchy is told (N space-shortcut-off)");
+  check(!strcmp(sent(), "S esc ctrl-opt|"), "... no notice in Omarchy");
   press(K, HID, 0); sent(); unsetKeys(); inVM(vm, 102);
-  // Every shortcut off, Mission Control's too: still nothing but the notice.
+  // Every shortcut off, Mission Control's too: still nothing.
   setKey(HOTKEY_SPACE_LEFT, kCFBooleanFalse, 123, 8650752); setKey(HOTKEY_SPACE_RIGHT, kCFBooleanFalse, 124, 8650752);
   setKey(HOTKEY_MISSION_CONTROL, kCFBooleanFalse, 126, 8650752);
   check(press(K, HID, 0) == 1 && !keys && world[0].cur == 102 && !hidden && !went &&
-        !strcmp(sent(), "S esc ctrl-opt|N space-shortcut-off|"), "every shortcut off: the notice only");
+        !strcmp(sent(), "S esc ctrl-opt|"), "every shortcut off: nothing, no notice");
   unsetKeys();
   press(K, HID, 0); sent(); inVM(vm, 102);
 
@@ -474,10 +481,10 @@ int main(void) {
   keysIgnored = 0;
   press(K, HID, 0); sent(); inVM(vm, 102);
 
-  // No Spaces information (an older or newer macOS without the call): the notice.
+  // No Spaces information (an older or newer macOS without the call): nothing.
   int saveN = nWorld; nWorld = 0;
-  check(press(K, HID, 0) == 1 && !spaceKeys && !mcKeys && !went && !hidden && !strcmp(sent(), "S esc ctrl-opt|N no-spaces|"),
-        "no Spaces information: N no-spaces, nothing else");
+  check(press(K, HID, 0) == 1 && !spaceKeys && !mcKeys && !went && !hidden && !strcmp(sent(), "S esc ctrl-opt|"),
+        "no Spaces information: nothing, no notice");
   nWorld = saveN;
   press(K, HID, 0); sent(); inVM(vm, 102);
 
@@ -519,10 +526,10 @@ int main(void) {
   check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 202 && world[1].cur == 302 && front == vm,
         "all: ... and both back into it");
   settle(vm, NET_APP); sent();
-  // Neither display moves: the notice, once.
+  // Neither display moves: nothing, no notice.
   keysIgnored = 1;
   check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 202 && world[1].cur == 302 && !mcKeys &&
-        !strcmp(sent(), "S esc ctrl-opt|N space-unchanged|"), "all, the shortcut ignored: nothing moves, one notice");
+        !strcmp(sent(), "S esc ctrl-opt|"), "all, the shortcut ignored: nothing moves, no notice");
   keysIgnored = 0;
   press(K, HID, 0); sent(); front = vm; world[0].cur = 202; world[1].cur = 302; settle(vm, NET_APP); sent();
   all = 0;
@@ -746,14 +753,14 @@ int main(void) {
     settle(vm, NET_APP); sent();
     r2 = press(K, HID, 0); sent();
     check(r2 == 1 && spaceKeys == 1 && world[0].cur == 503, "... and back in");
-    // Too late (never lands within the looks): the notice, still one key.
+    // Too late (never lands within the looks): no notice, still one key.
     // The slide lands only after the press is done (a fixed delay failed on a
     // slow CI runner: its timers stretched the looks past it).
     settle(vm, NET_APP); sent();
     front = safari; world[0].cur = 502; settle(vm, NET_APP); inVM(vm, 503);
     lateKeys = -1; int sm = swipeMoves; swipeMoves = 0;
     r2 = press(K, HID, 0); got2 = sent();
-    check(r2 == 1 && spaceKeys == 1 && strstr(got2, "N space-unchanged"), "lands only after every look (the swipe does nothing): the notice, one key");
+    check(r2 == 1 && spaceKeys == 1 && !strstr(got2, "N "), "lands only after every look (the swipe does nothing): no notice, one key");
     swipeMoves = sm;
     if (heldMove) { heldMove = 0; moveSpace(heldWorld, heldDir); }
     settleSteps();
@@ -962,6 +969,114 @@ int main(void) {
     check(press(K, HID, 0) == 0 && !mcKeys && mcShown, "MC open, no VM to go back to: the combo passes");
     vmAlive = 1; mcShown = 0; mcSim = 0;
     world[0].cur = 101; front = terminal; frontChanged(terminal, -1, 0, "", 11, 1); sent(); escaped = 0;
+  }
+
+  // ---- Swipe out to macOS (#342): "X left|right" from the guest in front ----
+  {
+    const uint64_t three3[] = { 101, 102, 103 };
+    layout(1, three3, 3, NULL, 0);
+    owner[101] = terminal; winOn[101] = 11; owner[102] = vm; winOn[102] = 22; owner[103] = safari; winOn[103] = 33;
+    pointer = CGPointMake(1000, 700); front = terminal; world[0].cur = 101;
+    frontChanged(terminal, -1, 0, "", 11, 1); sent();
+    inVM(vm, 102);
+    unsigned g0 = clients[0].gen;
+    soOn = 0; swipeOutLook();
+    check(!strcmp(sent(), "X off|") && swipeOut == 0, "swipe out: the setting read (off): every guest is told X off");
+    swipeOutLook();
+    check(!strcmp(sent(), ""), "swipe out: ... no change, nothing sent");
+    guestLine(clients[0].fd, g0, "X left"); keys = spaceKeys = 0; settleSteps();
+    check(!keys && world[0].cur == 102 && capturing && !strcmp(sent(), ""), "swipe out: setting off: X left ignored, nothing moves");
+    soOn = 1; swipeOutLook();
+    check(!strcmp(sent(), "X on|") && swipeOut == 1, "swipe out: turned on: X on to every guest");
+    keys = spaceKeys = went = hidden = mcKeys = 0;
+    guestLine(clients[0].fd, g0, "X left"); settleSteps();
+    check(spaceKeys == 1 && lastKey.keycode == 123 && world[0].cur == 101 && front == terminal,
+          "swipe out: X left: macOS's Move left a space, out to the Space on the left");
+    check(!strcmp(sent(), "S esc ctrl-opt|") && !capturing && escaped && !mcKeys && !hidden,
+          "swipe out: ... the guest lets go (S esc), capture off, no notice, no Mission Control, not hidden");
+    settle(vm, NET_APP); sent();
+    check(press(K, HID, 0) == 1 && world[0].cur == 102 && front == vm, "swipe out: ... the combo in macOS goes back into the VM");
+    settle(vm, NET_APP); sent();
+    keys = spaceKeys = 0;
+    guestLine(clients[0].fd, g0, "X right"); settleSteps();
+    check(spaceKeys == 1 && lastKey.keycode == 124 && world[0].cur == 103 && front == safari,
+          "swipe out: X right: Move right a space, out to the Space on the right");
+    sent(); settle(vm, NET_APP); sent();
+    check(press(K, HID, 0) == 1 && world[0].cur == 102 && front == vm, "swipe out: ... and back in with the combo");
+    settle(vm, NET_APP); sent();
+    // No Space on that side: nothing at all (not even a notice); capture stays.
+    const uint64_t last[] = { 101, 102 };
+    layout(1, last, 2, NULL, 0); world[0].cur = 102; settle(vm, NET_APP); sent();
+    keys = swipes = 0;
+    guestLine(clients[0].fd, g0, "X right"); settleSteps();
+    check(!keys && !swipes && world[0].cur == 102 && capturing && !strcmp(sent(), ""),
+          "swipe out: no Space on the right: nothing (no key, no swipe, no notice), still captured");
+    const uint64_t first[] = { 102, 101 };
+    layout(1, first, 2, NULL, 0); world[0].cur = 102; settle(vm, NET_APP); sent();
+    guestLine(clients[0].fd, g0, "X left"); settleSteps();
+    check(!keys && !swipes && world[0].cur == 102 && capturing && !strcmp(sent(), ""),
+          "swipe out: no Space on the left: nothing");
+    layout(1, three3, 3, NULL, 0); world[0].cur = 102; settle(vm, NET_APP); sent();
+    // Only the VM in front, captured; a gone or an older connection: nothing.
+    pthread_mutex_lock(&sendLock); clients[0].target = 0; pthread_mutex_unlock(&sendLock);
+    guestLine(clients[0].fd, g0, "X left"); settleSteps();
+    check(!keys && world[0].cur == 102, "swipe out: from a VM that is not the one in front: ignored");
+    pthread_mutex_lock(&sendLock); clients[0].target = 1; pthread_mutex_unlock(&sendLock);
+    guestLine(clients[0].fd, g0 + 1, "X left"); settleSteps();
+    check(!keys && world[0].cur == 102, "swipe out: from an older connection of that fd: ignored");
+    capturing = 0;
+    guestLine(clients[0].fd, g0, "X left"); settleSteps();
+    check(!keys && world[0].cur == 102, "swipe out: not captured: ignored");
+    capturing = 1;
+    const char *junk[] = { "X up", "X", "X left now", "Y left", "x left", "" };
+    for (int i = 0; i < 6; i++) guestLine(clients[0].fd, g0, junk[i]);
+    settleSteps();
+    check(!keys && world[0].cur == 102 && capturing, "swipe out: other lines (X up, X, X left now, Y left, ...): nothing");
+    // At most one a second.
+    swipeOutGap = 10; swipeOutAt = -1;
+    guestLine(clients[0].fd, g0, "X left"); settleSteps(); sent(); settle(vm, NET_APP); sent();
+    press(K, HID, 0); settle(vm, NET_APP); sent();
+    keys = 0;
+    guestLine(clients[0].fd, g0, "X right"); settleSteps();
+    check(world[0].cur == 102 && !keys, "swipe out: a second one within the gap: ignored");
+    swipeOutGap = 0;
+    // Two displays, the VM on both: the pointer's display, or both with "all".
+    const uint64_t in2[] = { 201, 202 }, out2[] = { 301, 302 };
+    layout(2, in2, 2, out2, 2);
+    owner[201] = terminal; winOn[201] = 11; owner[202] = vm; winOn[202] = 22;
+    owner[301] = safari; winOn[301] = 44; owner[302] = vm; winOn[302] = 23;
+    world[0].cur = 202; world[1].cur = 302; front = vm; pointer = CGPointMake(3000, 600);
+    settle(vm, NET_APP); sent();
+    keys = spaceKeys = 0;
+    guestLine(clients[0].fd, g0, "X left"); settleSteps();
+    check(spaceKeys == 1 && movedOn[0] == 2 && world[1].cur == 301 && world[0].cur == 202,
+          "swipe out, two displays: only the pointer's display moves (EscapeSwipe default)");
+    sent(); settle(vm, NET_APP); press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
+    all = 1; keys = spaceKeys = 0;
+    guestLine(clients[0].fd, g0, "X left"); settleSteps();
+    check(spaceKeys == 2 && world[0].cur == 201 && world[1].cur == 301, "swipe out, EscapeSwipe all: both displays move");
+    sent(); settle(vm, NET_APP); press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
+    all = 0;
+    // The guest's own reader: lines in pieces, a too long one skipped, then
+    // closing the client here ends the reader.
+    layout(1, three3, 3, NULL, 0); world[0].cur = 102; front = vm; pointer = CGPointMake(1000, 700);
+    settle(vm, NET_APP); sent();
+    int rp[2]; socketpair(AF_UNIX, SOCK_STREAM, 0, rp);
+    int save0 = clients[0].fd; clients[0].fd = rp[0];
+    ReaderArg ra = { dup(rp[0]), rp[0], g0, 0 };
+    pthread_t th; pthread_create(&th, NULL, readerThread, &ra);
+    char longLine[600]; memset(longLine, 'X', sizeof longLine); longLine[sizeof longLine - 1] = '\n';
+    write(rp[1], longLine, sizeof longLine);
+    write(rp[1], "X le", 4); usleep(30000); write(rp[1], "ft\n", 3);
+    keys = spaceKeys = 0;
+    for (int i = 0; i < 50 && world[0].cur == 102; i++) settleSteps();
+    check(spaceKeys == 1 && world[0].cur == 101, "swipe out: a real connection: \"X left\" in two pieces after a too long line: out");
+    closeClient(rp[0]); clients[0].fd = save0;
+    for (int i = 0; i < 100 && !ra.done; i++) usleep(20000);
+    check(ra.done, "swipe out: closing the client ends its reader");
+    pthread_join(th, NULL); close(rp[1]);
+    settle(vm, NET_APP); sent(); press(K, HID, 0); settle(vm, NET_APP); sent();
+    soOn = 0; swipeOutLook(); sent();
   }
 
   // Which apps the combo goes back to.
