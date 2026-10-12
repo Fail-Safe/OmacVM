@@ -12,6 +12,10 @@ in more words.
   route: OmacVM.app's setting, the control centre, or `defaults write org.omacvm.gestures SwipeOut
   -bool true`. Asked for by @epicoun (#342).
 - ⌃⌥ Esc no longer shows a notice in Omarchy, also when macOS could not switch the Space.
+- OmacVM.app: **Update VM** no longer turns off Chrome's and Brave's WebRTC video encoding on the
+  Mac's media engine (it runs the VM without its display, so it saw no encoder). Each start now
+  puts the flags back when they are missing, so a VM updated with 3.0.18 is fixed by its next start
+  (`omacvm check` said "WebRTC encoding" FAIL).
 
 ## 3.0.18
 

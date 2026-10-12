@@ -1,0 +1,49 @@
+#!/bin/bash
+# OmacVM.app: Chrome's and Brave's WebRTC encoder flags follow what the Mac's
+# app offers (browser-video-encode.py). As root:
+#   omacvm-video-encode apply USER   app/guest/install.sh (omacvm apply, Update VM)
+#   omacvm-video-encode boot         each start (omacvm-video-encode.service)
+# What the VM's GPU offers now, from vainfo: "on" (an encoder), "off" (a GPU
+# without one: an app older than the video encoding), or "unknown": no GPU
+# device at all, or vainfo failed. Update VM (and a build) runs the VM
+# without its video device: that is "unknown", and the flags stay as they
+# are. Up to 3.0.18 such a run took them out and nothing put them back
+# (omacvm check: "WebRTC encoding" FAIL): each start now puts back what is
+# missing while the GPU offers an encoder, and never takes anything out.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd -P)
+ENCODE=${OMACVM_VIDEO_ENCODE_PY:-/usr/local/share/omacvm/app/guest/browser-video-encode.py}
+[[ -f $ENCODE ]] || ENCODE=$here/browser-video-encode.py
+DRI=${OMACVM_DRI:-/dev/dri}
+ENV=${OMACVM_ENV:-/etc/omacvm/env}
+
+offered() {
+  compgen -G "$DRI/renderD*" >/dev/null || { echo unknown; return; }
+  local out
+  out=$(vainfo --display drm 2>/dev/null) || { echo unknown; return; }
+  grep -q VAEntrypointEncSlice <<<"$out" && echo on || echo off
+}
+
+case ${1:-} in
+apply)
+  U=${2:?usage: omacvm-video-encode apply USER}
+  case $(offered) in
+    on) python3 "$ENCODE" "$U" on && echo "video encoding: WebRTC encoder flags on" ;;
+    off) python3 "$ENCODE" "$U" off && echo "video encoding: none offered, WebRTC encoder flags off" ;;
+    *) echo "video encoding: no GPU now (a run without the VM's display, as Update VM's): WebRTC encoder flags left as they are" ;;
+  esac ;;
+boot)
+  U=$(sed -n 's/^OMACVM_USER=//p' "$ENV" 2>/dev/null | tail -1)
+  [[ -n $U ]] || exit 0
+  # The render node can come a moment after this unit starts: a few looks.
+  state=unknown
+  for ((i = 0; i < ${OMACVM_BOOT_LOOKS:-10}; i++)); do
+    state=$(offered)
+    [[ $state != unknown ]] && break
+    sleep 1
+  done
+  [[ $state == on ]] || exit 0
+  python3 "$ENCODE" "$U" check >/dev/null 2>&1 && exit 0
+  python3 "$ENCODE" "$U" on && echo "video encoding: WebRTC encoder flags put back" ;;
+*) echo "usage: omacvm-video-encode apply USER | boot" >&2; exit 2 ;;
+esac
