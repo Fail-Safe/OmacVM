@@ -3,11 +3,24 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.0.18
 
+Fixes for Full screen including notch, the start animation, Omanotch's patches and Mac input
+methods, and a switch for keyboard sharing apps.
+
+- OmacVM.app, **Full screen including notch**: macOS's menu bar no longer slides in at the top
+  edge while **Keep the Dock and hot corners away** is on (the default), as in normal full screen.
+  With that setting off it still comes down at the top edge (3.0.16) (#362).
 - OmacVM.app, **Full screen including notch**: with Omarchy's bar hidden (Super+Shift+Space) the
   strip beside the notch was black. The wallpaper now fills the whole screen up to the top edge;
-  windows still start below the strip. A full-screen video still turns the strip black.
+  windows still start below the strip. A full-screen video still turns the strip black (#364).
+- OmacVM.app: the **start animation** (OMACVM turning into Omarchy's logo) now plays on every
+  start, also with macOS's Reduce motion on. Before, Reduce motion gave a still logo (#359).
+- OmacVM.app: **keyboard sharing apps** (Synergy, Deskflow, Barrier, Input Leap) could lose the
+  keyboard to a VM started after them. A hidden switch puts OmacVM's keyboard taps at the end of
+  macOS's chain, so the sharing app sees the keys first: `defaults write org.omacvm.app
+  shareKeyboard -bool true`, then restart the VM. Trackpad gestures still go to Omarchy.
+  Reported by @javierburongarcia (#350).
 - **Omanotch**: the bar and wallpaper patches no longer trust their version line alone. A bar
   that has the line but not the whole patch (for example from another FullPanel build) is
   restored from its unpatched copy and patched again; without a clean copy the install stops and
@@ -18,16 +31,6 @@ in more words.
   OmacVM's box64 behind in such a VM. The check's Mac links row (under Omanotch) no longer fails
   for a VM started with Mac input methods on. Fcitx5 no longer shows a tip at login to unset
   `GTK_IM_MODULE`: Fcitx5 runs without it, GTK apps keep it. Reported by @Vocllum (#357).
-- OmacVM.app: the **start animation** (OMACVM turning into Omarchy's logo) now plays on every
-  start, also with macOS's Reduce motion on. Before, Reduce motion gave a still logo.
-- OmacVM.app: in **Full screen including notch**, macOS's menu bar no longer slides in at the top
-  edge while **Keep the Dock and hot corners away** is on (the default), as in normal full screen.
-  With that setting off it still comes down at the top edge (3.0.16).
-- OmacVM.app: **keyboard sharing apps** (Synergy, Deskflow, Barrier, Input Leap) could lose the
-  keyboard to a VM started after them. A hidden switch puts OmacVM's keyboard taps at the end of
-  macOS's chain, so the sharing app sees the keys first: `defaults write org.omacvm.app
-  shareKeyboard -bool true`, then restart the VM. Trackpad gestures still go to Omarchy.
-  Reported by @javierburongarcia (#350).
 
 ## 3.0.17
 
