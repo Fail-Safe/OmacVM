@@ -878,6 +878,12 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullpanel-log
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullpanel.patch"
 "$native_dir/Tests/display/test-fullpanel.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: FullPanel is not wired as tested (test-fullpanel.sh)"
+# Every scale in FullPanel (#355): the guest a few pixels larger, at a size
+# its scale fits, shown scaled onto the panel. Its sizes' test, then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullpanel-scale-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullpanel-scale.patch"
+"$native_dir/Tests/display/test-fullpanel-scale.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: FullPanel's scales are not wired as tested (test-fullpanel-scale.sh)"
 # Opt-in (#350; OmacVM.app's hidden shareKeyboard sets OMACVM_KEYS_LAST=1):
 # the full-grab tap at the end of macOS's event tap chain, so a keyboard
 # sharing app (Synergy, Deskflow, Barrier, Input Leap) sees the keys first.
