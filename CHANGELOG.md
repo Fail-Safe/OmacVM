@@ -47,6 +47,8 @@ A new window for the VM's settings.
 - OmacVM.app: **Closing the window** setting: *Shut down* (the default), *Keep running* (the VM
   goes on without its window; click OmacVM in the Dock to come back to it; Quit still shuts it
   down) or *Ask*. Asked for by @Vocllum (#358).
+- OmacVM.app: a VM window you cannot see (minimised, hidden, covered, on another Space) no longer
+  draws the guest's frames until it shows again.
 
 ## 3.0.18
 

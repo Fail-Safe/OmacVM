@@ -410,6 +410,9 @@ jobs:
       - name: Closing the VM window (shut down, keep running, ask; issue 358)
         run: app/runtime/Tests/display/test-close.sh
 
+      - name: No frames drawn for a VM window out of sight (the checks catch the old code)
+        run: app/runtime/Tests/display/test-present-unseen.sh --self-test
+
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 

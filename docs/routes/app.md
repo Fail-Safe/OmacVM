@@ -173,6 +173,9 @@ VM runs, and goes back by itself when a new version does not start
   come back to it) or *Ask*. A change counts from the next time you close the
   window, also while the VM runs. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.
+- A window you cannot see (minimised, hidden, covered, on another Space) gets
+  no new frames drawn until it shows again: no GPU time for pictures nobody
+  sees (`OMACVM_PRESENT_HIDDEN=1` in QEMU's environment draws them anyway).
 - Full screen, like Parallels: macOS's own, in a Space of its own on every
   display; on a MacBook with a notch Omanotch puts Omarchy's bar beside the
   notch (below).
