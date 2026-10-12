@@ -5,6 +5,12 @@ in more words.
 
 ## Unreleased
 
+- **Swipe out to macOS** (off by default): swipe past your first or last workspace and you are on
+  the macOS Space beside the VM, the same way ⌃⌥ Esc takes you there (this monitor or all). On the
+  right, the first swipe from your last workspace still opens a new empty one; swipe on from there.
+  Nothing happens when macOS has no Space on that side. A Magic Mouse's swipe counts too. Every
+  route: OmacVM.app's setting, the control centre, or `defaults write org.omacvm.gestures SwipeOut
+  -bool true`. Asked for by @epicoun (#342).
 - ⌃⌥ Esc no longer shows a notice in Omarchy, also when macOS could not switch the Space.
 
 ## 3.0.18

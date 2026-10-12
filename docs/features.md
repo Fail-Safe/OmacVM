@@ -172,6 +172,15 @@ In an OmacVM.app window, ⌃⌥ Esc gives the keyboard back to macOS (the app
 you were in before, else Finder); press it again in macOS to get the window
 back with the keyboard.
 
+**Swipe out to macOS** (off by default; OmacVM.app's setting, the control
+centre, or `defaults write org.omacvm.gestures SwipeOut -bool true` for
+Parallels, UTM and VMware Fusion): swipe past your first or last workspace and
+you are on the macOS Space beside the VM, as with ⌃⌥ Esc (the same *This
+monitor* / *All monitors*). Left of the first workspace is the Space on the
+left. On the right, the first swipe from your last workspace opens a new empty
+one as usual; swipe on from there to the Space on the right. With no Space on
+that side nothing happens. A Magic Mouse's swipe counts too.
+
 A **Magic Mouse** in the full-screen VM: two fingers sideways swipe
 Omarchy's workspaces, as four fingers on a trackpad (macOS's own Space
 swipe is off meanwhile); a one-finger flick sideways goes back or forward.

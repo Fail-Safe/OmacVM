@@ -46,6 +46,24 @@ app from before (else Finder) and brings the window back. It re-arms when you
 come back to the full-screen VM, or press the combo again.
 If the Mac helper stops, the tap goes with it and macOS has its gestures back.
 
+**Swipe out to macOS** (#342, opt-in: `SwipeOut` in `org.omacvm.gestures`, off by
+default; OmacVM.app's "Swipe out to macOS", the control centre): a swipe of three or
+more fingers past the first or the last workspace goes on to the macOS Space on that
+side. The guest decides at the lift, with Hyprland's workspaces as they were when the
+swipe began (`guest/omacvm-gestures`, `SwipeOut`): the way the swipe goes is the
+workspaces' way (`gestures:workspace_swipe_invert`); past the lowest workspace of the
+focused display = left; on the right the first swipe from the last workspace makes a
+new empty one (as Hyprland does), a swipe past that empty one = right
+(`workspace_swipe_create_new` off: the last one at once). Sideways travel at least
+`OMACVM_SWIPE_OUT_MIN` (0.15) of the trackpad's width, 1.5 times more sideways than up
+or down; a Magic Mouse's swipe counts (its virtual fingers). It says `X left|right` over
+its connection (only after the Mac's `X on`); the Mac takes it only from the VM in
+front while captured, at most once a second, and moves the way ⌃⌥ Esc does
+(`EscapeSwipe`), only to that side: no Space there = nothing at all. Hyprland's own
+swipe may have made a new empty workspace meanwhile: the guest goes back to the one
+the swipe began on. Tests: `mac/test-escape.c`, `guest/test-swipe-out.py` (a made-up
+Hyprland), `mac/test.sh` 2b (the line over a real connection).
+
 ## macOS-native scroll momentum
 
 On per VM by default (`omacvm disable scroll-momentum` turns it off; `OMACVM_FEATURE_scroll_momentum` in the VM's
@@ -73,8 +91,8 @@ Install / remove on the Mac: `mac/install.sh`, `mac/uninstall.sh` (or
 in the VM; `omacvm apply` runs it).
 
 Protocol (TCP, one line each): see the header of `mac/omacvm-gestures.c`
-(`F`, `S`, `O`, `A`, `W`, `P`, `K` to the guest; `R <gestures> <glide> <proof> <name>`
-from it, with the VM's name in base64). First both sides prove they know the
+(`F`, `S`, `O`, `A`, `W`, `P`, `K`, `X on|off` to the guest; `R <gestures> <glide> <proof> <name>`
+from it, with the VM's name in base64, then `X left|right`). First both sides prove they know the
 Bridge's token (HMAC-SHA256 over two nonces and the Mac address the helper
 accepted on, the Mac first), so the token never goes over the wire and the VM
 ignores a listener that cannot prove it (on 127.0.0.1, for OmacVM.app, any Mac
