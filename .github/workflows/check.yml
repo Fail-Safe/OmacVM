@@ -401,6 +401,9 @@ jobs:
       - name: QEMU's full-grab tap goes when Accessibility is taken away (issue 192)
         run: app/runtime/Tests/keys/test-tap-permission.sh
 
+      - name: QEMU's full-grab tap at the end of the chain with OMACVM_KEYS_LAST (keyboard sharing apps, issue 350)
+        run: app/runtime/Tests/keys/test-keys-last.sh
+
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 

@@ -878,6 +878,14 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullpanel-log
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullpanel.patch"
 "$native_dir/Tests/display/test-fullpanel.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: FullPanel is not wired as tested (test-fullpanel.sh)"
+# Opt-in (#350; OmacVM.app's hidden shareKeyboard sets OMACVM_KEYS_LAST=1):
+# the full-grab tap at the end of macOS's event tap chain, so a keyboard
+# sharing app (Synergy, Deskflow, Barrier, Input Leap) sees the keys first.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-keys-last.patch"
+grep -q 'eventsTap = CGEventTapCreate(kCGHIDEventTap, place, kCGEventTapOptionDefault,' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the full-grab tap ignores OMACVM_KEYS_LAST (keys-last patch)"
+"$native_dir/Tests/keys/test-keys-last.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the full-grab tap's place is not as tested (test-keys-last.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
