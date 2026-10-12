@@ -18,6 +18,10 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[4]
 PATCH = ROOT / "src/omanotch/guest/bar/apply-patch.py"
+# The patch's version, its version line and what a second run says.
+V = int(re.search(r"^VERSION = (\d+)$", PATCH.read_text(), re.M).group(1))
+VERSION_LINE = "// omarchy-notch-bar patch v%d" % V
+ALREADY = "already patched (v%d)" % V
 
 # Only the lines the patch anchors on, in Omarchy's order.
 BAR = '''import Quickshell
@@ -134,7 +138,8 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertIn("// omarchy-notch-bar patch v20", self.text)
+        self.assertEqual(V, 21)
+        self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
         # blockLoading alone: text() right after reload() gives the old content
@@ -154,7 +159,7 @@ class Patch(unittest.TestCase):
             f = d / "Bar.qml"
             f.write_text(self.text)
             out = subprocess.run([sys.executable, str(PATCH), str(f)], check=True, capture_output=True, text=True)
-            self.assertIn("already patched (v20)", out.stdout)
+            self.assertIn(ALREADY, out.stdout)
             self.assertEqual(f.read_text(), self.text)
         finally:
             shutil.rmtree(d)
@@ -193,7 +198,7 @@ class Incomplete(unittest.TestCase):
             self.assertNotIn(piece, BAR, piece)
 
     def test_version_line_alone_with_a_backup_gets_the_whole_patch(self):
-        self.bar.write_text("// omarchy-notch-bar patch v20\n")
+        self.bar.write_text(VERSION_LINE + "\n")
         self.backup.write_text(BAR)
         out = self.run_patch()
         self.assertEqual(out.returncode, 0, out.stderr)
@@ -202,19 +207,19 @@ class Incomplete(unittest.TestCase):
         self.assertEqual(self.backup.read_text(), BAR)
 
     def test_version_line_alone_without_a_backup_stops(self):
-        self.bar.write_text("// omarchy-notch-bar patch v20\n")
+        self.bar.write_text(VERSION_LINE + "\n")
         out = self.run_patch()
         self.assertNotEqual(out.returncode, 0)
         self.assertIn("re-clone the bar", out.stderr)
-        self.assertEqual(self.bar.read_text(), "// omarchy-notch-bar patch v20\n")
+        self.assertEqual(self.bar.read_text(), VERSION_LINE + "\n")
 
     def test_a_backup_that_is_patched_itself_is_not_used(self):
-        self.bar.write_text("// omarchy-notch-bar patch v20\n")
+        self.bar.write_text(VERSION_LINE + "\n")
         self.backup.write_text(self.full)
         out = self.run_patch()
         self.assertNotEqual(out.returncode, 0)
         self.assertIn("no clean backup", out.stderr)
-        self.assertEqual(self.bar.read_text(), "// omarchy-notch-bar patch v20\n")
+        self.assertEqual(self.bar.read_text(), VERSION_LINE + "\n")
 
     def test_each_missing_piece_is_patched_again(self):
         self.backup.write_text(BAR)
@@ -230,7 +235,7 @@ class Incomplete(unittest.TestCase):
         self.bar.write_text(self.full)
         out = self.run_patch()
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("already patched (v20)", out.stdout)
+        self.assertIn(ALREADY, out.stdout)
         self.assertEqual(self.bar.read_text(), self.full)
 
     def test_a_piece_found_twice_still_counts(self):
@@ -238,7 +243,7 @@ class Incomplete(unittest.TestCase):
         twice = self.full + "// " + "    readonly property string notchRole: root.notchRoleFor(screen)\n"
         self.bar.write_text(twice)
         out = self.run_patch()
-        self.assertIn("already patched (v20)", out.stdout)
+        self.assertIn(ALREADY, out.stdout)
         self.assertEqual(self.bar.read_text(), twice)
 
 
@@ -689,11 +694,47 @@ class FullPanelLayout(unittest.TestCase):
     def test_strip_height_and_reserved(self):
         # The bar is the strip's height (not the output's: outH 0), so its
         # exclusive zone keeps the strip free; parked never in FullPanel
-        # (a hidden bar is a black strip, still reserved).
+        # (a hidden bar still reserves the strip, see below).
         self.assertIn("root.notchBox(0, root.notchHeight, 0, root.barSize,", self.text)
         self.assertIn('notchRole === "fullpanel" ? notchPanelFit[0]', self.text)
-        self.assertIn('(notchRole === "fullpanel" && (root.notchFullscreen || root.barHidden))', self.text)
-        self.assertIn("readonly property bool parked: (root.barHidden && !notchBlack) || notchRole === \"parked\"", self.text)
+
+    def prop(self, name):
+        # The expression, also over continuation lines (indented further).
+        m = re.search(r"readonly property bool %s: (.*(?:\n {10,}\S.*)*)" % name, self.text)
+        return " ".join(m.group(1).split()) if m else "false"
+
+    def state(self, role, hidden, fullscreen):
+        """black, clear, parked of a bar copy, from the patch's own expressions."""
+        env = {"notchRole": role, "barHidden": hidden, "notchFullscreen": fullscreen}
+        for name in ("notchBlack", "notchClear", "parked"):
+            js = self.prop(name).replace("===", "==").replace("&&", " and ").replace("||", " or ")
+            js = re.sub(r"!(?!=)", " not ", js).replace("root.", "").replace("barWindow.", "")
+            js = re.sub(r"\bfalse\b", "False", re.sub(r"\btrue\b", "True", js))
+            env[name] = bool(eval(js, {}, dict(env)))
+        return env["notchBlack"], env["notchClear"], env["parked"]
+
+    def test_hidden_bar_shows_the_wallpaper_in_the_strip(self):
+        # Super+Shift+Space in FullPanel: the bar stays in the strip (not
+        # parked: it keeps reserving it, windows stay below the notch) but is
+        # see-through, so the wallpaper reaches the top edge. Not black.
+        self.assertEqual(self.state("fullpanel", True, False), (False, True, False))
+        self.assertIn('Binding { target: barWindow; property: "color"; value: "transparent"; when: barWindow.notchClear }',
+                      self.text)
+        self.assertIn("      visible: !barWindow.notchClear\n      sourceComponent:", self.text)
+        self.assertIn('visible: barWindow.notchBlack || barWindow.notchClear\n      color: barWindow.notchBlack ? "black" : "transparent"',
+                      self.text)
+        # The one-pixel repaint dot is the bar's colour: not over the wallpaper.
+        self.assertIn('      visible: !barWindow.notchClear\n      color: root.transparent ? "transparent" : root.background', self.text)
+
+    def test_shown_bar_and_fullscreen_as_before(self):
+        self.assertEqual(self.state("fullpanel", False, False), (False, False, False))   # the bar in the strip
+        self.assertEqual(self.state("fullpanel", False, True), (True, False, False))     # black over a video
+        self.assertEqual(self.state("fullpanel", True, True), (True, False, False))      # hidden too
+        self.assertEqual(self.state("notch", False, True), (True, False, False))
+        self.assertEqual(self.state("notch", True, False), (False, False, True))         # NOTCH: Omanotch's wallpaper
+        self.assertEqual(self.state("", True, False), (False, False, True))              # Omarchy's own hiding
+        self.assertEqual(self.state("", False, False), (False, False, False))
+        self.assertEqual(self.state("parked", False, False), (False, False, True))
 
     def test_above_fullscreen_windows(self):
         self.assertIn('barWindow.notchRole === "notch" || barWindow.notchRole === "fullpanel" ? WlrLayer.Overlay', self.text)
