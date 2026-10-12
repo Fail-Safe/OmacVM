@@ -58,3 +58,57 @@ struct UpdateBanner: View {
         if alert.runModal() == .alertFirstButtonReturn { updater.install() }
     }
 }
+
+/// Delete: the VM's name typed exactly, or nothing happens. Cancel is the
+/// default (Return); not while the VM runs.
+struct DeleteSheet: View {
+    let vm: VMConfig
+    let size: Int64?
+    let running: Bool
+    var done: (Bool) -> Void
+    @State private var typed = ""
+
+    private var ok: Bool { !running && DeleteConfirm.matches(typed: typed, name: vm.name) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(Look.red)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Delete “\(vm.name)”?").font(.system(size: 15, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Its disk\(size.map { " (\(Storage.format($0)))" } ?? "") and everything in \(vm.name) go to the Trash.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if running {
+                        Text("Shut down \(vm.name) first.").foregroundStyle(Look.red)
+                    } else {
+                        TextField("Type \(vm.name) to confirm", text: $typed)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityLabel("Type the VM's name to confirm")
+                            // Return in the field does not delete: Cancel is the default.
+                            .onSubmit {}
+                            .layoutProbe("delete-name")
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Cancel") { done(false) }
+                    .keyboardShortcut(.defaultAction)
+                Button { if ok { done(true) } } label: {
+                    Text("Delete").foregroundStyle(ok ? Look.red : Color(nsColor: .disabledControlTextColor))
+                }
+                    .disabled(!ok)
+                    .layoutProbe("delete-button")
+            }
+        }
+        .padding(16)
+        .frame(width: 430)
+        .background(Look.window, ignoresSafeAreaEdges: [])
+        .onExitCommand { done(false) }
+    }
+}

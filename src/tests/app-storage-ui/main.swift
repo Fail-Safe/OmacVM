@@ -52,7 +52,7 @@ MainActor.assumeIsolated {
     render(state, "1-ready-two-folders", out)
     render("7-all-vms", out) { AllVMsView(storage: state.storage, selected: state.config.folder) {} }
     render(state.storage.removeImagesAlert(), "8-remove-images", out)
-    render(state.storage.deleteAlert(VMConfig.named("Work")!), "9-delete-vm", out)
+    render("9-delete-vm", out) { DeleteSheet(vm: VMConfig.named("Work")!, size: nil, running: false) { _ in } }
 
     Paths.otherVMsRoots = [URL(fileURLWithPath: "/Volumes/SD4TB-not-here/OmacVM")]
     state.storage.refresh(); settle()

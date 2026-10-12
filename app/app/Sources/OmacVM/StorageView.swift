@@ -287,15 +287,14 @@ final class StorageModel: ObservableObject {
 
     // MARK: Deleting a VM
 
-    /// Moves a VM's folder to the Trash after a plain confirmation. A VM in
-    /// use (running, or omacvm working on it) is not deleted.
-    func delete(_ vm: VMConfig) {
+    /// After the Delete sheet (the VM's name typed): its folder to the Trash.
+    /// A VM in use (running, or omacvm working on it) is not deleted.
+    func trash(_ vm: VMConfig) {
         guard moving == nil else { return }
         guard Storage.busyFolders([vm.folder]).isEmpty else {
             say("\(vm.name) is in use: shut it down first, then delete it.", error: true)
             return
         }
-        guard deleteAlert(vm).runModal() == .alertSecondButtonReturn else { return }
         guard vm.folderIsSafe else {
             say("Not deleted: \(vm.folder.path) is not a VM folder of this app.", error: true)
             return
@@ -307,17 +306,6 @@ final class StorageModel: ObservableObject {
             say("Could not delete \(vm.name): \(error.localizedDescription)", error: true)
         }
         onMoved()
-    }
-
-    func deleteAlert(_ vm: VMConfig) -> NSAlert {
-        let alert = NSAlert()
-        alert.messageText = "Delete \(vm.name)?"
-        let size = vms.first { $0.folder.path == vm.folder.path }?.size.map { " (\(Storage.format($0)))" } ?? ""
-        alert.informativeText = "The VM's disk\(size) and everything in Omarchy goes to the Trash."
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Delete")
-        alert.buttons[1].hasDestructiveAction = true
-        return alert
     }
 
     // MARK: Downloaded images
@@ -400,6 +388,8 @@ struct StorageRows: View {
     var selected: URL?
     /// Open Existing VM… (AppState.openExisting).
     var open: () -> Void
+    /// The Delete sheet for a VM (from All VMs…).
+    var delete: (VMConfig) -> Void
     @State private var showAll = false
 
     var body: some View {
@@ -414,7 +404,11 @@ struct StorageRows: View {
                 .disabled(storage.vms.isEmpty)
         }
         .sheet(isPresented: $showAll) {
-            AllVMsView(storage: storage, selected: selected) { showAll = false }
+            AllVMsView(storage: storage, selected: selected, delete: { vm in
+                showAll = false
+                // Once this sheet is gone: one sheet at a time.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { delete(vm) }
+            }) { showAll = false }
         }
         VMsFolderRow(storage: storage)
         if !storage.legacyVMs.isEmpty && storage.moving == nil {
@@ -450,24 +444,11 @@ struct StorageRows: View {
     }
 }
 
-/// One VM's size with Show in Finder.
-struct VMSizeRow: View {
-    let vm: StorageModel.Entry
-
-    var body: some View {
-        Text(vm.size.map { Storage.format($0) } ?? "…").foregroundStyle(.secondary)
-        Button {
-            NSWorkspace.shared.activateFileViewerSelecting([vm.folder])
-        } label: { Image(systemName: "folder") }
-            .help("Show in Finder")
-            .accessibilityLabel("Show \(vm.name) in Finder")
-    }
-}
-
 /// Every VM with its size, Show in Finder and Delete.
 struct AllVMsView: View {
     @ObservedObject var storage: StorageModel
     var selected: URL?
+    var delete: (VMConfig) -> Void = { _ in }
     var done: () -> Void
 
     /// Nil while a size is still counted.
@@ -477,50 +458,53 @@ struct AllVMsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("All VMs").font(.headline)
-            ForEach(storage.vms) { vm in
-                HStack {
-                    Text(vm.name).lineLimit(1).truncationMode(.middle).help(vm.name)
-                    if vm.folder.path == selected?.path {
-                        Text("this one").font(.caption).foregroundStyle(.secondary)
+        SheetFrame(title: "All VMs", width: 500) {
+            ScrollView {
+                Card {
+                    if storage.vms.isEmpty {
+                        SettingRow("No VMs.")
                     }
-                    if vm.legacy {
-                        Text("in the old hidden folder").font(.caption).foregroundStyle(.secondary)
+                    ForEach(storage.vms) { vm in
+                        SettingRow(title: vm.name, subtitle: vm.legacy ? "In the old hidden folder" : nil, probe: "all-vms") {
+                            if vm.folder.path == selected?.path {
+                                Text("this VM").font(.system(size: 11)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 8).padding(.vertical, 1.5)
+                                    .background(Look.pill, in: Capsule())
+                            }
+                            Text(vm.size.map { Storage.format($0) } ?? "…").font(.subheadline).foregroundStyle(.secondary)
+                            ChipButton(symbol: "folder", help: "Show \(vm.name) in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([vm.folder])
+                            }
+                            ChipButton(symbol: "trash", help: "Delete \(vm.name)…") { delete(vm.config) }
+                                .disabled(storage.moving != nil)
+                        }
+                        .layoutProbe("all-vms-row")
                     }
-                    Spacer()
-                    VMSizeRow(vm: vm)
-                    Button {
-                        storage.delete(vm.config)
-                    } label: { Image(systemName: "trash") }
-                        .help("Delete…")
-                        .accessibilityLabel("Delete \(vm.name)…")
-                        .disabled(storage.moving != nil)
                 }
-                .layoutProbe("all-vms-row")
             }
-            if storage.vms.isEmpty {
-                Text("No VMs.").foregroundStyle(.secondary)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxHeight: 420)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Text("\(total.map { Storage.format($0) } ?? "…") in \(StorageModel.short(storage.root))")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .help(storage.root.path)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                ChipButton(symbol: "folder", help: "Show the VMs folder in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([storage.root])
+                }
             }
-            Divider()
-            HStack {
-                Text("Total").foregroundStyle(.secondary)
-                Spacer()
-                Text(total.map { Storage.format($0) } ?? "…").foregroundStyle(.secondary)
-            }
+            .padding(.horizontal, 2)
             if let n = storage.note {
-                Text(n).font(.caption).foregroundStyle(storage.noteIsError ? .red : .secondary)
+                Text(n).font(.subheadline).foregroundStyle(storage.noteIsError ? Look.red : .secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack {
-                Spacer()
-                Button("Done") { done() }
-                    .keyboardShortcut(.defaultAction)
-                    .layoutProbe("all-vms-done")
-            }
+        } buttons: {
+            Button("Done") { done() }
+                .keyboardShortcut(.defaultAction)
+                .layoutProbe("all-vms-done")
         }
-        .padding(20)
-        .frame(width: 420)
     }
 }
 

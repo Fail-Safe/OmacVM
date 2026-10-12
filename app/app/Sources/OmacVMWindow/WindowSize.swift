@@ -84,3 +84,10 @@ public enum SwipeOut {
         return defaultValue
     }
 }
+
+/// The Delete sheet: Delete only once the VM's name is typed exactly.
+public enum DeleteConfirm {
+    public static func matches(typed: String, name: String) -> Bool {
+        !name.isEmpty && typed == name
+    }
+}
