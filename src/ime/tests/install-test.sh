@@ -40,9 +40,10 @@ case $1 in
 esac
 exit 0
 EOF
+# (perl's shasum warns about a locale the runner lacks: the VM's Chinese)
 cat > "$T/bin/sha256sum" <<'EOF'
 #!/bin/bash
-shasum -a 256 "$@"
+LC_ALL=C exec shasum -a 256 "$@"
 EOF
 cat > "$T/bin/udevadm" <<'EOF'
 #!/bin/bash
