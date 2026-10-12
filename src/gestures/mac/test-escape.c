@@ -4,8 +4,8 @@
 // user set it in com.apple.symbolichotkeys); in macOS back into the VM. Each
 // move is checked: not moved or the shortcut off -> a Dock swipe (macOS 15
 // ignores the shortcut from the notched display's full-screen Space); still
-// not moved, or no Spaces information -> a log line and "N <why>" for
-// Omarchy's notice, nothing else (never Mission Control). The VM is never taken out of full screen and
+// not moved, or no Spaces information -> a log line, nothing else (no notice
+// in Omarchy, never Mission Control). The VM is never taken out of full screen and
 // never hidden. Drives the helper's own
 // tapCb with made-up key events and its capture logic (frontChanged) with
 // made-up front apps, against a made-up world of displays and Spaces whose
@@ -413,8 +413,8 @@ int main(void) {
   d.n = 1;
   check(leaveDir(&d, 0) == 0, "plan: a single Space: no move");
 
-  // ---- Checked; no way out -> a notice, nothing else; never out of full
-  // screen, never hidden, never Mission Control ----
+  // ---- Checked; no way out -> nothing (a log line, no notice); never out
+  // of full screen, never hidden, never Mission Control ----
   layout(1, mini, 2, NULL, 0);
   owner[101] = terminal; owner[102] = vm;
   front = terminal; world[0].cur = 101; settle(vm, NET_APP); inVM(vm, 102);
@@ -422,7 +422,7 @@ int main(void) {
   keysIgnored = 1;
   check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 2 && world[0].cur == 102,
         "shortcut did not move, nor the swipe (both ways): the VM's Space stays");
-  check(!strcmp(sent(), "S esc ctrl-opt|N space-unchanged|"), "... Omarchy is told (N space-unchanged)");
+  check(!strcmp(sent(), "S esc ctrl-opt|"), "... no notice in Omarchy (no N line)");
   check(!mcKeys && !hidden && !went && keys == 1, "... no Mission Control, nothing hidden, no app switch, one key only");
   check(!capturing && escaped, "... capture off (the trackpad and keys are macOS's, as after any escape)");
   int r = press(K, HID, 0); const char *got = sent();
@@ -452,17 +452,17 @@ int main(void) {
         "the swipe bounced at the edge: the other direction lands and is kept");
   keysIgnored = 0; swipeMoves = 0; sent();
   settle(vm, NET_APP); sent(); press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
-  // The shortcut off: nothing posted, Omarchy says which setting.
+  // The shortcut off: nothing posted, no notice.
   setKey(HOTKEY_SPACE_LEFT, kCFBooleanFalse, 123, 8650752);
   check(press(K, HID, 0) == 1 && !keys && swipes == 2 && world[0].cur == 102 && !mcKeys && !hidden && !went,
         "Move left a space off: no key posted, the swipe does not move either, no Mission Control");
-  check(!strcmp(sent(), "S esc ctrl-opt|N space-shortcut-off|"), "... Omarchy is told (N space-shortcut-off)");
+  check(!strcmp(sent(), "S esc ctrl-opt|"), "... no notice in Omarchy");
   press(K, HID, 0); sent(); unsetKeys(); inVM(vm, 102);
-  // Every shortcut off, Mission Control's too: still nothing but the notice.
+  // Every shortcut off, Mission Control's too: still nothing.
   setKey(HOTKEY_SPACE_LEFT, kCFBooleanFalse, 123, 8650752); setKey(HOTKEY_SPACE_RIGHT, kCFBooleanFalse, 124, 8650752);
   setKey(HOTKEY_MISSION_CONTROL, kCFBooleanFalse, 126, 8650752);
   check(press(K, HID, 0) == 1 && !keys && world[0].cur == 102 && !hidden && !went &&
-        !strcmp(sent(), "S esc ctrl-opt|N space-shortcut-off|"), "every shortcut off: the notice only");
+        !strcmp(sent(), "S esc ctrl-opt|"), "every shortcut off: nothing, no notice");
   unsetKeys();
   press(K, HID, 0); sent(); inVM(vm, 102);
 
@@ -474,10 +474,10 @@ int main(void) {
   keysIgnored = 0;
   press(K, HID, 0); sent(); inVM(vm, 102);
 
-  // No Spaces information (an older or newer macOS without the call): the notice.
+  // No Spaces information (an older or newer macOS without the call): nothing.
   int saveN = nWorld; nWorld = 0;
-  check(press(K, HID, 0) == 1 && !spaceKeys && !mcKeys && !went && !hidden && !strcmp(sent(), "S esc ctrl-opt|N no-spaces|"),
-        "no Spaces information: N no-spaces, nothing else");
+  check(press(K, HID, 0) == 1 && !spaceKeys && !mcKeys && !went && !hidden && !strcmp(sent(), "S esc ctrl-opt|"),
+        "no Spaces information: nothing, no notice");
   nWorld = saveN;
   press(K, HID, 0); sent(); inVM(vm, 102);
 
@@ -519,10 +519,10 @@ int main(void) {
   check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 202 && world[1].cur == 302 && front == vm,
         "all: ... and both back into it");
   settle(vm, NET_APP); sent();
-  // Neither display moves: the notice, once.
+  // Neither display moves: nothing, no notice.
   keysIgnored = 1;
   check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 202 && world[1].cur == 302 && !mcKeys &&
-        !strcmp(sent(), "S esc ctrl-opt|N space-unchanged|"), "all, the shortcut ignored: nothing moves, one notice");
+        !strcmp(sent(), "S esc ctrl-opt|"), "all, the shortcut ignored: nothing moves, no notice");
   keysIgnored = 0;
   press(K, HID, 0); sent(); front = vm; world[0].cur = 202; world[1].cur = 302; settle(vm, NET_APP); sent();
   all = 0;
@@ -746,14 +746,14 @@ int main(void) {
     settle(vm, NET_APP); sent();
     r2 = press(K, HID, 0); sent();
     check(r2 == 1 && spaceKeys == 1 && world[0].cur == 503, "... and back in");
-    // Too late (never lands within the looks): the notice, still one key.
+    // Too late (never lands within the looks): no notice, still one key.
     // The slide lands only after the press is done (a fixed delay failed on a
     // slow CI runner: its timers stretched the looks past it).
     settle(vm, NET_APP); sent();
     front = safari; world[0].cur = 502; settle(vm, NET_APP); inVM(vm, 503);
     lateKeys = -1; int sm = swipeMoves; swipeMoves = 0;
     r2 = press(K, HID, 0); got2 = sent();
-    check(r2 == 1 && spaceKeys == 1 && strstr(got2, "N space-unchanged"), "lands only after every look (the swipe does nothing): the notice, one key");
+    check(r2 == 1 && spaceKeys == 1 && !strstr(got2, "N "), "lands only after every look (the swipe does nothing): no notice, one key");
     swipeMoves = sm;
     if (heldMove) { heldMove = 0; moveSpace(heldWorld, heldDir); }
     settleSteps();

@@ -29,7 +29,7 @@
 #    shape and marker (test-escape.c, a made-up world of displays and Spaces:
 #    nothing posted, swiped or activated). The marker is the same in
 #    Gestures, the Bridge and QEMU's patch. The guest names the combo pressed,
-#    and after the old one the new one, once per VM, and the no-way-out notice (test-escape-notice.py).
+#    and after the old one the new one, once per VM; no other notice (test-escape-notice.py).
 # 6. Scroll momentum takes only a trackpad's scrolling (built-in or Magic
 #    Trackpad, also one connected later): wheel mice, smooth-scrolling mice and
 #    a Magic Mouse go to the VM app one to one (test-scroll.c, made-up events
@@ -234,7 +234,7 @@ if [[ -n $m_gest && $(( m_gest )) == $(( m_bridge )) && $(( m_gest )) == $(( m_q
 else
   echo "FAIL key markers differ: Gestures '$m_gest', Bridge '$m_bridge', QEMU '$m_qemu'" >&2; fail=1
 fi
-# The guest's notice for "S esc <keys>": the old combo names the new one once per VM.
+# The guest's notice for "S esc <keys>": none, but the old combo names the new one once per VM.
 python3 "$HERE/../guest/test-escape-notice.py" "$HERE/../guest/omacvm-gestures" > "$T/notice" 2>&1 || fail=1
 grep -E '^(ok|FAIL|skip) ' "$T/notice"
 # 6. Which scrolling scroll momentum takes.

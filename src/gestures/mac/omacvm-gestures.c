@@ -1347,9 +1347,9 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
 // -> a Dock swipe (the events a three/four-finger swipe makes; on macOS 15
 // the shortcut does nothing from the notched built-in display's full-screen
 // Space, the swipe does) -> still in the VM's Space, or macOS gives no Spaces
-// information -> one log line and a short notice in Omarchy ("N <why>"),
-// nothing else: never Mission Control from one press (user, 2026-10-06:
-// "never"; only twice in a row, see missionControl). Back in:
+// information -> one log line, nothing else: no notice in Omarchy (user,
+// 2026-10-12: "never a notice"), never Mission Control from one press (user,
+// 2026-10-06: "never"; only twice in a row, see missionControl). Back in:
 // the shortcut did not land -> the VM's window to the front (macOS shows its
 // Space).
 // An OmacVM VM in a window with the keyboard has no Space of its own: the
@@ -2101,13 +2101,12 @@ static void missionControl(void) {
 
 // No way out to macOS (the Space shortcut is off, macOS did not move the
 // Space, not even with a Dock swipe, or it gives no Spaces information): one
-// log line and a short notice in Omarchy, nothing else. Never Mission
-// Control (user, 2026-10-06: "never"). The trackpad and keys stay macOS's, as after
+// log line, nothing else. No notice in Omarchy (user, 2026-10-12: "never a
+// notice"; up to 3.0.18 the guest got "N <why>"), never Mission Control
+// (user, 2026-10-06: "never"). The trackpad and keys stay macOS's, as after
 // any escape; the combo again takes them back.
-static void noWayOut(const char *why, const char *notice) {
+static void noWayOut(const char *why) {
   logf_("escape combo: %s: nothing done", why);
-  char b[48]; int n = snprintf(b, sizeof b, "N %s\n", notice);
-  sendTo(0, b, (size_t)n);
 }
 
 // ---- the moves of the last press: per display, from its Space to the one beside it ----
@@ -2248,8 +2247,8 @@ static void checkLeave(int by) {
   } else if (!moved && retryOtherWay(^{ checkLeave(BY_DOCK); })) {
     return;
   }
-  if (shortcutOff) noWayOut("macOS's \"Move left/right a space\" shortcut is off and the swipe did not move", "space-shortcut-off");
-  else noWayOut("the Space did not change", "space-unchanged");
+  if (shortcutOff) noWayOut("macOS's \"Move left/right a space\" shortcut is off and the swipe did not move");
+  else noWayOut("the Space did not change");
 }
 
 static void checkEnter(void) {
@@ -2317,8 +2316,8 @@ static void leaveVM(void) {
   // The pointer is on a display without the VM: nothing to move there, the
   // keyboard goes to what it shows.
   if (nd && nw && !pointerOnVM && !all) { focusPointerDisplay(); return; }
-  if (!nd) noWayOut("macOS gives no Spaces information", "no-spaces");
-  else noWayOut("the VM's Space has no neighbour", "space-unchanged");
+  if (!nd) noWayOut("macOS gives no Spaces information");
+  else noWayOut("the VM's Space has no neighbour");
 }
 
 // Into the VM again: the pointer's display (or, with "all", each display the

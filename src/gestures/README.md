@@ -24,7 +24,7 @@ trackpad. Then:
   keyboard). With the gestures feature off, the VM's daemon is off too (no link to the Mac's
   Gestures at all), and so is this.
 
-**⌃⌥ Esc** releases the trackpad to macOS (Omarchy shows a notification) and
+**⌃⌥ Esc** releases the trackpad to macOS (no notice in Omarchy) and
 moves the display under the pointer one Space toward the one it showed
 before the VM, with macOS's own "Move left/right a space" shortcut as the
 user set it (`com.apple.symbolichotkeys` 79 and 81; ⌃← and ⌃→ by default),
@@ -36,8 +36,8 @@ pointer's display. Pressed there again in macOS, it moves back. The VM is
 never taken out of full screen and never hidden. Every move is checked: the
 shortcut off or the Space unchanged -> a Dock swipe (macOS 15 ignores the
 shortcut from the notched built-in display's full-screen Space); still
-unchanged, or no Spaces information -> one log line and a notice in Omarchy
-(`N <why>` to the guest), nothing else. A change that lands late is looked for
+unchanged, or no Spaces information -> one log line, nothing else (no notice;
+helpers up to 3.0.18 sent `N <why>`). A change that lands late is looked for
 twice more before the next step, so one press never moves two Spaces. Mission
 Control only on a double press (twice within 0.4 s; the second press drops
 what the first has not posted yet). Back in, a shortcut that does not land brings the VM's window to the

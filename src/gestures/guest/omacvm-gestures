@@ -19,17 +19,17 @@ from a listener without the proof is acted on. Then it reads lines:
   A <dx> <dy>, W <dx> <dy>, P       scroll momentum: macOS's scroll while touching, its
                                     momentum (points), a pinch macOS recognized
   K <code> <value>                  UTM: a key on the virtual keyboard
-  N <why>                           the escape combo found no way out to macOS
-                                    (space-shortcut-off, space-unchanged, no-spaces)
+  N <why>                           (Mac helpers up to 3.0.18) the escape combo found no way
+                                    out to macOS: ignored, no notice any more
 
 Without macOS-native scroll momentum (the scroll-momentum feature; "Glide"
 in the code, after the glide that follows a flick) the helper sends 3+-finger frames and 2-finger pinches; pointer,
 clicks and two-finger scrolling come from the VM app's own virtual mouse.
 With it (experimental) every two-finger frame comes too, and the scroll is
 rebuilt here from the real fingers plus macOS's own acceleration and momentum
-(docs/experiments/trackpad-scrolling.md). Runs as root (uinput); posts a
-notification to the desktop user when the escape combo is used (and once per
-VM "New shortcut: ⌃⌥ Esc" when the old ⌃⌥⌘ Esc was).
+(docs/experiments/trackpad-scrolling.md). Runs as root (uinput). No notices
+when the escape combo is used (user, 2026-10-12: "never a notice"), only once
+per VM "New shortcut: ⌃⌥ Esc" when the old ⌃⌥⌘ Esc was.
 """
 import glob
 import hashlib
@@ -582,40 +582,21 @@ _esc_hint_shown = False
 
 
 def escape_notice(keys):
-    """The notification for "S esc [<keys>]". No word: a Mac helper from
-    before 3.0.0, which only knows ⌃⌥⌘ Esc. The old combo from a 3.0 helper:
-    the new one, once per VM."""
+    """"S esc [<keys>]": no notice (user, 2026-10-12: "never a notice"), but
+    for the old ⌃⌥⌘ Esc ("ctrl-opt-cmd" from a 3.0 helper) the new one is
+    named once per VM, while that combo still works."""
     global _esc_hint_shown
-    if keys is None:
-        notify("Trackpad gestures → macOS (⌃⌥⌘ Esc to take them back)")
+    if keys != "ctrl-opt-cmd" or _esc_hint_shown or os.path.exists(ESC_HINT_FILE):
         return
-    if keys == "ctrl-opt-cmd" and not _esc_hint_shown and not os.path.exists(ESC_HINT_FILE):
-        if notify("New shortcut: ⌃⌥ Esc (⌃⌥⌘ Esc goes away in a later version)", 8000):
-            _esc_hint_shown = True
-            try:
-                os.makedirs(os.path.dirname(ESC_HINT_FILE), exist_ok=True)
-                with open(ESC_HINT_FILE, "w") as f:
-                    f.write("shown\n")
-            except OSError as err:
-                print(f"omacvm-gestures: cannot remember the escape hint ({err}); shown again after a restart",
-                      file=sys.stderr, flush=True)
-            return
-    notify("Trackpad gestures → macOS (⌃⌥ Esc to take them back)")
-
-
-# The escape combo found no way out to macOS ("N <why>"): the Mac did
-# nothing else (no Mission Control), so the user is told here, in the VM
-# that is still on screen.
-NO_WAY_OUT = {
-    "space-shortcut-off": "No way to macOS: turn on “Move left/right a space” "
-                          "(System Settings › Keyboard › Keyboard Shortcuts › Mission Control)",
-    "space-unchanged": "macOS did not switch the Space: still in the VM (swipe with the trackpad)",
-    "no-spaces": "macOS gave no Spaces information: still in the VM (swipe with the trackpad)",
-}
-
-
-def no_way_out(why):
-    notify(NO_WAY_OUT.get(why, NO_WAY_OUT["space-unchanged"]), 6000)
+    if notify("New shortcut: ⌃⌥ Esc (⌃⌥⌘ Esc goes away in a later version)", 8000):
+        _esc_hint_shown = True
+        try:
+            os.makedirs(os.path.dirname(ESC_HINT_FILE), exist_ok=True)
+            with open(ESC_HINT_FILE, "w") as f:
+                f.write("shown\n")
+        except OSError as err:
+            print(f"omacvm-gestures: cannot remember the escape hint ({err}); shown again after a restart",
+                  file=sys.stderr, flush=True)
 
 
 def bridge_token():
@@ -792,8 +773,6 @@ def handle(p, pad, keys, glide):
             keys.release()
         if state == "esc":
             escape_notice(p[2].decode() if len(p) > 2 else None)
-    elif p[0] == b"N":
-        no_way_out(p[1].decode())
 
 
 def main():

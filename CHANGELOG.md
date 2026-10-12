@@ -3,6 +3,10 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- ⌃⌥ Esc no longer shows a notice in Omarchy, also when macOS could not switch the Space.
+
 ## 3.0.18
 
 Fixes for Full screen including notch, the start animation, Omanotch's patches and Mac input
