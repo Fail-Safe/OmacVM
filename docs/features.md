@@ -59,9 +59,11 @@ its bar there itself:
   VM start, so a MacBook Pro and a MacBook Air each get their own), its
   widgets split around the notch, at whatever scale Omarchy uses;
 - the VM gets the whole panel, top to bottom (2940x1912 pixels on a
-  13-inch MacBook Air), so Omarchy's scale panel offers the scales that fit
-  that size: 1, 1.33, 2 and 4 on an Air or a 14-inch MacBook Pro, 1 and 2
-  on a 16-inch; a saved 1.67 becomes 2 there;
+  13-inch MacBook Air), and every one of Omarchy's scales (1, 1.25, 1.6, 2,
+  3, 4 in its display panel): for a scale the panel's size does not fit, the
+  VM gets a few pixels more (2944x1912 for 1.6 on the Air, at most 7 more
+  each way), shown scaled onto the panel, with no black band. The app keeps
+  the scale for the VM, so the next start begins at that size;
 - windows start below the strip, so nothing sits behind the notch, also
   with the bar hidden (Super+Shift+Space), when the wallpaper fills the
   strip up to the top edge; a full-screen window (a video, Super+F) turns

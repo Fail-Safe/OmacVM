@@ -21,9 +21,9 @@ loader.exec_module(build)
 NOTCH_LINE = "// omarchy-notch-bar display panel patch v"
 
 
-def panel():
+def panel(optional=True):
     """A stand-in for Omarchy's Panel.qml: every line build.py and Omanotch's patch change."""
-    lines = [a for a, _ in build.EDITS]
+    lines = [a for a, _ in build.EDITS] + ([a for a, _ in build.OPTIONAL_EDITS] if optional else [])
     lines += ["  property var displays: []\n",
               "    var parsed = Model.parseDisplays(displaysJson)\n",
               '    text: Quickshell.screens.length > 1 ? "󰍺" : "󰍹"\n']
@@ -53,6 +53,22 @@ class Build(unittest.TestCase):
         self.assertIn(NOTCH_LINE, text)
         self.assertIn("Model.parseDisplays(root.notchFilterJson(displaysJson))", text)
         self.assertIn("root.notchScreenCount() > 1", text)
+
+    def test_every_scale_in_fullpanel(self):
+        # #355: in "Full screen including notch" every preset, set through omacvm-displays.
+        self.assertEqual(self.build(), 0)
+        text = (self.out / "Panel.qml").read_text()
+        self.assertIn('display.name === root.macFullPanel ? scalePresets', text)
+        self.assertIn('root.macFullPanelFocused() ? ["omacvm-displays", "scale", String(scale)]', text)
+        self.assertIn('command: ["omacvm-displays", "fullpanel"]', text)
+        self.assertIn("if (!macFullPanelProc.running) macFullPanelProc.running = true", text)
+
+    def test_scale_buttons_changed_still_builds(self):
+        (self.source / "Panel.qml").write_text(panel(optional=False))
+        self.assertEqual(self.build(), 0)
+        text = (self.out / "Panel.qml").read_text()
+        self.assertIn('"MAC DISPLAYS"', text)
+        self.assertNotIn("? scalePresets", text)
 
     def test_without_omanotch_patch(self):
         # Omanotch's patch missing or no longer fitting: the widget still builds.

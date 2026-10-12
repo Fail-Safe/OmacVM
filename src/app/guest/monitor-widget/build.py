@@ -7,7 +7,9 @@ Copies Omarchy's own display widget (/usr/share/omarchy/shell/plugins/panels/
 monitor) into OUT_DIR, so it follows the installed Omarchy, and adds a "MAC
 DISPLAYS" section with "Use external displays" (omacvm-displays external
 toggle), and on a display 4K wide or more a line under the scale presets: 2x
-is the sharp one there. Omanotch's hidden NOTCH output is left out of its
+is the sharp one there. In "Full screen including notch" every one of
+Omarchy's scale presets on that output, set through `omacvm-displays scale`
+(the Mac gives the output a size that fits it first, #355). Omanotch's hidden NOTCH output is left out of its
 display list (Omanotch's patch, src/omanotch/guest/monitor/display-panel.py).
 OUT_DIR gets this folder's manifest.json and placement.sh and a
 .source-sha256 stamp of the panel it was built from. Exit 1 when Omarchy's
@@ -31,6 +33,8 @@ PROPS = """
   // OmacVM.app: in full screen, Omarchy on every Mac display (omacvm-displays).
   property bool macDisplays: false
   property bool macExternal: true
+  // OmacVM.app: the output in "Full screen including notch" ("" otherwise).
+  property string macFullPanel: ""
   // OmacVM.app: the focused display's width, for the scale hint below.
   readonly property int macFocusedWidth: {
     for (var i = 0; i < displays.length; i++)
@@ -57,6 +61,22 @@ FUNCS = """
         root.macDisplays = state === "on" || state === "off"
         if (root.macDisplays) root.macExternal = state === "on"
       }
+    }
+  }
+
+  // ---- OmacVM.app: every scale in "Full screen including notch" (#355) ----
+  function macFullPanelFocused() {
+    for (var i = 0; i < displays.length; i++)
+      if (displays[i] && displays[i].focused) return root.macFullPanel !== "" && displays[i].name === root.macFullPanel
+    return false
+  }
+
+  Process {
+    id: macFullPanelProc
+    command: ["omacvm-displays", "fullpanel"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.macFullPanel = String(text || "").trim()
     }
   }
 
@@ -206,13 +226,28 @@ EDITS = [
      '    if (focusSection === "monitors" && selectedIndex >= 0 && selectedIndex < displays.length) {\n'),
     ("    if (!stateProc.running) stateProc.running = true\n",
      "    if (!stateProc.running) stateProc.running = true\n"
-     "    if (!macStateProc.running) macStateProc.running = true\n"),
+     "    if (!macStateProc.running) macStateProc.running = true\n"
+     "    if (!macFullPanelProc.running) macFullPanelProc.running = true\n"),
     ("  BarIconButton {\n    id: button\n",
      FUNCS + "  BarIconButton {\n    id: button\n"),
     ("          // ---------- Monitors ----------\n",
      SCALE_HINT + "          // ---------- Monitors ----------\n"),
     ("          Item {\n            width: parent.width\n            height: Style.space(4)\n          }\n",
      SECTION + "          Item {\n            width: parent.width\n            height: Style.space(4)\n          }\n"),
+]
+
+
+# Every one of Omarchy's scales in "Full screen including notch" (#355): its
+# presets on that output whatever the size (the Mac gives a size that fits
+# the one picked), set through omacvm-displays. Not found (Omarchy changed its
+# panel): the panel as Omarchy has it, and the widget still builds.
+OPTIONAL_EDITS = [
+    ("        return Model.availableScales(scalePresets, display.width, display.height)\n",
+     "        return root.macFullPanel !== \"\" && display.name === root.macFullPanel ? scalePresets\n"
+     "          : Model.availableScales(scalePresets, display.width, display.height)\n"),
+    ('    actionProc.command = ["bash", "-c", "omarchy-hyprland-monitor-scaling " + scale]\n',
+     '    actionProc.command = root.macFullPanelFocused() ? ["omacvm-displays", "scale", String(scale)]\n'
+     '      : ["bash", "-c", "omarchy-hyprland-monitor-scaling " + scale]\n'),
 ]
 
 
@@ -242,6 +277,12 @@ def main() -> int:
                   file=sys.stderr)
             return 1
         panel = panel.replace(anchor, replacement)
+    if all(panel.count(anchor) == 1 for anchor, _ in OPTIONAL_EDITS):
+        for anchor, replacement in OPTIONAL_EDITS:
+            panel = panel.replace(anchor, replacement)
+    else:
+        print("omacvm.monitor: Omarchy's scale buttons changed: in full screen including notch "
+              "only the scales its size fits", file=sys.stderr)
     panel = hide_notch(panel)
     out.mkdir(parents=True, exist_ok=True)
     for item in source.iterdir():
