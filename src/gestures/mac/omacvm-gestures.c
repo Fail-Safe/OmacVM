@@ -648,6 +648,28 @@ static void watchTapSet(CFMachPortRef t) {
   pthread_mutex_lock(&watchLock); watchTap = t; watchAsked = 0; pthread_mutex_unlock(&watchLock);
 }
 static int seenPerm;      // every permission a tap of this process was created with
+
+// ---- keyboard sharing apps (#350) ----
+// A keyboard sharing app (Synergy, Deskflow, Barrier, Input Leap) taps the
+// keys at the head of the HID chain too, and the newest tap runs first: a VM
+// started after it took the keys while the pointer was on the other computer.
+// OmacVM.app's hidden setting (defaults write org.omacvm.app shareKeyboard
+// -bool true; the test identity's app is org.omacvm.app.test) puts this tap,
+// QEMU's (OMACVM_KEYS_LAST=1) and the Bridge's at the end of the chain, so
+// the sharing app sees keys and scrolls first. Read whenever a tap is made.
+// The trackpad's gestures come from MultitouchSupport, not the tap: they
+// still go to the VM.
+static int testIdentity(void);
+#ifndef SHARE_KEYBOARD_DOMAIN
+#define SHARE_KEYBOARD_DOMAIN (testIdentity() ? CFSTR("org.omacvm.app.test") : CFSTR("org.omacvm.app"))
+#endif
+static int shareKeyboard(void) {
+  CFStringRef domain = SHARE_KEYBOARD_DOMAIN;
+  CFPreferencesAppSynchronize(domain);
+  return CFPreferencesGetAppBooleanValue(CFSTR("shareKeyboard"), domain, NULL) ? 1 : 0;   // as the app's UserDefaults.bool
+}
+static CGEventTapPlacement tapPlace = kCGHeadInsertEventTap;   // the last tap's place (main thread)
+
 static int installTap(void) {
   int perm = permFn();
   if (!(perm & PERM_AX)) return 0;
@@ -655,8 +677,14 @@ static int installTap(void) {
   // events this one hands back either. (Never asked for it otherwise: where
   // macOS answers the preflight differently, Accessibility alone decides.)
   if ((seenPerm & PERM_POST) && !(perm & PERM_POST)) return 0;
-  CFMachPortRef newTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, tapMask, tapCb, NULL);
+  CGEventTapPlacement place = shareKeyboard() ? kCGTailAppendEventTap : kCGHeadInsertEventTap;
+  CFMachPortRef newTap = CGEventTapCreate(kCGHIDEventTap, place, kCGEventTapOptionDefault, tapMask, tapCb, NULL);
   if (!newTap) return 0;
+  if (place != tapPlace) {
+    tapPlace = place;
+    logf_("keyboard sharing (shareKeyboard) %s", place == kCGTailAppendEventTap ?
+          "on: the event tap at the end of the chain" : "off: the event tap at the head of the chain");
+  }
   CFRunLoopSourceRef newSource = CFMachPortCreateRunLoopSource(NULL, newTap, 0);
   if (!newSource) { CFMachPortInvalidate(newTap); CFRelease(newTap); return 0; }
   CFRunLoopRef loop = CFRunLoopGetMain();
