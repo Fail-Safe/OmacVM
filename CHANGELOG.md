@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.18 (unreleased)
+## 3.0.18
 
 Fixes for Full screen including notch, the start animation, Omanotch's patches and Mac input
 methods, and a switch for keyboard sharing apps.
