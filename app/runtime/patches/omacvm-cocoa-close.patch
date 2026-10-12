@@ -6,8 +6,8 @@ window" (#358, omacvm-close.h): Shut down (the default: the guest's power
 button, as before), Keep running (the app is hidden, the VM goes on; a click
 on the Dock icon, the app switcher or opening the app shows the same session
 again, a full-screen window in its own Space; Quit still shuts the guest
-down) or Ask (a sheet: Shut Down, the default, Keep Running, or Cancel with
-Esc). QEMU started as the OmacVM app reads the app's setting when the
+down) or Ask (a sheet that names the VM: Shut Down, the default, Keep
+Running, or Cancel with Esc). QEMU started as the OmacVM app reads the app's setting when the
 window closes, so a change while the VM runs counts; else
 OMACVM_CLOSE_ACTION from the start. qemu.log says what happened. The Dock
 icon also brings a minimised window back.
@@ -74,7 +74,7 @@ omacvm-cocoa-no-app-nap.patch.
 +    if ([w attachedSheet]) {
 +        return;
 +    }
-+    NSString *name = [w title];
++    NSString *name = qemu_name ? [NSString stringWithUTF8String:qemu_name] : nil;
 +    NSAlert *alert = [[NSAlert new] autorelease];
 +    [alert setMessageText:[name length] ? [NSString stringWithFormat:@"Shut down \u201c%@\u201d?", name]
 +                                        : @"Shut down the VM?"];

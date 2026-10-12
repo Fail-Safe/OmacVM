@@ -36,6 +36,8 @@ grep -q '\[NSApp hide:self\];' <<<"$keep" && ! grep -q 'terminate' <<<"$keep" &&
 # Ask: three buttons, Shut Down first (Return), Cancel last (Esc).
 awk '/addButtonWithTitle:@"Shut Down"/{a=NR} /addButtonWithTitle:@"Keep Running"/{b=NR} /addButtonWithTitle:@"Cancel"/{c=NR}
      END{exit !(a && b && c && a < b && b < c)}' <<<"$ask" || fail "the question's buttons are not Shut Down, Keep Running, Cancel"
+# The question names the VM (-name), not the window's title ("... (Press ⌃⌥G to release Mouse)").
+grep -q 'stringWithUTF8String:qemu_name' <<<"$ask" && ! grep -q '\[w title\]' <<<"$ask" || fail "the question does not name the VM"
 grep -q 'NSAlertFirstButtonReturn' <<<"$ask" && grep -q '\[NSApp terminate:self\];' <<<"$ask" &&
   grep -q 'NSAlertSecondButtonReturn' <<<"$ask" || fail "the answers are not acted on"
 # The Dock icon brings it back (hidden or minimised).
