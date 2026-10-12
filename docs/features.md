@@ -160,8 +160,9 @@ back into the VM.
 
 OmacVM.app's **Escape combo** setting: *This monitor* (the one under the
 pointer, the default) or *All monitors*, every monitor that shows the VM. For
-Parallels, UTM and VMware Fusion: `defaults write org.omacvm.gestures
-EscapeSwipe all` (or `pointer`).
+every route also in the control centre (the VM's `omacvm`, rows *Escape
+combo*, *Magic Mouse swipe*, *Swipe out to macOS*) and on the Mac with
+`omacvm gestures escape all` (or `pointer`); the same setting everywhere.
 
 Never out of full screen, and one press moves one Space at most: every move
 is checked, and a Space change that lands late is waited for before anything
