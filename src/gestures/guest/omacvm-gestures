@@ -659,9 +659,12 @@ def hypr(command, sock=None):
 
 
 def hypr_option(name, default, sock=None):
+    """A bool option: Hyprland 0.56 answers {"bool": true}, older ones {"int": 1}."""
     o = hypr(f"j/getoption {name}", sock)
-    v = o.get("int") if isinstance(o, dict) else None
-    return bool(v) if isinstance(v, int) and not isinstance(v, bool) else default
+    if not isinstance(o, dict):
+        return default
+    v = o.get("bool", o.get("int"))
+    return v if isinstance(v, bool) else bool(v) if isinstance(v, int) else default
 
 
 def workspaces_now(sock=None):

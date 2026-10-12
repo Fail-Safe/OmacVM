@@ -58,6 +58,7 @@ class Hypr:
         self.requests = []
         self.after_swipe = None   # (monitors, workspaces) Hyprland shows once a request came after the lift
         self.lifted = False
+        self.old_options = False  # answer options as Hyprland before 0.56 did ({"int": 1})
 
     def world(self, active, ids, windows=None, monitor="Virtual-1", others=(), special=0):
         windows = windows or {}
@@ -83,7 +84,11 @@ class Hypr:
             return json.dumps(self.workspaces)
         if req.startswith("j/getoption "):
             name = req.split(" ", 1)[1]
-            return json.dumps({"option": name, "int": self.options[name], "set": False}) if name in self.options else "no such option"
+            if name not in self.options:
+                return "no such option"
+            # Hyprland 0.56 answers a bool option with "bool"; older ones with "int".
+            key = "int" if self.old_options else "bool"
+            return json.dumps({"option": name, key: self.options[name] if key == "int" else bool(self.options[name]), "set": False})
         if req.startswith("dispatch "):
             return "ok"
         return "unknown request"
@@ -185,7 +190,12 @@ H.world(1, [1, 2], {1: 1, 2: 0})
 check(swipe(-0.3) == ["X left"], "invert off: fingers to the left from the first: X left")
 H.world(2, [1, 2], {1: 1, 2: 0})
 check(swipe(0.3) == ["X right"], "invert off: fingers to the right from the empty last: X right")
+H.old_options = True
+H.world(1, [1, 2], {1: 1, 2: 0})
+check(swipe(-0.3) == ["X left"], "invert off, said as before Hyprland 0.56 ({\"int\": 0}): the same")
 H.options["gestures:workspace_swipe_invert"] = 1
+check(swipe(0.3) == ["X left"] and swipe(-0.3) == [], "invert on, said as {\"int\": 1}: fingers to the right from the first: X left")
+H.old_options = False
 
 # ---- not a swipe out ----
 H.world(1, [1, 2, 3], {1: 2})
