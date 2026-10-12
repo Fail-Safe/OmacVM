@@ -121,9 +121,9 @@ enum RenderVMWindow {
         disk.disk = (DiskSize.Need(allocated: 13 * DiskSize.gib, used: 9 * DiskSize.gib, rootStart: 2 * DiskSize.gib), 128)
         window("window-8-disk-larger", state, disk)
 
-        // An update is ready: the banner, stopped and while the VM runs.
-        let staged = Updater.Staged(version: "3.1.1", app: URL(fileURLWithPath: "/nonexistent.app"),
-                                    notes: URL(string: "https://github.com/gillesgoetsch/OmacVM/releases"), teams: [])
+        // An update is ready: the banner (and its What's New from the new
+        // app's own CHANGELOG), stopped and while the VM runs.
+        let staged = makeStagedApp(tmp, version: "3.1.1")
         u.showForRendering(staged: staged, notice: nil, enabled: true, waiting: false, previous: nil)
         window("window-9-update", state, usual)
         var runs = usual
@@ -132,6 +132,12 @@ enum RenderVMWindow {
         u.showForRendering(staged: staged, notice: Updater.waitingNotice("A VM runs from \(Product.name)", version: "3.1.1"),
                            enabled: true, waiting: true, previous: nil)
         window("window-11-update-waits", state, runs)
+        u.showForRendering(staged: Updater.Staged(version: "3.1.1", app: URL(fileURLWithPath: "/nonexistent.app"),
+                                                  notes: URL(string: "https://github.com/gillesgoetsch/OmacVM/releases"), teams: []),
+                           notice: nil, enabled: true, waiting: false, previous: nil)
+        window("window-12-update-no-changelog", state, usual)
+        u.showForRendering(staged: staged, notice: nil, enabled: true, waiting: false, previous: nil)
+        sheet("sheet-1-whats-new") { WhatsNewSheet(updater: u, running: false) {} }
         u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil)
 
         // Long names: a VM name of 62 characters, a deep VMs folder, a
@@ -358,6 +364,35 @@ enum RenderVMWindow {
             return nil
         }
         return VMConfig.load(from: folder)
+    }
+
+    /// A downloaded app as Updater stages it, with this repo's CHANGELOG.md
+    /// under the new version's title.
+    private static func makeStagedApp(_ tmp: URL, version: String) -> Updater.Staged {
+        let app = tmp.appendingPathComponent("staged/OmacVM.app")
+        let res = app.appendingPathComponent("Contents/Resources/omacvm")
+        try? FileManager.default.createDirectory(at: res, withIntermediateDirectories: true)
+        let changelog = """
+        # Changelog
+
+        ## \(version)
+
+        A new settings window: everything about a VM on one page.
+
+        - OmacVM.app: **the VM's settings** in one window with a sidebar: General, Display, Input, Sharing & Devices, \
+        Storage & Updates. Resources and the disk's size change in the window itself.
+        - **Swipe out to macOS**: past the first or last workspace, a swipe goes on to the macOS Space beside the VM \
+        (#342, by @epicoun).
+        - **Closing the window** can keep the VM running or ask (#358, by @Vocllum).
+        - The update banner says what is new, with `What's New` for the whole list.
+
+        ## 3.0.18
+
+        - Earlier things.
+        """
+        try? changelog.write(to: res.appendingPathComponent("CHANGELOG.md"), atomically: true, encoding: .utf8)
+        return Updater.Staged(version: version, app: app, notes: URL(string: "https://github.com/gillesgoetsch/OmacVM/releases/tag/v\(version)"),
+                              teams: [])
     }
 }
 

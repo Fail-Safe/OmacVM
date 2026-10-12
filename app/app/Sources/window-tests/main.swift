@@ -403,6 +403,40 @@ if let d = UserDefaults(suiteName: suite) {
     d.removePersistentDomain(forName: suite)
 }
 
+// MARK: What's New (the new app's own CHANGELOG.md)
+
+let changelog = """
+# Changelog
+
+## Unreleased
+
+- Not yet.
+
+## 3.1.0
+
+A new settings window.
+
+- **One window** with a sidebar: General, Display.
+  More on a second line.
+- `Swipe out` to macOS (#342, by [@epicoun](https://github.com/epicoun)).
+
+## 3.0.18
+
+- Older.
+"""
+let news = WhatsNew.parse(changelog: changelog, version: "3.1.0")
+expect(news?.intro == "A new settings window." && news?.items.count == 2, "3.1.0: its intro and its two items")
+expect(news?.items.first == "**One window** with a sidebar: General, Display. More on a second line.", "an item's lines joined")
+expect(news?.summary() == "A new settings window.", "the banner: the intro")
+expect(WhatsNew.parse(changelog: changelog, version: "3.0.18")?.summary() == "Older.", "no intro: the first item")
+expect(WhatsNew.parse(changelog: changelog, version: "3.0.9") == nil, "a version without a section: nothing")
+expect(WhatsNew.parse(changelog: changelog, version: "3.0.1") == nil, "3.0.1 is not 3.0.18's prefix match")
+expect(WhatsNew.plain("`Swipe out` to macOS (#342, by [@epicoun](https://github.com/epicoun)).") == "Swipe out to macOS (#342, by @epicoun).",
+       "plain text: no Markdown marks")
+let long = WhatsNew(intro: nil, items: ["OmacVM.app: the **start animation** plays again in full screen when the VM starts with the notch and a lot more words. Second."])
+expect(long.summary(limit: 60)!.count <= 60 && long.summary(limit: 60)!.hasSuffix("…"), "a long first sentence is cut with …")
+expect(WhatsNew(intro: nil, items: ["OmacVM.app: fixed. More."]).summary() == "OmacVM.app: fixed.", "the first sentence, not the app's name's dot")
+
 // MARK: Window sides (the pictures' frames: OmacVM --render-vm-window)
 
 expect(WindowLayout.width == 800 && WindowLayout.contentWidth == 552 && WindowLayout.inset == 16, "800 pt window, 552 pt of settings, 16 pt margin")

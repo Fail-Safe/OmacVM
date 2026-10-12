@@ -165,7 +165,8 @@ install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/prebuilt-vm.sh" "$ROOT
 # runs its src/, and the Bridge runs it for the control centre when there is no
 # checkout (src/lib/mac.sh cli_file_app). The Bridge runs it only when nobody
 # else can write it (control.swift controlCLI): no group/other write bits.
-git -C "$REPO" archive "$COMMIT" omacvm src | tar -x -C "$C/Resources/omacvm"
+# CHANGELOG.md: the update banner's What's New reads the new version's own (UpdateViews.swift).
+git -C "$REPO" archive "$COMMIT" omacvm src CHANGELOG.md | tar -x -C "$C/Resources/omacvm"
 echo "$COMMIT" > "$C/Resources/omacvm/COMMIT"
 chmod -R go-w "$C/Resources/omacvm"
 install -m644 "$ROOT/LICENSE" "$C/Resources/licenses/LICENSE.omacvm-app"

@@ -1,5 +1,6 @@
 import AppKit
 import OmacVMUpdate
+import OmacVMWindow
 
 /// OmacVM.app updates itself (docs/adr/0033).
 ///
@@ -41,6 +42,8 @@ final class Updater: ObservableObject {
     }
 
     @Published private(set) var staged: Staged?
+    /// Later in the banner: hidden for that version until the next launch.
+    @Published var later: String?
     @Published private(set) var checking = false
     @Published var notice: String?
     @Published private(set) var enabled: Bool
@@ -644,6 +647,22 @@ final class Updater: ObservableObject {
     static func waitingNotice(_ why: String, version: String) -> String {
         "\(why): \(Product.name) \(version) goes in once it has shut down."
     }
+
+    /// When the last check ran (weekly or by hand), for the window's line.
+    var lastCheckDate: Date? { lastCheck }
+
+    /// What the staged version brings: its own CHANGELOG.md (signed with the
+    /// app and checked before it was staged). nil: an app without one.
+    func whatsNew(_ s: Staged) -> WhatsNew? {
+        if let n = whatsNewCache[s.version] { return n }
+        let url = s.app.appendingPathComponent("Contents/Resources/omacvm/CHANGELOG.md")
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= WhatsNew.maxBytes,
+              let text = try? String(contentsOf: url, encoding: .utf8),
+              let n = WhatsNew.parse(changelog: text, version: s.version) else { return nil }
+        whatsNewCache[s.version] = n
+        return n
+    }
+    private var whatsNewCache: [String: WhatsNew] = [:]
 
     // MARK: - Check Now (the window and the menu)
 

@@ -21,10 +21,11 @@ struct ReadyView: View {
     @State private var deleteBusy = false
 
     enum ReadySheet: Identifiable {
-        case delete(VMConfig)
+        case delete(VMConfig), whatsNew
         var id: String {
             switch self {
             case .delete(let c): return "delete-" + c.folder.path
+            case .whatsNew: return "whats-new"
             }
         }
     }
@@ -35,7 +36,7 @@ struct ReadyView: View {
         WindowShell(nav: SettingsNav.items) {
             header
         } notices: {
-            UpdateBanner(updater: updater)
+            UpdateBanner(updater: updater, running: running) { sheet = .whatsNew }
             notices
         } content: {
             SettingsSections(state: state, preview: preview, running: running) { vm in
@@ -52,6 +53,8 @@ struct ReadyView: View {
                     sheet = nil
                     if delete { state.storage.trash(vm) }
                 }
+            case .whatsNew:
+                WhatsNewSheet(updater: updater, running: running) { sheet = nil }
             }
         }
         .onAppear { if let s = preview?.sheet { sheet = s } }
