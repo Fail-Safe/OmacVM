@@ -133,6 +133,7 @@ struct SettingsSections: View {
             Card {
                 ResourcesRow(state: state)
                 GraphicsRow(state: state)
+                CloseActionRow(tick: state.tick)
             }
         }
         .spySection("general")
@@ -153,6 +154,7 @@ struct SettingsSections: View {
             Card {
                 KeyboardRow(state: state, preview: preview?.keyNote)
                 MacIMERow(state: state)
+                SwipeOutRow(tick: state.tick, gesturesOff: VMRecord.isOff("gestures", folder: state.config.folder))
             }
         }
         .spySection("input")

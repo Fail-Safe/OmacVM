@@ -179,6 +179,26 @@ struct GraphicsRow: View {
     }
 }
 
+/// Closing the window (org.omacvm.app closeAction): what closing a running
+/// VM's window does. QEMU gets it as OMACVM_CLOSE_ACTION.
+struct CloseActionRow: View {
+    var tick = 0
+    @State private var action = Settings.closeAction
+
+    var body: some View {
+        SettingRow(title: "Closing the window", probe: "close") {
+            Picker("Closing the window", selection: $action) {
+                ForEach(CloseAction.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+        }
+        .onChange(of: action) { _, v in if v != Settings.closeAction { Settings.closeAction = v } }
+        .onChange(of: tick) { _, _ in action = Settings.closeAction }
+    }
+}
+
 // MARK: Display
 
 /// Keep the Dock and hot corners away (org.omacvm.app keepDockAway, every VM).
@@ -273,6 +293,27 @@ struct KeyboardRow: View {
         if keyNote == .needsUser, preview == nil {
             KeyAccess.clearOldEntryOnce { refreshKeyNote() }
         }
+    }
+}
+
+/// Swipe out to macOS (org.omacvm.gestures SwipeOut, off by default): past
+/// the first or the last workspace, a swipe goes on to the macOS Space beside
+/// the VM. OmacVM Gestures reads it.
+struct SwipeOutRow: View {
+    var tick = 0
+    /// This VM has trackpad gestures off: nothing to swipe with there.
+    var gesturesOff = false
+    @State private var on = SwipeOutSetting.current()
+
+    var body: some View {
+        SettingRow(title: "Swipe out to macOS",
+                   subtitle: "Swipe past the first or last workspace to the macOS Space beside it."
+                       + (gesturesOff ? " Trackpad gestures are off in this VM." : ""), probe: "swipe-out") {
+            SwipeOutPicture()
+            RowSwitch(title: "Swipe out to macOS", isOn: $on)
+        }
+        .onChange(of: on) { _, v in if v != SwipeOutSetting.current() { SwipeOutSetting.set(v) } }
+        .onChange(of: tick) { _, _ in on = SwipeOutSetting.current() }
     }
 }
 

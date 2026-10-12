@@ -47,3 +47,40 @@ public enum ScrollSpy {
         content > visible && offset + visible >= content - 4
     }
 }
+
+/// "Closing the window" (org.omacvm.app closeAction): what closing a running
+/// VM's window does. The window stores it; QEMU gets it as
+/// OMACVM_CLOSE_ACTION. Anything else than the three words is the default.
+public enum CloseAction: String, CaseIterable, Sendable {
+    case shutdown, keepRunning, ask
+
+    public static let key = "closeAction"
+    public static let defaultValue = CloseAction.shutdown
+
+    public static func parse(_ stored: Any?) -> CloseAction {
+        (stored as? String).flatMap(CloseAction.init(rawValue:)) ?? defaultValue
+    }
+
+    public var title: String {
+        switch self {
+        case .shutdown: return "Shut down"
+        case .keepRunning: return "Keep running"
+        case .ask: return "Ask"
+        }
+    }
+}
+
+/// "Swipe out to macOS" (org.omacvm.gestures SwipeOut, a bool, off by
+/// default): OmacVM Gestures reads it from its own settings domain. Read as
+/// CFPreferencesGetAppBooleanValue reads it: a bool, a number other than 0,
+/// or the words true / yes.
+public enum SwipeOut {
+    public static let key = "SwipeOut"
+    public static let defaultValue = false
+
+    public static func isOn(stored: Any?) -> Bool {
+        if let n = stored as? NSNumber { return n.doubleValue != 0 }
+        if let s = stored as? String { return ["true", "yes"].contains(s.lowercased()) || (Int(s).map { $0 != 0 } ?? false) }
+        return defaultValue
+    }
+}

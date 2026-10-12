@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The pictures of the VM window (docs/design/settings-3.1/final.html):
-/// how a VM starts and what the escape combo takes back to macOS. Drawn in the design's coordinates and scaled; Omarchy is drawn
+/// how a VM starts, what the escape combo takes back to macOS, the swipe out
+/// to macOS. Drawn in the design's coordinates and scaled; Omarchy is drawn
 /// in Rosé Pine Dawn's colours, macOS's desktop in its own, in light and dark.
 private struct Sketch {
     var ctx: GraphicsContext
@@ -193,5 +194,42 @@ struct EscapePicture: View {
             s.ctx.fill(p, with: .color(Color(rgb: 0x1D1D1F)))
             s.ctx.stroke(p, with: .color(.white), lineWidth: 0.6 * k)
         }
+    }
+}
+
+/// Swipe out: past the first or the last workspace lies the macOS Space beside it.
+struct SwipeOutPicture: View {
+    var body: some View {
+        Canvas { ctx, size in
+            let s = Sketch(ctx: ctx, k: size.width / 240)
+            s.rect(0, 0, 240, 64, radius: 8, fill: Look.panel)
+            for x in [12.0, 192] {
+                s.rect(x, 22, 36, 24, radius: 3, fill: Ink.desk)
+                s.clipped(x, 22, 36, 24, radius: 3) { s in s.rect(x, 22, 36, 3.5, fill: Ink.menu) }
+                s.rect(x + 12, 42, 12, 2, radius: 1, fill: .white.opacity(0.9))
+                s.rect(x + 0.5, 22.5, 35, 23, radius: 3, stroke: Look.pictureLine)
+            }
+            for (i, x) in [56.0, 90, 124, 158].enumerated() {
+                s.rect(x, 24, 28, 20, radius: 3, fill: Ink.base)
+                s.clipped(x, 24, 28, 20, radius: 3) { s in s.rect(x, 24, 28, 2.5, fill: Ink.bar) }
+                if i < 3 {
+                    s.rect(x + 3, 29, 12, 9, radius: 1, fill: Ink.surface, stroke: Ink.border, line: 0.6)
+                    s.rect(x + 17, 29, 8, 9, radius: 1, fill: Ink.surface, stroke: Ink.border, line: 0.6)
+                    s.text("\(i + 1)", x + 24, 44, size: 6, Ink.text)
+                }
+                s.rect(x + 0.5, 24.5, 27, 19, radius: 3, stroke: i == 0 ? Ink.rose : (i == 3 ? Color(rgb: 0xC9C0B6) : Look.pictureLine),
+                       line: 0.8, dash: i == 3 ? [2.4, 2] : [])
+            }
+            s.text("macOS", 30, 59, size: 6, .secondary)
+            s.text("Omarchy", 121, 59, size: 6, .secondary)
+            s.text("macOS", 210, 59, size: 6, .secondary)
+            s.curve((60, 16), (54, 8), (38, 8), (30, 15), Ink.accent, width: 1.6)
+            s.line([(35, 11.6), (29.8, 15.2), (34.6, 18.2)], Ink.accent, width: 1.6)
+            s.curve((180, 16), (186, 8), (202, 8), (210, 15), Ink.accent, width: 1.6)
+            s.line([(205, 11.6), (210.2, 15.2), (205.4, 18.2)], Ink.accent, width: 1.6)
+            s.rect(0.5, 0.5, 239, 63, radius: 8, stroke: Look.pictureLine)
+        }
+        .frame(width: 240, height: 64)
+        .accessibilityHidden(true)
     }
 }
