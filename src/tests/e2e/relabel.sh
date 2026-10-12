@@ -31,6 +31,12 @@ for h in "$A"/Contents/Helpers/*.app; do
 done
 $PB -c "Set :CFBundleIdentifier org.omacvm.app.test" "$A/Contents/Info.plist"
 $PB -c "Set :CFBundleName OmacVM Test" "$A/Contents/Info.plist" 2>/dev/null || true
+# The window's Gestures rows (escape combo, Magic Mouse swipe, Swipe out) read
+# the domain build-app.sh --test-identity names; a release has none, so the
+# relabeled copy would read the installed Gestures' org.omacvm.gestures.
+$PB -c "Delete :OmacVMGesturesDomain" "$A/Contents/Info.plist" 2>/dev/null || true
+$PB -c "Add :OmacVMGesturesDomain string org.omacvm.test.gestures" "$A/Contents/Info.plist"
 codesign --force --options runtime --timestamp=none --preserve-metadata=entitlements -s "$SIGN" -i org.omacvm.app.test "$A"
 codesign --verify --deep --strict "$A"
-echo "$($PB -c 'Print :CFBundleShortVersionString' "$A/Contents/Info.plist") $(codesign -dv "$A" 2>&1 | grep -E '^Identifier|^TeamIdentifier' | tr '\n' ' ')"
+[[ $($PB -c "Print :OmacVMGesturesDomain" "$A/Contents/Info.plist") == org.omacvm.test.gestures ]] || { echo "relabel.sh: no test Gestures domain" >&2; exit 1; }
+echo "$($PB -c 'Print :CFBundleShortVersionString' "$A/Contents/Info.plist") $(codesign -dv "$A" 2>&1 | grep -E '^Identifier|^TeamIdentifier' | tr '\n' ' ')gestures domain $($PB -c 'Print :OmacVMGesturesDomain' "$A/Contents/Info.plist")"
