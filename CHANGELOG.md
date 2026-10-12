@@ -9,6 +9,12 @@ in more words.
   that has the line but not the whole patch (for example from another FullPanel build) is
   restored from its unpatched copy and patched again; without a clean copy the install stops and
   says to clone the bar again. Reported by @brianmerchant (#354).
+- **Mac input methods** (mac-ime, experimental): in a VM whose language is not English, the control
+  centre and `omacvm check` said the Fcitx5 module was not built, although it was; pacman's
+  package info is now read in English. The same fix keeps `omacvm disable x86-apps` from leaving
+  OmacVM's box64 behind in such a VM. The check's Mac links row (under Omanotch) no longer fails
+  for a VM started with Mac input methods on. Fcitx5 no longer shows a tip at login to unset
+  `GTK_IM_MODULE`: Fcitx5 runs without it, GTK apps keep it. Reported by @Vocllum (#357).
 
 ## 3.0.17
 

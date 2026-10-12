@@ -164,6 +164,9 @@ check says when.
   `--enable-wayland-ime` to `chromium-flags.conf` and
   `electron-flags.conf`, each in a block marked as OmacVM's; off removes
   them. Both take effect at the next login; the check row says so.
+  Fcitx5 itself runs without `GTK_IM_MODULE` (a drop-in for Omarchy's
+  `omarchy-fcitx5.service` unsets it): with it, Fcitx5's Wayland check
+  shows a tip to unset it (#357).
 
 ### Mac: QEMU's window (`omacvm-cocoa-ime.patch`)
 
