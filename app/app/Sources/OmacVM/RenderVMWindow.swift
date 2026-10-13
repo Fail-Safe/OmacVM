@@ -34,6 +34,8 @@ enum RenderVMWindow {
         var menuBar: Bool? = false
         /// Disk › Change… open: what Omarchy needs, the size chosen.
         var disk: (need: DiskSize.Need, gb: Int)? = nil
+        /// Skip the notch's (i) open.
+        var notchSkipInfo: Bool? = nil
     }
 
     static func allowed(bundleID: String?) -> Bool {
@@ -118,6 +120,17 @@ enum RenderVMWindow {
         menuBar.section = "display"
         window("window-15-notch-menu-bar", state, menuBar)
         Settings.keepDockAway = true
+        // Skip the notch on, the VM ready for it; then not ready yet (its line
+        // says what it needs); and its (i) on its own.
+        try? NotchSkip.write(true, folder: folder)
+        try? Data().write(to: folder.appendingPathComponent(NotchSkip.readyFileName))
+        var skip = usual
+        skip.section = "display"
+        window("window-17-notch-skip", state, skip)
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent(NotchSkip.readyFileName))
+        window("window-18-notch-skip-not-ready", state, skip)
+        try? NotchSkip.write(false, folder: folder)
+        sheet("popover-1-notch-skip") { NotchSkipInfo() }
         try? FileManager.default.removeItem(at: folder.appendingPathComponent(NotchArea.readyFileName))
         try? NotchArea.write(.native, folder: folder)
         try? VMDisk.setJobs([], config)

@@ -171,6 +171,9 @@ struct SettingsSections: View {
             SectionTitle(text: "Display")
             Card {
                 StartInRow(state: state, previewNotch: preview?.notch, previewMenuBar: preview?.menuBar)
+                if preview?.notch ?? Mac.hasNotch {
+                    NotchSkipRow(state: state, previewInfo: preview?.notchSkipInfo ?? false)
+                }
                 KeepDockAwayRow(tick: state.tick)
                 EscapeRow(tick: state.tick)
                 if preview?.magicMouse ?? mouse.connected {

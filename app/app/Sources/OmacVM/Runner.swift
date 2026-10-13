@@ -97,6 +97,10 @@ final class Runner {
         if notchStart.fullPanel, let g = notchGeometry {
             a += ["-smbios", "type=11,value=\(g.smbios)"]
         }
+        // Skip the notch (NotchSkip): the bar beside the notch, either full screen.
+        if notchSkip {
+            a += ["-smbios", "type=11,value=\(NotchSkip.smbios)"]
+        }
         // HDR: the guest's display sync reads it (omacvm-app-host).
         if Settings.hdrActive {
             a += ["-smbios", "type=11,value=omacvm.hdr=1"]
@@ -363,6 +367,7 @@ final class Runner {
                                      guestReady: NotchArea.guestReady(folder: c.folder, features: try? String(
                                         contentsOf: c.folder.appendingPathComponent("features"), encoding: .utf8)))
         if notchStart.fullPanel { links.omanotch = false }
+        notchSkip = NotchSkip.read(folder: c.folder)
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
         env["OMACVM_PRODUCT_NAME"] = Product.name
@@ -468,6 +473,7 @@ final class Runner {
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
         log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
         log.write(Data("\(NotchArea.logPrefix)\(notchStart.record)\n".utf8))
+        if notchSkip { log.write(Data("OmacVM: skip the notch: on\n".utf8)) }
         log.write(Data("OmacVM: Mac proxy: \(proxy.record(fastNetwork: network.vmnet))\n".utf8))
         log.write(Data("OmacVM: Mac folder: \(macFolder)\n".utf8))
         if let n = sizeNote { log.write(Data("OmacVM: resources: \(c.cpus) CPUs, \(c.memoryMB) MB for this start: \(n)\n".utf8)) }
@@ -571,12 +577,37 @@ final class Runner {
                 Task { @MainActor in self?.appendLog(line) }
             }
         }
+        Runner.watchNotchSkip(folder: c.folder, atStart: notchSkip, agentPath: agentPath, running: { kill(pid, 0) == 0 }) { [weak self] line in
+            Task { @MainActor in self?.appendLog(line) }
+        }
+    }
+
+    /// Skip the notch switched while the VM runs (the window, `omacvm notch
+    /// --skip`, the control centre: all write the folder's file): the VM's bar
+    /// gets it within a few seconds (NotchSkipLive). A file read every 2 s.
+    nonisolated static func watchNotchSkip(folder: URL, atStart: Bool, agentPath: String, running: @escaping @Sendable () -> Bool,
+                                           log: @escaping @Sendable (String) -> Void) {
+        Thread.detachNewThread {
+            var live = NotchSkipLive(atStart: atStart)
+            while running() {
+                Thread.sleep(forTimeInterval: 2)
+                let on = NotchSkip.read(folder: folder)
+                guard live.due(on, at: Date()), running() else { continue }
+                let cmd = NotchSkip.guestCommand(on)
+                if GuestAgent.start(socketPath: agentPath, cmd.path, cmd.args) == .started {
+                    if on != live.told ?? atStart { log("OmacVM: skip the notch: \(on ? "on" : "off") (switched while the VM runs)") }
+                    live.sent(on, at: Date())
+                }
+            }
+        }
     }
 
     /// What of the Mac this start of the VM may use (its features).
     private(set) var links = MacLinks()
     /// This start and the strip beside the notch (NotchArea), set in start().
     private(set) var notchStart = NotchStart(fullPanel: false, record: "native")
+    /// Skip the notch at this start (NotchSkip), set in start().
+    private(set) var notchSkip = false
     private(set) var notchGeometry: NotchGeometry?
 
     /// omacvm-netd may still refuse QEMU (another build, the limit), vmnet

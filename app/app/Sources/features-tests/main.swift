@@ -186,6 +186,47 @@ for c in StartIn.allCases {
     expect(StartIn.current(fullScreen: c.fullScreen, mode: m, hasNotch: true) == c, "Start in: \(c) round trip")
 }
 
+// Skip the notch (NotchSkip): its file, the SMBIOS string, the command for a
+// running VM, and when that VM is told again (NotchSkipLive).
+let skipDir = FileManager.default.temporaryDirectory.appendingPathComponent("notch-skip-\(getpid())")
+try? FileManager.default.createDirectory(at: skipDir, withIntermediateDirectories: true)
+expect(!NotchSkip.read(folder: skipDir), "skip: no file: off (the default)")
+expect(NotchSkip.on("on\n") && !NotchSkip.on("On") && !NotchSkip.on("1") && !NotchSkip.on(nil), "skip: only \"on\" is on")
+try? NotchSkip.write(true, folder: skipDir)
+expect(NotchSkip.read(folder: skipDir) &&
+       (try? String(contentsOf: skipDir.appendingPathComponent("notch-skip"), encoding: .utf8)) == "on\n",
+       "skip: on writes notch-skip, as omacvm notch --skip does")
+try? NotchSkip.write(false, folder: skipDir)
+expect(!FileManager.default.fileExists(atPath: skipDir.appendingPathComponent("notch-skip").path), "skip: off removes the file")
+expect((try? NotchSkip.write(false, folder: skipDir)) != nil, "skip: off twice is fine")
+expect(!NotchSkip.guestReady(folder: skipDir, features: nil), "skip: not ready without apply's marker")
+FileManager.default.createFile(atPath: skipDir.appendingPathComponent(NotchSkip.readyFileName).path, contents: Data())
+expect(NotchSkip.guestReady(folder: skipDir, features: "omanotch=on") && !NotchSkip.guestReady(folder: skipDir, features: "omanotch=off"),
+       "skip: ready with the marker and Omanotch on")
+try? FileManager.default.removeItem(at: skipDir)
+let smbiosValue = NotchSkip.smbios.split(separator: "=")
+expect(smbiosValue.count == 2 && smbiosValue[0] == "omacvm.notchskip" && smbiosValue[1] == "1",
+       "skip: SMBIOS omacvm.notchskip=1 (omacvm-app-host: OMACVM_NOTCHSKIP=1)")
+let cmdOn = NotchSkip.guestCommand(true), cmdOff = NotchSkip.guestCommand(false)
+expect(cmdOn.path == "/bin/sh" && cmdOn.args.count == 2 && cmdOn.args[1].contains("printf 1 > /run/omacvm/notch-skip.new") &&
+       cmdOff.args[1].contains("printf 0 > ") && cmdOn.args[1].hasSuffix("mv -f /run/omacvm/notch-skip.new /run/omacvm/notch-skip"),
+       "skip: the running VM gets 1 or 0 in /run/omacvm/notch-skip, in one step")
+let t0 = Date(timeIntervalSince1970: 1_000_000)
+var live = NotchSkipLive(atStart: false)
+expect(!live.due(false, at: t0), "skip live: unchanged since the start: nothing to tell")
+expect(live.due(true, at: t0), "skip live: switched on: tell the VM")
+live.sent(true, at: t0)
+expect(!live.due(true, at: t0.addingTimeInterval(2)), "skip live: told: not again at once")
+expect(live.due(true, at: t0.addingTimeInterval(NotchSkipLive.again)), "skip live: told again now and then while it differs from the start")
+expect(live.due(false, at: t0.addingTimeInterval(4)), "skip live: switched back: tell the VM")
+live.sent(false, at: t0.addingTimeInterval(4))
+expect(!live.due(false, at: t0.addingTimeInterval(400)), "skip live: back to the start's value: no more repeats")
+var liveOn = NotchSkipLive(atStart: true)
+expect(!liveOn.due(true, at: t0) && liveOn.due(false, at: t0), "skip live: on at the start, switched off: tell the VM")
+liveOn.sent(false, at: t0)
+expect(liveOn.due(false, at: t0.addingTimeInterval(31)) && !liveOn.due(false, at: t0.addingTimeInterval(29)),
+       "skip live: off while the start said on: again after 30 s (a reboot inside the VM)")
+
 // The menu bar in full screen (#356): macOS's global preference.
 if let d = UserDefaults(suiteName: "org.omacvm.test.features-menubar.\(getpid())") {
     // (Not set, the Mac's own global setting counts: not checked here.)

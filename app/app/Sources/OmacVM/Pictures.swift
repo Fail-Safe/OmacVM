@@ -233,3 +233,60 @@ struct SwipeOutPicture: View {
         .accessibilityHidden(true)
     }
 }
+
+/// Skip the notch, in its (i): the top of the built-in display twice. Off:
+/// the tray's last icons go behind the notch. On: they continue left of it,
+/// in the same order.
+struct NotchSkipPicture: View {
+    /// The tray icons from the left, as Omarchy lays them out.
+    private static let tray: [Color] = [Ink.iris, Ink.gold, Color(rgb: 0x56949F), Ink.rose, Ink.pine, Ink.gold,
+                                        Color(rgb: 0xB4637A), Ink.iris, Ink.pine, Ink.rose, Color(rgb: 0x56949F), Ink.gold]
+    /// How many of them no longer fit right of the notch (the fourth only half).
+    private static let over = 4
+
+    var body: some View {
+        Canvas { ctx, size in
+            let s = Sketch(ctx: ctx, k: size.width / 292)
+            s.rect(0, 0, 292, 118, radius: 8, fill: Look.panel)
+            s.text("Off", 14, 19, size: 8, .secondary)
+            strip(s, y: 24, on: false)
+            s.text("On", 14, 72, size: 8, .secondary)
+            strip(s, y: 77, on: true)
+            s.rect(0.5, 0.5, 291, 117, radius: 8, stroke: Look.pictureLine)
+        }
+        .frame(width: 292, height: 118)
+        .accessibilityHidden(true)
+    }
+
+    /// One display's top: the bar (18 tall) and a little of the desktop.
+    private func strip(_ s: Sketch, y: CGFloat, on: Bool) {
+        let left: CGFloat = 12, width: CGFloat = 268, notchL: CGFloat = 124, notchR: CGFloat = 168
+        s.clipped(left, y, width, 30, radius: 4) { s in
+            s.rect(left, y, width, 30, fill: Ink.base)
+            s.rect(left, y, width, 18, fill: Ink.bar)
+            s.rect(left, y + 18, width, 0.6, fill: Ink.border)
+            // The menu and four workspaces.
+            s.rect(18, y + 6, 6, 6, radius: 1.5, fill: Ink.rose)
+            for (i, x) in [29.0, 37, 45, 53].enumerated() {
+                s.rect(x, y + 6, 6, 6, radius: 1.5, fill: i == 0 ? Ink.pine : Ink.dot)
+            }
+            // The clock at the far right, the tray before it, 9 apart.
+            s.rect(250, y + 7.6, 24, 2.8, radius: 1.4, fill: Ink.text)
+            let n = Self.tray.count
+            for (i, c) in Self.tray.enumerated() {
+                var cx = 241 - CGFloat(n - 1 - i) * 9
+                if on && i < Self.over { cx = notchL - 7 - CGFloat(Self.over - 1 - i) * 9 }
+                s.circle(cx, y + 9, 3, c)
+            }
+            // The camera housing, over what is behind it.
+            s.rect(notchL, y - 6, notchR - notchL, 19, radius: 4, fill: Ink.notch)
+            if on {
+                // Under the notch, from where they were to where they are.
+                s.curve((notchR + 4, y + 21), (notchR - 8, y + 28.5), (notchL + 8, y + 28.5), (notchL - 3, y + 21),
+                        Ink.accent, width: 1.4)
+                s.line([(notchL + 2.4, y + 21.2), (notchL - 3.2, y + 20.8), (notchL - 1.4, y + 26)], Ink.accent, width: 1.4)
+            }
+        }
+        s.rect(left + 0.5, y + 0.5, width - 1, 29, radius: 4, stroke: Look.pictureLine)
+    }
+}

@@ -41,6 +41,7 @@ enum SettingsDump {
             "diskGB": c.diskGB,
             "graphics": Graphics.read(folder: f).rawValue,
             "notchMode": mode.rawValue,
+            "notchSkip": NotchSkip.read(folder: f),
             // As a Mac with a notch shows it (a Mac without one shows Full screen for both).
             "startIn": StartIn.current(fullScreen: Settings.startFullScreen, mode: mode, hasNotch: true).rawValue,
             "macFolder": MacFolder.path(c) ?? "",
