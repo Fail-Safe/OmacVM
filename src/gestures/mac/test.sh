@@ -248,6 +248,15 @@ grep -q 'swipe out to the left from "App VM": its VM is not the one in front: ig
   echo "ok   swipe out: the guest's X left reached the Mac over its connection (and was checked)" ||
   { echo "FAIL swipe out: the Mac did not read the guest's X left" >&2; cat "$T/out4" >&2; fail=1; }
 expect "$T/out4" "edges App VM 1 -1"   # its "E right left", kept with its connection
+# ... the same on the other three routes (each on its own network's address).
+for r in "parallels 0 10.211.55.2" "utm 1 192.168.64.1" "fusion 2 172.16.5.1"; do
+  set -- $r
+  TEST_SWIPE_OUT=1 mac "$T/out-$1" "$2,$3"
+  guest "$1 VM" "$1" "" swipe OMACVM_HOST="$3" > "$T/guest-$1" 2>&1 || true
+  wait "$MAC" || true
+  expect "$T/guest-$1" "guest: swipe out on 2"
+  expect "$T/out-$1" "edges $1 VM 1 -1"
+done
 mac "$T/out5" 3
 guest "App VM" app "" swipe OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest5" 2>&1 || true
 wait "$MAC" || true
