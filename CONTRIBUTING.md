@@ -69,6 +69,7 @@ src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh && src/tests/buil
 src/net/mac/test.sh
 src/gestures/mac/test.sh
 src/bridge/mac/test-models.sh && src/bridge/mac/test-hid.sh
+src/bridge/mac/test-wallpaper.sh
 src/tests/venus-driver.sh
 src/tests/vulkan-feature.sh && src/tests/venus-build-tools.sh && src/tests/graphics-setting.sh && src/tests/pkg-safe.sh
 src/tests/app-paths.sh

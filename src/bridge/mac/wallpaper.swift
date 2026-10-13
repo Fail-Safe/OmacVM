@@ -55,7 +55,9 @@ func setOnAllSpaces(_ url: URL) {
   guard let data = try? Data(contentsOf: wallpaperStore),
         var store = try? PropertyListSerialization.propertyList(from: data, options: .mutableContainers, format: nil) as? [String: Any]
   else { return }
-  // The just-set Space's picture settings (placement, background colour) for every Space.
+  // The image choice's Configuration for every Space. On macOS 27 it is a plist
+  // with only the type (imageFile) and the picture's URL; placement and colour
+  // are in each Desktop's EncodedOptionValues, which stay as they are.
   var config: Any?
   func findConfig(_ o: Any) {
     if let d = o as? [String: Any] {
@@ -64,15 +66,45 @@ func setOnAllSpaces(_ url: URL) {
     } else if let a = o as? [Any] { a.forEach { if config == nil { findConfig($0) } } }
   }
   findConfig(store)
+  // The first image configuration may belong to an old Space. Its embedded
+  // imageFile URL must match Files, not a picture setWallpaper already removed.
+  if let data = config as? Data,
+     var image = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+     image["type"] as? String == "imageFile", var imageURL = image["url"] as? [String: Any] {
+    imageURL["relative"] = url.absoluteString
+    image["url"] = imageURL
+    if let updated = try? PropertyListSerialization.data(fromPropertyList: image, format: .binary, options: 0) {
+      config = updated
+    }
+  }
+  // Files as this macOS writes them: like the image choice it wrote last (the
+  // Space NSWorkspace just set). macOS 27 writes none and refuses a choice with
+  // a Files entry (WallpaperAgent: "Failed to create Wallpaper", its default
+  // picture on every Space); older ones list the picture's URL.
+  var newest: (set: Date, files: [Any])?
+  func findNewest(_ o: Any) {
+    if let d = o as? [String: Any] {
+      for (k, v) in d {
+        if k == "Desktop", let desktop = v as? [String: Any],
+           let choice = ((desktop["Content"] as? [String: Any])?["Choices"] as? [[String: Any]])?.first,
+           choice["Provider"] as? String == imageProvider, let files = choice["Files"] as? [Any] {
+          let set = desktop["LastSet"] as? Date ?? .distantPast
+          if newest == nil || set > newest!.set { newest = (set, files) }
+        } else { findNewest(v) }
+      }
+    } else if let a = o as? [Any] { a.forEach(findNewest) }
+  }
+  findNewest(store)
+  let files: [Any] = newest?.files.isEmpty == true ? [] : [["relative": url.absoluteString]]
   var changed = 0
   func rewrite(_ o: Any) -> Any {
     if var d = o as? [String: Any] {
       for (k, v) in d {
         if k == "Desktop", var desktop = v as? [String: Any], var content = desktop["Content"] as? [String: Any] {
-          var choice: [String: Any] = ["Provider": imageProvider, "Files": [["relative": url.absoluteString]]]
+          var choice: [String: Any] = ["Provider": imageProvider, "Files": files]
           if let c = config { choice["Configuration"] = c }
           else if let old = (content["Choices"] as? [[String: Any]])?.first, old["Provider"] as? String == imageProvider {
-            choice = old; choice["Files"] = [["relative": url.absoluteString]]
+            choice = old; choice["Files"] = files
           } else { continue }
           content["Choices"] = [choice]; content["Shuffle"] = "$null"
           desktop["Content"] = content; d[k] = desktop; changed += 1
