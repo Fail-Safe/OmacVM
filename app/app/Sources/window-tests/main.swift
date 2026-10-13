@@ -364,11 +364,12 @@ expect(WindowSize.defaultHeight(visible: 400) == 500, "a tiny screen: never belo
 
 // MARK: The sidebar follows the scroll (ScrollSpy)
 
-// The settings page as the window lays it out: five sections, their tops in
-// the content, and the content's height (General, Display, Input, Sharing &
-// Devices, Storage & Updates; the last two never reach the top).
-let spyTops: [Double] = [10, 384, 1135, 1406, 1690]
-let spyContent = 2330.0
+// The settings page as the window lays it out (measured in 3.1.0, a stopped
+// VM): five sections, their headings in the content, and the content's height
+// (General, Display, Input, Sharing & Devices, Storage & Updates; the last two
+// never reach the top).
+let spyTops: [Double] = [14, 259, 734, 963, 1170]
+let spyContent = 1548.0
 // The visible part under the 52 pt header: the 500 pt minimum, a 13-inch
 // MacBook Air (760 and 860 pt windows), a tall window, and the Air with the
 // update banner (52 + 52 pt).
@@ -411,13 +412,12 @@ for window: Double in [500, 760, 860, 1400, 808] {
     expect(usual, "\(Int(window)) pt window: mid-page, the section at the 90 pt line (up to \(Int(stretchStart)) of \(Int(maxOffset)) pt)")
 }
 // Mid-page examples: Display's heading at the line marks Display, half a point
-// before not yet; in the 500 pt window the same for Input.
-let spy860 = (viewport: 808.0, maxOffset: spyContent - 808)
-expect(ScrollSpy.current(tops: spyTops, offset: 294, maxOffset: spy860.maxOffset, viewport: spy860.viewport) == 1
-       && ScrollSpy.current(tops: spyTops, offset: 293.5, maxOffset: spy860.maxOffset, viewport: spy860.viewport) == 0,
-       "860 pt window: Display marked when its heading reaches the line, not before")
-expect(ScrollSpy.current(tops: spyTops, offset: 1045, maxOffset: spyContent - 448, viewport: 448) == 2
-       && ScrollSpy.current(tops: spyTops, offset: 1044.5, maxOffset: spyContent - 448, viewport: 448) == 1,
+// before not yet (760 pt window); in the 500 pt window the same for Input.
+expect(ScrollSpy.current(tops: spyTops, offset: 169, maxOffset: spyContent - 708, viewport: 708) == 1
+       && ScrollSpy.current(tops: spyTops, offset: 168.5, maxOffset: spyContent - 708, viewport: 708) == 0,
+       "760 pt window: Display marked when its heading reaches the line, not before")
+expect(ScrollSpy.current(tops: spyTops, offset: 644, maxOffset: spyContent - 448, viewport: 448) == 2
+       && ScrollSpy.current(tops: spyTops, offset: 643.5, maxOffset: spyContent - 448, viewport: 448) == 1,
        "500 pt window: Input marked when its heading reaches the line, not before")
 // Near the top the line is 90 pt down, as before: a section 80 pt down counts, one 120 pt down not yet.
 expect(ScrollSpy.current(tops: [0, 80, 1000], offset: 0, maxOffset: 2000, viewport: 700) == 1, "top: a section 80 pt down is marked")
