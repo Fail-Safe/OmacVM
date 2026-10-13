@@ -5,7 +5,7 @@ in more words.
 
 ## 3.1.1 (unreleased)
 
-Omarchy's shell draws again on Qt 6.12.
+Omarchy's shell draws again on Qt 6.12, and the settings sidebar marks the section at the top again.
 
 - **Omarchy's bar, menus, OSD and notifications draw again on Qt 6.12** (Arch Linux ARM's update
   of 2026-10-12). They were empty, and a VM built from scratch since then had a blank shell from
@@ -15,6 +15,9 @@ Omarchy's shell draws again on Qt 6.12.
   (or `omacvm apply`). Reported by @raulVetclaims (#376).
 - `omacvm check`: a **shell colours** row counts the colour errors in the running shell's log and
   says what to do.
+- OmacVM.app, the VM's settings: while you scroll, the sidebar marks the section at the top again.
+  Only over the last screen of the page does it move on, so the last sections are marked in turn
+  and the last one at the very bottom. (3.1.0 marked the section near the middle of the window.)
 
 ## 3.1.0
 

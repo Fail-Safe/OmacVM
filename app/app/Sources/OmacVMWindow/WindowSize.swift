@@ -25,12 +25,14 @@ public enum WindowSize {
 }
 
 /// Which section the sidebar marks while the settings scroll. A probe line
-/// starts `inset` below the top of the visible part and moves down with the
-/// scroll's progress: at the top it is `inset` down, at the end it is at the
-/// end of the content. The marked section is the last one whose top the probe
-/// has reached. The probe only moves forward and runs over the whole content,
-/// so every section is marked once on the way down, also short ones at the
-/// end that can never scroll up to the top.
+/// sits `inset` below the top of the visible part: the section whose heading
+/// has passed it is marked, as usual. Only over the last stretch of the scroll
+/// (one visible height minus the inset, or the whole scroll when it is
+/// shorter) does the line move down, to the end of the content at the very
+/// bottom. So the last sections, which can never scroll up to the top, are
+/// marked in turn too, and the last one at the bottom. The probe only moves
+/// forward and runs over the whole content: every section is marked once on
+/// the way down.
 public enum ScrollSpy {
     public static let inset: Double = 90
 
@@ -41,18 +43,20 @@ public enum ScrollSpy {
     public static func current(tops: [Double], offset: Double, maxOffset: Double, viewport: Double,
                                inset: Double = inset) -> Int {
         guard !tops.isEmpty, maxOffset > 0 else { return 0 }
-        let p = min(max(offset / maxOffset, 0), 1)
-        let probe = probe(offset: offset, progress: p, viewport: viewport, inset: inset)
+        let probe = probe(offset: offset, maxOffset: maxOffset, viewport: viewport, inset: inset)
         var i = 0
         for (k, top) in tops.enumerated() where top <= probe { i = k }
         return i
     }
 
-    /// The probe line in content coordinates: `inset` down at the top, the
-    /// content's end (offset + viewport) at the end.
-    public static func probe(offset: Double, progress p: Double, viewport: Double, inset: Double = inset) -> Double {
+    /// The probe line in content coordinates: `inset` below the visible top
+    /// until the last stretch of the scroll, then moving down to the content's
+    /// end (offset + viewport) at the very bottom.
+    public static func probe(offset: Double, maxOffset: Double, viewport: Double, inset: Double = inset) -> Double {
         let start = min(inset, viewport)
-        return offset + start + p * (viewport - start)
+        let stretch = min(maxOffset, viewport - start)
+        let t = stretch > 0 ? min(max((offset - (maxOffset - stretch)) / stretch, 0), 1) : (offset >= maxOffset ? 1 : 0)
+        return offset + start + t * (viewport - start)
     }
 }
 
