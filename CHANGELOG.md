@@ -3,8 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.1
 
+Omarchy's shell draws again on Qt 6.12, and the settings sidebar marks the section at the top again.
+
+- **Omarchy's bar, menus, OSD and notifications draw again on Qt 6.12** (Arch Linux ARM's update
+  of 2026-10-12). They were empty, and a VM built from scratch since then had a blank shell from
+  the first boot. Qt 6.12 brought a `Color` of its own into QtQuick, which hid Omarchy's shell
+  colours. OmacVM imports QtQuick 6.11 in the Omarchy files that need it (nothing changes on Qt
+  6.11) and does it again after every Omarchy or Qt update. A VM that is already blank: Update VM
+  (or `omacvm apply`). Reported by @raulVetclaims (#376).
+- `omacvm check`: a **shell colours** row counts the colour errors in the running shell's log and
+  says what to do.
 - OmacVM.app, the VM's settings: while you scroll, the sidebar marks the section at the top again.
   Only over the last screen of the page does it move on, so the last sections are marked in turn
   and the last one at the very bottom. (3.1.0 marked the section near the middle of the window.)
