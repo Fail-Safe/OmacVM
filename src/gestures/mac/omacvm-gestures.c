@@ -2717,7 +2717,7 @@ static volatile double takeTravel = TAKE_TRAVEL;   // trackpad widths per Space 
 #define TAKE_QUIET 0.4                   // s after a taken swipe's end
 
 // "SwipeOutTravel" (hidden, for tuning; defaults write org.omacvm.gestures
-// SwipeOutTravel -float 0.45): how much of the trackpad's width moves macOS
+// SwipeOutTravel -float 0.5): how much of the trackpad's width moves macOS
 // one Space. Not set or out of 0.15-1.5: TAKE_TRAVEL.
 static void takeTravelLook(void) {
   CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("SwipeOutTravel"), GESTURES_DOMAIN);

@@ -1176,8 +1176,8 @@ int main(void) {
     padSwipe(3, 0.6, 0.3, 30);
     int mono = 1;
     for (int i = 2; i < nDockEv; i++) if (dockEv[i].phase == kSwipeChanged && dockEv[i].p > dockEv[i - 1].p + 1e-9) mono = 0;
-    check(nDockEv > 20 && dockEv[0].phase == kSwipeBegan && dockEv[1].phase == kSwipeChanged && mono && dockEv[nDockEv - 1].p < -0.9,
-          "follow: fingers left at the edge: macOS's swipe begins and follows them toward the right (0.3 of the width = 0.67 of a Space)");
+    check(nDockEv > 20 && dockEv[0].phase == kSwipeBegan && dockEv[1].phase == kSwipeChanged && mono && fabs(dockEv[nDockEv - 1].p + 0.9) < 0.01,
+          "follow: fingers left at the edge: macOS's swipe begins and follows them toward the right (0.3 of the width = 0.6 of a Space, 0.9 in the Dock's units at 3 Spaces)");
     guestGot();
     check(gotFrames == 0 && gotLifts == 0 && capturing, "follow: ... the guest gets none of it; still captured while the fingers are down");
     padLift();
@@ -1213,7 +1213,7 @@ int main(void) {
     // The other edge: fingers right = the Space on the left.
     nDockEv = 0;
     padSwipe(4, 0.3, 0.6, 30); padLift(); guestGot();
-    check(dockEv[nDockEv - 1].p > 0.9 && dockLast() == kSwipeEnded && world[0].cur == 101 && front == terminal && gotFrames == 0,
+    check(dockEv[nDockEv - 1].p > 0.85 && dockLast() == kSwipeEnded && world[0].cur == 101 && front == terminal && gotFrames == 0,
           "follow: four fingers right: out to the Space on the left with the fingers");
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
 
@@ -1356,20 +1356,20 @@ int main(void) {
           "model: past half a Space finishes; under it only a flick; going back never");
     SwipeTake s; takeReset(&s);
     double t = 0;
-    check(takeFrame(&s, 3, 1, -1, 0, 0, 0.45, t) == TK_HOLD, "model: three fingers at an edge: held");
+    check(takeFrame(&s, 3, 1, -1, 0, 0, 0.5, t) == TK_HOLD, "model: three fingers at an edge: held");
     int r = TK_HOLD;
-    for (int i = 0; i < 40 && r == TK_HOLD; i++) r = takeFrame(&s, 3, 1, -1, 0, 0, 0.45, t += 0.008);
+    for (int i = 0; i < 40 && r == TK_HOLD; i++) r = takeFrame(&s, 3, 1, -1, 0, 0, 0.5, t += 0.008);
     check(r == TK_FLUSH && s.state == TAKE_PASS, "model: resting longer than 0.25 s: the guest's");
     takeReset(&s);
-    takeFrame(&s, 3, 1, 0, -0.01, 0, 0.45, t);
-    check(takeFrame(&s, 3, 1, 0, -0.015, 0, 0.45, t += 0.008) == TK_BEGIN && s.toward == 1 && fabs(s.progress - 0.025 / 0.45) < 1e-9,
+    takeFrame(&s, 3, 1, 0, -0.01, 0, 0.5, t);
+    check(takeFrame(&s, 3, 1, 0, -0.015, 0, 0.5, t += 0.008) == TK_BEGIN && s.toward == 1 && fabs(s.progress - 0.025 / 0.5) < 1e-9,
           "model: 2.5 % of the width to the left: taken, from where the fingers are");
-    takeFrame(&s, 3, 0, 0, 0.05, 0, 0.45, t += 0.008);
+    takeFrame(&s, 3, 0, 0, 0.05, 0, 0.5, t += 0.008);
     check(s.progress == 0 && s.state == TAKE_TAKEN, "model: back past the start: the VM's Space, not further");
-    check(takeFrame(&s, 2, 0, 0, 0, 0, 0.45, t += 0.008) == TK_END && !s.commit && s.state == TAKE_DONE, "model: one finger up: the end, back");
-    check(takeFrame(&s, 3, 1, -1, -0.2, 0, 0.45, t += 0.008) == TK_DROP && takeFrame(&s, 0, 0, 0, 0, 0, 0.45, t) == TK_DROP && s.state == TAKE_IDLE,
+    check(takeFrame(&s, 2, 0, 0, 0, 0, 0.5, t += 0.008) == TK_END && !s.commit && s.state == TAKE_DONE, "model: one finger up: the end, back");
+    check(takeFrame(&s, 3, 1, -1, -0.2, 0, 0.5, t += 0.008) == TK_DROP && takeFrame(&s, 0, 0, 0, 0, 0, 0.5, t) == TK_DROP && s.state == TAKE_IDLE,
           "model: after the end nothing until every finger is up");
-    check(takeFrame(&s, 3, 0, 0, 0, 0, 0.45, t) == TK_FORWARD && s.state == TAKE_PASS, "model: no way out either way: the guest's at once");
+    check(takeFrame(&s, 3, 0, 0, 0, 0, 0.5, t) == TK_FORWARD && s.state == TAKE_PASS, "model: no way out either way: the guest's at once");
   }
 
   // ---- the Dock's swipe events (as macOS 26 and older read them, and as macOS 27 does) ----

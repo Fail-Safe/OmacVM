@@ -21,7 +21,7 @@
 #define TAKE_MIN 0.02          // trackpad widths of travel that tell the way
 #define TAKE_RATIO 1.5         // ... and this much more sideways than up or down (the guest's SWIPE_OUT_RATIO)
 #define TAKE_HOLD 0.25         // s: a touch whose way is not clear by then goes to the guest
-#define TAKE_TRAVEL 0.45       // trackpad widths per Space (SwipeOutTravel changes it)
+#define TAKE_TRAVEL 0.5        // trackpad widths per Space (SwipeOutTravel changes it)
 #define TAKE_VEL_TIME 0.06     // s of movement the lift's speed is read over
 #define TAKE_BACK (-0.3)       // Spaces/s: going back at least this fast at the lift = back into the VM
 #define TAKE_FLICK 0.8         // Spaces/s: this fast toward the Space finishes it ...
