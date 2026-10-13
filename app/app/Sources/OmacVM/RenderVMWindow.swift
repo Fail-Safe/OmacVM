@@ -1,6 +1,7 @@
 import AppKit
 import OmacVMUSB
 import OmacVMUpdate
+import OmacVMIcon
 import OmacVMWindow
 import SwiftUI
 import OmacVMFeatures

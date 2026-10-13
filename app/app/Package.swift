@@ -9,9 +9,12 @@ let package = Package(
         // Touch ID's panel, loaded by QEMU (the VM window's process):
         // omacvm-cocoa-touchid-panel.patch, docs/adr/0041-touch-id.md.
         .library(name: "OmacVMTouchIDPanel", type: .dynamic, targets: ["OmacVMTouchIDPanel"]),
+        // The Dock tile plug-in: the icon's look while the app is not running
+        // (build-app.sh puts it in Contents/PlugIns).
+        .library(name: "OmacVMDockTile", type: .dynamic, targets: ["OmacVMDockTile"]),
     ],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMAuth", "OmacVMBuildProgress", "OmacVMWindow", "OmacVMDesktop", "OmacVMAudio"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMAuth", "OmacVMBuildProgress", "OmacVMWindow", "OmacVMDesktop", "OmacVMAudio", "OmacVMIcon"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -41,7 +44,12 @@ let package = Package(
         // The VM window's rules: custom resources, disk Grow/Compact,
         // "omacvm in Terminal", the keyboard note: `swift run window-tests`.
         .target(name: "OmacVMWindow"),
-        .executableTarget(name: "window-tests", dependencies: ["OmacVMWindow"]),
+        .executableTarget(name: "window-tests", dependencies: ["OmacVMWindow", "OmacVMIcon"]),
+        // The icon's looks (IconTheme, IconArt) and what the Dock tile
+        // plug-in shows while the app is not running: `swift run icon-tests`.
+        .target(name: "OmacVMIcon"),
+        .target(name: "OmacVMDockTile", dependencies: ["OmacVMIcon"]),
+        .executableTarget(name: "icon-tests", dependencies: ["OmacVMIcon"]),
         // "Restart the Desktop…" in QEMU's app menu after Later on the
         // desktop-lost window: `swift run desktop-tests`.
         .target(name: "OmacVMDesktop"),

@@ -107,6 +107,10 @@ jobs:
         timeout-minutes: 5
         run: .build/debug/OmacVM --render-vm-window "$RUNNER_TEMP/vm-window"
 
+      - name: OmacVM.app icon looks in the Dock (each look's picture, what the Dock tile plug-in reads)
+        working-directory: app/app
+        run: swift run icon-tests "$RUNNER_TEMP/vm-window/icon-looks"
+
       - name: Keep the VM window pictures
         if: always()
         uses: actions/upload-artifact@v4
@@ -556,8 +560,10 @@ jobs:
           want OmacVMCommit "$(git rev-parse HEAD)" "$(pb OmacVMCommit)"
           want CFBundleIdentifier "$APP_ID" "$(pb CFBundleIdentifier)"
           want CFBundleShortVersionString "$(cat src/VERSION)" "$(pb CFBundleShortVersionString)"
+          want NSDockTilePlugIn OmacVMDockTile.docktileplugin "$(pb NSDockTilePlugIn)"
           for f in MacOS/OmacVM Resources/runtime/bin/OmacVM Resources/firmware/edk2-aarch64-code.fd \
                    Resources/runtime/lib/OmacVMTouchIDPanel.dylib Library/LaunchServices/org.omacvm.netd \
+                   PlugIns/OmacVMDockTile.docktileplugin/Contents/MacOS/OmacVMDockTile \
                    Resources/omacvm/omacvm Helpers; do
             [ -e "$c/$f" ] && echo "ok   $f" || { echo "::error::no $f in the app"; fail=1; }
           done

@@ -348,6 +348,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["OMACVM_COCOA_HIDDEN"] != nil { return }
         defer { offerMoves() }
         NSApp.setActivationPolicy(.regular)
+        // Back from .accessory (a VM ran): macOS drew the bundle's icon again.
+        AppIcon.apply()
         if window == nil {
             let w = Self.makeWindow(RootView(state: state))
             window = w
