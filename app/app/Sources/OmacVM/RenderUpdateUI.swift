@@ -40,6 +40,9 @@ enum RenderUpdateUI {
             u.showForRendering(staged: s, notice: notice, enabled: enabled, waiting: waiting, previous: "2.9.0")
             RenderVMWindow.picture(name, into: dir) { RootView(state: state) }
         }
+        // The check found a newer version and downloads it.
+        u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil, checking: true, downloading: next)
+        RenderVMWindow.picture("window-9b-downloading", into: dir) { RootView(state: state) }
         // Check Now: while it checks, and the results it leaves under the switch.
         let checks: [(String, Updater.Outcome?, Bool, Bool)] = [
             ("window-9-checking", nil, true, false),

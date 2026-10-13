@@ -3,6 +3,12 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Updates: the settings row says "Downloading OmacVM 3.1.1…"** while a found update downloads, instead of
+  "Checking…" (it looked stuck on a slow connection), and offers **Update Now** next to the switch
+  once the update is ready, the same as the banner.
+
 ## 3.1.1
 
 Omarchy's shell draws again on Qt 6.12, and the settings sidebar marks the section at the top again.
