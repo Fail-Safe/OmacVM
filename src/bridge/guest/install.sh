@@ -54,21 +54,11 @@ for p in ../plugins/*/; do [[ -f $p/manifest.json ]] && ../../lib/install-plugin
 # Night light: the Mac's Night Shift replaces Omarchy's (hyprsunset in the VM),
 # so the screen is never tinted twice. Omarchy's night light indicator leaves
 # the indicators widget (it would switch hyprsunset); the marker keeps what it
-# had, so turning the Bridge off puts it back (../../guest/install.sh).
+# had, so turning the Bridge off puts it back (../../guest/off.sh).
 pkill -x hyprsunset 2>/dev/null || true
-C=$H/.config/omarchy/shell.json
 MARK=$H/.local/state/omacvm/nightlight-indicator
-if [[ -f $C ]] && jq -e '[.bar.layout[]?[]? | select(.id == "omarchy.indicators")] | length > 0' "$C" >/dev/null; then
-  if [[ ! -f $MARK ]]; then
-    install -d -o "$U" -g "$U" "$(dirname "$MARK")"
-    jq -c '[.bar.layout[]?[]? | select(.id == "omarchy.indicators") | .items] | first' "$C" > "$MARK"
-    chown "$U:$U" "$MARK"
-  fi
-  # Next to it and renamed into place, only when it changes (the shell reads it).
-  tmp=$(mktemp "$C.XXXXXX")
-  jq '(.bar.layout[]?[]? | select(.id == "omarchy.indicators")) |= (.items = ((.items // ["Dictation", "ScreenRecording", "Reminder", "NightLight", "Dnd", "StayAwake"]) - ["NightLight"]))' "$C" > "$tmp"
-  if cmp -s "$tmp" "$C"; then rm -f "$tmp"
-  else chmod --reference="$C" "$tmp"; chown "$U:$U" "$tmp"; mv -f "$tmp" "$C"; fi
-fi
+install -d -o "$U" -g "$U" "$(dirname "$MARK")"
+./nightlight-indicator.sh "$H/.config/omarchy/shell.json" "$MARK" >/dev/null || echo "night light indicator: shell.json left as it is"
+[[ ! -f $MARK ]] || chown "$U:$U" "$MARK"
 
 echo "omacvm-bridge guest side installed for $U"
