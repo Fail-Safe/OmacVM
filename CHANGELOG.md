@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.4 (unreleased)
+## 3.1.4
 
 The app icon's look stays in the Dock, and the Updates row shows how far a download is.
 
