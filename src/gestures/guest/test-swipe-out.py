@@ -11,6 +11,10 @@ Unix socket (j/monitors, j/workspaces, j/getoption, dispatch). No VM, no uinput.
   two-finger touches, a special workspace or no Hyprland: nothing;
   after "X right" Hyprland's new empty workspace goes back to the one the
   swipe began on; no notices on "S esc" or "N".
+  "X on 2" (the Mac follows the fingers itself): "E <l> <r>" at once and after
+  each burst of Hyprland's workspace events (a made-up event socket), only
+  when it changed, nothing at the lift; again on a new connection and when
+  the event socket comes back; nothing after "X off"; "X on" as before.
 """
 import importlib.machinery
 import importlib.util
@@ -260,6 +264,99 @@ line("S esc ctrl-opt-cmd")
 check(len(shown) == 1 and "New shortcut" in shown[0], "the old ⌃⌥⌘ Esc: the new one is named, once per VM")
 line("S esc ctrl-opt-cmd")
 check(len(shown) == 1, "... not again")
+
+# ---- the Mac follows the fingers itself ("X on 2"): where swipes go, at once and on every change ----
+EV = os.path.join(tmp, ".socket2.sock")
+evsrv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+evsrv.bind(EV)
+evsrv.listen(4)
+evconns = []
+
+
+def evserve():
+    while True:
+        c, _ = evsrv.accept()
+        evconns.append(c)
+
+
+threading.Thread(target=evserve, daemon=True).start()
+
+
+def event(*texts):
+    """Hyprland's event socket says these (one burst)."""
+    for c in list(evconns):
+        try:
+            c.sendall("".join(t + "\n" for t in texts).encode())
+        except OSError:
+            evconns.remove(c)
+
+
+def told(n, wait=1.5):
+    """The E lines the Mac got, once there are n (or after wait s)."""
+    end = time.monotonic() + wait
+    while time.monotonic() < end and len([s for s in sent if s.startswith("E ")]) < n:
+        time.sleep(0.01)
+    time.sleep(0.1)
+    return [s for s in sent if s.startswith("E ")]
+
+
+H.world(1, [1, 2, 3], {1: 2, 2: 1, 3: 1})
+sent.clear()
+line("X on 2")
+check(g.SWIPE.on and g.SWIPE.version == 2 and told(1) == ["E - left"],
+      "X on 2: where swipes go, at once: workspace 1 of 1..3, invert on: fingers left Hyprland's, right out to the left")
+check(swipe(0.3) == [], "... a swipe past the first workspace: nothing at the lift (the Mac took it)")
+sent.clear()
+H.world(2, [1, 2, 3], {1: 2, 2: 1, 3: 1})
+event("workspace>>2", "workspacev2>>2,2")
+check(told(1) == ["E - -"], "Hyprland's workspace>>2 (a burst of two): one line, E - - (both ways Hyprland's)")
+sent.clear()
+H.world(3, [1, 2, 3], {1: 2, 2: 1, 3: 1})
+event("workspace>>3")
+check(told(1, wait=0.5) == [], "to the last workspace with windows: still E - - (the first swipe makes a new one): nothing sent")
+H.world(4, [1, 2, 3, 4], {1: 2, 2: 1, 3: 1, 4: 0})
+event("createworkspace>>4", "createworkspacev2>>4,4", "workspace>>4", "workspacev2>>4,4")
+check(told(1) == ["E right -"], "Hyprland's new empty 4 (the right-edge rule): fingers left out to the right")
+sent.clear()
+H.world(4, [1, 2, 3, 4], {1: 2, 2: 1, 3: 1, 4: 1})
+event("openwindow>>5a1b,4,foot,foot")
+check(told(1) == ["E - -"], "a window opens on 4: E - - again (the next swipe makes a new one)")
+sent.clear()
+event("activewindow>>foot,foot", "windowtitle>>5a1b")
+check(told(1, wait=0.5) == [], "other events (focus, titles): nothing asked, nothing sent")
+H.options["gestures:workspace_swipe_invert"] = 0
+H.world(1, [1], {1: 0})
+event("configreloaded>>")
+check(told(1) == ["E left right"], "invert off, one empty workspace: fingers left out to the left, right out to the right")
+H.options["gestures:workspace_swipe_invert"] = 1
+sent.clear()
+H.world(1, [1], {1: 0}, special=-98)
+event("activespecial>>special:magic,Virtual-1")
+check(told(1) == ["E - -"], "the scratchpad open: E - -")
+sent.clear()
+H.world(1, [1, 2], {1: 1, 2: 1})
+g.SWIPE.set(False)
+line("X on 2")
+check(told(1) == ["E - left"], "connected again (X on 2 again): said again at once")
+sent.clear()
+for c in list(evconns):
+    c.close()
+evconns.clear()
+H.world(2, [1, 2], {1: 1, 2: 0})
+check(told(1, wait=3) == ["E right -"], "Hyprland's event socket gone and back: connected again, said again")
+sent.clear()
+line("X off")
+H.world(1, [1, 2], {1: 1, 2: 1})
+event("workspace>>1")
+check(told(1, wait=0.5) == [] and not g.SWIPE.on, "X off: nothing sent on changes")
+line("X on")
+H.world(1, [1, 2], {1: 1, 2: 1})
+check(swipe(0.3) == ["X left"] and told(1, wait=0.3) == [], "X on (a Mac helper from 3.1.0-3.1.4): X left at the lift as before, no E")
+check(g.edge_sides({"active": 2, "ids": [1, 2], "empty": True, "invert": True, "create_new": True}) == ("right", "-") and
+      g.edge_sides({"active": 2, "ids": [1, 2, 3], "empty": True, "invert": True, "create_new": True}) == ("-", "-") and
+      g.edge_sides(None) == ("-", "-") and
+      g.edge_sides({"active": 1, "ids": [1, 2], "empty": False, "invert": True, "create_new": False}) == ("-", "left"),
+      "edges on their own: the empty last; in the middle; nothing known; the first")
 
 # ---- the rule on its own ----
 st = {"active": 1, "ids": [1, 2], "empty": False, "special": False, "invert": True, "create_new": True}

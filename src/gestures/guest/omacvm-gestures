@@ -19,10 +19,15 @@ from a listener without the proof is acted on. Then it reads lines:
   A <dx> <dy>, W <dx> <dy>, P       scroll momentum: macOS's scroll while touching, its
                                     momentum (points), a pinch macOS recognized
   K <code> <value>                  UTM: a key on the virtual keyboard
-  X <on|off>                        Swipe out to macOS on or off (the Mac's setting)
+  X <on [2]|off>                    Swipe out to macOS on or off (the Mac's setting); "2": the
+                                    Mac takes such a swipe itself and follows the fingers
   N <why>                           (Mac helpers up to 3.0.18) the escape combo found no way
                                     out to macOS: ignored, no notice any more
-and sends, once the Mac said "X on":
+and sends, after "X on 2":
+  E <l> <r>                         where a swipe of fingers going left and right goes now:
+                                    left|right = out to the macOS Space on that side, - = a
+                                    workspace swipe here; at once and on every workspace change
+or, after "X on" (Mac helpers 3.1.0-3.1.4):
   X <left|right>                    a swipe went past the first or last workspace: out to the
                                     macOS Space on that side
 
@@ -44,6 +49,7 @@ import os
 import pwd
 import re
 import secrets
+import select
 import socket
 import struct
 import subprocess
@@ -617,6 +623,10 @@ def escape_notice(keys):
 # last workspace makes a new empty one (workspace_swipe_create_new, as
 # Hyprland does), a swipe past that empty one goes to the Space on the right.
 # The Mac moves (or, without a Space there, does nothing) as ⌃⌥ Esc does.
+# With a Mac that says "X on 2" the Mac decides and follows the
+# fingers with macOS's own Space swipe: this daemon only tells it where a
+# swipe would go, at once and on every workspace change ("E", from
+# Hyprland's event socket), and such a swipe never reaches this VM.
 # Sideways travel, share of the trackpad's width: Hyprland 0.56 (Omarchy's
 # settings) changes the workspace from about 0.11-0.13 (mini, 2026-10-12).
 SWIPE_OUT_MIN = env_float("OMACVM_SWIPE_OUT_MIN", 0.12)
@@ -692,6 +702,18 @@ def workspaces_now(sock=None):
             "create_new": hypr_option("gestures:workspace_swipe_create_new", True, sock)}
 
 
+def edge_sides(state):
+    """Where a swipe would go from the workspaces now, as (fingers to the
+    left, fingers to the right): "left"/"right" (out to that macOS Space) or
+    "-" (a workspace swipe here)."""
+    if not state or state.get("special") or not isinstance(state.get("active"), int):
+        return "-", "-"
+    active, ids = state["active"], state.get("ids") or [state["active"]]
+    prev = "left" if not any(i < active for i in ids) else "-"
+    nxt = "right" if not any(i > active for i in ids) and (state.get("empty") or not state.get("create_new", True)) else "-"
+    return (nxt, prev) if state.get("invert", True) else (prev, nxt)
+
+
 def swipe_out_side(state, dx, dy, width):
     """Where a swipe of dx, dy (touchpad units) goes, given the workspaces at
     its start: "left", "right" or None (a workspace swipe as usual, or no
@@ -709,19 +731,125 @@ def swipe_out_side(state, dx, dy, width):
     return "right" if state.get("empty") or not state.get("create_new", True) else None
 
 
+HYPR_EVENTS = {b"workspace", b"workspacev2", b"focusedmon", b"focusedmonv2", b"createworkspace", b"createworkspacev2",
+               b"destroyworkspace", b"destroyworkspacev2", b"moveworkspace", b"moveworkspacev2", b"renameworkspace",
+               b"activespecial", b"activespecialv2", b"openwindow", b"closewindow", b"movewindow", b"movewindowv2",
+               b"monitoradded", b"monitoraddedv2", b"monitorremoved", b"monitorremovedv2", b"configreloaded"}
+EDGE_QUIET = 0.03        # s: a burst of Hyprland's events is read as one change ...
+EDGE_BURST = 0.2         # ... for at most this long
+EDGE_RECHECK = 30.0      # s: looked at again without an event (a missed one)
+
+
 class SwipeOut:
     def __init__(self):
         self.on = False
-        self.send = None         # run() sets it: a line to the Mac
+        self.version = 1         # 2: the Mac takes the swipe ("X on 2"), this daemon only says where it goes
+        self.send = None         # run() sets it: a line to the Mac (any thread)
         self.start = self.end = None
         self.box = {}            # the workspaces at this swipe's start ("state"; a thread reads them)
         self.reader = None
+        self.said = None         # the last "E" line sent on this connection
+        self.waker = None        # (read end, write end): wakes the watcher at once
+        self.watcher = None
 
-    def set(self, on):
-        if on != self.on:
-            print(f"omacvm-gestures: swipe out to macOS {'on' if on else 'off'}", flush=True)
-        self.on = on
+    def set(self, on, version=1):
+        if on != self.on or (on and version != self.version):
+            print(f"omacvm-gestures: swipe out to macOS {'on' if on else 'off'}"
+                  f"{' (the Mac follows the fingers)' if on and version >= 2 else ''}", flush=True)
+        self.on, self.version = on, version
         self.cancel()
+        self.said = None
+        if on and version >= 2:
+            if self.watcher is None:
+                self.waker = socket.socketpair()
+                self.waker[0].setblocking(False)
+                self.watcher = threading.Thread(target=self.watch, daemon=True)
+                self.watcher.start()
+            try:
+                self.waker[1].send(b"!")
+            except OSError:
+                pass
+
+    def tell(self, state):
+        """Where swipes go now, to the Mac (only when it changed)."""
+        line = "E %s %s\n" % edge_sides(state)
+        send = self.send
+        if line == self.said or not send or not (self.on and self.version >= 2):
+            return
+        try:
+            send(line.encode())
+            self.said = line
+        except OSError:
+            pass   # the connection is going: run() connects again and the Mac asks anew
+
+    def woken(self, timeout):
+        """Waits up to timeout s for a wake-up (set()); True if one came."""
+        r, _, _ = select.select([self.waker[0]], [], [], timeout)
+        if not r:
+            return False
+        try:
+            while self.waker[0].recv(64):
+                pass
+        except OSError:
+            pass
+        return True
+
+    def watch(self):
+        """Hyprland's event socket for good (Hyprland may start, stop and
+        start again): every workspace change tells the Mac where swipes go."""
+        while True:
+            if not (self.on and self.version >= 2):
+                self.woken(None)
+                continue
+            sock = hypr_socket()
+            if not sock:
+                self.tell(None)
+                self.woken(2)
+                continue
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as ev:
+                    ev.connect(os.path.join(os.path.dirname(sock), ".socket2.sock"))
+                    self.woken(0)   # events() says it at once anyway
+                    self.events(ev, sock)
+            except OSError:
+                pass
+            self.woken(1)
+
+    def events(self, ev, sock):
+        """Until Hyprland goes: tell the Mac at once, after each burst of
+        workspace events, after a wake-up (a new connection) and now and
+        then without one."""
+        buf, dirty, last = b"", True, 0.0
+        while self.on and self.version >= 2:
+            now = time.monotonic()
+            if dirty or now - last >= EDGE_RECHECK:
+                self.tell(workspaces_now(sock))
+                dirty, last = False, now
+            r, _, _ = select.select([ev, self.waker[0]], [], [], EDGE_RECHECK)
+            if self.waker[0] in r:
+                self.woken(0)
+                dirty, self.said = True, None
+            if ev not in r:
+                continue
+            data = ev.recv(65536)
+            if not data:
+                return   # Hyprland went away
+            buf += data
+            *lines, buf = buf.split(b"\n")
+            if not any(line.partition(b">>")[0] in HYPR_EVENTS for line in lines):
+                continue
+            # The rest of the burst (a workspace change is several events):
+            # read until it is quiet, at most EDGE_BURST.
+            until = time.monotonic() + EDGE_BURST
+            while time.monotonic() < until:
+                r, _, _ = select.select([ev], [], [], EDGE_QUIET)
+                if not r:
+                    break
+                more = ev.recv(65536)
+                if not more:
+                    return
+                buf = (buf + more).rpartition(b"\n")[2]
+            dirty = True
 
     def cancel(self):
         self.start = self.end = None
@@ -731,7 +859,7 @@ class SwipeOut:
         box["state"] = workspaces_now()
 
     def frame(self, contacts):
-        if not self.on:
+        if not self.on or self.version >= 2:
             return
         if len(contacts) >= 3:
             c = (sum(x for _, x, _ in contacts) / len(contacts), sum(y for _, _, y in contacts) / len(contacts))
@@ -880,7 +1008,12 @@ def run(pad, keys, glide):
         s.sendall(f"R {int(GESTURES)} {int(GLIDE_ON)} {proof(tok, 'vm', addr, gn, m[1].decode()).decode()}"
                   f"{' ' + NAME if NAME else ''}\n".encode())
         SWIPE.set(False)      # until this Mac says "X on"
-        SWIPE.send = s.sendall
+        lock = threading.Lock()
+
+        def send(data, s=s):
+            with lock:
+                s.sendall(data)
+        SWIPE.send = send
         print(f"omacvm-gestures: connected to {host}:{PORT} (gestures {'on' if GESTURES else 'off'}, "
               f"scroll momentum {'on' if GLIDE_ON else 'off'})", flush=True)
         tick = -1          # forces the first settimeout (create_connection left 5 s)
@@ -953,7 +1086,7 @@ def handle(p, pad, keys, glide):
         if state == "esc":
             escape_notice(p[2].decode() if len(p) > 2 else None)
     elif p[0] == b"X":
-        SWIPE.set(p[1] == b"on")
+        SWIPE.set(p[1] == b"on", int(p[2]) if len(p) > 2 and p[2].isdigit() else 1)
 
 
 def main():

@@ -180,6 +180,73 @@ static void *readerThread(void *a) { ReaderArg *r = a; readGuest(r->rd, r->fd, r
 static pid_t launcher;   // OmacVM.app's launcher: the VMs' process name, but no QEMU
 static int fakeIsQemu(pid_t pid) { return pid != launcher; }
 
+// ---- swipe out that follows the fingers: a made-up trackpad, Magic Mouse and Dock ----
+static void settleSteps(void);
+static int fakePadDev, fakeMouseDev;
+static double clk;                     // the takeover's clock (8 ms a frame)
+static double fakeClock(void) { return clk; }
+static int fakeHidOff(void) { return 0; }
+typedef struct { int phase; double p, v; } DockEv;
+static DockEv dockEv[1024];
+static int nDockEv;
+static int dockFollow = 1;   // "macOS": a finished swipe moves the Space under it
+static int animNow = 1;      // "macOS" says the display moves with the swipe
+static int fakeDockPost(int phase, double progress, double speed, CGPoint at) {
+  if (nDockEv < 1024) dockEv[nDockEv++] = (DockEv){ phase, progress, speed };
+  if (phase == kSwipeEnded && dockFollow)
+    for (int i = 0; i < nWorld; i++) if (CGRectContainsPoint(world[i].b, at)) moveSpace(&world[i], progress < 0 ? 1 : -1);
+  return 1;
+}
+static int fakeAnimating(CGDirectDisplayID id) { (void)id; return animNow; }
+static int dockLast(void) { return nDockEv ? dockEv[nDockEv - 1].phase : 0; }
+static int dockCount(int phase) { int n = 0; for (int i = 0; i < nDockEv; i++) n += dockEv[i].phase == phase; return n; }
+
+// One trackpad frame: k fingers side by side around x (0..1 of the width), y (up).
+static void pad(int k, double x, double y) {
+  MTTouch t[8]; memset(t, 0, sizeof t);
+  for (int i = 0; i < k; i++) {
+    t[i].pathIndex = 3 + i; t[i].state = 4; t[i].zTotal = 0.5f;
+    t[i].normalized.pos.x = (float)(x - 0.05 * (k - 1) / 2 + 0.05 * i); t[i].normalized.pos.y = (float)y;
+  }
+  frameCb((MTDeviceRef)&fakePadDev, t, k, 0, 0);
+  clk += 0.008;
+}
+// k fingers from x0 to x1 (y0 to y1) in steps frames of 8 ms.
+static void padMove(int k, double x0, double x1, double y0, double y1, int steps) {
+  for (int s = 0; s <= steps; s++) pad(k, x0 + (x1 - x0) * s / steps, y0 + (y1 - y0) * s / steps);
+}
+static void padSwipe(int k, double x0, double x1, int steps) { padMove(k, x0, x1, 0.5, 0.5, steps); }
+static void padLift(void) { pad(0, 0, 0); settleSteps(); }
+// One Magic Mouse frame: two fingers at x (0..1 across the mouse).
+static void mouse2(double x) {
+  MTTouch t[2]; memset(t, 0, sizeof t);
+  for (int i = 0; i < 2; i++) {
+    t[i].pathIndex = 7 + i; t[i].state = 4; t[i].zTotal = 0.5f;
+    t[i].normalized.pos.x = (float)(x + 0.15 * i); t[i].normalized.pos.y = 0.5f;
+  }
+  mouseFrameCb((MTDeviceRef)&fakeMouseDev, t, 2, 0, 0);
+  clk += 0.008;
+}
+static void mouseLift(void) { mouseFrameCb((MTDeviceRef)&fakeMouseDev, NULL, 0, 0, 0); clk += 0.008; settleSteps(); }
+// What the guest got since the last look: finger frames, lifts ("F 0") and
+// the other lines (joined by '|').
+static int gotFrames, gotLifts;
+static char gotOther[512];
+static void guestGot(void) {
+  static char buf[262144];
+  size_t n = 0; ssize_t r;
+  usleep(2000);
+  while (n < sizeof buf - 1 && (r = read(peer, buf + n, sizeof buf - 1 - n)) > 0) n += (size_t)r;
+  buf[n] = 0;
+  gotFrames = gotLifts = 0; gotOther[0] = 0;
+  for (char *s = buf, *l; (l = strsep(&s, "\n"));) {
+    if (!l[0]) continue;
+    if (!strcmp(l, "F 0")) gotLifts++;
+    else if (!strncmp(l, "F ", 2)) gotFrames++;
+    else { strlcat(gotOther, l, sizeof gotOther); strlcat(gotOther, "|", sizeof gotOther); }
+  }
+}
+
 // The user's shortcut table: one entry.
 static void setKey(int id, CFTypeRef enabled, int64_t code, int64_t mods) {
   if (!binding) binding = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -987,7 +1054,7 @@ int main(void) {
     guestLine(clients[0].fd, g0, "X left"); keys = spaceKeys = 0; settleSteps();
     check(!keys && world[0].cur == 102 && capturing && !strcmp(sent(), ""), "swipe out: setting off: X left ignored, nothing moves");
     soOn = 1; swipeOutLook();
-    check(!strcmp(sent(), "X on|") && swipeOut == 1, "swipe out: turned on: X on to every guest");
+    check(!strcmp(sent(), "X on 2|") && swipeOut == 1, "swipe out: turned on: X on 2 to every guest (this helper follows the fingers)");
     keys = spaceKeys = went = hidden = mcKeys = 0;
     guestLine(clients[0].fd, g0, "X left"); settleSteps();
     check(spaceKeys == 1 && lastKey.keycode == 123 && world[0].cur == 101 && front == terminal,
@@ -1077,6 +1144,232 @@ int main(void) {
     pthread_join(th, NULL); close(rp[1]);
     settle(vm, NET_APP); sent(); press(K, HID, 0); settle(vm, NET_APP); sent();
     soOn = 0; swipeOutLook(); sent();
+  }
+
+  // ---- Swipe out that follows the fingers ("X on 2", "E"): made-up trackpad frames, a made-up Dock ----
+  {
+    int big = 1 << 18;
+    setsockopt(clients[0].fd, SOL_SOCKET, SO_SNDBUF, &big, sizeof big);
+    setsockopt(peer, SOL_SOCKET, SO_RCVBUF, &big, sizeof big);
+    dockPostFn = fakeDockPost; animatingFn = fakeAnimating; takeClockFn = fakeClock; hidSwipeFn = fakeHidOff;
+    pthread_mutex_lock(&padLock);
+    pads[0].dev = (MTDeviceRef)&fakePadDev; pads[0].id = 77; pads[0].w = 15600; pads[0].h = 9600; pads[0].fingers = 0;
+    nPads = 1; activePad = 0; tpW = 15600; tpH = 9600;
+    pthread_mutex_unlock(&padLock);
+    const uint64_t three3[] = { 101, 102, 103 };
+    layout(1, three3, 3, NULL, 0);
+    owner[101] = terminal; winOn[101] = 11; owner[102] = vm; winOn[102] = 22; owner[103] = safari; winOn[103] = 33;
+    pointer = CGPointMake(1000, 700); front = terminal; world[0].cur = 101;
+    frontChanged(terminal, -1, 0, "", 11, 1); sent();
+    inVM(vm, 102); guestGot();
+    unsigned g0 = clients[0].gen;
+    soOn = 1; swipeOutLook(); guestGot();
+    check(!strcmp(gotOther, "X on 2|"), "follow: X on 2 to the guest");
+    guestLine(clients[0].fd, g0, "E right left");
+    check(clients[0].edgeKnown && clients[0].edge[0] == 1 && clients[0].edge[1] == -1, "follow: E right left kept (fingers left: the Space on the right)");
+    takeLook();
+    check(takeDisp.ok && takeDisp.left && takeDisp.right && takeDisp.n == 3 && takeDisp.vmSpace == 102,
+          "follow: the capture check knows the pointer's display: the VM's Space 102 of 3, one on each side");
+
+    // Out to the right with the fingers: held back, then macOS's own swipe.
+    nDockEv = 0; keys = spaceKeys = 0;
+    padSwipe(3, 0.6, 0.3, 30);
+    int mono = 1;
+    for (int i = 2; i < nDockEv; i++) if (dockEv[i].phase == kSwipeChanged && dockEv[i].p > dockEv[i - 1].p + 1e-9) mono = 0;
+    check(nDockEv > 20 && dockEv[0].phase == kSwipeBegan && dockEv[1].phase == kSwipeChanged && mono && dockEv[nDockEv - 1].p < -0.9,
+          "follow: fingers left at the edge: macOS's swipe begins and follows them toward the right (0.3 of the width = 0.67 of a Space)");
+    guestGot();
+    check(gotFrames == 0 && gotLifts == 0 && capturing, "follow: ... the guest gets none of it; still captured while the fingers are down");
+    padLift();
+    guestGot();
+    check(dockLast() == kSwipeEnded && world[0].cur == 103 && front == safari && !keys,
+          "follow: the lift: finished (Ended), out to the Space on the right, no shortcut key");
+    check(!capturing && !strcmp(gotOther, "S esc ctrl-opt|") && gotFrames == 0, "follow: ... capture off, the guest lets go (S esc), no frames");
+    settle(vm, NET_APP); guestGot();
+    check(press(K, HID, 0) == 1 && world[0].cur == 102 && front == vm, "follow: ... the combo in macOS goes back into the VM");
+    settle(vm, NET_APP); guestGot(); takeLook();
+
+    // Pulled back halfway: back into the VM.
+    nDockEv = 0;
+    padSwipe(3, 0.6, 0.4, 20); padSwipe(3, 0.4, 0.55, 10); padLift(); guestGot();
+    check(dockLast() == kSwipeCancelled && !dockCount(kSwipeEnded) && world[0].cur == 102 && capturing && gotFrames == 0 && !gotOther[0],
+          "follow: pulled back halfway: Cancelled, still in the VM and captured, the guest got nothing");
+    // Slow and short, then still: back.
+    nDockEv = 0;
+    padSwipe(3, 0.6, 0.5, 40); for (int i = 0; i < 10; i++) pad(3, 0.5, 0.5);
+    padLift(); guestGot();
+    check(dockLast() == kSwipeCancelled && world[0].cur == 102 && capturing, "follow: slow and under half a Space, then still: back");
+    // Slow past half a Space: finished.
+    nDockEv = 0;
+    padSwipe(3, 0.7, 0.4, 60); for (int i = 0; i < 10; i++) pad(3, 0.4, 0.5);
+    padLift(); guestGot();
+    check(dockLast() == kSwipeEnded && world[0].cur == 103, "follow: slow past half a Space, then still: finished");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    // A flick: short and fast.
+    nDockEv = 0;
+    padSwipe(3, 0.6, 0.55, 4); padLift(); guestGot();
+    check(dockLast() == kSwipeEnded && world[0].cur == 103, "follow: a flick (5 % of the width in 32 ms): finished");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    // The other edge: fingers right = the Space on the left.
+    nDockEv = 0;
+    padSwipe(4, 0.3, 0.6, 30); padLift(); guestGot();
+    check(dockEv[nDockEv - 1].p > 0.9 && dockLast() == kSwipeEnded && world[0].cur == 101 && front == terminal && gotFrames == 0,
+          "follow: four fingers right: out to the Space on the left with the fingers");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+
+    // Hyprland's: the other way, up and down, a tap.
+    guestLine(clients[0].fd, g0, "E right -");
+    nDockEv = 0;
+    padSwipe(3, 0.3, 0.6, 30); padLift(); guestGot();
+    check(!nDockEv && gotFrames == 31 && gotLifts == 1 && world[0].cur == 102,
+          "follow: E right -, fingers right (a workspace swipe here): every frame to the guest (the held ones too), no Dock swipe");
+    guestLine(clients[0].fd, g0, "E right left");
+    padMove(3, 0.5, 0.5, 0.3, 0.7, 20); padLift(); guestGot();
+    check(!nDockEv && gotFrames == 21 && gotLifts == 1, "follow: up and down: all of it to the guest");
+    pad(3, 0.5, 0.5); pad(3, 0.5, 0.5); pad(3, 0.5, 0.5); padLift(); guestGot();
+    check(!nDockEv && gotFrames == 3 && gotLifts == 1, "follow: a three-finger tap: to the guest (held, then all at once)");
+    // Spread apart (a pinch): the guest's.
+    for (int s = 0; s <= 10; s++) {
+      MTTouch t[3]; memset(t, 0, sizeof t);
+      for (int i = 0; i < 3; i++) {
+        t[i].pathIndex = 3 + i; t[i].state = 4; t[i].zTotal = 0.5f;
+        t[i].normalized.pos.x = (float)(0.5 + (i - 1) * (0.05 + 0.006 * s)); t[i].normalized.pos.y = 0.5f;
+      }
+      frameCb((MTDeviceRef)&fakePadDev, t, 3, 0, 0); clk += 0.008;
+    }
+    padLift(); guestGot();
+    check(!nDockEv && gotFrames == 11 && gotLifts == 1, "follow: three fingers spreading apart (no way yet): the guest's");
+    for (int i = 0; i < 40; i++) pad(3, 0.5, 0.5);
+    padSwipe(3, 0.5, 0.2, 20); padLift(); guestGot();
+    check(!nDockEv && gotFrames == 61 && world[0].cur == 102, "follow: fingers resting first (over 0.25 s), then a swipe: the guest's");
+
+    // No Space on that side: the guest's swipe, nothing else.
+    const uint64_t last2[] = { 101, 102 };
+    layout(1, last2, 2, NULL, 0); world[0].cur = 102; settle(vm, NET_APP); guestGot(); takeLook();
+    check(takeDisp.ok && takeDisp.left && !takeDisp.right, "follow: the VM's Space is the last: no Space on the right");
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(!nDockEv && gotFrames == 31 && world[0].cur == 102 && capturing, "follow: fingers left, no Space on the right: the guest's swipe, nothing moves");
+    layout(1, three3, 3, NULL, 0); world[0].cur = 102; settle(vm, NET_APP); guestGot(); takeLook();
+
+    // A guest that never said where swipes go (3.1.0-3.1.4): frames as always.
+    clients[0].edgeKnown = 0; takeLook();
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(!nDockEv && gotFrames == 31 && !takeDisp.ok, "follow: no E from the guest: every frame to it at once, no Dock swipe");
+    guestLine(clients[0].fd, g0, "E right left"); takeLook();
+    // Malformed: kept as it was.
+    const char *bad[] = { "E right", "E up left", "E right left now", "E  ", "e right left", "E right-left" };
+    for (int i = 0; i < 6; i++) guestLine(clients[0].fd, g0, bad[i]);
+    check(clients[0].edge[0] == 1 && clients[0].edge[1] == -1, "follow: malformed E lines: ignored");
+    guestLine(clients[0].fd, g0 + 1, "E - -");
+    check(clients[0].edge[0] == 1, "follow: an E from an older connection of that fd: ignored");
+
+    // Setting off: nothing taken, the guest hears X off.
+    soOn = 0; swipeOutLook(); guestGot();
+    check(!strcmp(gotOther, "X off|") && !clients[0].edgeKnown, "follow: SwipeOut off: X off, what the guest said is forgotten");
+    takeLook(); padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(!nDockEv && gotFrames == 31 && world[0].cur == 102, "follow: SwipeOut off: the swipe is the guest's");
+    soOn = 1; swipeOutLook(); guestGot(); guestLine(clients[0].fd, g0, "E right left"); takeLook();
+
+    // Two fingers first (scroll momentum): the guest's touch is let go when the swipe is taken.
+    clients[0].glide = 1;
+    pad(2, 0.6, 0.5); pad(2, 0.6, 0.5);
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(gotFrames == 2 && gotLifts == 1 && world[0].cur == 103, "follow: a third finger on a two-finger touch: the guest's touch let go (F 0), then out");
+    clients[0].glide = 0;
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+
+    // The capture ends during the swipe: macOS's swipe goes back.
+    nDockEv = 0;
+    padSwipe(3, 0.6, 0.45, 15);
+    front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    pad(3, 0.4, 0.5); padLift(); guestGot();
+    check(dockLast() == kSwipeCancelled && world[0].cur == 102 && !dockCount(kSwipeEnded), "follow: capture ends during the swipe: Cancelled, no move");
+    front = vm; settle(vm, NET_APP); guestGot(); takeLook();
+
+    // A Magic Mouse's two-finger swipe: the same.
+    pthread_mutex_lock(&mouseLock);
+    mice[0].dev = (MTDeviceRef)&fakeMouseDev; mice[0].id = 88; mice[0].w = 5150; mice[0].h = 9050; mice[0].sent = 0;
+    mouseStateInit(&mice[0].st); takeReset(&mice[0].take); nMice = 1;
+    pthread_mutex_unlock(&mouseLock);
+    nDockEv = 0;
+    for (int i = 0; i <= 20; i++) mouse2(0.3 + 0.02 * i);
+    guestGot();
+    check(nDockEv > 10 && dockEv[0].phase == kSwipeBegan && gotFrames == 0, "follow: Magic Mouse, two fingers right at the edge: macOS's swipe, nothing to the guest");
+    mouseLift(); guestGot();
+    check(dockLast() == kSwipeEnded && world[0].cur == 101 && gotFrames == 0 && gotLifts == 0, "follow: ... out to the Space on the left");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    guestLine(clients[0].fd, g0, "E right -");
+    nDockEv = 0;
+    for (int i = 0; i <= 20; i++) mouse2(0.3 + 0.02 * i);
+    mouseLift(); guestGot();
+    check(!nDockEv && gotFrames > 10 && gotLifts == 1, "follow: Magic Mouse, the guest's way: virtual fingers to the guest as before");
+    guestLine(clients[0].fd, g0, "E right left");
+
+    // macOS does not follow (the display does not move): the one step at the lift, from then on.
+    animNow = 0; nDockEv = 0; keys = spaceKeys = 0;
+    padSwipe(3, 0.6, 0.3, 30);
+    check(dockCount(kSwipeCancelled) == 1 && !dockCount(kSwipeEnded) && dockLast() == kSwipeCancelled,
+          "follow: the display does not move with it: macOS's swipe cancelled at once");
+    padLift(); guestGot();
+    check(spaceKeys == 1 && lastKey.keycode == 124 && world[0].cur == 103 && !dockFollows && gotFrames == 0,
+          "follow: ... the lift: one step with macOS's shortcut (as before), and so from now on");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    nDockEv = 0; spaceKeys = 0;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(!nDockEv && spaceKeys == 1 && world[0].cur == 103, "follow: the next swipe: no Dock swipe, the one step at the lift");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    nDockEv = 0; spaceKeys = 0;
+    padSwipe(3, 0.6, 0.57, 20); padLift(); guestGot();
+    check(!nDockEv && !spaceKeys && world[0].cur == 102 && capturing, "follow: ... a short one (3 % of the width): nothing");
+    dockFollows = 1; animNow = 1;
+    // Finished, but the Space did not change: the one step.
+    dockFollow = 0; nDockEv = 0; spaceKeys = 0;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(dockLast() == kSwipeEnded && spaceKeys == 1 && world[0].cur == 103 && !dockFollows,
+          "follow: finished but the Space did not change: one step with the shortcut after all");
+    dockFollow = 1; dockFollows = 1;
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+
+    // Two displays with "all": the fingers' display follows them, the other one the shortcut.
+    const uint64_t in2[] = { 201, 202 }, out2[] = { 301, 302 };
+    layout(2, in2, 2, out2, 2);
+    owner[201] = terminal; winOn[201] = 11; owner[202] = vm; winOn[202] = 22;
+    owner[301] = safari; winOn[301] = 44; owner[302] = vm; winOn[302] = 23;
+    world[0].cur = 202; world[1].cur = 302; front = vm; pointer = CGPointMake(3000, 600); all = 1;
+    settle(vm, NET_APP); guestGot(); takeLook();
+    check(takeDisp.ok && takeDisp.id == 2 && takeDisp.left && !takeDisp.right, "follow, two displays: the pointer's display 2, a Space on its left");
+    nDockEv = 0; spaceKeys = 0;
+    padSwipe(3, 0.3, 0.6, 30); padLift(); guestGot();
+    check(world[1].cur == 301 && world[0].cur == 201 && spaceKeys == 1 && movedOn[0] == 1,
+          "follow, EscapeSwipe all: display 2 with the fingers, display 1 one step with the shortcut");
+    all = 0;
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot();
+    dockPostFn = dockPost; animatingFn = displayAnimating; takeClockFn = monoNow; hidSwipeFn = hidSwipeOS;
+    pthread_mutex_lock(&padLock); nPads = 0; activePad = -1; pthread_mutex_unlock(&padLock);
+    pthread_mutex_lock(&mouseLock); nMice = 0; pthread_mutex_unlock(&mouseLock);
+    soOn = 0; swipeOutLook(); guestGot();
+  }
+
+  // ---- the swipe model on its own (swipe-take.h) ----
+  {
+    check(takeCommit(0.6, 0) && !takeCommit(0.4, 0.2) && takeCommit(0.1, 1.0) && !takeCommit(0.04, 3) && !takeCommit(0.9, -0.5),
+          "model: past half a Space finishes; under it only a flick; going back never");
+    SwipeTake s; takeReset(&s);
+    double t = 0;
+    check(takeFrame(&s, 3, 1, -1, 0, 0, 0.45, t) == TK_HOLD, "model: three fingers at an edge: held");
+    int r = TK_HOLD;
+    for (int i = 0; i < 40 && r == TK_HOLD; i++) r = takeFrame(&s, 3, 1, -1, 0, 0, 0.45, t += 0.008);
+    check(r == TK_FLUSH && s.state == TAKE_PASS, "model: resting longer than 0.25 s: the guest's");
+    takeReset(&s);
+    takeFrame(&s, 3, 1, 0, -0.01, 0, 0.45, t);
+    check(takeFrame(&s, 3, 1, 0, -0.015, 0, 0.45, t += 0.008) == TK_BEGIN && s.toward == 1 && fabs(s.progress - 0.025 / 0.45) < 1e-9,
+          "model: 2.5 % of the width to the left: taken, from where the fingers are");
+    takeFrame(&s, 3, 0, 0, 0.05, 0, 0.45, t += 0.008);
+    check(s.progress == 0 && s.state == TAKE_TAKEN, "model: back past the start: the VM's Space, not further");
+    check(takeFrame(&s, 2, 0, 0, 0, 0, 0.45, t += 0.008) == TK_END && !s.commit && s.state == TAKE_DONE, "model: one finger up: the end, back");
+    check(takeFrame(&s, 3, 1, -1, -0.2, 0, 0.45, t += 0.008) == TK_DROP && takeFrame(&s, 0, 0, 0, 0, 0, 0.45, t) == TK_DROP && s.state == TAKE_IDLE,
+          "model: after the end nothing until every finger is up");
+    check(takeFrame(&s, 3, 0, 0, 0, 0, 0.45, t) == TK_FORWARD && s.state == TAKE_PASS, "model: no way out either way: the guest's at once");
   }
 
   // ---- the Dock's swipe events (as macOS 26 and older read them, and as macOS 27 does) ----
