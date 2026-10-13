@@ -111,7 +111,7 @@ SECTION = """          // ---------- OmacVM.app: Mac displays ----------
               hasCursor: root.cursorActive && root.focusSection === "mac"
               onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(macExternalRow)
               foreground: root.bar.foreground
-              fill: Style.hoverFillFor(root.bar.foreground, Color.accent)
+              fill: Style.hoverFillFor(root.bar.foreground, Commons.Color.accent)
               implicitHeight: macExternalInner.implicitHeight + Style.spacing.xl
 
               Row {
@@ -206,6 +206,11 @@ SCALE_HINT = """          // ---------- OmacVM.app: which scale suits a 4K or 5K
 
 """
 
+# Omarchy's colours as Commons.Color: on Qt 6.12 a bare Color is QtQuick's
+# own (#376). Omarchy's panel imports the alias itself from about October 2026.
+COMMONS = "import qs.Commons\n"
+COMMONS_ALIAS = "import qs.Commons as Commons\n"
+
 # (anchor, replacement): every anchor must be found exactly once.
 EDITS = [
     ("  property int enabledDisplayCount: 0\n",
@@ -283,6 +288,11 @@ def main() -> int:
                   file=sys.stderr)
             return 1
         panel = panel.replace(anchor, replacement)
+    if COMMONS_ALIAS not in panel:
+        if panel.count(COMMONS) != 1:
+            print("omacvm.monitor: Omarchy's display panel changed (no single 'import qs.Commons')", file=sys.stderr)
+            return 1
+        panel = panel.replace(COMMONS, COMMONS + COMMONS_ALIAS)
     if all(panel.count(anchor) == 1 for anchor, _ in OPTIONAL_EDITS):
         for anchor, replacement in OPTIONAL_EDITS:
             panel = panel.replace(anchor, replacement)
