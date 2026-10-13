@@ -68,7 +68,16 @@ SHA-256 from the feed, then unpacked: exactly one app, our bundle id, the
 version the feed named, `codesign --verify --deep --strict` with OmacVM's
 Developer ID requirement on the app and on its QEMU (the part with the
 Hypervisor entitlement), all with Security.framework. Anything off: deleted,
-logged, nothing offered.
+logged, nothing offered. The feed, its signature and the zip are read with
+their limits enforced while the bytes come in (64 KB, 1 KB, exactly the
+feed's length; a server that says or sends more is cut off), redirects only
+on https, and the Updates row shows the zip's progress. `update.log` has a
+line with the time of each step (feed, download and its speed, size and
+SHA-256, unpacking, signatures, the install's copy and check). The checks
+take well under a second on an M2 MacBook Air; a slow update is the download
+(2026-10-13: 35 MB at 0.3 MB/s on the Air's Wi-Fi, 132 s, where the day
+before it took 0.9 s). The swap does not wait more than 10 s for
+LaunchServices (`lsregister` can hang).
 
 **Offer.** The window shows "OmacVM X is ready to install" with What's New,
 Skip This Version and Update and Relaunch. With checks off nothing is shown.

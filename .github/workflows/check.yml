@@ -171,6 +171,9 @@ jobs:
         working-directory: app/app
         run: swift run update-tests
 
+      - name: OmacVM.app update swap does not wait for a hanging LaunchServices
+        run: src/tests/update-swap-register.sh
+
       - name: Mac helpers build (Gestures, Bridge)
         run: |
           src/gestures/mac/build.sh

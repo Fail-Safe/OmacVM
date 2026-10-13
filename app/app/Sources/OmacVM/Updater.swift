@@ -47,6 +47,8 @@ final class Updater: ObservableObject {
     @Published private(set) var checking = false
     /// The version being downloaded while a check runs (the row says so).
     @Published private(set) var downloading: String?
+    /// Its bytes so far and its size (the row shows them).
+    @Published private(set) var downloaded: (done: Int64, total: Int64)?
     @Published var notice: String?
     @Published private(set) var enabled: Bool
 
@@ -266,22 +268,26 @@ final class Updater: ObservableObject {
         config.timeoutIntervalForResource = 30 * 60
         config.allowsExpensiveNetworkAccess = manual
         config.allowsConstrainedNetworkAccess = manual
-        let session = URLSession(configuration: config)
-        defer { session.finishTasksAndInvalidate() }
+        let net = Transfer(configuration: config)
+        defer { net.finish() }
+        let started = Date()
 
         let feed: Appcast, feedData: Data, feedSig: Data
         do {
-            let (raw, code) = try await fetch(feedURL, cap: Appcast.maxFeedBytes, session: session)
+            let (raw, code) = try await net.data(feedURL, cap: Appcast.maxFeedBytes)
             // The server answered: the week starts again even without a feed
             // (no release has one yet), so nobody asks every hour.
             lastCheck = Date()
             guard code == 200 else { return failed("no update feed (HTTP \(code)) at \(feedURL.absoluteString)") }
-            let (sig, scode) = try await fetch(feedURL.appendingPathExtension("sig"), cap: Appcast.maxSignatureBytes, session: session)
+            let tFeed = Date()
+            let (sig, scode) = try await net.data(feedURL.appendingPathExtension("sig"), cap: Appcast.maxSignatureBytes)
             guard scode == 200 else { return failed("the update feed has no signature (HTTP \(scode))") }
+            let tSig = Date()
             switch Appcast.verified(feed: raw, signature: sig, keys: keys) {
             case .success(let f): feed = f; feedData = raw; feedSig = sig
             case .failure(let p): return failed(p.description)
             }
+            log("feed: \(raw.count) bytes in \(Self.secs(tFeed, started)), signature \(Self.secs(tSig, tFeed)), checked in \(Self.secs(Date(), tSig))")
         } catch {
             return failed("no connection to the update feed (\(error.localizedDescription))")
         }
@@ -310,11 +316,12 @@ final class Updater: ObservableObject {
         if let s = staged, s.version == feed.version.description { return .ready(s.version) }
         log("downloading \(feed.version) from \(feed.url.absoluteString)")
         downloading = feed.version.description
-        defer { downloading = nil }
+        downloaded = (0, feed.length)
+        defer { downloading = nil; downloaded = nil }
         do {
-            let s = try await stage(feed, data: feedData, signature: feedSig, session: session)
+            let s = try await stage(feed, data: feedData, signature: feedSig, net: net)
             staged = s
-            log("ready: \(s.version) at \(s.app.path)")
+            log("ready: \(s.version) at \(s.app.path) (\(Self.secs(Date(), started)) from the start of the check)")
             return .ready(s.version)
         } catch {
             return failed("\(feed.version) was not installed: \(error.localizedDescription)")
@@ -326,47 +333,54 @@ final class Updater: ObservableObject {
         return .failed(why)
     }
 
-    private func fetch(_ url: URL, cap: Int, session: URLSession) async throws -> (Data, Int) {
-        let (bytes, response) = try await session.bytes(from: url)
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard code == 200 else { return (Data(), code) }
-        var data = Data()
-        for try await b in bytes {
-            data.append(b)
-            if data.count > cap { throw HelperError.io("\(url.lastPathComponent) is larger than \(cap) bytes") }
-        }
-        return (data, code)
+    /// Seconds between two moments, for update.log ("0.42 s").
+    nonisolated static func secs(_ end: Date, _ start: Date) -> String {
+        String(format: "%.2f s", max(0, end.timeIntervalSince(start)))
+    }
+
+    /// "34.8 MB in 1.3 s (26.8 MB/s)".
+    nonisolated static func rate(_ bytes: Int64, _ end: Date, _ start: Date) -> String {
+        let t = max(0.001, end.timeIntervalSince(start))
+        return String(format: "%.1f MB in %.2f s (%.1f MB/s)", Double(bytes) / 1e6, t, Double(bytes) / 1e6 / t)
     }
 
     private var stagedRoot: URL { home.appendingPathComponent("staged") }
 
-    /// Downloads to staged/VERSION, checks size and digest, unpacks, checks
-    /// the app. Anything that fails leaves nothing behind. The signed feed is
-    /// kept there too: a later launch checks it again for the teams.
-    private func stage(_ feed: Appcast, data: Data, signature: Data, session: URLSession) async throws -> Staged {
+    /// Downloads to staged/VERSION (never more bytes than the feed names),
+    /// checks size and digest, unpacks, checks the app. Anything that fails
+    /// leaves nothing behind. The signed feed is kept there too: a later
+    /// launch checks it again for the teams.
+    private func stage(_ feed: Appcast, data: Data, signature: Data, net: Transfer) async throws -> Staged {
         let fm = FileManager.default
         try? fm.removeItem(at: stagedRoot)
         let dir = stagedRoot.appendingPathComponent(feed.version.description)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         do {
-            let (tmp, response) = try await session.download(from: feed.url)
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             let zip = dir.appendingPathComponent("update.zip")
-            try fm.moveItem(at: tmp, to: zip)
+            let t0 = Date()
+            let total = feed.length
+            let code = try await net.file(feed.url, to: zip, length: feed.length) { done in
+                Task { @MainActor in if Updater.shared.downloading != nil { Updater.shared.downloaded = (done, total) } }
+            }
             guard code == 200 else { throw HelperError.io("the download failed (HTTP \(code))") }
+            log("download: \(Self.rate(feed.length, Date(), t0))")
             let id = bundleID
-            let app = try await Task.detached { () throws -> URL in
+            let (app, timing) = try await Task.detached { () throws -> (URL, String) in
+                let t1 = Date()
                 guard Files.size(zip) == feed.length else { throw HelperError.io("the download has the wrong size") }
                 guard try Files.sha256(zip) == feed.sha256 else { throw HelperError.io("the download does not match its checksum") }
+                let t2 = Date()
                 let x = dir.appendingPathComponent("x")
                 guard Updater.run("/usr/bin/ditto", ["-x", "-k", zip.path, x.path]) == 0 else {
                     throw HelperError.io("the download does not unpack")
                 }
                 try? FileManager.default.removeItem(at: zip)
                 guard let app = Files.singleApp(in: x) else { throw HelperError.io("the download holds no single app") }
+                let t3 = Date()
                 try Updater.verifyApp(app, id: id, version: feed.version, teams: feed.teams)
-                return app
+                return (app, "size and SHA-256 \(Updater.secs(t2, t1)), unpacked \(Updater.secs(t3, t2)), signatures (app and QEMU: Developer ID, team, version) \(Updater.secs(Date(), t3))")
             }.value
+            log("download checked: \(timing)")
             try data.write(to: dir.appendingPathComponent("feed.json"))
             try signature.write(to: dir.appendingPathComponent("feed.json.sig"))
             if let n = feed.notesURL { try? Data(n.absoluteString.utf8).write(to: dir.appendingPathComponent("notes")) }
@@ -399,6 +413,7 @@ final class Updater: ObservableObject {
               let dirs = try? FileManager.default.contentsOfDirectory(at: stagedRoot, includingPropertiesForKeys: nil) else { return }
         let id = bundleID, skip = skipped.flatMap(Version.init), keys = keys
         for dir in dirs {
+            let t0 = Date()
             // The feed it came with, checked again: the teams come from it.
             let feed = (try? Data(contentsOf: dir.appendingPathComponent("feed.json"))).flatMap { d in
                 (try? Data(contentsOf: dir.appendingPathComponent("feed.json.sig"))).flatMap { s in
@@ -415,6 +430,7 @@ final class Updater: ObservableObject {
             let notes = (try? String(contentsOf: dir.appendingPathComponent("notes"), encoding: .utf8))
                 .flatMap(URL.init(string:)).flatMap { $0.scheme == "https" ? $0 : nil }
             staged = Staged(version: v.description, app: app, notes: notes, teams: feed.teams)
+            log("staged \(v) checked again at launch in \(Self.secs(Date(), t0))")
         }
     }
 
@@ -502,6 +518,8 @@ final class Updater: ObservableObject {
         // place is what was verified. The staged one stays for another try.
         let incoming = work.appendingPathComponent("incoming/\(bundle.lastPathComponent)")
         let fm = FileManager.default
+        log("install \(s.version): copying and checking")
+        let t0 = Date()
         do {
             try? fm.removeItem(at: incoming.deletingLastPathComponent())
             try fm.createDirectory(at: incoming.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -512,6 +530,7 @@ final class Updater: ObservableObject {
             log("install: \(error.localizedDescription)")
             return
         }
+        let t1 = Date()
         do {
             try Updater.verifyApp(incoming, id: bundleID, version: v, teams: s.teams)
         } catch {
@@ -522,7 +541,7 @@ final class Updater: ObservableObject {
             log("install: the copy at \(incoming.path) does not check out (\(error.localizedDescription))")
             return
         }
-        log("install \(s.version): copied to \(incoming.path) and checked")
+        log("install \(s.version): copied to \(incoming.path) and checked (copy \(Self.secs(t1, t0)), check \(Self.secs(Date(), t1)))")
         // Into the name of this copy (users pick the app's name at install):
         // a renamed copy is signed again ad hoc, as the installer does.
         do {
@@ -939,11 +958,13 @@ final class Updater: ObservableObject {
 
     /// Puts the updater in a state to draw it; nothing is checked or saved.
     func showForRendering(staged: Staged?, notice: String?, enabled: Bool, waiting: Bool, previous: String?,
-                          outcome: Outcome? = nil, checking: Bool = false, downloading: String? = nil) {
+                          outcome: Outcome? = nil, checking: Bool = false, downloading: String? = nil,
+                          downloaded: (done: Int64, total: Int64)? = nil) {
         self.staged = staged
         lastOutcome = outcome
         self.checking = checking
         self.downloading = downloading
+        self.downloaded = downloaded
         self.notice = notice
         self.enabled = enabled
         installWhenIdle = waiting
