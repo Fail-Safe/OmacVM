@@ -470,7 +470,7 @@ struct UpdateRow: View {
     var running = false
 
     private var line: String {
-        if let v = updater.downloading { return "Downloading \(Product.name) \(v)…" }
+        if let v = updater.downloading { return Self.downloadLine(v, updater.downloaded) }
         if updater.checking { return "Checking…" }
         if let s = updater.staged { return "\(Product.name) \(s.version) is ready to install." }
         if let o = updater.lastOutcome, let l = Updater.outcomeLine(o, current: updater.currentVersion) { return l }
@@ -478,6 +478,13 @@ struct UpdateRow: View {
         guard Version(updater.currentVersion) != nil else { return "Check Now looks for a newer version." }
         if let d = updater.lastCheckDate { return "Checked \(Self.when(d)). \(Product.name) \(updater.currentVersion) is the newest version." }
         return "You have \(Product.name) \(updater.currentVersion)."
+    }
+
+    /// "Downloading OmacVM 3.1.4… 12.3 of 34.8 MB" (nothing yet: no numbers).
+    static func downloadLine(_ version: String, _ progress: (done: Int64, total: Int64)?) -> String {
+        let head = "Downloading \(Product.name) \(version)…"
+        guard let p = progress, p.done > 0, p.total > 0 else { return head }
+        return head + String(format: " %.1f of %.1f MB", Double(min(p.done, p.total)) / 1e6, Double(p.total) / 1e6)
     }
 
     static func when(_ d: Date) -> String {

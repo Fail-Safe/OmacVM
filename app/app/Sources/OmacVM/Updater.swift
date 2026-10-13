@@ -47,6 +47,8 @@ final class Updater: ObservableObject {
     @Published private(set) var checking = false
     /// The version being downloaded while a check runs (the row says so).
     @Published private(set) var downloading: String?
+    /// Its bytes so far and its size (the row shows them).
+    @Published private(set) var downloaded: (done: Int64, total: Int64)?
     @Published var notice: String?
     @Published private(set) var enabled: Bool
 
@@ -314,7 +316,8 @@ final class Updater: ObservableObject {
         if let s = staged, s.version == feed.version.description { return .ready(s.version) }
         log("downloading \(feed.version) from \(feed.url.absoluteString)")
         downloading = feed.version.description
-        defer { downloading = nil }
+        downloaded = (0, feed.length)
+        defer { downloading = nil; downloaded = nil }
         do {
             let s = try await stage(feed, data: feedData, signature: feedSig, net: net)
             staged = s
@@ -355,7 +358,10 @@ final class Updater: ObservableObject {
         do {
             let zip = dir.appendingPathComponent("update.zip")
             let t0 = Date()
-            let code = try await net.file(feed.url, to: zip, length: feed.length)
+            let total = feed.length
+            let code = try await net.file(feed.url, to: zip, length: feed.length) { done in
+                Task { @MainActor in if Updater.shared.downloading != nil { Updater.shared.downloaded = (done, total) } }
+            }
             guard code == 200 else { throw HelperError.io("the download failed (HTTP \(code))") }
             log("download: \(Self.rate(feed.length, Date(), t0))")
             let id = bundleID
@@ -952,11 +958,13 @@ final class Updater: ObservableObject {
 
     /// Puts the updater in a state to draw it; nothing is checked or saved.
     func showForRendering(staged: Staged?, notice: String?, enabled: Bool, waiting: Bool, previous: String?,
-                          outcome: Outcome? = nil, checking: Bool = false, downloading: String? = nil) {
+                          outcome: Outcome? = nil, checking: Bool = false, downloading: String? = nil,
+                          downloaded: (done: Int64, total: Int64)? = nil) {
         self.staged = staged
         lastOutcome = outcome
         self.checking = checking
         self.downloading = downloading
+        self.downloaded = downloaded
         self.notice = notice
         self.enabled = enabled
         installWhenIdle = waiting
