@@ -90,6 +90,11 @@ expect "fixed environment: OMACVM_PROGRESS kept, others dropped" "progress=json 
 expect "status 0" 0 "$rc"
 "$T/bridge" "$EXE" --control-run "$CLI" update --vm A --vm-type app >/dev/null 2>&1
 expect "the command's status comes back (4: rolled back)" 4 "$?"
+# The Full screen and Skip the notch rows: the notch status and its jobs.
+out=$("$T/bridge" "$EXE" --control-run "$CLI" notch --vm A --vm-type app --json 2>&1); rc=$?
+expect "notch status (the control centre's Full screen row)" "args: notch --vm A --vm-type app --json|0" "$(sed -n 1p <<<"$out")|$rc"
+out=$("$T/bridge" "$EXE" --control-run "$CLI" notch --skip on --vm A --vm-type app --yes 2>&1)
+expect "notch --skip on (Skip the notch's job)" "args: notch --skip on --vm A --vm-type app --yes" "$(sed -n 1p <<<"$out")"
 ln -s "$APP" "$T/Link.app"
 "$T/bridge" "$EXE" --control-run "$T/Link.app/Contents/Resources/omacvm/omacvm" features --json >/dev/null 2>&1
 expect "the app's omacvm by another path to it: runs" 0 "$?"

@@ -26,8 +26,9 @@ import Security
 /// omacvm somewhere else (--ip, --key, --user) are refused.
 enum ControlRun {
     static let flag = "--control-run"
-    /// What control.swift runs: vms, features, check, graphics and its jobs (jobArgv).
-    static let commands: Set<String> = ["vms", "features", "check", "graphics", "enable", "disable", "apply", "update"]
+    /// What control.swift runs: vms, features, check, graphics, notch (the Full screen and
+    /// Skip the notch rows: status and jobs) and its jobs (jobArgv).
+    static let commands: Set<String> = ["vms", "features", "check", "graphics", "notch", "enable", "disable", "apply", "update"]
     /// The Bridge's PATH for omacvm (control.swift cliEnvironment).
     static let path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     /// The Bridge never passes these; they would send omacvm to another host or key.
