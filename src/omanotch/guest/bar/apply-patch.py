@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 23
+VERSION = 24
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -78,6 +78,7 @@ PIECES = [
     "    property var notchBeside: [0, 0]\n",                                # 5.
     "            notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)\n",  # 8. lists
     "    transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }\n",  # 9. items
+    "  function notchPeekBlockIn(item, depth) {\n",                       # 1. room for the indicators' peek
 ]
 
 
