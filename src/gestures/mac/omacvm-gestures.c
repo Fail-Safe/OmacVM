@@ -2933,12 +2933,15 @@ static int takePadFrame(MTTouch **c, int k) {
 
 // A Magic Mouse's swipe frame (mouseFrameCb, mouseLock held): k virtual
 // fingers (0: its end), step: its travel on the guest's touchpad since the
-// last one (trackpad widths).
+// last one (trackpad widths). The mouse's surface is a third of a trackpad's
+// width: one Space for half the travel (half a Space: 13 mm on the mouse,
+// about what switches a workspace in the VM).
+#define TAKE_MOUSE_TRAVEL 0.5
 static int takeMouseFrame(SwipeTake *t, int k, double step) {
   if (!(capturing && gesturesOn())) return takeAbort(t, k);
   int sl = 0, sr = 0;
   if (t->state == TAKE_IDLE && k >= 3) takeSides(&sl, &sr);
-  int tk = takeFrame(t, k, sl, sr, step, 0, takeTravel, takeClock());
+  int tk = takeFrame(t, k, sl, sr, step, 0, takeTravel * TAKE_MOUSE_TRAVEL, takeClock());
   takeAct(t, tk, "Magic Mouse");
   return tk;
 }
