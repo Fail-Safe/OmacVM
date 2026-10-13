@@ -270,6 +270,9 @@ jobs:
       - name: Bridge offline tests (media-key tap, where each media key goes, Wi-Fi state)
         run: src/bridge/mac/test-models.sh
 
+      - name: Bridge wallpaper store (embedded image URLs, no desktop changes)
+        run: src/bridge/mac/test-wallpaper.sh
+
       - name: Bridge brightness keys read from the keyboard (made-up keyboards)
         run: src/bridge/mac/test-hid.sh
 

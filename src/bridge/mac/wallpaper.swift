@@ -55,7 +55,7 @@ func setOnAllSpaces(_ url: URL) {
   guard let data = try? Data(contentsOf: wallpaperStore),
         var store = try? PropertyListSerialization.propertyList(from: data, options: .mutableContainers, format: nil) as? [String: Any]
   else { return }
-  // The just-set Space's picture settings (placement, background colour) for every Space.
+  // Reuse picture settings (placement, background colour) for every Space.
   var config: Any?
   func findConfig(_ o: Any) {
     if let d = o as? [String: Any] {
@@ -64,6 +64,17 @@ func setOnAllSpaces(_ url: URL) {
     } else if let a = o as? [Any] { a.forEach { if config == nil { findConfig($0) } } }
   }
   findConfig(store)
+  // The first image configuration may belong to an old Space. Its embedded
+  // imageFile URL must match Files, not a picture setWallpaper already removed.
+  if let data = config as? Data,
+     var image = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+     image["type"] as? String == "imageFile", var imageURL = image["url"] as? [String: Any] {
+    imageURL["relative"] = url.absoluteString
+    image["url"] = imageURL
+    if let updated = try? PropertyListSerialization.data(fromPropertyList: image, format: .binary, options: 0) {
+      config = updated
+    }
+  }
   var changed = 0
   func rewrite(_ o: Any) -> Any {
     if var d = o as? [String: Any] {
