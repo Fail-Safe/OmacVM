@@ -190,7 +190,11 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   the built-in display while a VM is connected: from the outside they look just
   like a full-screen VM.
 - On an older Omarchy (up to about September 2026) the bar patch also makes the
-  cloned bar loadable at all; newer versions don't need that.
+  cloned bar loadable at all; newer versions don't need that. The bar and
+  background patches fit omarchy-mac's shell and upstream Omarchy's from
+  October 2026 (a notch floor, a bar thickness per screen, the wallpaper
+  decoded at the display's size); a clone made before an Omarchy update keeps
+  its older bar until it is cloned again.
 - Cursor handling uses the window-server property `SetsCursorInBackground`,
   which is not public API (but widely used and stable for years).
 - At the exact moment the pointer crosses into the strip you may catch a

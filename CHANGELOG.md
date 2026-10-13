@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Omanotch is ready for Omarchy's next shell.** Upstream Omarchy changed its bar and wallpaper in
+  October 2026 (omarchy-mac has not shipped that yet), and Omanotch's patches no longer applied to
+  them: a VM set up on that shell would have had no Omanotch. Both patches now fit the old and the
+  new shell, and notifications under the strip keep only the normal gap on both.
+- On that shell too: the Bridge keeps Omarchy's own indicators when it takes out the night light
+  one (it put omarchy-mac's list there), and OmacVM.app's display panel draws its "Use external
+  displays" row's highlight on Qt 6.12.
+
 ## 3.1.2
 
 The Mac's wallpaper follows the VM's theme again on every Space, the Updates row says when an update downloads, and a source checkout uses the app's Mac helpers when its Swift fails.
