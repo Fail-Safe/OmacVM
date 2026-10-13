@@ -3,6 +3,22 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.4
+
+The app icon's look stays in the Dock, and the Updates row shows how far a download is.
+
+- **OmacVM.app: the icon's look stays in the Dock.** The look you pick for the app icon (click the
+  icon in the window's header) now shows in the Dock all the time: with the window open, while the
+  VM runs, after it shuts down, and when OmacVM is not running but kept in the Dock, also after a
+  restart and after an update. Before, it showed only while the VM ran. Finder and Launchpad keep
+  OmacVM's own icon: the app on disk is not changed, so its signature stays intact.
+- **OmacVM.app updates: the Updates row shows the download's progress** ("Downloading OmacVM
+  3.1.5… 12.3 of 34.8 MB"), and `update.log` says how long each step took. The checks of a new
+  version (checksum, unpacking, signatures) take under a second; when an update takes minutes, it
+  is the download (on a MacBook Air's Wi-Fi on 2026-10-13 the 35 MB came in at 0.3 MB/s). The
+  downloads now stop at once when a server sends more than the signed feed names, and the switch
+  to the new version no longer waits when macOS's app list (LaunchServices) hangs.
+
 ## 3.1.3
 
 Omanotch is ready for Omarchy's next shell.
