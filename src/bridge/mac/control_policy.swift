@@ -19,7 +19,8 @@ let graphicsChoices: Set<String> = ["opengl", "vulkan", "auto"]
 
 /// OmacVM.app's notch area (src/cmd/notch.sh, FullPanel #339): the only
 /// values a notch job takes.
-let notchChoices: Set<String> = ["native", "fullpanel"]
+// The notch action: Full screen (native, fullpanel) or Skip the notch (skip-on, skip-off).
+let notchChoices: Set<String> = ["native", "fullpanel", "skip-on", "skip-off"]
 
 struct JobRequest: Equatable { let action: ControlAction; let features: [String] }
 
@@ -125,7 +126,7 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
       }
       if action == .notch {
         guard o["features"] == nil, o["graphics"] == nil, let n = o["notch"] as? String, notchChoices.contains(n) else {
-          throw PolicyError(400, "bad-body", "send {\"action\": \"notch\", \"notch\": \"native\"|\"fullpanel\"}")
+          throw PolicyError(400, "bad-body", "send {\"action\": \"notch\", \"notch\": \"native\"|\"fullpanel\"|\"skip-on\"|\"skip-off\"}")
         }
         return .success(.startJob(JobRequest(action: .notch, features: [n])))
       }
@@ -594,7 +595,11 @@ func jobArgv(cli: String, _ r: JobRequest, vm: String, type: String, commit: Str
     return [cli, "graphics", r.features.first ?? "auto"] + which + ["--yes"]
   case .notch:
     // The value is one of notchChoices (controlRoute); OmacVM.app VMs only.
-    return [cli, "notch", r.features.first ?? "native"] + which + ["--yes"]
+    switch r.features.first {
+    case "skip-on": return [cli, "notch", "--skip", "on"] + which + ["--yes"]
+    case "skip-off": return [cli, "notch", "--skip", "off"] + which + ["--yes"]
+    default: return [cli, "notch", r.features.first ?? "native"] + which + ["--yes"]
+    }
   }
 }
 

@@ -349,6 +349,13 @@ class Controller:
         if na is not None:
             at = next((i + 1 for i, r in enumerate(rows) if r.feature.name == "omanotch"), len(rows))
             rows.insert(at, na)
+        # Skip the notch: right after Full screen (as in the app's window).
+        sk = S.notch_skip_row(self.mac_status, self.local.vm_type, list(self.jobs.values()),
+                              offline=self.mac_error is not None)
+        if sk is not None:
+            names = [r.feature.name for r in rows]
+            after = "notch-area" if "notch-area" in names else "omanotch"
+            rows.insert(names.index(after) + 1 if after in names else len(rows), sk)
         m = S.gpu_memory_row(self.gpu_memory, self.local.vm_type, self.gpu_memory_supported(), checks,
                              offline=self.mac_error is not None)
         # A Mac setting: the last answer stays while the Mac is away for a moment.
@@ -376,6 +383,12 @@ class Controller:
         """This VM's notch-mode as the Mac last said it ("" unknown)."""
         n = (self.mac_status or {}).get("notch")
         return str(n.get("notch") or "") if isinstance(n, dict) else ""
+
+    def notch_skip(self) -> str:
+        """This VM's Skip the notch as the Mac last said it: on, off ("" unknown)."""
+        n = (self.mac_status or {}).get("notch")
+        s = n.get("skip") if isinstance(n, dict) else None
+        return s if s in ("on", "off") else ""
 
     def graphics(self) -> str:
         """This VM's Graphics setting as the Mac last said it ("" unknown)."""
