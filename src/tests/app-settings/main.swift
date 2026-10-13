@@ -5,6 +5,7 @@ import AppKit
 import Foundation
 import OmacVMUSB
 import OmacVMUpdate
+import OmacVMIcon
 import OmacVMWindow
 import OmacVMFeatures
 
