@@ -55,7 +55,9 @@ func setOnAllSpaces(_ url: URL) {
   guard let data = try? Data(contentsOf: wallpaperStore),
         var store = try? PropertyListSerialization.propertyList(from: data, options: .mutableContainers, format: nil) as? [String: Any]
   else { return }
-  // Reuse picture settings (placement, background colour) for every Space.
+  // The image choice's Configuration for every Space. On macOS 27 it is a plist
+  // with only the type (imageFile) and the picture's URL; placement and colour
+  // are in each Desktop's EncodedOptionValues, which stay as they are.
   var config: Any?
   func findConfig(_ o: Any) {
     if let d = o as? [String: Any] {
