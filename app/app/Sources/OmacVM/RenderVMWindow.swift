@@ -143,6 +143,12 @@ enum RenderVMWindow {
         let staged = makeStagedApp(tmp, version: "3.1.1")
         u.showForRendering(staged: staged, notice: nil, enabled: true, waiting: false, previous: nil)
         window("window-9-update", state, usual)
+        var updateRow = usual
+        updateRow.section = "storage"
+        window("window-9c-update-row", state, updateRow)
+        u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil, checking: true, downloading: "3.1.1")
+        window("window-9d-update-downloading", state, updateRow)
+        u.showForRendering(staged: staged, notice: nil, enabled: true, waiting: false, previous: nil)
         var runs = usual
         runs.running = true
         window("window-10-update-vm-runs", state, runs)

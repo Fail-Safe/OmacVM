@@ -5,13 +5,16 @@ in more words.
 
 ## 3.1.2 (unreleased)
 
-The Mac's wallpaper follows the VM's theme again on every Space, and a source checkout uses the app's Mac helpers when its Swift fails.
+The Mac's wallpaper follows the VM's theme again on every Space, the Updates row says when an update downloads, and a source checkout uses the app's Mac helpers when its Swift fails.
 
 - **The Mac's wallpaper on every Space**: when the VM's theme or background changes, every Space
   and display shows the new picture again. The picture settings the Bridge copies to every Space in
   macOS's wallpaper store could still name the old, deleted picture, and on macOS 27 the store
   entry it wrote was refused, so every Space showed macOS's default picture. Thanks @fbalazsy
   (#388).
+- **Updates: the settings row says "Downloading OmacVM 3.1.3…"** while a found update downloads
+  (from the next update on), instead of "Checking…" (it looked stuck on a slow connection), and
+  offers **Update Now** next to the switch once the update is ready, the same as the banner.
 - A source checkout of OmacVM (`~/.omacvm` or a clone) asks the installed OmacVM.app's built
   helpers (notch, display, clock format, free space) when its own Swift run fails, for example on
   an SDK the compiler does not support. Before, the answer was lost. Thanks @fbalazsy (#387).
