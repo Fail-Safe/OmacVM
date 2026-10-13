@@ -82,7 +82,7 @@ expect "a terminal that forces ls colours (CLICOLOR_FORCE): the same VMs" "Ext|N
 expect "a VM in an older folder by its folder name" "$H/OmacVM/New" "$(HOME=$H app_dir New)"
 for d in Ext New Omarchy; do f=$(HOME=$H app_dir "$d"); echo "SSH_PORT=5222$((${#d} % 7))" >> "$f/vm.env"; done
 p=$(HOME=$H app_free_port)
-expect "the SSH ports of every folder are taken" yes "$([[ $p =~ ^5[0-9]+$ && $p != 52220 && $p != 52223 && $p != 52224 ]] && echo yes || echo "$p")"
+expect "the SSH ports of every folder are taken" yes "$([[ $p =~ ^5[0-9]+$ && $p != 52220 && $p != 52223 ]] && echo yes || echo "$p")"
 echo mac=x > "$OLD/Omarchy/fast-network"
 HOME=$H app_any_fast_network; expect "the fast network of a VM in the old place counts" 0 $?
 defaults write "$OMACVM_APP_ID" vmsRoot "$OLD"; defaults delete "$OMACVM_APP_ID" otherVMsRoots
