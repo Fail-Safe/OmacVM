@@ -59,6 +59,6 @@ pkill -x hyprsunset 2>/dev/null || true
 MARK=$H/.local/state/omacvm/nightlight-indicator
 install -d -o "$U" -g "$U" "$(dirname "$MARK")"
 ./nightlight-indicator.sh "$H/.config/omarchy/shell.json" "$MARK" >/dev/null || echo "night light indicator: shell.json left as it is"
-[[ ! -f $MARK ]] || chown "$U:$U" "$MARK"
+for f in "$MARK" "$MARK.set"; do [[ ! -f $f ]] || chown "$U:$U" "$f"; done
 
 echo "omacvm-bridge guest side installed for $U"

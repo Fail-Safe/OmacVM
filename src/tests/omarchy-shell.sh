@@ -74,6 +74,9 @@ done
 layout "$want_mac" > "$T/old.json"; echo null > "$T/old.mark"
 bash "$I" "$T/old.json" "$T/old.mark" "$O/$UP/shell/plugins/bar/widgets/Indicators.qml" >/dev/null
 t "$want_up" "$(items "$T/old.json")" "older OmacVM's list on upstream's shell: upstream's default less NightLight"
+# And back (or a later default): the list it wrote last follows Omarchy's default.
+bash "$I" "$T/old.json" "$T/old.mark" "$O/$MAC/shell/plugins/bar/widgets/Indicators.qml" >/dev/null
+t "$want_mac" "$(items "$T/old.json")" "  then omarchy-mac's shell again: its default again (the list it wrote follows)"
 # The user's own items: theirs less NightLight, kept for off.
 layout '["Dnd","NightLight"]' > "$T/own.json"; rm -f "$T/own.mark"
 bash "$I" "$T/own.json" "$T/own.mark" "$O/$UP/shell/plugins/bar/widgets/Indicators.qml" >/dev/null

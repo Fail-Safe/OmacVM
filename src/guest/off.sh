@@ -123,7 +123,7 @@ bridge_off() {
     tmp=$(mktemp "$c.XXXXXX")
     jq --argjson items "$(cat "$nl")" '(.bar.layout[]?[]? | select(.id == "omarchy.indicators")) |= (if $items == null then del(.items) else .items = $items end)' "$c" > "$tmp" &&
       cat "$tmp" > "$c"
-    rm -f "$tmp" "$nl"
+    rm -f "$tmp" "$nl" "$nl.set"
   fi
   for p in omarchy-toggle-nightlight omarchy-network-qr omarchy-network-password omacvm-bridge omacvm-bridge-osd omacvm-bridge-events; do
     rm -f "$ROOT$b/$p"
