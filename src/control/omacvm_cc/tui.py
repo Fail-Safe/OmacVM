@@ -955,6 +955,8 @@ class ControlCentre(App):
         names = ", ".join(titles.get(n, n) for n in features)
         if action == "graphics":
             return f"Graphics: {S.GRAPHICS_TITLES.get(features[0] if features else '', '?')}"
+        if action == "notch" and features and features[0] in S.NOTCH_SKIP_CHOICES:
+            return f"Skip the notch {features[0].removeprefix('skip-')}"
         if action == "notch":
             return f"Full screen: {S.NOTCH_TITLES.get(features[0] if features else '', '?')}"
         return {"update": "Update", "reinstall": f"Repair {names}", "enable": f"{names} on",
@@ -1033,6 +1035,9 @@ class ControlCentre(App):
             return
         if r.feature.name == "notch-area":
             self.choose_notch()
+            return
+        if r.feature.name == "notch-skip":
+            self.switch_notch_skip()
             return
         if r.feature.name == "gpu-memory":
             self.notify(f"Graphics memory is measured, not switched. {S.GPU_MEMORY_EXPLAINER}")
@@ -1201,9 +1206,23 @@ class ControlCentre(App):
                                        text + "\nFrom the VM's next start (shut it down, then start it again)."),
                          lambda yes: yes and self.run_job("notch", [nxt]))
 
+    def switch_notch_skip(self) -> None:
+        """Space on Skip the notch: on <-> off, through the Mac (the VM's bar
+        follows within seconds; nothing to restart, so not asked)."""
+        if not self.can_ask():
+            return
+        cur = self.c.notch_skip()
+        if not cur:
+            self.notify("Skip the notch: the Mac's OmacVM does not say this VM's setting (omacvm update on the Mac)", severity="warning")
+            return
+        self.run_job("notch", ["skip-off" if cur == "on" else "skip-on"])
+
     def repair(self, r: S.Row) -> None:
         if r.feature.name == "notch-area":
             self.notify("Full screen is a setting: space switches notch via Omanotch and including notch")
+            return
+        if r.feature.name == "notch-skip":
+            self.notify("Skip the notch is a setting: space turns it on or off")
             return
         if r.feature.name == "mouse-swipe":
             self.notify("Magic Mouse swipe is a setting: space switches 3 and 4 fingers")

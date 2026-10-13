@@ -3,6 +3,19 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Skip the notch** (OmacVM.app, off by default, on a MacBook with a notch): bar items that no
+  longer fit on their side of the notch continue on its other side, in the same order, instead of
+  going behind the notch. They only hide when both sides are full; the menu and the clock at the
+  far right never move. Omarchy's small indicators (Stay Awake and the others that show on hover)
+  keep their room, so showing them moves nothing. In either full screen, only the bar beside the
+  notch: external displays keep their bar. Display > Skip the notch in the VM's window (its (i)
+  shows a picture), `omacvm notch --vm NAME --skip on`, or the control centre; a running VM
+  follows within seconds.
+- **Control centre: the Full screen row now shows for OmacVM.app VMs** (before, it never did: the
+  Mac refused the command behind it).
+
 ## 3.1.4
 
 The app icon's look stays in the Dock, and the Updates row shows how far a download is.

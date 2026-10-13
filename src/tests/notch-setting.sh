@@ -106,6 +106,31 @@ notch_menu_bar_in_the_way && ok "menu bar always shown, Keep the Dock away off: 
 MENU_ALWAYS=0; notch_menu_bar_in_the_way && bad "menu bar hidden by macOS: in the way" || ok "menu bar hidden by macOS: never in the way"
 command defaults delete "$OMACVM_APP_ID" keepDockAway
 unset -f defaults
+# Skip the notch (NotchSkip in NotchArea.swift): its own file, off by default.
+k=$T/k; mkdir -p "$k"
+expect "skip: no file: off" off "$(notch_skip "$k")"
+echo On > "$k/notch-skip"; expect "skip: another word: off" off "$(notch_skip "$k")"
+notch_skip_set "$k" on; expect "skip: set on" "on" "$(cat "$k/notch-skip")"
+expect "skip: reads on" on "$(notch_skip "$k")"
+notch_skip_set "$k" off; [[ ! -e $k/notch-skip ]] && ok "skip: off removes the file" || bad "skip: off left the file"
+notch_skip_set "$k" maybe; expect "skip: a bad value: usage" 2 "$?"
+notch_skip_ready "$k" && bad "skip: ready without the marker" || ok "skip: not ready without apply's marker"
+: > "$k/notch-skip-ready"; notch_skip_ready "$k" && ok "skip: ready with it" || bad "skip: not ready with the marker"
+echo "bridge=on omanotch=off" > "$k/features"
+notch_skip_ready "$k" && bad "skip: ready with Omanotch off" || ok "skip: not ready with Omanotch off"
+expect "omacvm notch --json: skip off" off "$(run --vm "Test notch" --json | j skip)"
+expect "  skip not ready" False "$(run --vm "Test notch" --json | j skip_ready)"
+expect "omacvm notch --skip on: changed" True "$(run --vm "Test notch" --skip on --json --yes | j changed)"
+expect "  the file the app reads" on "$(cat "$V/notch-skip")"
+expect "  the full screen choice stays" native "$(run --vm "Test notch" --json | j notch)"
+expect "  again: unchanged" False "$(run --vm "Test notch" --skip on --json | j changed)"
+: > "$V/notch-skip-ready"
+expect "  ready after apply" True "$(run --vm "Test notch" --json | j skip_ready)"
+out=$(run --vm "Test notch"); [[ $out == *"skip the notch: on"* ]] && ok "the text says it" || bad "text: $out"
+expect "fullpanel and --skip off at once" "fullpanel off" "$(run --vm "Test notch" fullpanel --skip off --json --yes | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["notch"], d["skip"])')"
+[[ ! -e $V/notch-skip ]] && ok "  off removes the file" || bad "  off left the file"
+out=$(run --vm "Test notch" --skip yes); [[ $out == *"--skip needs on or off"* ]] && ok "--skip yes: usage" || bad "--skip yes: $out"
+notch_set "$V" native
 out=$(run --vm "No such VM" --json); [[ $out == *"no OmacVM.app VM named"* ]] && ok "unknown VM: says so" || bad "unknown VM: $out"
 out=$(run --vm "Test notch" --vm-type utm); [[ $out == *"OmacVM.app's setting"* ]] && ok "another route: says Omanotch fills the strip there" || bad "utm: $out"
 

@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 22
+VERSION = 24
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -73,6 +73,12 @@ PIECES = [
     "        Item { id: notchLeftEdge; ",
     "    WlrLayershell.layer: barWindow.notchRole === \"notch\" || ",        # 6. layer, repaint, black strip
     "    // omarchy-notch-bar: a bar parked in the notch strip takes no room here.\n",  # 7. toasts
+    "  function notchSkipPlace(width, pad, left, right, housing, beside, edge, gap, keep) {\n",  # 1. Skip the notch
+    "        readonly property bool notchSkipActive: root.notchSkipOn && barWindow.notchLayout\n",  # 4.
+    "    property var notchBeside: [0, 0]\n",                                # 5.
+    "            notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)\n",  # 8. lists
+    "    transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }\n",  # 9. items
+    "  function notchPeekBlockIn(item, depth) {\n",                       # 1. room for the indicators' peek
 ]
 
 
@@ -326,7 +332,8 @@ def main():
   function notchTargetAt(x, y) {
     for (var i = clickTargets.length - 1; i >= 0; i--) {
       var t = clickTargets[i]
-      if (!moduleTargetClickable(t)) continue
+      // Not enabled: hidden by Skip the notch (both sides full).
+      if (!moduleTargetClickable(t) || t.enabled === false) continue
       var w = targetWindow(t)
       if (!w || !w.screen || String(w.screen.name) !== notchParkedScreen) continue
       // x only: the bar is a single row, and the parked copy is 1 px tall.
@@ -339,13 +346,128 @@ def main():
     var out = []
     for (var i = 0; i < clickTargets.length; i++) {
       var t = clickTargets[i]
-      if (!moduleTargetClickable(t)) continue
+      if (!moduleTargetClickable(t) || t.enabled === false) continue
       var w = targetWindow(t)
       if (!w || !w.screen || String(w.screen.name).indexOf("NOTCH") !== 0) continue
       var p = t.mapToItem(w.contentItem, 0, 0)
       out.push([Math.round(p.x), Math.round(p.y), Math.round(t.width), Math.round(t.height)])
     }
     return out
+  }
+  // Skip the notch (OmacVM.app's setting for a VM, off by default): on a bar
+  // in the notch strip, items that no longer fit on their side of the camera
+  // housing continue on its other side (notchSkipPlace). The app says it at
+  // the start (host.env: OMACVM_NOTCHSKIP=1) and, when it is switched while
+  // the VM runs, in /run/omacvm/notch-skip ("1" or "0"), which then wins.
+  property bool notchSkipOn: false
+  property bool notchSkipBoot: false
+  // Where the items of the left and right lists go on a bar in the notch
+  // strip. In: the bar's width, Omarchy's margin at the screen edges (pad),
+  // each list's items left to right, each a width or [width, room] (room:
+  // its width when it peeks: Omarchy's indicators show their hidden ones on
+  // hover), the housing [left, right], the room of the centre widgets beside
+  // it [before, after] (`edge` from it), the gap to the housing (or those
+  // widgets) and the room a jumped item keeps from the other side's own
+  // items. Everything is decided on rooms, so a peek moves no other item:
+  // it shows in room kept free for it. Items past their side's end jump
+  // over and continue on the other side in the same order; they hide only
+  // when that side is full too, and then the rest of them as well. The
+  // first item from each screen edge (the menu, the clock at the far right)
+  // always stays. An item sits in its room as Omarchy aligns it: left items
+  // at the room's start, right items at its end. Out: per item {x: shift
+  // from Omarchy's place, hidden, n: that place on the bar}, and how many
+  // items jumped and hid; null when the housing is not on the bar.
+  function notchSkipPlace(width, pad, left, right, housing, beside, edge, gap, keep) {
+    var W = Number(width), nl = Number(housing[0]), nr = Number(housing[1])
+    if (!(W > 0 && nl > 0 && nr > nl && nr < W)) return null
+    var before = beside && beside[0] > 0 ? beside[0] : 0, after = beside && beside[1] > 0 ? beside[1] : 0
+    // Where each side ends: the housing, or the centre widgets beside it.
+    var wallL = before > 0 ? nl - edge - before : nl
+    var wallR = after > 0 ? nr + edge + after : nr
+    function sizes(e) {
+      var w = Math.max(0, Number(Array.isArray(e) ? e[0] : e) || 0)
+      return { w: w, r: Math.max(w, Number(Array.isArray(e) ? e[1] : e) || 0) }
+    }
+    // n: Omarchy's place (its rows, at today's widths); b: the item's room.
+    var L = [], R = [], out = { left: [], right: [], jumped: 0, hidden: 0 }
+    var i, s, x = pad, b = pad
+    for (i = 0; i < left.length; i++) {
+      s = sizes(left[i])
+      L.push({ n: x, w: s.w, r: s.r, b: b })
+      x += s.w
+      b += s.r
+    }
+    x = W - pad
+    b = W - pad
+    for (i = right.length - 1; i >= 0; i--) {
+      s = sizes(right[i])
+      x -= s.w
+      b -= s.r
+      R[i] = { n: x, w: s.w, r: s.r, b: b }
+    }
+    // What stays on its own side: rooms up to the gap before its end.
+    var keptL = L.length, keptR = 0
+    for (i = 1; i < L.length; i++) if (L[i].b + L[i].r > wallL - gap) { keptL = i; break }
+    for (i = R.length - 2; i >= 0; i--) if (R[i].b < wallR + gap) { keptR = i + 1; break }
+    var endL = keptL > 0 ? L[keptL - 1].b + L[keptL - 1].r : pad
+    var startR = keptR < R.length ? R[keptR].b : W - pad
+    // The left side's overflow: rooms right of the housing, up to `keep`
+    // before the right side's own items.
+    var at = wallR + gap, full = false
+    for (i = keptL; i < L.length; i++) {
+      if (!full && at + L[i].r <= startR - keep) {
+        L[i].b = at
+        at += L[i].r
+        if (L[i].w > 0) out.jumped++
+      } else {
+        full = true
+        L[i].hide = true
+        if (L[i].w > 0) out.hidden++
+      }
+    }
+    // The right side's overflow: rooms left of the housing, down to `keep`
+    // after the left side's own items.
+    at = wallL - gap
+    full = false
+    for (i = keptR - 1; i >= 0; i--) {
+      if (!full && at - R[i].r >= endL + keep) {
+        at -= R[i].r
+        R[i].b = at
+        if (R[i].w > 0) out.jumped++
+      } else {
+        full = true
+        R[i].hide = true
+        if (R[i].w > 0) out.hidden++
+      }
+    }
+    // Hidden ones fade at the housing on their own side.
+    for (i = 0; i < L.length; i++) {
+      var lx = L[i].hide ? wallL - gap - L[i].w : L[i].b
+      out.left.push({ x: lx - L[i].n, hidden: !!L[i].hide, n: L[i].n })
+    }
+    for (i = 0; i < R.length; i++) {
+      var rx = R[i].hide ? wallR + gap : R[i].b + R[i].r - R[i].w
+      out.right.push({ x: rx - R[i].n, hidden: !!R[i].hide, n: R[i].n })
+    }
+    return out
+  }
+  // Omarchy's indicators show their hidden ones when they peek (hover):
+  // that block (an IndicatorBlock "inactive" in a clipping item of the
+  // horizontal row, in both shells), or null.
+  function notchPeekBlockIn(item, depth) {
+    if (!item || depth > 8) return null
+    if (item.indicatorBlock === "inactive" && item.horizontal === true) return item
+    var kids = item.children || []
+    for (var i = 0; i < kids.length; i++) {
+      var found = notchPeekBlockIn(kids[i], depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+  // One item's part of a list's layout ({items, animate}; null: none).
+  function notchShiftAt(list, i) {
+    var s = list && list.items ? list.items[i] : null
+    return s ? { x: s.x, hidden: s.hidden === true, n: s.n, animate: list.animate === true } : null
   }
   // --- end omarchy-notch-bar --------------------------------------------
 '''.replace("{VERSION_LINE}", VERSION_LINE))
@@ -425,10 +547,24 @@ def main():
       return JSON.stringify({ parked: root.notchParked, screen: root.notchParkedScreen,
                               fullpanel: root.notchPanel.length ? (root.notchPanelOn ? "strip" : "waiting") : "off",
                               notch: [root.notchLeft, root.notchRight], notchHeight: root.notchHeight, notchBarHeight: root.notchBarHeight, barSize: root.barSize,
-                              beatAgeMs: root.notchLastBeat ? Date.now() - root.notchLastBeat : -1,
+                              beatAgeMs: root.notchLastBeat ? Date.now() - root.notchLastBeat : -1, skip: root.notchSkipOn,
                               bars: notchBarVariants.instances.map(function(p) {
-                                return [p.screen ? String(p.screen.name) : "", p.notchRole, p.parked, p.parkedSize, p.height]
+                                return [p.screen ? String(p.screen.name) : "", p.notchRole, p.parked, p.parkedSize, p.height,
+                                        p.notchSkip ? [p.notchSkip.jumped, p.notchSkip.hidden] : null]
                               }) })
+    }
+    // Each bar item as it shows: [screen, region, id, x, width, hidden].
+    function items(): string {
+      var out = []
+      for (var i = 0; i < root.moduleSlots.length; i++) {
+        var s = root.moduleSlots[i]
+        var w = s ? root.slotWindow(s) : null
+        if (!s || !w || !w.screen || !w.contentItem || !(s.width > 0)) continue
+        var p = s.mapToItem(w.contentItem, 0, 0)
+        out.push([String(w.screen.name), s.region, s.moduleName, Math.round(p.x * 10) / 10,
+                  Math.round(s.width * 10) / 10, s.notchShiftGone === true])
+      }
+      return JSON.stringify(out)
     }
   }
 
@@ -596,7 +732,22 @@ def main():
     }
     if (on !== notchPanelOn) notchPanelOn = on
   }
+  // Skip the notch: the app's word at this start, and while the VM runs.
+  FileView {
+    id: notchSkipFile
+    path: "/run/omacvm/notch-skip"
+    blockLoading: true
+    blockAllReads: true
+    printErrors: false
+  }
+  function notchSkipUpdate() {
+    notchSkipFile.reload()
+    var t = String(notchSkipFile.text()).trim()
+    var on = t === "1" ? true : t === "0" ? false : notchSkipBoot
+    if (on !== notchSkipOn) notchSkipOn = on
+  }
   function notchBoot() {
+    notchSkipBoot = /^OMACVM_NOTCHSKIP=1$/m.test(String(notchHostEnvFile.text()))
     notchPanel = notchPanelParse(notchHostEnvFile.text())
     if (notchPanel.length) {
       notchPanelUpdate()
@@ -647,6 +798,7 @@ def main():
         root.notchFollowParkFile()
       }
       root.notchWatchdog()
+      root.notchSkipUpdate()
     }
   }
 
@@ -677,6 +829,9 @@ def main():
     readonly property bool parked: (root.barHidden && !notchBlack && !notchClear) || notchRole === "parked"
     Binding { target: barWindow; property: "color"; value: "transparent"; when: barWindow.notchClear }
     readonly property bool notchLayout: notchRole !== ""
+    // Skip the notch on this bar (its horizontal bar sets it): see
+    // root.notchSkipPlace; null when off or not in the notch strip.
+    property var notchSkip: null
     // The parked copy is 1 px tall: panels open at its height + gap, so they
     // appear right below the notch strip instead of a bar height lower.
     // The NOTCH copy fills the whole NOTCH output (nothing may show below the
@@ -762,7 +917,32 @@ def main():
 ''')
 
     # 4. Pass the layout mode to the horizontal centre section (from about
-    #    October 2026 Omarchy also gives it its entries there).
+    #    October 2026 Omarchy also gives it its entries there), and Skip the
+    #    notch's layout of this window's left and right lists.
+    skip_bar = '''        id: notchSkipBar
+        anchors.fill: parent
+        // omarchy-notch-bar: Skip the notch (root.notchSkipPlace), for this
+        // window only and only while it is a bar in the notch strip. Items
+        // slide once the layout has settled (not at login or when parking).
+        readonly property bool notchSkipActive: root.notchSkipOn && barWindow.notchLayout
+        property bool notchSkipSettled: false
+        onNotchSkipActiveChanged: notchSkipSettled = false
+        Timer {
+          interval: 1500
+          running: notchSkipBar.notchSkipActive && !notchSkipBar.notchSkipSettled
+          onTriggered: notchSkipBar.notchSkipSettled = true
+        }
+        readonly property var notchSkip: notchSkipActive
+          ? root.notchSkipPlace(width, Style.space(8), notchLeftList.notchWidths, rightModules.notchWidths,
+                                [root.notchLeft, root.notchRight], notchCentre.notchBeside,
+                                Style.space(6), Style.space(8), Style.space(24))
+          : null
+        Binding { target: barWindow; property: "notchSkip"; value: notchSkipBar.notchSkip }
+'''
+    skip_left = '''        LeftModules {
+          id: notchLeftList
+          notchShift: notchSkipBar.notchSkip ? { items: notchSkipBar.notchSkip.left, animate: notchSkipBar.notchSkipSettled } : null
+          anchors.left: parent.left'''
     text = replace_variant(text, [('''      Item {
         anchors.fill: parent
 
@@ -770,12 +950,10 @@ def main():
 
         LeftModules {
           anchors.left: parent.left''', '''      Item {
-        anchors.fill: parent
+''' + skip_bar + '''
+        CenterModules { id: notchCentre; anchors.fill: parent; notchLayout: barWindow.notchLayout }
 
-        CenterModules { anchors.fill: parent; notchLayout: barWindow.notchLayout }
-
-        LeftModules {
-          anchors.left: parent.left'''), ('''      Item {
+''' + skip_left), ('''      Item {
         anchors.fill: parent
 
         CenterModules {
@@ -785,22 +963,38 @@ def main():
 
         LeftModules {
           anchors.left: parent.left''', '''      Item {
-        anchors.fill: parent
-
+''' + skip_bar + '''
         CenterModules {
+          id: notchCentre
           anchors.fill: parent
           notchLayout: barWindow.notchLayout
           entries: barWindow.centerBesideRight ? [] : root.layoutEntries("center")
         }
 
-        LeftModules {
-          anchors.left: parent.left''')], "the horizontal bar's centre section")
+''' + skip_left)], "the horizontal bar's centre section")
+    skip_right = '''          notchShift: notchSkipBar.notchSkip ? { items: notchSkipBar.notchSkip.right, animate: notchSkipBar.notchSkipSettled } : null
+'''
+    text = replace_variant(text, [('''        RightModules {
+          anchors.right: parent.right
+''', '''        RightModules {
+          id: rightModules
+''' + skip_right + '''          anchors.right: parent.right
+'''), ('''        RightModules {
+          id: rightModules
+          anchors.right: parent.right
+''', '''        RightModules {
+          id: rightModules
+''' + skip_right + '''          anchors.right: parent.right
+''')], "the horizontal bar's right section")
 
     # 5. Centre widgets around the camera housing in notch layout.
     text = replace_once(text, '''    property var entries: root.layoutEntries("center")
     readonly property bool hasAnchor: root.entryIndex(entries, root.centerAnchor) !== -1''', '''    property var entries: root.layoutEntries("center")
     // omarchy-notch-bar: keep the camera housing free.
     property bool notchLayout: false
+    // The room of the centre widgets beside the housing [left of it, right
+    // of it] in the horizontal bar (with their peeks), for Skip the notch.
+    property var notchBeside: [0, 0]
     readonly property bool hasAnchor: root.entryIndex(entries, root.centerAnchor) !== -1''')
     # Omarchy's hover area above these (a HoverHandler, from about October
     # 2026 an Item up to the anchor widget) stays as it is.
@@ -829,8 +1023,17 @@ def main():
 ''', '''        // omarchy-notch-bar: edges of the camera housing plus a small gap.
         Item { id: notchLeftEdge; x: root.notchLeft - Style.space(6); width: 0; height: parent.height }
         Item { id: notchRightEdge; x: root.notchRight + Style.space(6); width: 0; height: parent.height }
+        Binding {
+          target: centerRoot
+          property: "notchBeside"
+          value: centerRoot.hasAnchor
+            ? [notchCentreBefore.width + notchCentreBefore.notchPeekWidth,
+               centerAnchorModule.width + centerAnchorModule.notchPeekWidth + notchCentreAfter.width + notchCentreAfter.notchPeekWidth]
+            : [0, notchCentreAll.width + notchCentreAll.notchPeekWidth]
+        }
 
         ModuleList {
+          id: notchCentreAll
           visible: !centerRoot.hasAnchor
           entries: centerRoot.entries
           region: "center"
@@ -840,6 +1043,7 @@ def main():
         }
 
         ModuleList {
+          id: notchCentreBefore
           visible: centerRoot.hasAnchor
           entries: root.entriesBefore(centerRoot.entries, root.centerAnchor)
           region: "center"
@@ -856,6 +1060,15 @@ def main():
           anchors.left: centerRoot.notchLayout ? notchRightEdge.left : undefined
           anchors.verticalCenter: centerRoot.notchLayout ? parent.verticalCenter : undefined
         }
+''')
+    # The list after the anchor widget follows it, as before.
+    text = replace_once(text, '''          entries: root.entriesAfter(centerRoot.entries, root.centerAnchor)
+          region: "center"
+          anchors.left: centerAnchorModule.right
+''', '''          id: notchCentreAfter
+          entries: root.entriesAfter(centerRoot.entries, root.centerAnchor)
+          region: "center"
+          anchors.left: centerAnchorModule.right
 ''')
 
     # 6. One-pixel repaint trigger (pixel value unchanged) for notchcast.
@@ -906,6 +1119,130 @@ def main():
 ''' + stock_room + room + '''    return root.barSize
   }
   // --- end omarchy-notch-bar --------------------------------------------
+''')
+
+    # 8. Skip the notch, the lists: a list takes its items' places from the
+    #    bar (notchShift) and, laid out in a row, says how wide its items are.
+    text = replace_once(text, '''  component ModuleList: Loader {
+    id: moduleListRoot
+
+    property var entries: []
+    property string region: ""
+''', '''  component ModuleList: Loader {
+    id: moduleListRoot
+
+    property var entries: []
+    property string region: ""
+    // omarchy-notch-bar: Skip the notch: {items: [{x, hidden}], animate} on
+    // a bar in the notch strip, null elsewhere; and the items' widths, left
+    // to right (a horizontal list).
+    property var notchShift: null
+    readonly property var notchWidths: item && item.notchWidths ? item.notchWidths : []
+    readonly property real notchPeekWidth: item && item.notchPeekWidth > 0 ? item.notchPeekWidth : 0
+''')
+    text = replace_once(text, '''      Row {
+        spacing: 0
+
+        Repeater {
+          model: moduleListRoot.entries
+
+          ModuleSlot {
+            required property var modelData
+            entry: modelData
+            region: moduleListRoot.region
+          }
+        }
+      }
+''', '''      Row {
+        spacing: 0
+        // omarchy-notch-bar: each item's [width, room], by its place in the
+        // list, and the room the peeks in it take.
+        readonly property var notchWidths: {
+          var out = []
+          for (var i = 0; i < children.length; i++) {
+            var c = children[i]
+            if (c && c.notchSlotIndex >= 0) out[c.notchSlotIndex] = [c.width, c.width + c.notchPeekWidth]
+          }
+          for (var j = 0; j < out.length; j++) if (out[j] === undefined) out[j] = 0
+          return out
+        }
+        readonly property real notchPeekWidth: {
+          var sum = 0
+          for (var i = 0; i < children.length; i++) if (children[i] && children[i].notchPeekWidth > 0) sum += children[i].notchPeekWidth
+          return sum
+        }
+
+        Repeater {
+          model: moduleListRoot.entries
+
+          ModuleSlot {
+            required property var modelData
+            required property int index
+            entry: modelData
+            region: moduleListRoot.region
+            notchSlotIndex: index
+            notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)
+          }
+        }
+      }
+''')
+
+    # 9. Skip the notch, each item: moved by a transform (what it draws, its
+    #    hover, clicks, popups and Omanotch's click map all follow it), and
+    #    see-through without input when hidden. Not invisible: an item's
+    #    width depends on its own visible, which would loop.
+    text = replace_once(text, '''  component ModuleSlot: Item {
+    id: slot
+
+    required property var entry
+    property string region: ""
+''', '''  component ModuleSlot: Item {
+    id: slot
+
+    required property var entry
+    property string region: ""
+    // omarchy-notch-bar: Skip the notch: {x, hidden, n, animate} for this
+    // item on a bar in the notch strip; null elsewhere (Omarchy's place).
+    property int notchSlotIndex: -1
+    property var notchShift: null
+    property bool notchShiftGone: false
+    // Omarchy's indicators: how much wider they get when they peek (0 for
+    // every other widget, and while they show). Kept free by the layout.
+    readonly property var notchPeekBlock: activeItem && activeItem.revealInactiveIndicators !== undefined
+      ? root.notchPeekBlockIn(activeItem, 0) : null
+    readonly property real notchPeekWidth: notchPeekBlock && notchPeekBlock.parent
+      ? Math.max(0, notchPeekBlock.implicitWidth - notchPeekBlock.parent.width) : 0
+    // Where the item shows on the bar and Omarchy's place for it (n), both in
+    // bar coordinates from the layout: a new place glides from where the item
+    // showed, also while Omarchy's row moves under it (its row moves as a
+    // whole when an item in it grows). Omarchy's own moves stay instant.
+    property real notchShownX: 0
+    property real notchPlaceX: 0
+    property real notchShiftX: 0
+    transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }
+    opacity: slot.notchShiftGone ? 0 : 1
+    enabled: !slot.notchShiftGone
+    Behavior on notchShownX {
+      id: notchSlide
+      enabled: false
+      NumberAnimation { id: notchSlideRun; duration: 220; easing.type: Easing.OutCubic }
+    }
+    Behavior on opacity {
+      id: notchFade
+      enabled: false
+      NumberAnimation { duration: 160 }
+    }
+    onNotchShiftChanged: {
+      var s = notchShift
+      var gone = !!(s && s.hidden), animate = !!(s && s.animate)
+      // Set before the values, so the change itself slides and fades or not.
+      notchSlide.enabled = animate && (notchSlideRun.running || s.x !== notchShiftX)
+      notchFade.enabled = animate
+      notchShiftX = s ? s.x : 0
+      notchPlaceX = s ? s.n : 0
+      notchShownX = s ? s.n + s.x : 0
+      if (gone !== notchShiftGone) notchShiftGone = gone
+    }
 ''')
 
     open(path, "w").write(text)

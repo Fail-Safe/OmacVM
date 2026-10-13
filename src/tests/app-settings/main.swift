@@ -41,6 +41,7 @@ MainActor.assumeIsolated {
             try c.writeResources()
         case "graphics": try Graphics.write(GraphicsChoice(rawValue: value) ?? .auto, folder: need().folder)
         case "notchMode": try NotchArea.write(NotchMode(rawValue: value) ?? .native, folder: need().folder)
+        case "notchSkip": try NotchSkip.write(value == "true", folder: need().folder)
         case "macFolder": try MacFolder.set(value.isEmpty ? nil : URL(fileURLWithPath: value), for: need())
         case "usb": try USBSwitch.set(value == "true", folder: need().folder)
         case "usbRemember":

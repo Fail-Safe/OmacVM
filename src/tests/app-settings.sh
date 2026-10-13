@@ -6,7 +6,7 @@
 #     launch, and the next one;
 # (c) per-VM settings stay with their VM, app-wide ones are the same for all;
 # (d) a VM folder and settings as 3.0.x wrote them read the same (no new keys);
-# (e) `omacvm resources|graphics|fullscreen` change what the window reads.
+# (e) `omacvm resources|graphics|fullscreen|notch --skip` change what the window reads.
 # Builds the app's sources with a test main of its own bundle id (own settings
 # domain, own Gestures domain), a throwaway HOME, no VM is started, nothing
 # of the person's is read or written.
@@ -75,6 +75,7 @@ for i in 0 1; do
   n=$(val vms.$i.name)
   expect "fresh $n: graphics Automatic" auto "$(val vms.$i.graphics)"
   expect "fresh $n: notch via Omanotch" native "$(val vms.$i.notchMode)"
+  expect "fresh $n: Skip the notch off" false "$(val vms.$i.notchSkip)"
   expect "fresh $n: Mac folder off" "" "$(val vms.$i.macFolder)"
   expect "fresh $n: USB devices off, none remembered" "false 0" "$(val vms.$i.usb) $(val vms.$i.usbRemembered)"
   expect "fresh $n: fast network off" false "$(val vms.$i.fastNetwork)"
@@ -88,7 +89,7 @@ for kv in "startFullScreen false" "keepDockAway false" "closeAction ask" "appIco
           "escapeSwipe all" "mouseSwipeFingers 3" "swipeOut true" "updateChecks false"; do
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
-for kv in "resources 6:12" "graphics vulkan" "notchMode fullpanel" "macFolder $H/Shared" "usb true" \
+for kv in "resources 6:12" "graphics vulkan" "notchMode fullpanel" "notchSkip true" "macFolder $H/Shared" "usb true" \
           "usbRemember STLink" "macIME true"; do
   run set $kv Alpha || { echo "FAIL set $kv Alpha"; fail=1; }
 done
@@ -104,6 +105,8 @@ for launch in 1 2; do
   expect "launch $launch: update checks off" false "$(val app.updateChecks)"
   expect "launch $launch Alpha: 6 CPUs, 12 GB" "6 12" "$(val vms.0.cpus) $(val vms.0.memoryGB)"
   expect "launch $launch Alpha: Vulkan, including notch" "vulkan fullpanel" "$(val vms.0.graphics) $(val vms.0.notchMode)"
+  expect "launch $launch Alpha: Skip the notch on" true "$(val vms.0.notchSkip)"
+  expect "launch $launch Beta: Skip the notch still off" false "$(val vms.1.notchSkip)"
   expect "launch $launch Alpha: Mac folder" "$H/Shared" "$(val vms.0.macFolder)"
   expect "launch $launch Alpha: USB on, 1 remembered" "true 1" "$(val vms.0.usb) $(val vms.0.usbRemembered)"
   expect "launch $launch Alpha: Mac input on" true "$(val vms.0.macIME)"
@@ -134,6 +137,8 @@ expect "3.0.x app-wide: full screen, Dock away, focused monitor, 4 fingers" "tru
   "$(val app.startFullScreen) $(val app.keepDockAway) $(val app.escapeSwipe) $(val app.mouseSwipeFingers)"
 expect "3.1's own stay: ask, Flexoki Light, Swipe out" "ask flexoki-light true" \
   "$(val app.closeAction) $(val app.appIconTheme) $(val app.swipeOut)"
+expect "3.0.x Gamma: Skip the notch off (new, off by default), Alpha's kept" "false true" \
+  "$(val vms.2.notchSkip) $(val vms.0.notchSkip)"
 
 # (e) omacvm on the Mac changes what the window reads (the test identity's
 # CLI with this test's settings domain).
@@ -149,5 +154,12 @@ expect "Alpha untouched by Beta's changes" "6 vulkan" "$(val vms.0.cpus) $(val v
 cli fullscreen --vm Beta standard
 dump
 expect "omacvm fullscreen standard: Beta via Omanotch" native "$(val vms.1.notchMode)"
+cli notch --vm Beta --skip on
+dump
+expect "omacvm notch --skip on: Beta skips the notch" true "$(val vms.1.notchSkip)"
+cli notch --vm Alpha --skip off
+dump
+expect "omacvm notch --skip off: Alpha off, Beta on" "false true" "$(val vms.0.notchSkip) $(val vms.1.notchSkip)"
+expect "  the file the window and the CLI share" "on" "$(cat "$V/Beta/notch-skip")"
 
 exit $fail

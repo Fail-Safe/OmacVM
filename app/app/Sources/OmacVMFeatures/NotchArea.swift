@@ -211,3 +211,78 @@ public enum NotchArea {
                                                          g.left, g.right, g.strip, g.width, g.height))
     }
 }
+
+/// Skip the notch (off by default): on the bar beside the notch, items that
+/// do not fit on their side continue on its other side (Omanotch's bar
+/// patch, `notchSkipPlace`), in either full screen. The VM folder's
+/// `notch-skip` file ("on"; none is off), the same as `omacvm notch --skip`
+/// and the control centre's row. The VM gets it at each start (SMBIOS
+/// omacvm.notchskip=1 -> host.env OMACVM_NOTCHSKIP=1) and, while it runs, as
+/// soon as the file changes (NotchSkipLive: /run/omacvm/notch-skip through
+/// the guest agent), which the bar reads every 3 s.
+public enum NotchSkip {
+    public static let fileName = "notch-skip"
+    /// Written by `omacvm apply` when the VM's Omanotch bar can do it.
+    public static let readyFileName = "notch-skip-ready"
+    /// For QEMU's -smbios type=11 (only when on).
+    public static let smbios = "omacvm.notchskip=1"
+
+    public static func on(_ text: String?) -> Bool {
+        text?.trimmingCharacters(in: .whitespacesAndNewlines) == "on"
+    }
+
+    public static func read(folder: URL) -> Bool {
+        on(try? String(contentsOf: folder.appendingPathComponent(fileName), encoding: .utf8))
+    }
+
+    /// On writes the file, off removes it.
+    public static func write(_ on: Bool, folder: URL) throws {
+        let url = folder.appendingPathComponent(fileName)
+        if on {
+            try "on\n".write(to: url, atomically: true, encoding: .utf8)
+        } else if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// The VM's bar can do it: apply's marker, and Omanotch not off.
+    public static func guestReady(folder: URL, features: String?) -> Bool {
+        FileManager.default.fileExists(atPath: folder.appendingPathComponent(readyFileName).path) &&
+            !(features ?? "").split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).contains("omanotch=off")
+    }
+
+    /// What tells a running VM (root, through the guest agent): a fixed
+    /// command, written in one step so the bar never reads half a file.
+    public static func guestCommand(_ on: Bool) -> (path: String, args: [String]) {
+        let f = "/run/omacvm/notch-skip"
+        return ("/bin/sh", ["-c", "mkdir -p /run/omacvm && printf \(on ? 1 : 0) > \(f).new && mv -f \(f).new \(f)"])
+    }
+
+    /// The VM window's line under the row when it is on but the VM's bar
+    /// cannot do it yet.
+    public static let notReady = "Needs Omanotch on in the VM and an update first (Update VM)."
+}
+
+/// While a VM runs: when to tell it the setting again. It got the file's
+/// value at the start; a change goes to it at the next look, and, while the
+/// value differs from the start's, again now and then (a reboot inside the VM
+/// loses /run, and QEMU's SMBIOS still says the start's value).
+public struct NotchSkipLive: Sendable {
+    public let atStart: Bool
+    public private(set) var told: Bool?
+    private var toldAt: Date?
+    public static let again: TimeInterval = 30
+
+    public init(atStart: Bool) { self.atStart = atStart }
+
+    public func due(_ now: Bool, at date: Date) -> Bool {
+        if now != (told ?? atStart) { return true }
+        if now != atStart, let t = toldAt, date.timeIntervalSince(t) >= Self.again { return true }
+        return false
+    }
+
+    public mutating func sent(_ value: Bool, at date: Date) {
+        told = value
+        toldAt = date
+    }
+}

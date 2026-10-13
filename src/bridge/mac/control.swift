@@ -685,6 +685,8 @@ final class Control {
            let o = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any] {
           var d: [String: Any] = [:]
           for k in ["notch", "next_start", "this_start", "mac_has_notch", "full_screen", "vm_ready"] { d[k] = o[k] ?? NSNull() }
+          // Skip the notch (a CLI older than it has none: no key, no row).
+          for k in ["skip", "skip_ready"] where o[k] != nil { d[k] = o[k] }
           notch = d
         }
       }

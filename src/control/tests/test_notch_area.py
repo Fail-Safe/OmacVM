@@ -120,3 +120,37 @@ def test_job_body(app_world):
     c = Controller()
     c.bridge.start_job("notch", ["fullpanel"])
     assert ("POST", "/omacvm/jobs", {"action": "notch", "notch": "fullpanel"}) in app_world.requests
+
+
+# Skip the notch (omacvm notch --skip): its row right after Full screen.
+def test_skip_row_states():
+    assert S.notch_skip_row(notch(), "app") is None                      # a Mac older than it: no skip key
+    assert S.notch_skip_row(notch(skip="off"), "parallels") is None
+    assert S.notch_skip_row(notch(skip="off", mac_has_notch=False), "app") is None   # no notch here
+    r = S.notch_skip_row(notch(skip="off", skip_ready=True), "app")
+    assert (r.on, r.status, r.note) == (False, S.Status.OFF, "off")
+    r = S.notch_skip_row(notch(skip="on", skip_ready=True), "app")
+    assert (r.on, r.status, r.note) == (True, S.Status.WORKS, "on")
+    r = S.notch_skip_row(notch(skip="on", skip_ready=False), "app")
+    assert r.status is S.Status.NEEDS_PERSON and "not ready" in r.note and "Update VM" in r.detail
+    assert S.notch_skip_row(None, "app") is None and S.notch_skip_row(notch(skip="maybe"), "app") is None
+    job = S.Job(id="2", action="notch", features=("skip-on",), state="running")
+    r = S.notch_skip_row(notch(skip="off"), "app", jobs=[job])
+    assert (r.status, r.note) == (S.Status.BUSY, "turning on…")
+    # Its job does not make the Full screen row busy, nor the other way round.
+    assert S.notch_row(notch(skip="off"), "app", jobs=[job]).status is S.Status.OFF
+    fp = S.Job(id="3", action="notch", features=("fullpanel",), state="running")
+    assert S.notch_skip_row(notch(skip="off"), "app", jobs=[fp]).status is S.Status.OFF
+    assert len(f"{S.NOTCH_SKIP_FEATURE.title}: on: VM not ready") <= 80
+
+
+def test_skip_row_after_full_screen_and_its_job(app_world):
+    from omacvm_cc.controller import Controller
+    app_world.notch_area = notch(skip="on", skip_ready=True)["notch"]
+    c = Controller()
+    c.refresh_mac()
+    names = [r.feature.name for r in c.rows()]
+    assert names.index("notch-skip") == names.index("notch-area") + 1
+    assert c.notch_skip() == "on"
+    c.bridge.start_job("notch", ["skip-off"])
+    assert ("POST", "/omacvm/jobs", {"action": "notch", "notch": "skip-off"}) in app_world.requests

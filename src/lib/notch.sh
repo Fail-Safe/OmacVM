@@ -39,6 +39,38 @@ notch_guest_ready() {   # DIR
   [[ " $(printf '%s' "$f" | tr '\n\t' '  ') " != *" omanotch=off "* ]]
 }
 
+# Skip the notch (NotchSkip in NotchArea.swift; off by default): on the bar in
+# the notch strip, items that do not fit on their side of the camera housing
+# continue on its other side. A VM folder's `notch-skip` file: "on"; none (or
+# anything else) is off. `notch-skip-ready` (omacvm apply): the VM's Omanotch
+# bar can do it. The app gives it to the VM at each start and, while the VM
+# runs, as soon as the file changes.
+NOTCH_SKIP_FILE=notch-skip
+NOTCH_SKIP_READY_FILE=notch-skip-ready
+
+notch_skip() {   # DIR -> on|off
+  local c
+  c=$(tr -d "[:space:]" 2>/dev/null < "$1/$NOTCH_SKIP_FILE") || c=""
+  [[ $c == on ]] && echo on || echo off
+}
+
+notch_skip_set() {   # DIR on|off: on writes the file, off removes it
+  case $2 in
+    on) printf 'on\n' > "$1/$NOTCH_SKIP_FILE.new" && mv -f "$1/$NOTCH_SKIP_FILE.new" "$1/$NOTCH_SKIP_FILE" ;;
+    off) rm -f "$1/$NOTCH_SKIP_FILE" ;;
+    *) return 2 ;;
+  esac
+}
+
+# The VM's bar can do it: apply wrote notch-skip-ready, and Omanotch (whose
+# bar it is) is not off in the VM's features (NotchSkip.guestReady).
+notch_skip_ready() {   # DIR
+  [[ -e $1/$NOTCH_SKIP_READY_FILE ]] || return 1
+  local f
+  f=$(cat "$1/features" 2>/dev/null) || f=""
+  [[ " $(printf '%s' "$f" | tr '\n\t' '  ') " != *" omanotch=off "* ]]
+}
+
 # The app's "Start in" not Window (app-wide; Settings.startFullScreen, default on).
 notch_app_full_screen() {
   [[ $(defaults read "${APP_ID:-org.omacvm.app}" startFullScreen 2>/dev/null) != 0 ]]

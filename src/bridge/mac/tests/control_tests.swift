@@ -60,8 +60,8 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": "auto", "features": ["bridge"]}"#))?.code == "bad-body", "graphics with features")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": true}"#))?.code == "bad-body", "graphics: not a string")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "enable", "features": ["bridge"], "graphics": "auto"}"#))?.code == "bad-body", "graphics on another action")
-    // The notch area (FullPanel, #339): two values, nothing else.
-    for n in ["native", "fullpanel"] {
+    // The notch area (FullPanel, #339) and Skip the notch: four values, nothing else.
+    for n in ["native", "fullpanel", "skip-on", "skip-off"] {
       expect(ok(route("POST", "/omacvm/jobs", #"{"action": "notch", "notch": "\#(n)"}"#))
              == .startJob(JobRequest(action: .notch, features: [n])), "notch \(n)")
     }
@@ -183,6 +183,10 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
            == ["/c/omacvm", "graphics", "vulkan", "--vm", "My VM", "--vm-type", "app", "--yes"], "graphics argv")
     expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .notch, features: ["fullpanel"]), vm: "My VM", type: "app", commit: nil)
            == ["/c/omacvm", "notch", "fullpanel", "--vm", "My VM", "--vm-type", "app", "--yes"], "notch argv")
+    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .notch, features: ["skip-on"]), vm: "My VM", type: "app", commit: nil)
+           == ["/c/omacvm", "notch", "--skip", "on", "--vm", "My VM", "--vm-type", "app", "--yes"], "skip the notch on argv")
+    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .notch, features: ["skip-off"]), vm: "My VM", type: "app", commit: nil)
+           == ["/c/omacvm", "notch", "--skip", "off", "--vm", "My VM", "--vm-type", "app", "--yes"], "skip the notch off argv")
 
     // ---- the VM's own key: requests signed with it, never sent ----
     let k = String(repeating: "5a", count: 32)

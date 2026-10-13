@@ -589,7 +589,8 @@ def notch_row(status: dict | None, vm_type: str, jobs: list[Job] | None = None,
     if vm_type != "app":
         return None
     n = (status or {}).get("notch")
-    job = next((j for j in (jobs or []) if j.active and j.action == "notch"), None)
+    job = next((j for j in (jobs or []) if j.active and j.action == "notch"
+                and not (j.features and j.features[0] in NOTCH_SKIP_CHOICES)), None)
     if job is not None:
         return Row(NOTCH_FEATURE, True, Status.BUSY, f"to {NOTCH_TITLES.get(job.features[0] if job.features else '', '?')}…")
     if not isinstance(status, dict):
@@ -624,6 +625,46 @@ def notch_row(status: dict | None, vm_type: str, jobs: list[Job] | None = None,
 def next_notch(current: str) -> str:
     """Space on the Full screen row: notch via Omanotch <-> including notch."""
     return "native" if current == "fullpanel" else "fullpanel"
+
+
+# Skip the notch (omacvm notch --skip, the app's switch under Start in): on the
+# bar beside the notch, items that do not fit on their side continue on its
+# other side. Off by default; the VM's bar follows a change within seconds.
+# The Mac's job: the notch action with one of these.
+NOTCH_SKIP_CHOICES = ("skip-on", "skip-off")
+NOTCH_SKIP_FEATURE = Feature(
+    name="notch-skip", default="off", sides=("mac",), tags=(), needs=None,
+    title="Skip the notch",
+    summary=("OmacVM.app only, on a MacBook with a notch, in either full screen. Off: bar items that "
+             "do not fit beside the notch go behind it. On: they continue on its other side, in the "
+             "same order, and only hide when both sides are full. External displays keep their bar. "
+             "The bar changes within a few seconds."))
+
+
+def notch_skip_row(status: dict | None, vm_type: str, jobs: list[Job] | None = None,
+                   offline: bool = False) -> Row | None:
+    """The Skip the notch row, where the Full screen row is (and only with a
+    Mac that knows it: `skip` in omacvm notch --json); None elsewhere."""
+    if vm_type != "app" or not isinstance(status, dict):
+        return None
+    n = status.get("notch")
+    if not isinstance(n, dict) or n.get("skip") not in ("on", "off"):
+        return None
+    if n.get("notch") == "native" and n.get("mac_has_notch") is not True and n.get("skip") == "off":
+        return None   # no notch on this Mac: nothing to choose
+    job = next((j for j in (jobs or []) if j.active and j.action == "notch"
+                and j.features and j.features[0] in NOTCH_SKIP_CHOICES), None)
+    if job is not None:
+        return Row(NOTCH_SKIP_FEATURE, job.features[0] == "skip-on", Status.BUSY,
+                   "turning on…" if job.features[0] == "skip-on" else "turning off…")
+    if n["skip"] == "off":
+        return Row(NOTCH_SKIP_FEATURE, False, Status.OFF, "off",
+                   detail="Bar items that do not fit beside the notch go behind it.")
+    if n.get("skip_ready") is not True:
+        return Row(NOTCH_SKIP_FEATURE, True, Status.NEEDS_PERSON, "on: VM not ready",
+                   detail="Needs Omanotch on in the VM and an update first (u, or Update VM in the app).")
+    return Row(NOTCH_SKIP_FEATURE, True, Status.WORKS, "on",
+               detail="Bar items that do not fit beside the notch continue on its other side.")
 
 
 # ---- OmacVM.app: the VM's graphics memory on the Mac (GET /omacvm/gpu-memory) ----

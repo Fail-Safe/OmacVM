@@ -98,6 +98,8 @@ struct SettingRow<Trailing: View>: View {
     var subtitleIsError = false
     var info: String? = nil
     var probe: String? = nil
+    /// An (i) of its own (a picture in its popover) instead of info's text.
+    var infoButton: AnyView? = nil
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
@@ -106,7 +108,7 @@ struct SettingRow<Trailing: View>: View {
                 HStack(spacing: 6) {
                     Text(title)
                     if let badge { Text("(\(badge))").font(.subheadline).foregroundStyle(.secondary) }
-                    if let info { InfoButton(topic: title, text: info) }
+                    if let infoButton { infoButton } else if let info { InfoButton(topic: title, text: info) }
                 }
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)

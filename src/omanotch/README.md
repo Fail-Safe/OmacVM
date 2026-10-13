@@ -86,6 +86,16 @@ hiding the bar lets the wallpaper run through behind the notch, full-screen
 video and the lock screen turn it black, and it follows you across Spaces and
 MacBook sizes.
 
+## Skip the notch
+
+OmacVM.app has a switch for it (off by default): on the bar beside the notch,
+items that no longer fit on their side jump over the camera housing and
+continue on its other side, in the same order. They only hide when that side
+is full too. The menu and the clock at the far right stay put, and bars on
+other displays are not touched. The bar patch does the layout
+(`notchSkipPlace`); the app tells the VM through `/run/omacvm/host.env`
+(`OMACVM_NOTCHSKIP=1`) and `/run/omacvm/notch-skip`.
+
 ## Any notched MacBook
 
 Nothing is tied to one model. The Mac app measures everything on the spot:
