@@ -48,6 +48,8 @@ running_from() { ps -axww -o pid=,args= | grep -F -- "$1/Contents/" | grep -v -e
 HOOKS=(OMACVM_COCOA_HIDDEN)
 APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" 2>/dev/null)
 [[ -z $APP_ID || $APP_ID == org.omacvm.app ]] || HOOKS+=(OMACVM_APPCAST_URL OMACVM_APPCAST_KEY OMACVM_SETTINGS_DIR)
+# Tests (src/tests/update-swap-register.sh): a LaunchServices that hangs.
+[[ -z $APP_ID || $APP_ID == org.omacvm.app ]] || LSREGISTER=${OMACVM_TEST_LSREGISTER:-$LSREGISTER}
 OPEN_ENV=()
 for v in "${HOOKS[@]}"; do
   [[ -n ${!v:-} ]] && OPEN_ENV+=(--env "$v=${!v}")
@@ -69,6 +71,16 @@ abort() {
 
 # The volume a path lies on.
 volume() { stat -f %d "$1" 2>/dev/null; }
+
+# LaunchServices learns the bundle now at APP. At most 10 s: it can hang (its
+# Time Machine check stalled in getxattr for minutes on the Mac mini,
+# 2026-10-13), and the update must not wait for it; it goes on by itself.
+register() {
+  "$LSREGISTER" -f "$APP" >/dev/null 2>&1 &
+  local p=$! i
+  for ((i = 0; i < 40; i++)); do kill -0 "$p" 2>/dev/null || return 0; sleep 0.25; done
+  log "LaunchServices did not answer within 10 s: going on"
+}
 
 log "$MODE $APP (now $(version "$APP"))"
 for ((i = 0; i < 600; i++)); do kill -0 "$OLD_PID" 2>/dev/null || break; sleep 0.1; done
@@ -119,7 +131,7 @@ if ! mv "$NEW" "$APP"; then
   keep_old
   abort "could not put $NEW_V in place"
 fi
-"$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
+register
 log "swapped $OLD_V -> $NEW_V, starting it"
 
 # The result goes first: the new app reads it right after its check, while
@@ -161,7 +173,7 @@ if ! mv "$APP" "$FAILED/$BASE" || ! mv "$PREV" "$APP"; then
   result "rolled-back $NEW_V $why; putting $OLD_V back failed too: it is at $PREV"
   exit 1
 fi
-"$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
+register
 keep_old
 rm -rf "$FAILED" "$WORK_DIR/incoming"
 # An update with a VM restart: the new app may have taken the VM to start
