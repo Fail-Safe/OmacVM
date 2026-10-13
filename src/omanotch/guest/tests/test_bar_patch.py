@@ -669,7 +669,8 @@ class RealOmarchy(unittest.TestCase):
             self.assertEqual(full.count("transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }"), 1)
             # The housing's centre widths, and the after list named for them.
             self.assertEqual(full.count("id: notchCentreAfter"), 1)
-            self.assertIn("? [notchCentreBefore.width, centerAnchorModule.width + notchCentreAfter.width]", full)
+            self.assertIn("? [notchCentreBefore.width + notchCentreBefore.notchPeekWidth,", full)
+            self.assertIn("centerAnchorModule.width + centerAnchorModule.notchPeekWidth + notchCentreAfter.width + notchCentreAfter.notchPeekWidth]", full)
             # Omanotch's clicks and hover skip hidden items.
             self.assertEqual(full.count("if (!moduleTargetClickable(t) || t.enabled === false) continue"), 2)
 
@@ -765,8 +766,8 @@ class SkipTheNotch(unittest.TestCase):
 
     W, PAD, HOUSING, EDGE, GAP, KEEP = 1470, 8, [640.5, 829.5], 6, 8, 24
 
-    def place(self, *cases, places=False):
-        body = function(patched(), "notchSkipPlace")
+    def place(self, *cases, places=False, body=None):
+        body = body or function(patched(), "notchSkipPlace")
         args = [[self.W, self.PAD, left, right, housing or self.HOUSING, beside or [0, 0], self.EDGE, self.GAP, self.KEEP]
                 for left, right, housing, beside in cases]
         js = SKIP.replace("BODY", body).replace("CASES", json.dumps(args))
@@ -913,6 +914,125 @@ class SkipTheNotch(unittest.TestCase):
         r = self.place((left, right, None, None), places=True)[0]
         self.assertEqual([s["n"] for s in r["left"]], self.starts_left(left))
         self.assertEqual([s["n"] for s in r["right"]], self.starts_right(right))
+
+    # Omarchy's indicators peek: hovered (on this bar, or any other bar:
+    # Omarchy shares the peek between bars), they get 84 wider. Their width
+    # here is [now, when they peek]. The layout keeps their room either way,
+    # so nothing else moves: what is checked is where each item shows (n + x).
+    IND = [21, 105]
+
+    def shows(self, r):
+        return [[round(s["n"] + s["x"], 3), s["hidden"]] for s in r["left"] + r["right"]]
+
+    def peek_cases(self):
+        return [
+            ("right side fits", [20, 120], [54, 21, self.IND, 27, 133, 150]),
+            ("tray beyond the housing", [20, 120], [300, 21, self.IND, 27, 133, 150]),
+            ("tray and weather beyond it", [20, 120], [300, 120, self.IND, 27, 133, 150]),
+            ("both sides full", [20] + [26] * 30, [300, 21, self.IND, 27, 133, 150]),
+            ("indicators on the left", [20, self.IND, 400], [54, 150]),
+            ("indicators jumped over", [20], [21, self.IND, 300, 400, 150]),
+            ("indicators hidden, both sides full", [20, 120], [21, self.IND, 400, 400, 150]),
+        ]
+
+    def test_a_peek_moves_no_other_item(self, body=None):
+        seen = set()
+        for what, left, right in self.peek_cases():
+            peek = lambda l: [[105, 105] if e == self.IND else e for e in l]
+            idle, peeking = self.place((left, right, None, None), (peek(left), peek(right), None, None), places=True, body=body)
+            self.assertEqual((idle["jumped"], idle["hidden"]), (peeking["jumped"], peeking["hidden"]), what)
+            seen.add((idle["jumped"] > 0, idle["hidden"] > 0))
+            a, b = self.shows(idle), self.shows(peeking)
+            where = [i for i, e in enumerate(left + right) if e == self.IND][0]
+            for i, (x, y) in enumerate(zip(a, b)):
+                if i != where:
+                    self.assertEqual(x, y, "%s: item %d moved on a peek" % (what, i))
+            # The indicators grow into their room as Omarchy has them grow:
+            # on the right their right end stays, on the left their start.
+            ind = (idle["left"] + idle["right"])[where], (peeking["left"] + peeking["right"])[where]
+            self.assertEqual(ind[0]["hidden"], ind[1]["hidden"], what)
+            if ind[0]["hidden"]:
+                continue
+            if where < len(left):
+                self.assertEqual(ind[0]["n"] + ind[0]["x"], ind[1]["n"] + ind[1]["x"], what)
+            else:
+                self.assertEqual(ind[0]["n"] + ind[0]["x"] + 21, ind[1]["n"] + ind[1]["x"] + 105, what)
+        # The cases cover nothing jumping, jumping, and hiding.
+        self.assertTrue({(False, False), (True, False)} <= seen and any(h for _, h in seen), seen)
+
+    def test_a_peek_beside_the_housing_moves_no_other_item(self):
+        # Indicators among the centre widgets: their room beside the housing
+        # is the peek's, all the time (the bar passes it so).
+        right = [300, 21, 27, 133, 150]
+        idle, peeking = self.place(([20, 120], right, None, [0, 105]), ([20, 120], right, None, [0, 105]), places=True)
+        self.assertEqual(self.shows(idle), self.shows(peeking))
+        r = self.one([20, 120], [24] * 20 + [150], beside=[0, 105])
+        got = self.shown(r, "right", self.starts_right([24] * 20 + [150]))
+        kept = [g for g, s in zip(got, r["right"]) if s["x"] == 0]
+        self.assertGreaterEqual(kept[0][0], 829.5 + 6 + 105 + 8)
+
+    def test_no_peek_room_is_the_old_layout(self):
+        # Items without a peek: [w, w] is the same as w.
+        for what, left, right in self.peek_cases():
+            plain = lambda l: [21 if e == self.IND else e for e in l]
+            pairs = lambda l: [[21, 21] if e == self.IND else [e, e] for e in l]
+            a, b = self.place((plain(left), plain(right), None, None), (pairs(left), pairs(right), None, None), places=True)
+            self.assertEqual(a, b, what)
+
+    def test_the_real_shells_have_the_same_layout(self):
+        # The layout function as both Omarchy shells' patched bars have it.
+        for bar in SHELLS:
+            d = pathlib.Path(tempfile.mkdtemp())
+            try:
+                f = d / "Bar.qml"
+                f.write_text(bar.read_text())
+                subprocess.run([sys.executable, str(PATCH), str(f)], check=True, capture_output=True)
+                body = function(f.read_text(), "notchSkipPlace")
+            finally:
+                shutil.rmtree(d)
+            with self.subTest(omarchy=bar.parts[-5]):
+                self.test_a_peek_moves_no_other_item(body=body)
+
+    def test_the_peek_block_is_found(self):
+        # Omarchy's indicators in both shells: the horizontal row's hidden
+        # block, not the vertical one's; nothing in other widgets.
+        js = """
+function peek(item, depth) { BODY }
+var notchPeekBlockIn = peek;
+var block = { indicatorBlock: "inactive", horizontal: true, implicitWidth: 84, children: [] };
+var vblock = { indicatorBlock: "inactive", horizontal: false, implicitWidth: 30, children: [] };
+var active = { indicatorBlock: "active", horizontal: true, children: [] };
+var mac = { revealInactiveIndicators: false, children: [
+  { children: [ { children: [] }, { width: 0, children: [block] }, active ] },
+  { children: [ { width: 0, children: [vblock] } ] } ] };
+var upstream = { revealInactiveIndicators: false, children: [ { item: null, children: [ { children: [ { children: [
+  { width: 0, children: [block] }, active ] } ] } ] } ] };
+var deep = { children: [] }, at = deep;
+for (var i = 0; i < 12; i++) { var n = { children: [] }; at.children.push(n); at = n; }
+at.children.push(block);
+var clock = { children: [ { children: [ { text: "Tue" } ] } ] };
+console.log(JSON.stringify([peek(mac, 0) === block, peek(upstream, 0) === block, peek(deep, 0), peek(clock, 0), peek(null, 0)]));
+"""
+        body = function(patched(), "notchPeekBlockIn")
+        out = subprocess.run(["node", "-e", js.replace("BODY", body)], check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(out.stdout), [True, True, None, None, None])
+
+    def test_omarchys_indicators_still_peek_this_way(self):
+        # What the bar relies on, in Omarchy's own Indicators.qml of both
+        # shells: a clipping item as wide as the hidden block only while they
+        # peek, the block a horizontal "inactive" IndicatorBlock in it.
+        for bar in SHELLS:
+            ind = (bar.parent / "widgets" / "Indicators.qml").read_text()
+            with self.subTest(omarchy=bar.parts[-5]):
+                self.assertIn("readonly property bool revealInactiveIndicators:", ind)
+                area = re.search(r"id: inactiveHorizontalArea\n(.*?)\n\s*IndicatorBlock \{\n(.*?)\n\s*\}", ind, re.S)
+                self.assertIsNotNone(area)
+                self.assertIn("implicitWidth: root.revealInactiveIndicators ? inactiveHorizontalBlock.implicitWidth : 0", area.group(1))
+                self.assertIn("width: implicitWidth", area.group(1))
+                self.assertIn("clip: true", area.group(1))
+                self.assertIn('indicatorBlock: "inactive"', area.group(2))
+                self.assertIn("horizontal: true", area.group(2))
+                self.assertIn('property string indicatorBlock: "active"', ind)
 
     def test_no_housing_no_layout(self):
         self.assertEqual(self.place(([20], [150], [0, 0], None), ([20], [150], [900, 800], None),
