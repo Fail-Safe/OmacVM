@@ -3,7 +3,8 @@ import Foundation
 /// The app icon's looks (the header's icon, click: the easter egg). OmacVM's
 /// own icon and Omarchy's stock themes: four dark, four light. The choice is
 /// org.omacvm.app appIconTheme. IconArt draws it: the launcher's Dock tile
-/// (NSApp.applicationIconImage) and QEMU's (a PNG). The icon file in the app
+/// (NSApp.applicationIconImage), QEMU's (a PNG), and the Dock tile plug-in's
+/// while the app is not running (OmacVMDockTile). The icon file in the app
 /// bundle is never changed (its signature covers it).
 public struct IconTheme: Equatable, Sendable, Identifiable {
     public let id: String
@@ -23,6 +24,9 @@ public struct IconTheme: Equatable, Sendable, Identifiable {
 
     public static let key = "appIconTheme"
     public static let defaultID = "default"
+    /// Posted (distributed, object: the app's bundle id) when the look
+    /// changes: the Dock tile plug-in draws it again.
+    public static let changedNotification = "org.omacvm.app.iconTheme.changed"
 
     /// Dark first, then light: the popover's two rows. The ids are Omarchy's
     /// theme folders (omarchy-theme-set); the colours come from each theme's

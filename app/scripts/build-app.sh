@@ -133,6 +133,12 @@ SWIFT_MODULECACHE_PATH=$PWD/.build/mc/swift CLANG_MODULE_CACHE_PATH=$PWD/.build/
   { echo "Touch ID panel build failed" >&2; exit 1; }
 TOUCHID_PANEL=$ROOT/app/.build/release/libOmacVMTouchIDPanel.dylib
 [[ -f $TOUCHID_PANEL ]] || { echo "Touch ID panel build failed" >&2; exit 1; }
+# The Dock tile plug-in: the icon's look while the app is not running (DockTile.swift).
+SWIFT_MODULECACHE_PATH=$PWD/.build/mc/swift CLANG_MODULE_CACHE_PATH=$PWD/.build/mc/clang \
+  MACOSX_DEPLOYMENT_TARGET=15.0 swift build --disable-sandbox -c release -debug-info-format none --product OmacVMDockTile 2>&1 | { grep -v '^\[' || true; } ||
+  { echo "Dock tile plug-in build failed" >&2; exit 1; }
+DOCK_TILE=$ROOT/app/.build/release/libOmacVMDockTile.dylib
+[[ -f $DOCK_TILE ]] || { echo "Dock tile plug-in build failed" >&2; exit 1; }
 
 ICON=$ROOT/.build/OmacVM.icns
 if [[ ! -f $ICON ]]; then
@@ -154,6 +160,26 @@ install -m644 "$TOUCHID_PANEL" "$C/Resources/runtime/lib/OmacVMTouchIDPanel.dyli
 install_name_tool -id @rpath/OmacVMTouchIDPanel.dylib "$C/Resources/runtime/lib/OmacVMTouchIDPanel.dylib"
 mkdir -p "$C/Resources/fonts"
 install -m644 "$ROOT/fonts/JetBrainsMono-Regular.ttf" "$ROOT/fonts/JetBrainsMono-Bold.ttf" "$ROOT/fonts/OFL.txt" "$C/Resources/fonts/"
+# The Dock loads it (NSDockTilePlugIn below) while the app is in the Dock,
+# running or not: a pinned OmacVM keeps the icon's look the user picked.
+DT=$C/PlugIns/OmacVMDockTile.docktileplugin/Contents
+mkdir -p "$DT/MacOS"
+install -m755 "$DOCK_TILE" "$DT/MacOS/OmacVMDockTile"
+cat > "$DT/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>$ID.docktile</string>
+  <key>CFBundleName</key><string>OmacVMDockTile</string>
+  <key>CFBundleExecutable</key><string>OmacVMDockTile</string>
+  <key>CFBundlePackageType</key><string>BNDL</string>
+  <key>CFBundleShortVersionString</key><string>$(cat "$REPO/src/VERSION")</string>
+  <key>CFBundleVersion</key><string>$(cat "$REPO/src/VERSION")</string>
+  <key>NSPrincipalClass</key><string>OmacVMDockTilePlugIn</string>
+</dict>
+</plist>
+EOF
 # The app starts QEMU through this link, so macOS counts it as this app: one
 # icon in the Dock (DockIdentity.swift). The kernel still names it OmacVM.
 ln -s ../Resources/runtime/bin/OmacVM "$C/MacOS/OmacVM-VM"
@@ -270,6 +296,7 @@ cat > "$C/Info.plist" <<EOF
   <key>CFBundleDisplayName</key><string>$NAME</string>
   <key>CFBundleExecutable</key><string>OmacVM</string>
   <key>CFBundleIconFile</key><string>OmacVM</string>
+  <key>NSDockTilePlugIn</key><string>OmacVMDockTile.docktileplugin</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
@@ -310,6 +337,7 @@ if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
   codesign "${SIGN[@]}" --identifier org.omacvm.netd "$NETD"
   codesign "${SIGN[@]}" --identifier "$BRIDGE_ID" --entitlements "$ROOT/app/OmacVMBridge.entitlements" "$C/Helpers/$BRIDGE_APP"
   codesign "${SIGN[@]}" --identifier "$GESTURES_ID" "$C/Helpers/$GESTURES_APP"
+  codesign "${SIGN[@]}" --identifier "$ID.docktile" "$C/PlugIns/OmacVMDockTile.docktileplugin"
   codesign "${SIGN[@]}" --identifier "$ID" \
     --entitlements "$ROOT/app/OmacVM.entitlements" "$APP"
 else
@@ -323,6 +351,7 @@ else
   codesign --force --sign - --identifier "$ID.qemu" -r="designated => identifier \"$ID.qemu\"" \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
   codesign --force --sign - --identifier org.omacvm.netd "$NETD"
+  codesign --force --sign - --identifier "$ID.docktile" "$C/PlugIns/OmacVMDockTile.docktileplugin"
   # The helpers keep the signature their build gave them (src/lib/sign.sh: the same rule).
   codesign --force --sign - --identifier "$ID" -r="designated => identifier \"$ID\"" "$APP"
 fi

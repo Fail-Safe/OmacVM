@@ -9,6 +9,9 @@ let package = Package(
         // Touch ID's panel, loaded by QEMU (the VM window's process):
         // omacvm-cocoa-touchid-panel.patch, docs/adr/0041-touch-id.md.
         .library(name: "OmacVMTouchIDPanel", type: .dynamic, targets: ["OmacVMTouchIDPanel"]),
+        // The Dock tile plug-in: the icon's look while the app is not running
+        // (build-app.sh puts it in Contents/PlugIns).
+        .library(name: "OmacVMDockTile", type: .dynamic, targets: ["OmacVMDockTile"]),
     ],
     targets: [
         .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMAuth", "OmacVMBuildProgress", "OmacVMWindow", "OmacVMDesktop", "OmacVMAudio", "OmacVMIcon"]),
@@ -42,8 +45,10 @@ let package = Package(
         // "omacvm in Terminal", the keyboard note: `swift run window-tests`.
         .target(name: "OmacVMWindow"),
         .executableTarget(name: "window-tests", dependencies: ["OmacVMWindow", "OmacVMIcon"]),
-        // The icon's looks (IconTheme, IconArt): `swift run icon-tests`.
+        // The icon's looks (IconTheme, IconArt) and what the Dock tile
+        // plug-in shows while the app is not running: `swift run icon-tests`.
         .target(name: "OmacVMIcon"),
+        .target(name: "OmacVMDockTile", dependencies: ["OmacVMIcon"]),
         .executableTarget(name: "icon-tests", dependencies: ["OmacVMIcon"]),
         // "Restart the Desktop…" in QEMU's app menu after Later on the
         // desktop-lost window: `swift run desktop-tests`.

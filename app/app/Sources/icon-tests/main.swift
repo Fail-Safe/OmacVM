@@ -1,6 +1,7 @@
 // The icon's looks as the Dock shows them: IconArt's drawing of each look
-// (the launcher's and QEMU's tiles). `swift run icon-tests [DIR]`: DIR gets a
-// picture of each look (dock-<id>.png).
+// (the launcher's and QEMU's tiles, and the Dock tile plug-in's while the app
+// is not running) and what the plug-in reads. `swift run icon-tests [DIR]`:
+// DIR gets a picture of each look (dock-<id>.png), as the plug-in draws it.
 import AppKit
 import OmacVMIcon
 
@@ -41,6 +42,44 @@ if let a = IconArt.bitmap(IconTheme.choice(stored: "tokyo-night"), pixels: 256),
    let b = IconArt.bitmap(IconTheme.choice(stored: "flexoki-light"), pixels: 256) {
     expect(pixel(a, 512, 130).r < 80 && pixel(b, 512, 130).r > 200, "Tokyo Night is dark, Flexoki Light is light")
 }
+
+// What the plug-in reads: the app's own defaults domain.
+let domain = "org.omacvm.icon-tests.\(getpid())"
+func store(_ v: String?) {
+    CFPreferencesSetAppValue(IconTheme.key as CFString, v as CFString?, domain as CFString)
+    CFPreferencesAppSynchronize(domain as CFString)
+}
+store(nil)
+expect(DockTileLook.stored(domain: domain) == nil, "nothing stored: the bundle's icon (no picture of its own)")
+store("default")
+expect(DockTileLook.stored(domain: domain) == nil, "\"default\": the bundle's icon")
+store("gruvbox")
+expect(DockTileLook.stored(domain: domain)?.id == "gruvbox", "\"gruvbox\": the Gruvbox look")
+store("no-such-look")
+expect(DockTileLook.stored(domain: domain) == nil, "an unknown look: the bundle's icon")
+store("catppuccin-latte")
+expect(DockTileLook.stored(domain: domain)?.id == "catppuccin-latte", "changed while the plug-in runs: read again")
+store(nil)
+try? FileManager.default.removeItem(at: FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Preferences/\(domain).plist"))
+
+// The app around the plug-in: its own bundle id (a test copy, a renamed copy).
+let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("icon-tests-\(getpid())")
+func fakeApp(_ name: String, id: String?) -> URL {
+    let app = tmp.appendingPathComponent(name)
+    let plug = app.appendingPathComponent("Contents/PlugIns/OmacVMDockTile.docktileplugin")
+    try? FileManager.default.createDirectory(at: plug, withIntermediateDirectories: true)
+    if let id {
+        let d = try? PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": id], format: .xml, options: 0)
+        try? d?.write(to: app.appendingPathComponent("Contents/Info.plist"))
+    }
+    return plug
+}
+expect(DockTileLook.appID(plugIn: fakeApp("OmacVM.app", id: "org.omacvm.app")) == "org.omacvm.app", "OmacVM.app: org.omacvm.app")
+expect(DockTileLook.appID(plugIn: fakeApp("My VM.app", id: "org.omacvm.app.test")) == "org.omacvm.app.test", "a renamed test copy: its own id")
+expect(DockTileLook.appID(plugIn: fakeApp("Broken.app", id: nil)) == nil, "no Info.plist: no domain (the bundle's icon)")
+expect(DockTileLook.appID(plugIn: fakeApp("NotAnApp", id: "org.omacvm.app")) == nil, "not inside an app: no domain")
+try? FileManager.default.removeItem(at: tmp)
 
 print(failures == 0 ? "icon: all checks passed" : "icon: \(failures) failed")
 exit(failures == 0 ? 0 : 1)

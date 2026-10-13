@@ -6,8 +6,9 @@ import SwiftUI
 /// the header, the Dock and QEMU's window (OMACVM_ICON: a PNG in the run
 /// folder). In the Dock: the launcher's tile (NSApp.applicationIconImage, at
 /// launch, when it changes and each time the launcher comes back after a VM:
-/// macOS drops it when the app goes .accessory and back) and QEMU's while the
-/// VM runs. The icon in the app bundle stays as it is.
+/// macOS drops it when the app goes .accessory and back), QEMU's while the VM
+/// runs, and the Dock tile plug-in's (OmacVMDockTile) while the app is not
+/// running. The icon in the app bundle stays as it is.
 @MainActor
 enum AppIcon {
     static let changed = Notification.Name("OmacVM.AppIcon.changed")
@@ -24,10 +25,16 @@ enum AppIcon {
         NotificationCenter.default.post(name: changed, object: nil)
     }
 
-    /// The Dock's icon for this launch.
+    /// The Dock's icon for this launch, and the plug-in's for when the app
+    /// is not running (it reads the look again on this notice).
     static func apply() {
         let t = theme
         NSApp.applicationIconImage = t.isDefault ? nil : image(t, size: 1024)
+        // On disk before the plug-in (another process) reads it.
+        CFPreferencesAppSynchronize((Bundle.main.bundleIdentifier ?? "org.omacvm.app") as CFString)
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name(IconTheme.changedNotification), object: Bundle.main.bundleIdentifier,
+            userInfo: nil, deliverImmediately: true)
     }
 
     /// The icon in a look, `size` points square.

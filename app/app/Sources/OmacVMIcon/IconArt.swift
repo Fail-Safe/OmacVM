@@ -1,8 +1,8 @@
 import AppKit
 
 /// The icon in a look: src/icon/omacvm.svg with other colours. One drawing
-/// for every place it shows: the window's header and the launcher's and
-/// QEMU's Dock tiles.
+/// for every place it shows: the window's header, the launcher's and QEMU's
+/// Dock tiles, and the Dock tile plug-in while the app is not running.
 public enum IconArt {
     /// OmacVM's own colours (src/icon/omacvm.svg), when there is no bundle icon.
     public static let defaultColors = IconTheme.Colors(background: 0x26233a, pad: 0x1b1928, loops: 0xc4a7e7, mark: 0xe0def4)
