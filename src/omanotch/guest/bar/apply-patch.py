@@ -77,7 +77,7 @@ PIECES = [
     "        readonly property bool notchSkipActive: root.notchSkipOn && barWindow.notchLayout\n",  # 4.
     "    property var notchBeside: [0, 0]\n",                                # 5.
     "            notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)\n",  # 8. lists
-    "    transform: Translate { x: slot.notchShiftX }\n",                    # 9. items
+    "    transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }\n",  # 9. items
 ]
 
 
@@ -369,8 +369,9 @@ def main():
   // over and continue on the other side in the same order; they hide only
   // when that side is full too, and then the rest of them as well. The first
   // item from each screen edge (the menu, the clock at the far right) always
-  // stays. Out: per item {x: shift from Omarchy's place, hidden}, and how
-  // many items jumped and hid; null when the housing is not on the bar.
+  // stays. Out: per item {x: shift from Omarchy's place, hidden, n: that
+  // place on the bar}, and how many items jumped and hid; null when the
+  // housing is not on the bar.
   function notchSkipPlace(width, pad, left, right, housing, beside, edge, gap, keep) {
     var W = Number(width), nl = Number(housing[0]), nr = Number(housing[1])
     if (!(W > 0 && nl > 0 && nr > nl && nr < W)) return null
@@ -383,7 +384,7 @@ def main():
     for (i = 0; i < left.length; i++) {
       w = Math.max(0, Number(left[i]) || 0)
       L.push({ x: x, w: w })
-      out.left.push({ x: 0, hidden: false })
+      out.left.push({ x: 0, hidden: false, n: x })
       x += w
     }
     x = W - pad
@@ -391,7 +392,7 @@ def main():
       w = Math.max(0, Number(right[i]) || 0)
       x -= w
       R[i] = { x: x, w: w }
-      out.right[i] = { x: 0, hidden: false }
+      out.right[i] = { x: 0, hidden: false, n: x }
     }
     // What stays on its own side: up to the gap before its end.
     var keptL = L.length, keptR = 0
@@ -409,7 +410,7 @@ def main():
         if (L[i].w > 0) out.jumped++
       } else {
         full = true
-        out.left[i] = { x: wallL - gap - L[i].w - L[i].x, hidden: true }
+        out.left[i] = { x: wallL - gap - L[i].w - L[i].x, hidden: true, n: L[i].x }
         if (L[i].w > 0) out.hidden++
       }
     }
@@ -424,7 +425,7 @@ def main():
         if (R[i].w > 0) out.jumped++
       } else {
         full = true
-        out.right[i] = { x: wallR + gap - R[i].x, hidden: true }
+        out.right[i] = { x: wallR + gap - R[i].x, hidden: true, n: R[i].x }
         if (R[i].w > 0) out.hidden++
       }
     }
@@ -433,7 +434,7 @@ def main():
   // One item's part of a list's layout ({items, animate}; null: none).
   function notchShiftAt(list, i) {
     var s = list && list.items ? list.items[i] : null
-    return s ? { x: s.x, hidden: s.hidden === true, animate: list.animate === true } : null
+    return s ? { x: s.x, hidden: s.hidden === true, n: s.n, animate: list.animate === true } : null
   }
   // --- end omarchy-notch-bar --------------------------------------------
 '''.replace("{VERSION_LINE}", VERSION_LINE))
@@ -1159,19 +1160,25 @@ def main():
 
     required property var entry
     property string region: ""
-    // omarchy-notch-bar: Skip the notch: {x, hidden, animate} for this item
-    // on a bar in the notch strip; null elsewhere (Omarchy's place).
+    // omarchy-notch-bar: Skip the notch: {x, hidden, n, animate} for this
+    // item on a bar in the notch strip; null elsewhere (Omarchy's place).
     property int notchSlotIndex: -1
     property var notchShift: null
-    property real notchShiftX: 0
     property bool notchShiftGone: false
-    transform: Translate { x: slot.notchShiftX }
+    // Where the item shows on the bar and Omarchy's place for it (n), both in
+    // bar coordinates from the layout: a new place glides from where the item
+    // showed, also while Omarchy's row moves under it (its row moves as a
+    // whole when an item in it grows). Omarchy's own moves stay instant.
+    property real notchShownX: 0
+    property real notchPlaceX: 0
+    property real notchShiftX: 0
+    transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }
     opacity: slot.notchShiftGone ? 0 : 1
     enabled: !slot.notchShiftGone
-    Behavior on notchShiftX {
+    Behavior on notchShownX {
       id: notchSlide
       enabled: false
-      NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+      NumberAnimation { id: notchSlideRun; duration: 220; easing.type: Easing.OutCubic }
     }
     Behavior on opacity {
       id: notchFade
@@ -1179,11 +1186,14 @@ def main():
       NumberAnimation { duration: 160 }
     }
     onNotchShiftChanged: {
-      var s = notchShift, x = s ? s.x : 0, gone = !!(s && s.hidden)
-      // Set before the values, so the change itself slides or not.
-      notchSlide.enabled = !!(s && s.animate)
-      notchFade.enabled = notchSlide.enabled
-      if (x !== notchShiftX) notchShiftX = x
+      var s = notchShift
+      var gone = !!(s && s.hidden), animate = !!(s && s.animate)
+      // Set before the values, so the change itself slides and fades or not.
+      notchSlide.enabled = animate && (notchSlideRun.running || s.x !== notchShiftX)
+      notchFade.enabled = animate
+      notchShiftX = s ? s.x : 0
+      notchPlaceX = s ? s.n : 0
+      notchShownX = s ? s.n + s.x : 0
       if (gone !== notchShiftGone) notchShiftGone = gone
     }
 ''')

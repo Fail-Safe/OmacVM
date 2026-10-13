@@ -666,7 +666,7 @@ class RealOmarchy(unittest.TestCase):
             self.assertEqual(full.count("id: rightModules"), 1)
             # Each item of a horizontal list, not the vertical ones.
             self.assertEqual(full.count("notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)"), 1)
-            self.assertEqual(full.count("transform: Translate { x: slot.notchShiftX }"), 1)
+            self.assertEqual(full.count("transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }"), 1)
             # The housing's centre widths, and the after list named for them.
             self.assertEqual(full.count("id: notchCentreAfter"), 1)
             self.assertIn("? [notchCentreBefore.width, centerAnchorModule.width + notchCentreAfter.width]", full)
@@ -765,12 +765,17 @@ class SkipTheNotch(unittest.TestCase):
 
     W, PAD, HOUSING, EDGE, GAP, KEEP = 1470, 8, [640.5, 829.5], 6, 8, 24
 
-    def place(self, *cases):
+    def place(self, *cases, places=False):
         body = function(patched(), "notchSkipPlace")
         args = [[self.W, self.PAD, left, right, housing or self.HOUSING, beside or [0, 0], self.EDGE, self.GAP, self.KEEP]
                 for left, right, housing, beside in cases]
         js = SKIP.replace("BODY", body).replace("CASES", json.dumps(args))
-        return json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)
+        out = json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)
+        if not places:   # each item's place on the bar (n): test_places_on_the_bar
+            for r in out:
+                for s in (r or {}).get("left", []) + (r or {}).get("right", []):
+                    s.pop("n")
+        return out
 
     def one(self, left, right, housing=None, beside=None):
         return self.place((left, right, housing, beside))[0]
@@ -900,6 +905,14 @@ class SkipTheNotch(unittest.TestCase):
         right = [24] * 11 + [0, 0] + [24] * 19 + [150]
         r = self.one([20, 120], right)
         self.assertEqual(r["jumped"], 11)
+
+    def test_places_on_the_bar(self):
+        # n: Omarchy's place of each item on the bar, as its rows lay them out
+        # (the item glides between places on the bar, not in its row).
+        left, right = [20] + [26] * 30, [24] * 30 + [150]
+        r = self.place((left, right, None, None), places=True)[0]
+        self.assertEqual([s["n"] for s in r["left"]], self.starts_left(left))
+        self.assertEqual([s["n"] for s in r["right"]], self.starts_right(right))
 
     def test_no_housing_no_layout(self):
         self.assertEqual(self.place(([20], [150], [0, 0], None), ([20], [150], [900, 800], None),
