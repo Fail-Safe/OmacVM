@@ -1237,6 +1237,7 @@ static void logPermissions(void) {
 
 static void swipeOutLook(void);
 static void takeLook(void);
+static void replayLook(void);
 static void updateCapture(CFRunLoopTimerRef t, void *info) {
   (void)info;
   logPermissions();
@@ -1256,6 +1257,7 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   if (other || (net >= 0 && !front)) win = frontWindow(pid);
   frontChanged(pid, net, front, title, win, other);
   takeLook();   // where a swipe out would go (only while it may)
+  replayLook();
   if (t) {
     // Every 0.2 s while a VM app is in front, else every 2 s; the slow look
     // may come up to 0.5 s late so macOS can batch it with other wake-ups.
@@ -3613,6 +3615,7 @@ static void stopDevice(MTDeviceRef d, MTFrameCallback cb) {
   if (MTDeviceIsRunning(d)) MTDeviceStop(d);
 }
 static void (*stopDeviceFn)(MTDeviceRef, MTFrameCallback) = stopDevice;
+static int isReplayDev(MTDeviceRef d);
 
 static void stopTrackpads(void) {
   MTDeviceRef p[MAX_PADS], m[MAX_MICE];
@@ -3626,11 +3629,94 @@ static void stopTrackpads(void) {
   for (int i = 0; i < nm; i++) m[i] = mice[i].dev;
   nMice = 0;
   pthread_mutex_unlock(&mouseLock);
-  for (int i = 0; i < np; i++) stopDeviceFn(p[i], frameCb);
-  for (int i = 0; i < nm; i++) stopDeviceFn(m[i], mouseFrameCb);
+  for (int i = 0; i < np; i++) if (!isReplayDev(p[i])) stopDeviceFn(p[i], frameCb);
+  for (int i = 0; i < nm; i++) if (!isReplayDev(m[i])) stopDeviceFn(m[i], mouseFrameCb);
   fingers = 0;
   if (np + nm) logf_("trackpads let go: %d trackpad%s, %d Magic Mouse", np, np == 1 ? "" : "s", nm);
 }
+
+#if GESTURES_TEST_IDENTITY
+// ---- the test identity only: finger frames from a file ----
+// A Mac without a trackpad (the Mac mini) cannot make the swipe out happen
+// for real: its end-to-end test plays made-up frames into the real
+// callbacks. OMACVM_TEST_REPLAY_DIR=<dir> at start: <dir>/next.tsv is taken
+// with the capture check (renamed to playing.tsv), played on its own thread
+// and removed. Lines: <seconds> pad|mouse <n> [<id> <x> <y>]... (0..1, y up,
+// as MultitouchSupport gives them). Never in the helper that ships
+// (GESTURES_TEST_IDENTITY: build.sh with OMACVM_HELPER_TEST=1).
+static char replayDir[900];
+static int replayPadDev, replayMouseDev;   // their addresses stand for the devices
+static volatile int replaying;
+static int isReplayDev(MTDeviceRef d) { return d == (MTDeviceRef)&replayPadDev || d == (MTDeviceRef)&replayMouseDev; }
+
+static void replayDevices(void) {
+  pthread_mutex_lock(&padLock);
+  int have = 0;
+  for (int i = 0; i < nPads; i++) have |= pads[i].dev == (MTDeviceRef)&replayPadDev;
+  if (!have && nPads < MAX_PADS) {
+    pads[nPads].dev = (MTDeviceRef)&replayPadDev; pads[nPads].id = 0; pads[nPads].fingers = 0;
+    pads[nPads].w = 15600; pads[nPads].h = 9600; nPads++;
+  }
+  pthread_mutex_unlock(&padLock);
+  pthread_mutex_lock(&mouseLock);
+  have = 0;
+  for (int i = 0; i < nMice; i++) have |= mice[i].dev == (MTDeviceRef)&replayMouseDev;
+  if (!have && nMice < MAX_MICE) {
+    mice[nMice].dev = (MTDeviceRef)&replayMouseDev; mice[nMice].id = 0; mice[nMice].sent = 0;
+    mice[nMice].w = 5150; mice[nMice].h = 9050;
+    mouseStateInit(&mice[nMice].st); takeReset(&mice[nMice].take); nMice++;
+  }
+  pthread_mutex_unlock(&mouseLock);
+}
+
+static void *replayMain(void *arg) {
+  char *path = arg, line[2048];
+  FILE *f = fopen(path, "r");
+  double t0 = monoNow();
+  int frame = 0;
+  while (f && fgets(line, sizeof line, f)) {
+    double t; char kind[8]; int n, off = 0;
+    if (sscanf(line, "%lf %7s %d%n", &t, kind, &n, &off) != 3 || n < 0 || n > 16) continue;
+    MTTouch tch[16]; memset(tch, 0, sizeof tch);
+    const char *q = line + off; int k = 0;
+    for (int i = 0; i < n; i++) {
+      int id, used = 0; float x, y;
+      if (sscanf(q, "%d %f %f%n", &id, &x, &y, &used) != 3) break;
+      q += used;
+      tch[k].pathIndex = tch[k].fingerID = id; tch[k].state = 4; tch[k].zTotal = 0.5f;
+      tch[k].normalized.pos.x = x; tch[k].normalized.pos.y = y; k++;
+    }
+    double wait = t0 + t - monoNow();
+    if (wait > 0) usleep((useconds_t)(wait * 1e6));
+    if (!strcmp(kind, "mouse")) mouseFrameCb((MTDeviceRef)&replayMouseDev, tch, k, t, frame++);
+    else frameCb((MTDeviceRef)&replayPadDev, tch, k, t, frame++);
+  }
+  if (f) fclose(f);
+  unlink(path);
+  logf_("replay: done (%d frames)", frame);
+  free(path);
+  replaying = 0;
+  return NULL;
+}
+
+static void replayLook(void) {
+  if (!replayDir[0] || replaying || inputPaused) return;
+  char next[1024], playing[1024];
+  snprintf(next, sizeof next, "%s/next.tsv", replayDir);
+  snprintf(playing, sizeof playing, "%s/playing.tsv", replayDir);
+  if (rename(next, playing)) return;
+  replayDevices();
+  replaying = 1;
+  logf_("replay: %s", playing);
+  pthread_t th;
+  char *arg = strdup(playing);
+  if (!arg || pthread_create(&th, NULL, replayMain, arg)) { free(arg); replaying = 0; return; }
+  pthread_detach(th);
+}
+#else
+static int isReplayDev(MTDeviceRef d) { (void)d; return 0; }
+static void replayLook(void) {}
+#endif
 
 static void appActivated(void) { updateCapture(captureTimer, NULL); }
 
@@ -3735,6 +3821,10 @@ int main(int argc, char **argv) {
     else logf_("unknown option %s, ignored", argv[i]);
   }
   signal(SIGPIPE, SIG_IGN);
+#if GESTURES_TEST_IDENTITY
+  const char *rd = getenv("OMACVM_TEST_REPLAY_DIR");
+  if (rd && rd[0] == '/') { snprintf(replayDir, sizeof replayDir, "%s", rd); logf_("test identity: frames from %s/next.tsv", replayDir); }
+#endif
 
   tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
