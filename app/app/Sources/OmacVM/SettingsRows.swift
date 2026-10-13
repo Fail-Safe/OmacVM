@@ -466,8 +466,11 @@ struct FastNetworkRow: View {
 /// what the last check found.
 struct UpdateRow: View {
     @ObservedObject var updater: Updater
+    /// A VM runs from this app: the update waits for its shutdown.
+    var running = false
 
     private var line: String {
+        if let v = updater.downloading { return "Downloading \(Product.name) \(v)…" }
         if updater.checking { return "Checking…" }
         if let s = updater.staged { return "\(Product.name) \(s.version) is ready to install." }
         if let o = updater.lastOutcome, let l = Updater.outcomeLine(o, current: updater.currentVersion) { return l }
@@ -492,8 +495,14 @@ struct UpdateRow: View {
                    info: "Off: no checks and no messages. Check Now still works. The same switch as in the control centre in Omarchy.",
                    probe: "updates") {
             if updater.checking { ProgressView().controlSize(.small) }
-            Button("Check Now") { Task { await updater.checkNow() } }
-                .disabled(updater.checking || updater.restarting)
+            if updater.staged != nil && !updater.installWhenIdle && !updater.restarting {
+                // The same button as the banner, also here.
+                Button(UpdateBanner.updateTitle(running: running)) { UpdateBanner.update(updater) }
+                    .layoutProbe("row-update-now")
+            } else {
+                Button("Check Now") { Task { await updater.checkNow() } }
+                    .disabled(updater.checking || updater.restarting)
+            }
             RowSwitch(title: "Check for updates once a week", isOn: Binding(get: { updater.enabled }, set: { updater.setEnabled($0) }))
         }
     }

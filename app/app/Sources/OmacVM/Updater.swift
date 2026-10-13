@@ -45,6 +45,8 @@ final class Updater: ObservableObject {
     /// Later in the banner: hidden for that version until the next launch.
     @Published var later: String?
     @Published private(set) var checking = false
+    /// The version being downloaded while a check runs (the row says so).
+    @Published private(set) var downloading: String?
     @Published var notice: String?
     @Published private(set) var enabled: Bool
 
@@ -307,6 +309,8 @@ final class Updater: ObservableObject {
         }
         if let s = staged, s.version == feed.version.description { return .ready(s.version) }
         log("downloading \(feed.version) from \(feed.url.absoluteString)")
+        downloading = feed.version.description
+        defer { downloading = nil }
         do {
             let s = try await stage(feed, data: feedData, signature: feedSig, session: session)
             staged = s
@@ -935,10 +939,11 @@ final class Updater: ObservableObject {
 
     /// Puts the updater in a state to draw it; nothing is checked or saved.
     func showForRendering(staged: Staged?, notice: String?, enabled: Bool, waiting: Bool, previous: String?,
-                          outcome: Outcome? = nil, checking: Bool = false) {
+                          outcome: Outcome? = nil, checking: Bool = false, downloading: String? = nil) {
         self.staged = staged
         lastOutcome = outcome
         self.checking = checking
+        self.downloading = downloading
         self.notice = notice
         self.enabled = enabled
         installWhenIdle = waiting

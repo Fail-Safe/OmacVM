@@ -204,7 +204,7 @@ struct SettingsSections: View {
                 StorageRows(storage: state.storage, selected: state.config.location == nil ? nil : state.config.folder,
                             open: { state.openExisting() }, delete: delete)
                 CommandLineRow(preview: preview?.terminal)
-                UpdateRow(updater: Updater.shared)
+                UpdateRow(updater: Updater.shared, running: running)
             }
             ForEach(state.storage.disconnected, id: \.self) { line in
                 Text(line).font(.subheadline).foregroundStyle(Look.red).padding(.top, 8).padding(.horizontal, 4)
