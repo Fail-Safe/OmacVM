@@ -3,6 +3,19 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.2 (unreleased)
+
+The Mac's wallpaper follows the VM's theme again on every Space, and a source checkout uses the app's Mac helpers when its Swift fails.
+
+- **The Mac's wallpaper on every Space**: when the VM's theme or background changes, every Space
+  and display shows the new picture again. The picture settings the Bridge copies to every Space in
+  macOS's wallpaper store could still name the old, deleted picture, and on macOS 27 the store
+  entry it wrote was refused, so every Space showed macOS's default picture. Thanks @fbalazsy
+  (#388).
+- A source checkout of OmacVM (`~/.omacvm` or a clone) asks the installed OmacVM.app's built
+  helpers (notch, display, clock format, free space) when its own Swift run fails, for example on
+  an SDK the compiler does not support. Before, the answer was lost. Thanks @fbalazsy (#387).
+
 ## 3.1.1
 
 Omarchy's shell draws again on Qt 6.12, and the settings sidebar marks the section at the top again.
