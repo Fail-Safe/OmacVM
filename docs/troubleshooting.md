@@ -893,3 +893,36 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `app/runtime/Tests/keys/test-keys-last.sh`, `swift run features-tests`,
   `src/gestures/mac/test.sh` (test-tap.c), `src/bridge/mac/test-models.sh`.
   Issue [#350](https://github.com/gillesgoetsch/OmacVM/issues/350).
+
+## 35. All routes: the bar, menus and pop-ups draw empty after an update (Qt 6.12)
+
+- **Symptom:** Omarchy's bar is an empty dark strip, Super+Space (the
+  Omarchy menu) shows a blank screen until Escape, the volume OSD and
+  notifications are empty or unthemed. The shell's log
+  (`/run/user/1000/quickshell/by-pid/*/log.log`) has hundreds of
+  `TypeError: Cannot read property 'border' of undefined` and
+  `Unable to assign [undefined] to QColor` from the first start. A VM built
+  from scratch since Arch's Qt 6.12 (2026-10-12) has it from the first boot;
+  an older VM after `pacman -Syu` or `omarchy update`.
+- **Cause:** Qt 6.12 brought a singleton named `Color` into QtQuick
+  (`Color.rgba()`, `Color.lighter()`, ...). Omarchy's shell has its own
+  `Color` (`qs.Commons`), and its files import both. With a plain
+  `import QtQuick` (the newest version), a bare `Color` is QtQuick's,
+  whatever the order of the imports, so every colour the shell reads
+  (`Color.bar.text`, `Color.foreground`, ...) is undefined.
+- **Fix (3.1.1):** `omacvm apply` (OmacVM.app: Update VM) imports QtQuick
+  below 6.12 (`import QtQuick 6.11`, which leaves QtQuick's `Color` out) in
+  each of Omarchy's shell files, and the user's clones of them, that use
+  Omarchy's bare `Color`; the line is marked `// omacvm #376`. Nothing
+  changes on Qt 6.11. Then the shell restarts (after the next unlock if the
+  screen is locked). A pacman hook does it again after every Omarchy or Qt
+  update (`omarchy update` restarts the shell at its end); a file Omarchy
+  itself changed so that it no longer needs it is left alone. `omacvm check` has a "shell colours" row: it counts these
+  errors in the running shell's log and says what to do. By hand, as root
+  in the VM: `/usr/local/lib/omacvm/shell-colors.py` (`--status`,
+  `--revert`), then `omarchy restart shell` as the desktop user.
+- **Where:** `src/guest/shell-colors.py`, `src/guest/install.sh` (the step
+  and the hook `/etc/pacman.d/hooks/zz-omacvm-shell-colors.hook`),
+  `src/guest/check.sh` ("shell colours"); test `src/tests/shell-colors.sh`.
+  OmacVM's own panels (Wi-Fi, sound, Bluetooth) use `Commons.Color`.
+  Issue [#376](https://github.com/gillesgoetsch/OmacVM/issues/376).

@@ -186,6 +186,33 @@ fi
 if system && ! "$R/guest/default-keyring.sh" status "$H" >/dev/null; then
   log "keyring: $("$R/guest/default-keyring.sh" setup "$U" "$H" 2>&1 || true)"
 fi
+# Qt 6.12's QtQuick has a Color of its own, which hides Omarchy's shell colours:
+# the bar, menus, OSD and notifications draw empty (#376). shell-colors.py
+# imports QtQuick below 6.12 in Omarchy's files and the user's clones of them
+# (nothing on Qt 6.11); a pacman hook does it again after Omarchy or Qt
+# updates. Before the plugins below: omacvm.monitor is built from Omarchy's panel.
+if system; then
+  install -Dm755 "$R/guest/shell-colors.py" /usr/local/lib/omacvm/shell-colors.py
+  install -Dm644 /dev/stdin /etc/pacman.d/hooks/zz-omacvm-shell-colors.hook <<'HOOK'
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Target = usr/share/omarchy/shell/*
+Target = usr/lib/qt6/qml/QtQuick/plugins.qmltypes
+
+[Action]
+Description = OmacVM: Omarchy's shell colours on Qt 6.12 (#376)
+When = PostTransaction
+Exec = /usr/local/lib/omacvm/shell-colors.py
+HOOK
+  r=$(/usr/local/lib/omacvm/shell-colors.py --user "$U" 2>&1) || r="not all fixed: $r"
+  case $r in
+    nothing*) ;;
+    patched*|restored*) log "Omarchy shell colours: $r"; restart_shell_later ;;
+    *) log "Omarchy shell colours: $r" ;;
+  esac
+fi
 
 if system; then
   log "system: SSH from the Mac, bootable snapshots, DNS fallback"

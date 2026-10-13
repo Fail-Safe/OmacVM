@@ -3,7 +3,8 @@
 # Run as root inside the VM while the desktop user is logged in (check.sh on
 # the Mac does that over SSH):
 #   guest/check.sh --user NAME [--tsv]
-# One line per feature (ok / FAIL / skip); exits 1 if anything failed. --tsv:
+# One line per feature (ok / WARN / FAIL / skip); exits 1 if anything failed
+# (WARN: works, but not as it should; does not fail the check). --tsv:
 # "status<TAB>name<TAB>detail<TAB>human<TAB>feature" lines (human = 1: only a
 # person can fix it; feature = the features.tsv name the line belongs to, empty
 # for the VM in general) and "section<TAB>title", for omacvm check --json and
@@ -27,6 +28,7 @@ line() {   # STATUS LABEL NAME DETAIL [human]
 ok()   { line ok ok "$1" "${2:-}"; }
 bad()  { line fail FAIL "$1" "${2:-}" "${3:-}"; fails=$((fails + 1)); }
 skip() { line skip skip "$1" "${2:-}" "${3:-}"; }
+warn() { line warn WARN "$1" "${2:-}" "${3:-}"; }
 # check NAME DETAIL COMMAND...: ok if the command succeeds
 check() { local n=$1 d=$2; shift 2; if "$@" >/dev/null 2>&1; then ok "$n" "$d"; else bad "$n" "$d"; fi; }
 section() { if (( TSV )); then printf 'section\t%s\n' "$1"; else printf '%s\n' "$1"; fi; }
@@ -113,6 +115,38 @@ section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
 else bad "Hyprland" "not running for $U: log in first, the checks below need the session"; fi
 check "Omarchy shell" "answers" as_user omarchy-shell shell ping
+# Omarchy's shell colours (#376). Qt 6.12's QtQuick has a Color of its own,
+# which hides Omarchy's in every file that imports both: each colour the shell
+# reads is undefined (these lines in its log), and its bar, menus, OSD and
+# notifications draw empty. guest/shell-colors.py fixes Omarchy's files.
+COLOR_ERRORS="Unable to assign \[undefined\] to QColor|TypeError: Cannot read property '([a-z]+\.[a-z.-]+|background|foreground|text[A-Za-z]*|border[A-Za-z]*|accent|active|muted|urgent|scrim|countdown|placeholder|selection|selected[A-Za-z]*|unselected[A-Za-z]*)' of undefined"
+# The running Omarchy shell's log (quickshell's folder for its pid), or nothing.
+shell_log() {
+  local d
+  for d in "$RUN"/quickshell/by-pid/*; do
+    [[ -d /proc/${d##*/} && -r $d/log.log ]] || continue
+    grep -qm1 'Launching config: .*omarchy.*/shell\.qml' "$d/log.log" && { echo "$d/log.log"; return; }
+  done
+}
+# shell_colors LOG FIX: the row for the colour errors in LOG; FIX is
+# shell-colors.py --status ("" when this VM does not have it yet).
+shell_colors() {
+  local n what qt=${2%%,*}
+  n=$(grep -cE "$COLOR_ERRORS" "$1")
+  what="$n colour errors since the shell started"
+  [[ -n $2 ]] || { grep -qs '"QtQuick/Color ' "$QT_QUICK_TYPES" && qt="qtquick-color yes"; }
+  if (( n == 0 )); then ok "shell colours" "no colour errors since the shell started"
+  elif [[ $qt != "qtquick-color yes" ]]; then
+    warn "shell colours" "$what (not Qt 6.12's #376: a plugin's? the shell's log: $1)"
+  elif [[ $2 == *", to patch 0,"* ]]; then
+    bad "shell colours" "$what: it started before OmacVM fixed Omarchy's files for Qt 6.12 (#376); restart it: omarchy restart shell (or log out and in)"
+  else
+    bad "shell colours" "$what: the bar, menus and pop-ups draw empty (Qt 6.12's QtQuick Color hides Omarchy's, #376); fix: omacvm apply (OmacVM.app: Update VM), then the shell restarts"
+  fi
+}
+QT_QUICK_TYPES=/usr/lib/qt6/qml/QtQuick/plugins.qmltypes
+if [[ -z $(shell_log) ]]; then skip "shell colours" "no log of a running Omarchy shell"
+else shell_colors "$(shell_log)" "$(/usr/local/lib/omacvm/shell-colors.py --status 2>/dev/null)"; fi
 mon=$(as_user hyprctl monitors -j 2>/dev/null | jq -r 'max_by(.width * .height) | "\(.width)x\(.height)@\(.refreshRate | round) scale \(.scale)"' 2>/dev/null)
 if [[ -z $mon ]]; then bad "display" "no monitor from hyprctl"
 elif [[ $mon == 1160x768* ]]; then bad "display" "$mon: still the firmware mode (monitors.lua not applied)"
