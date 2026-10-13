@@ -14,8 +14,9 @@
 #   tools_path            that python3 first on PATH (for python3 and #!/usr/bin/env
 #                         python3), and no __pycache__ written (inside the signed
 #                         app that would break its seal)
-#   mac_tool NAME [ARG]   what src/*/NAME.swift prints: the app's built copy, else
-#                         swift with the Command Line Tools (status 1: neither)
+#   mac_tool NAME [ARG]   what src/*/NAME.swift prints: its app's built copy,
+#                         else the checkout's source with Swift, falling back to
+#                         the installed app if Swift is missing or fails
 #                         mac-notch, mac-display (src/display), mac-clock
 #                         (src/clock), mac-free-gb (src/lib)
 # OMACVM_STUB_BIN: where macOS's stubs are (/usr/bin; src/tests/no-clt.sh
@@ -65,12 +66,17 @@ tools_path() {
 }
 
 mac_tool() {   # NAME [ARG...]
-  local n=$1 r f
+  local n=$1 r f out status=1
   shift
   if r=$(_tools_own_resources) && [[ -x $r/tools/$n ]]; then "$r/tools/$n" "$@"; return; fi
   for f in "$_TOOLS_SRC"/*/"$n.swift"; do
-    [[ -f $f ]] && clt_has swift && { swift "$f" "$@"; return; }
+    if [[ -f $f ]] && clt_has swift; then
+      # A checkout uses its own source first. Finding Swift does not mean it
+      # can use the selected SDK; keep a failed answer out of the fallback's stdout.
+      if out=$(swift "$f" "$@"); then printf '%s\n' "$out"; return 0
+      else status=$?; fi
+    fi
   done
   if r=$(tools_app_resources) && [[ -x $r/tools/$n ]]; then "$r/tools/$n" "$@"; return; fi
-  return 1
+  return "$status"
 }

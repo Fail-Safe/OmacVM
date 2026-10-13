@@ -276,6 +276,9 @@ jobs:
       - name: OmacVM.app's signed Mac helpers are used only for the same sources
         run: src/tests/prebuilt-helpers.sh
 
+      - name: Mac answers use the checkout's source, with installed helpers as a fallback
+        run: src/tests/mac-tools.sh
+
       - name: A Mac without Xcode's Command Line Tools (OmacVM.app's route runs none of macOS's stubs)
         run: src/tests/no-clt.sh
 
