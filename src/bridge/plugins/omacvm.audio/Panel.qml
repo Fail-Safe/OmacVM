@@ -21,6 +21,8 @@ import Quickshell.Io
 import Quickshell.Services.Pipewire
 import qs.Ui
 import qs.Commons
+// Qt 6.12's QtQuick has a Color of its own, which hides Omarchy's (#376).
+import qs.Commons as Commons
 import "Model.js" as Model
 
 Panel {
@@ -81,10 +83,10 @@ Panel {
   readonly property string toggleHint: anyAudible ? "Mute" : "Unmute"
 
   readonly property color hoverFill: bar
-    ? Style.hoverFillFor(bar.foreground, Color.accent)
+    ? Style.hoverFillFor(bar.foreground, Commons.Color.accent)
     : "transparent"
   readonly property color selectedFill: bar
-    ? Style.selectedFillFor(bar.foreground, Color.accent)
+    ? Style.selectedFillFor(bar.foreground, Commons.Color.accent)
     : "transparent"
 
   Connections {
