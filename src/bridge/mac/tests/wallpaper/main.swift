@@ -159,5 +159,32 @@ expect(restarts == beforeRestarts, "missing store does not restart")
 try Data("invalid store".utf8).write(to: wallpaperStore)
 setOnAllSpaces(newURL)
 expect(restarts == beforeRestarts, "invalid store does not restart")
+
+// The shape macOS 27 writes (the Mac mini's store): Configuration holds only the
+// type and the picture's URL; placement and colour are in the Desktop's
+// EncodedOptionValues, which stay with each Desktop.
+let options = try plist(["values": ["placement": ["picker": ["_0": ["id": "Crop"]]]]])
+let oldOnly = try plist(["type": "imageFile", "url": ["relative": oldURL.absoluteString]])
+func realDesktop(_ configuration: Data, _ url: URL) -> [String: Any] {
+  ["Type": "individual", "Desktop": ["Content": ["Choices": [["Provider": imageProvider,
+    "Files": [["relative": url.absoluteString]], "Configuration": configuration]],
+    "Shuffle": "$null", "EncodedOptionValues": options]]]
+}
+try plist(["SystemDefault": realDesktop(oldOnly, oldURL),
+           "Spaces": ["S1": ["Default": realDesktop(freshConfiguration, newURL)],
+                      "S2": ["Default": realDesktop(oldOnly, oldURL)]]]).write(to: wallpaperStore)
+setOnAllSpaces(newURL)
+let real = try dictionary(Data(contentsOf: wallpaperStore))
+let realSpaces = real["Spaces"] as! [String: Any]
+for (name, desktopEntry) in [("SystemDefault", real["SystemDefault"]!),
+                             ("S1", (realSpaces["S1"] as! [String: Any])["Default"]!),
+                             ("S2", (realSpaces["S2"] as! [String: Any])["Default"]!)] {
+  let content = ((desktopEntry as! [String: Any])["Desktop"] as! [String: Any])["Content"] as! [String: Any]
+  let choice = (content["Choices"] as! [[String: Any]])[0]
+  expect((choice["Files"] as? [[String: String]])?.first?["relative"] == newURL.absoluteString, "macOS 27 shape: \(name) Files URL")
+  expect(NSDictionary(dictionary: try dictionary(choice["Configuration"] as! Data))
+    .isEqual(to: ["type": "imageFile", "url": ["relative": newURL.absoluteString]]), "macOS 27 shape: \(name) Configuration names the new picture")
+  expect(content["EncodedOptionValues"] as? Data == options, "macOS 27 shape: \(name) placement and colour kept")
+}
 print("wallpaper: \(checks) checks, \(failures) failures")
 exit(failures == 0 ? 0 : 1)
