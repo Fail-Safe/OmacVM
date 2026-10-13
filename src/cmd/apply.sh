@@ -644,6 +644,13 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
   else
     rm -f "$d/fullpanel-ready"
   fi
+  # Skip the notch (src/lib/notch.sh): the VM's Omanotch bar can lay its
+  # items out on both sides of the housing. The app's switch says so without.
+  if on omanotch && gssh "$IP" "grep -qs notchSkipPlace $S/omanotch/guest/bar/apply-patch.py" < /dev/null 2>/dev/null; then
+    : > "$d/notch-skip-ready"
+  else
+    rm -f "$d/notch-skip-ready"
+  fi
 fi
 
 if [[ $TYPE == parallels ]]; then
