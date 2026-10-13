@@ -3,6 +3,12 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- OmacVM.app, the VM's settings: while you scroll, the sidebar marks the section at the top again.
+  Only over the last screen of the page does it move on, so the last sections are marked in turn
+  and the last one at the very bottom. (3.1.0 marked the section near the middle of the window.)
+
 ## 3.1.0
 
 A new settings window, Swipe out to macOS, Closing the window, every scale in Full screen including notch.
