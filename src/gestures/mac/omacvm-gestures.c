@@ -1238,10 +1238,17 @@ static void logPermissions(void) {
 static void swipeOutLook(void);
 static void takeLook(void);
 static void replayLook(void);
+static int takeOn(void);
 static void updateCapture(CFRunLoopTimerRef t, void *info) {
   (void)info;
   logPermissions();
   swipeOutLook();
+  // While a swipe out is the Mac's, macOS's own Space move shows other
+  // windows and apps: the capture stays as it is until it is over.
+  if (takeOn()) {
+    if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + 0.2);
+    return;
+  }
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
   int net = vmNet(pid, name, &frontForeign);
@@ -2685,10 +2692,10 @@ static void guestLine(int fd, unsigned gen, const char *line) {
 // of the VM is the Mac's: held back from the guest until its way is clear
 // (swipe-take.h), then macOS's own Space swipe on the pointer's display
 // follows the fingers and finishes or goes back at the lift; the guest sees
-// none of it. If macOS does not follow (the display does not move with it,
-// or a finished one did not change the Space), it is the one step at the
-// lift as before (leaveToward), until the helper starts again; logged once.
-// A Magic Mouse's swipe too (mouseFrameCb).
+// none of it. If macOS does not follow (the display never moved with it, or
+// a finished one did not change the Space), it is the one step at the lift
+// as before (leaveToward); twice in a row, the one step from then on until
+// the helper starts again. A Magic Mouse's swipe too (mouseFrameCb).
 
 // What the capture check last saw of the pointer's display while a VM is
 // captured (main thread writes, the trackpad's and the mouse's threads read).
@@ -2700,7 +2707,9 @@ typedef struct {
 } TakeDisplay;
 // The swipe the Mac has now (one at a time).
 typedef struct {
-  int on, follows, checked, toward;
+  int on, follows, toward;
+  int seen;                 // the display moved with it (1), macOS did not say (-1), not seen yet (0)
+  int missed;               // macOS did not follow this one
   double began, unit;       // unit: the Dock's progress for one Space there
   CGPoint at;
   TakeDisplay d;
@@ -2711,7 +2720,9 @@ static pthread_mutex_t takeLock = PTHREAD_MUTEX_INITIALIZER;   // takeDisp, take
 static SwipeTake padTake;
 static double (*takeClockFn)(void) = monoNow;   // the offline test's own clock
 static double takeClock(void) { return takeClockFn(); }
-static volatile int dockFollows = 1;     // 0: macOS did not follow one since the helper started (main thread writes)
+static volatile int dockFollows = 1;     // 0: macOS did not follow twice in a row: one step from then on (main thread writes)
+static int dockMisses;                   // swipes in a row macOS did not follow (main thread)
+#define TAKE_JUDGE 0.15                  // s: a swipe this long that never moved the display: macOS did not follow
 static volatile double takeQuietUntil;   // the real trackpad's gesture events dropped until then
 static volatile double takeTravel = TAKE_TRAVEL;   // trackpad widths per Space ("SwipeOutTravel")
 #define TAKE_QUIET 0.4                   // s after a taken swipe's end
@@ -2784,8 +2795,11 @@ static void takeSides(int *sl, int *sr) {
   }
 }
 
-static void takeFollowsOff(const char *why) {
+// macOS did not follow a swipe (main thread): that one goes in one step; two
+// in a row, every one from then on (logged once).
+static void takeMissed(const char *why) {
   if (!dockFollows) return;
+  if (++dockMisses < 2) { logf_("swipe out: macOS did not follow this swipe (%s): one step", why); return; }
   dockFollows = 0;
   logf_("swipe out: macOS does not follow the swipe here (%s): one step at the lift from now on", why);
 }
@@ -2801,6 +2815,7 @@ static void takeEnded(TakeRun r, int commit, double progress, double speed) {
     return;
   }
   swipeOutAt = monoNow();
+  if (r.missed) takeMissed("the display did not move with it");
   if (!r.follows) {
     logf_("swipe out to the %s: one step (%.2f of a Space, %.1f Spaces/s)", side, progress, speed);
     pthread_mutex_lock(&takeLock); takeRun.on = 0; pthread_mutex_unlock(&takeLock);
@@ -2822,12 +2837,21 @@ static void takeLanded(TakeRun r, int looks) {
   pthread_mutex_lock(&takeLock); takeRun.on = 0; pthread_mutex_unlock(&takeLock);
   if (!d) { logf_("swipe out: the display is gone"); return; }
   if (d->current != r.d.vmSpace) {
+    dockMisses = 0;
     logf_("swipe out: out of the VM's Space (macOS's swipe)");
     if (!leaveToward(r.toward, r.d.id)) focusPointerDisplay();   // with "all" the other displays follow
     return;
   }
-  takeFollowsOff("a finished swipe did not change the Space");
+  takeMissed("a finished swipe did not change the Space");
   leaveToward(r.toward, 0);
+}
+
+// A swipe out is the Mac's now (until macOS has finished it), at most 5 s.
+static int takeOn(void) {
+  pthread_mutex_lock(&takeLock);
+  int on = takeRun.on && takeClock() - takeRun.began < 5;
+  pthread_mutex_unlock(&takeLock);
+  return on;
 }
 
 static double takeUnits(double spaces) { return -takeRun.toward * spaces * takeRun.unit; }
@@ -2838,7 +2862,7 @@ static void takeAct(SwipeTake *s, int tk, const char *who) {
   double now = takeClock();
   if (tk == TK_BEGIN) {
     pthread_mutex_lock(&takeLock);
-    takeRun.on = 1; takeRun.d = takeDisp; takeRun.toward = s->toward; takeRun.began = now; takeRun.checked = 0;
+    takeRun.on = 1; takeRun.d = takeDisp; takeRun.toward = s->toward; takeRun.began = now; takeRun.seen = takeRun.missed = 0;
     takeRun.follows = dockFollows && (!hidSwipeFn() || lookUpHID());
     takeRun.unit = takeRun.d.n <= 1 ? 2.0 : 1.0 + 1.0 / (takeRun.d.n - 1);
     CGPoint p = pointerFn();
@@ -2849,16 +2873,15 @@ static void takeAct(SwipeTake *s, int tk, const char *who) {
     if (takeRun.follows && !dockPostFn(kSwipeBegan, takeUnits(s->progress), 0, takeRun.at)) takeRun.follows = 0;
   } else if (tk == TK_MOVE && takeRun.follows) {
     dockPostFn(kSwipeChanged, takeUnits(s->progress), 0, takeRun.at);
-    // Moving with it? Asked once, a moment in (macOS 27: from the first event on).
-    if (!takeRun.checked && s->progress >= 0.03 && now - takeRun.began >= 0.04) {
-      takeRun.checked = 1;
-      if (animatingFn(takeRun.d.id) == 0) {
-        dockPostFn(kSwipeCancelled, takeUnits(s->progress), 0, takeRun.at);
-        takeRun.follows = 0;
-        dispatch_async(dispatch_get_main_queue(), ^{ takeFollowsOff("the display did not move with the swipe"); });
-      }
-    }
+    // Does the display move with it (macOS 27: from the first event on)?
+    // Asked until it does; judged at the lift.
+    if (!takeRun.seen) takeRun.seen = animatingFn(takeRun.d.id);
   } else if (tk == TK_END) {
+    if (takeRun.follows && !takeRun.seen && now - takeRun.began >= TAKE_JUDGE) {
+      // Never moved: macOS did not take it. Its swipe goes, the one step instead.
+      dockPostFn(kSwipeCancelled, takeUnits(s->progress), 0, takeRun.at);
+      takeRun.follows = 0; takeRun.missed = 1;
+    }
     int commit = takeRun.follows ? s->commit : s->along >= TAKE_STEP_MIN && s->speed > TAKE_BACK;
     if (takeRun.follows) dockPostFn(commit ? kSwipeEnded : kSwipeCancelled, takeUnits(s->progress), takeUnits(s->speed), takeRun.at);
     takeQuietUntil = monoNow() + TAKE_QUIET;

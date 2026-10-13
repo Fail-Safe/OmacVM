@@ -1305,14 +1305,20 @@ int main(void) {
     check(!nDockEv && gotFrames > 10 && gotLifts == 1, "follow: Magic Mouse, the guest's way: virtual fingers to the guest as before");
     guestLine(clients[0].fd, g0, "E right left");
 
-    // macOS does not follow (the display does not move): the one step at the lift, from then on.
+    // macOS does not follow (the display never moves): at the lift its swipe goes and the one
+    // step is made; twice in a row: the one step from then on.
     animNow = 0; nDockEv = 0; keys = spaceKeys = 0;
     padSwipe(3, 0.6, 0.3, 30);
-    check(dockCount(kSwipeCancelled) == 1 && !dockCount(kSwipeEnded) && dockLast() == kSwipeCancelled,
-          "follow: the display does not move with it: macOS's swipe cancelled at once");
+    check(!dockCount(kSwipeCancelled) && dockLast() == kSwipeChanged, "follow: the display does not move: macOS's swipe goes on until the lift");
     padLift(); guestGot();
-    check(spaceKeys == 1 && lastKey.keycode == 124 && world[0].cur == 103 && !dockFollows && gotFrames == 0,
-          "follow: ... the lift: one step with macOS's shortcut (as before), and so from now on");
+    check(dockLast() == kSwipeCancelled && !dockCount(kSwipeEnded) && spaceKeys == 1 && lastKey.keycode == 124 && world[0].cur == 103 &&
+          dockFollows && gotFrames == 0, "follow: ... at the lift: Cancelled, one step with macOS's shortcut (as before)");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    nDockEv = 0; spaceKeys = 0; dockFollow = 0;
+    padSwipe(3, 0.6, 0.55, 4); padLift(); guestGot();
+    check(dockEv[nDockEv - 1].phase == kSwipeEnded && spaceKeys == 1 && world[0].cur == 103 && !dockFollows,
+          "follow: ... a flick (shorter than 0.15 s: Ended) that did not change the Space: the second in a row: one step, and so from now on");
+    dockFollow = 1;
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
     nDockEv = 0; spaceKeys = 0;
     padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
@@ -1321,13 +1327,16 @@ int main(void) {
     nDockEv = 0; spaceKeys = 0;
     padSwipe(3, 0.6, 0.57, 20); padLift(); guestGot();
     check(!nDockEv && !spaceKeys && world[0].cur == 102 && capturing, "follow: ... a short one (3 % of the width): nothing");
-    dockFollows = 1; animNow = 1;
+    dockFollows = 1; dockMisses = 0; animNow = 1;
     // Finished, but the Space did not change: the one step.
     dockFollow = 0; nDockEv = 0; spaceKeys = 0;
     padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
-    check(dockLast() == kSwipeEnded && spaceKeys == 1 && world[0].cur == 103 && !dockFollows,
-          "follow: finished but the Space did not change: one step with the shortcut after all");
-    dockFollow = 1; dockFollows = 1;
+    check(dockLast() == kSwipeEnded && spaceKeys == 1 && world[0].cur == 103 && dockFollows && dockMisses == 1,
+          "follow: finished but the Space did not change: one step with the shortcut after all (one miss)");
+    dockFollow = 1;
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(world[0].cur == 103 && dockMisses == 0 && dockFollows, "follow: ... the next one macOS follows: the misses start again");
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
 
     // Two displays with "all": the fingers' display follows them, the other one the shortcut.
