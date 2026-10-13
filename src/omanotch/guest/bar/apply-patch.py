@@ -42,12 +42,20 @@ What the patch adds:
     says that output covers the whole display in full screen
     ($XDG_RUNTIME_DIR/omacvm/displays.json); else the bar is the normal one.
     notchcast does not run in such a boot.
+  * Toasts on the display with the parked bar keep only the normal gap, not
+    a bar's room (barSizeFor, which Omarchy's notifications ask from about
+    October 2026; older ones get guest/omanotch-notifications.sh).
+
+Omarchy's Bar.qml changed in October 2026 (upstream's notch floor from
+display-cutouts.json, a bar thickness per screen, the centre's hover area):
+where a step's anchor differs, both forms are known (replace_variant), so
+the patch fits omarchy-mac's bar as well as upstream's.
 """
 import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 21
+VERSION = 22
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -60,10 +68,11 @@ PIECES = [
     '      top: barWindow.parked && root.position === "top" ? -barWindow.parkedSize : 0\n',
     '    implicitHeight: root.vertical ? 0 : (barWindow.notchRole === "" ? ',
     "      anchors.topMargin: barWindow.notchPadTop\n",
-    "        CenterModules { anchors.fill: parent; notchLayout: barWindow.notchLayout }\n",  # 4. layout mode
+    "notchLayout: barWindow.notchLayout",                                    # 4. layout mode
     "    property bool notchLayout: false\n",                                # 5. around the housing
     "        Item { id: notchLeftEdge; ",
     "    WlrLayershell.layer: barWindow.notchRole === \"notch\" || ",        # 6. layer, repaint, black strip
+    "    // omarchy-notch-bar: a bar parked in the notch strip takes no room here.\n",  # 7. toasts
 ]
 
 
@@ -77,6 +86,23 @@ def replace_once(text, old, new):
     if count != 1:
         sys.exit(f"apply-patch: expected exactly one match, found {count}:\n{old}")
     return text.replace(old, new)
+
+
+def find_variant(text, olds, what):
+    """The index of the one form in olds that text has, exactly once."""
+    found = [i for i, old in enumerate(olds) if text.count(old) == 1]
+    if len(found) != 1 or any(text.count(old) > 1 for old in olds):
+        sys.exit(f"apply-patch: could not find {what} (Omarchy changed it?)")
+    return found[0]
+
+
+def replace_variant(text, variants, what):
+    """Replace the one (old, new) of variants whose old text has, exactly once.
+
+    Omarchy's bar changed over time: each variant is one form a step's
+    anchor had."""
+    i = find_variant(text, [old for old, _ in variants], what)
+    return text.replace(variants[i][0], variants[i][1])
 
 
 # Omarchy builds up to about September 2026 declare these bar properties as
@@ -118,6 +144,17 @@ def main():
         print("replacing an incomplete or older patch")
 
     text = compat(text)
+
+    # How far Omarchy parks a hidden bar: its configured size, or from about
+    # October 2026 its thickness on that screen (a notch floor can make it
+    # taller). Ordinary bars keep that; the notch roles get parkedSize.
+    stock_margins = [
+        '''      top: root.barHidden && root.position === "top" ? -{0} : 0
+      bottom: root.barHidden && root.position === "bottom" ? -{0} : 0
+      left: root.barHidden && root.position === "left" ? -{0} : 0
+      right: root.barHidden && root.position === "right" ? -{0} : 0'''.format(size)
+        for size in ("root.barSize", "barWindow.thickness")]
+    stock_size = ("root.barSize", "barWindow.thickness")[find_variant(text, stock_margins, "the bar's margins")]
 
     # 1. State and role helpers (the version line marks the patch).
     text = replace_once(text, '  property string home: Quickshell.env("HOME")\n', '''  property string home: Quickshell.env("HOME")
@@ -621,10 +658,13 @@ def main():
       BarPanel {''')
 
     # 3. Parking per window instead of only through the global bar-off flag.
-    text = replace_once(text, '''    visible: !remapGuard.remapping
+    #    Omarchy's own visible condition stays (from about October 2026 a top
+    #    bar also waits for its notch floor), with the remap below added.
+    stock_visible = ["!remapGuard.remapping", "!remapGuard.remapping && (cutoutWaitOver || !cutoutPending)"]
+    text = replace_variant(text, [(f'''    visible: {v}
     exclusionMode: root.barHidden ? ExclusionMode.Ignore : ExclusionMode.Auto
 ''', '''    // omarchy-notch-bar: notchRemap, see below.
-    visible: !remapGuard.remapping && !notchRemap.remapping
+    visible: VISIBLE && !notchRemap.remapping
     // omarchy-notch-bar: role of this copy ("notch", "parked" or "").
     readonly property string notchRole: root.notchRoleFor(screen)
     // Over fullscreen the NOTCH copy stays mapped, even with the bar off, to
@@ -651,7 +691,7 @@ def main():
     readonly property var notchPanelFit: root.notchBox(0, root.notchHeight, 0, root.barSize,
                                                        screen ? screen.devicePixelRatio : 1)
     readonly property int parkedSize: notchRole === "parked" ? 1
-      : notchRole === "notch" ? notchFit[0] : notchRole === "fullpanel" ? notchPanelFit[0] : root.barSize
+      : notchRole === "notch" ? notchFit[0] : notchRole === "fullpanel" ? notchPanelFit[0] : STOCK_SIZE
     readonly property real notchPadTop: notchRole === "notch" ? notchFit[1] : notchRole === "fullpanel" ? notchPanelFit[1] : 0
     readonly property real notchPadBottom: notchRole === "notch" || notchRole === "fullpanel"
       ? parkedSize - root.barSize - notchPadTop : 0
@@ -687,31 +727,28 @@ def main():
       Timer { id: notchRemapSettle; interval: 200; onTriggered: notchRemap.remapping = true }
       Timer { interval: 100; running: notchRemap.remapping; onTriggered: notchRemap.remapping = false }
     }
-''')
-    text = replace_once(text, '''      top: root.barHidden && root.position === "top" ? -root.barSize : 0
-      bottom: root.barHidden && root.position === "bottom" ? -root.barSize : 0
-      left: root.barHidden && root.position === "left" ? -root.barSize : 0
-      right: root.barHidden && root.position === "right" ? -root.barSize : 0''', '''      top: barWindow.parked && root.position === "top" ? -barWindow.parkedSize : 0
+'''.replace("VISIBLE", v).replace("STOCK_SIZE", stock_size)) for v in stock_visible],
+                          "the bar's visible line")
+    text = replace_once(text, stock_margins[("root.barSize", "barWindow.thickness").index(stock_size)], '''      top: barWindow.parked && root.position === "top" ? -barWindow.parkedSize : 0
       bottom: barWindow.parked && root.position === "bottom" ? -barWindow.parkedSize : 0
       left: barWindow.parked && root.position === "left" ? -barWindow.parkedSize : 0
       right: barWindow.parked && root.position === "right" ? -barWindow.parkedSize : 0''')
 
-    # Omarchy from about October 2026 raises the bar to the camera cutout on
-    # Asahi MacBooks (notchFloor); older versions use the bar size alone.
-    # Ordinary bars keep Omarchy's height, the notch roles get parkedSize.
+    # Omarchy raises the bar to the camera cutout on Apple notched panels:
+    # omarchy-mac on Apple Silicon hosts (notchFloor), upstream from about
+    # October 2026 where display-cutouts.json describes one (thickness).
+    # Older versions use the bar size alone. Ordinary bars keep Omarchy's
+    # height, the notch roles get parkedSize.
     stock_heights = [
-        "    implicitHeight: root.vertical ? 0 : Math.max(root.barSize, notchFloor)\n",
-        "    implicitHeight: root.vertical ? 0 : root.barSize\n",
+        ("root.barSize", "Math.max(root.barSize, notchFloor)"),
+        ("root.barSize", "root.barSize"),
+        ("thickness", "thickness"),
     ]
-    for stock in stock_heights:
-        if text.count("    implicitWidth: root.vertical ? root.barSize : 0\n" + stock) == 1:
-            expr = stock.split("root.vertical ? 0 : ", 1)[1].rstrip("\n")
-            text = text.replace("    implicitWidth: root.vertical ? root.barSize : 0\n" + stock,
-                                "    implicitWidth: root.vertical ? root.barSize : 0\n"
-                                f"    implicitHeight: root.vertical ? 0 : (barWindow.notchRole === \"\" ? {expr} : barWindow.parkedSize)\n")
-            break
-    else:
-        sys.exit("apply-patch: could not find the bar's implicitHeight line (Omarchy changed it?)")
+    text = replace_variant(text, [
+        (f"    implicitWidth: root.vertical ? {width} : 0\n    implicitHeight: root.vertical ? 0 : {height}\n",
+         f"    implicitWidth: root.vertical ? {width} : 0\n"
+         f"    implicitHeight: root.vertical ? 0 : (barWindow.notchRole === \"\" ? {height} : barWindow.parkedSize)\n")
+        for width, height in stock_heights], "the bar's implicitHeight line")
 
     text = replace_once(text, '''    Loader {
       anchors.fill: parent
@@ -724,8 +761,9 @@ def main():
       sourceComponent: root.vertical ? verticalBar : horizontalBar
 ''')
 
-    # 4. Pass the layout mode to the horizontal centre section.
-    text = replace_once(text, '''      Item {
+    # 4. Pass the layout mode to the horizontal centre section (from about
+    #    October 2026 Omarchy also gives it its entries there).
+    text = replace_variant(text, [('''      Item {
         anchors.fill: parent
 
         CenterModules { anchors.fill: parent }
@@ -737,7 +775,26 @@ def main():
         CenterModules { anchors.fill: parent; notchLayout: barWindow.notchLayout }
 
         LeftModules {
-          anchors.left: parent.left''')
+          anchors.left: parent.left'''), ('''      Item {
+        anchors.fill: parent
+
+        CenterModules {
+          anchors.fill: parent
+          entries: barWindow.centerBesideRight ? [] : root.layoutEntries("center")
+        }
+
+        LeftModules {
+          anchors.left: parent.left''', '''      Item {
+        anchors.fill: parent
+
+        CenterModules {
+          anchors.fill: parent
+          notchLayout: barWindow.notchLayout
+          entries: barWindow.centerBesideRight ? [] : root.layoutEntries("center")
+        }
+
+        LeftModules {
+          anchors.left: parent.left''')], "the horizontal bar's centre section")
 
     # 5. Centre widgets around the camera housing in notch layout.
     text = replace_once(text, '''    property var entries: root.layoutEntries("center")
@@ -745,13 +802,9 @@ def main():
     // omarchy-notch-bar: keep the camera housing free.
     property bool notchLayout: false
     readonly property bool hasAnchor: root.entryIndex(entries, root.centerAnchor) !== -1''')
-    text = replace_once(text, '''        CenterGestureArea { anchors.fill: parent }
-
-        HoverHandler {
-          onHoveredChanged: root.setCenterSectionHovered(hovered)
-        }
-
-        ModuleList {
+    # Omarchy's hover area above these (a HoverHandler, from about October
+    # 2026 an Item up to the anchor widget) stays as it is.
+    text = replace_once(text, '''        ModuleList {
           visible: !centerRoot.hasAnchor
           entries: centerRoot.entries
           region: "center"
@@ -773,13 +826,7 @@ def main():
           region: "center"
           anchors.centerIn: parent
         }
-''', '''        CenterGestureArea { anchors.fill: parent }
-
-        HoverHandler {
-          onHoveredChanged: root.setCenterSectionHovered(hovered)
-        }
-
-        // omarchy-notch-bar: edges of the camera housing plus a small gap.
+''', '''        // omarchy-notch-bar: edges of the camera housing plus a small gap.
         Item { id: notchLeftEdge; x: root.notchLeft - Style.space(6); width: 0; height: parent.height }
         Item { id: notchRightEdge; x: root.notchRight + Style.space(6); width: 0; height: parent.height }
 
@@ -825,7 +872,10 @@ def main():
     Rectangle {
       x: 0; y: 0; width: 1; height: 1; z: -1
       visible: !barWindow.notchClear
-      color: root.transparent ? "transparent" : root.background
+      // The bar's own colour where it is opaque; on a see-through bar
+      // (transparent, or glassy from about October 2026) a second layer of
+      // it would show.
+      color: barWindow.color.a < 1 ? "transparent" : barWindow.color
       opacity: root.notchPokeSerial % 2 ? 0.999 : 1
     }
     // omarchy-notch-bar: black strip over fullscreen windows. FullPanel's
@@ -838,6 +888,24 @@ def main():
       color: barWindow.notchBlack ? "black" : "transparent"
       MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; enabled: barWindow.notchRole === "fullpanel" }
     }
+''')
+
+    # 7. Toasts on the display whose bar is parked in the notch strip keep
+    #    only the normal gap. Omarchy's notifications ask the bar how much
+    #    room it takes on a screen (barSizeFor) from about October 2026; a
+    #    bar from before has no such function, so it gets one (an older
+    #    notification service reads barSize: guest/omanotch-notifications.sh).
+    room = '''    // omarchy-notch-bar: a bar parked in the notch strip takes no room here.
+    if (root.notchParked && String(screenName) === root.notchParkedScreen) return 0
+'''
+    stock_room = "  function barSizeFor(screenName) {\n"
+    if text.count(stock_room) == 1:
+        text = text.replace(stock_room, stock_room + room)
+    else:
+        text = replace_once(text, "  // --- end omarchy-notch-bar --------------------------------------------\n", '''  // The room the bar takes on a screen, for Omarchy's notifications.
+''' + stock_room + room + '''    return root.barSize
+  }
+  // --- end omarchy-notch-bar --------------------------------------------
 ''')
 
     open(path, "w").write(text)

@@ -5,9 +5,12 @@
 # only the normal gap; other displays keep their bar's room. This patches
 # Omarchy's notification service itself (a cloned plugin runs sandboxed and
 # can't show popups); a pacman hook does it again after Omarchy updates.
-# Run as root:  omanotch-notifications.sh on|off   (prints "changed" if it did)
+# Omarchy from about October 2026 asks the bar for its room on each display
+# (barClearanceFor -> the bar's barSizeFor), which Omanotch's bar patch
+# answers for the parked display: then there is nothing to patch here.
+# Run as root:  omanotch-notifications.sh on|off [FILE]   (prints "changed" if it did)
 set -euo pipefail
-F=/usr/share/omarchy/shell/plugins/notifications/Service.qml
+F=${2:-/usr/share/omarchy/shell/plugins/notifications/Service.qml}
 [[ -f $F ]] || exit 0
 python3 - "$F" "${1:?on or off}" <<'PY'
 import sys
@@ -22,13 +25,14 @@ new = ("NotificationLogic.popupPlacement(\n        service.barPosition,\n"
        "        Style.gapsOut)")
 if mode == "on":
     if new in s: sys.exit(0)
+    if s.count(old) != 1 and "service.barClearanceFor(" in s: sys.exit(0)  # the bar answers (see above)
     if s.count(old) != 1: sys.exit("omanotch-notifications: Omarchy's notification service changed, not patched")
     s = s.replace(old, new)
 elif mode == "off":
     if new not in s: sys.exit(0)
     s = s.replace(new, old)
 else:
-    sys.exit("omanotch-notifications.sh on|off")
+    sys.exit("omanotch-notifications.sh on|off [FILE]")
 tmp = path + ".omacvm"
 open(tmp, "w").write(s)
 import os; os.chmod(tmp, 0o644); os.replace(tmp, path)

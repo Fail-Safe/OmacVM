@@ -4,7 +4,9 @@
     python3 src/omanotch/guest/tests/test_bar_patch.py
 
 With node installed, the patch's startup and watchdog logic also runs against
-fake state files: the right bar from the first frame after login.
+fake state files: the right bar from the first frame after login. RealOmarchy
+runs it on Omarchy's own Bar.qml as omarchy-mac and upstream have it
+(src/tests/omarchy-shell).
 """
 import json
 import math
@@ -138,7 +140,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertEqual(V, 21)
+        self.assertEqual(V, 22)
         self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
@@ -533,6 +535,139 @@ class Behaviour(unittest.TestCase):
             self.assertEqual(r["root"]["notchLeft"], 918, geom)
 
 
+SHELLS = sorted((ROOT / "src/tests/omarchy-shell").glob("*/shell/plugins/bar/Bar.qml"))
+
+
+def patch_file(path):
+    return subprocess.run([sys.executable, str(PATCH), str(path)], capture_output=True, text=True)
+
+
+class RealOmarchy(unittest.TestCase):
+    """Omarchy's own Bar.qml: omarchy-mac's (what users have) and upstream's
+    from October 2026 (notch floor from display-cutouts.json, a thickness per
+    screen, the centre's hover area up to the anchor widget)."""
+
+    def setUp(self):
+        self.assertEqual(len(SHELLS), 2, SHELLS)
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir)
+
+    def full(self, stock):
+        f = self.dir / "full.qml"
+        f.write_text(stock)
+        out = patch_file(f)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.strip(), "patched")
+        return f.read_text()
+
+    def each(self):
+        for bar in SHELLS:
+            with self.subTest(omarchy=bar.parts[-5]):
+                yield bar.parts[-5], bar.read_text()
+
+    def test_patch_and_again(self):
+        for name, stock in self.each():
+            full = self.full(stock)
+            self.assertIn(VERSION_LINE, full)
+            self.assertEqual(load_patch().missing_pieces(full), [])
+            f = self.dir / "Bar.qml"
+            f.write_text(full)
+            out = patch_file(f)
+            self.assertIn(ALREADY, out.stdout)
+            self.assertEqual(f.read_text(), full)
+
+    def test_omarchys_own_conditions_stay(self):
+        for name, stock in self.each():
+            full = self.full(stock)
+            visible = re.search(r"^    visible: !remapGuard\.remapping(.*)$", stock, re.M).group(1)
+            self.assertIn("    visible: !remapGuard.remapping%s && !notchRemap.remapping\n" % visible, full)
+            # Ordinary bars: Omarchy's height and how far it parks a hidden bar.
+            height = re.search(r"^    implicitHeight: root\.vertical \? 0 : (.*)$", stock, re.M).group(1)
+            self.assertIn('implicitHeight: root.vertical ? 0 : (barWindow.notchRole === "" ? %s : barWindow.parkedSize)' % height, full)
+            size = "barWindow.thickness" if "-barWindow.thickness : 0" in stock else "root.barSize"
+            self.assertIn('notchRole === "fullpanel" ? notchPanelFit[0] : %s\n' % size, full)
+            self.assertIn('top: barWindow.parked && root.position === "top" ? -barWindow.parkedSize : 0', full)
+            self.assertNotIn("root.barHidden && root.position", full)
+
+    def test_centre_around_the_housing(self):
+        for name, stock in self.each():
+            full = self.full(stock)
+            self.assertEqual(full.count("notchLayout: barWindow.notchLayout"), 1)
+            self.assertEqual(full.count("anchors.right: centerRoot.notchLayout ? notchLeftEdge.left : centerAnchorModule.left"), 1)
+            self.assertEqual(full.count("anchors.left: centerRoot.notchLayout ? notchRightEdge.left : undefined"), 2)
+            # Omarchy's hover over the centre stays as it is.
+            self.assertEqual(full.count("onHoveredChanged: root.setCenterSectionHovered(hovered)"),
+                             stock.count("onHoveredChanged: root.setCenterSectionHovered(hovered)"))
+
+    def test_one_room_function_for_toasts(self):
+        for name, stock in self.each():
+            full = self.full(stock)
+            self.assertEqual(full.count("  function barSizeFor(screenName) {\n"), 1)
+            body = function(full, "barSizeFor")
+            self.assertTrue(body.startswith("\n    // omarchy-notch-bar: a bar parked in the notch strip takes no room here.\n"), body)
+
+    @unittest.skipUnless(shutil.which("node"), "node not installed")
+    def test_toasts_keep_only_the_gap_under_the_parked_bar(self):
+        # Omarchy's notifications (from about October 2026): the bar's room on
+        # that screen plus the gap; a hidden bar counts the default size.
+        js = """
+var BarModel = { barSizeFor: function (sizes, name, fallback) { return sizes[name] > 0 ? sizes[name] : fallback } }
+function barClearance(bar, screenName, defaultBarSize, gapsOut) {
+  var size = Number(defaultBarSize)
+  if (bar && !bar.barHidden) size = Math.max(0, Number(bar.barSizeFor(screenName)))
+  return size + Number(gapsOut)
+}
+var out = [];
+CASES.forEach(function (c) {
+  var root = { notchParked: c[0], notchParkedScreen: "Virtual-1", barHidden: false, barSize: 26,
+               screenBarSizes: { "Virtual-1": 26, "Virtual-2": 34 } }
+  root.barSizeFor = function (screenName) { BODY }
+  out.push(barClearance(root, c[1], 26, 10))
+})
+console.log(JSON.stringify(out))
+"""
+        cases = [[True, "Virtual-1"], [True, "Virtual-2"], [False, "Virtual-1"], [False, "Virtual-2"]]
+        for name, stock in self.each():
+            body = function(self.full(stock), "barSizeFor")
+            out = subprocess.run(["node", "-e", js.replace("CASES", json.dumps(cases)).replace("BODY", body)],
+                                 check=True, capture_output=True, text=True)
+            other = 34 if "screenBarSizes" in stock else 26   # a thicker bar there (notch floor) on the newer one
+            self.assertEqual(json.loads(out.stdout), [10, other + 10, 36, other + 10])
+
+    def test_older_patch_and_restore(self):
+        for name, stock in self.each():
+            full = self.full(stock)
+            bar, backup = self.dir / "Bar.qml", self.dir / "Bar.qml.before-notchbar"
+            backup.write_text(stock)
+            # An older version (3.1.2 had v21), a version line alone, each piece missing.
+            olds = [full.replace(VERSION_LINE, "// omarchy-notch-bar patch v21"), VERSION_LINE + "\n"]
+            olds += [full.replace(p, "") for p in load_patch().PIECES]
+            for old in olds:
+                bar.write_text(old)
+                out = patch_file(bar)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn("replacing an incomplete or older patch", out.stdout)
+                self.assertEqual(bar.read_text(), full)
+                self.assertEqual(backup.read_text(), stock)
+            # No clean backup: stops, the file stays as it is.
+            backup.unlink()
+            bar.write_text(olds[0])
+            out = patch_file(bar)
+            self.assertNotEqual(out.returncode, 0)
+            self.assertIn("re-clone the bar", out.stderr)
+            self.assertEqual(bar.read_text(), olds[0])
+
+    def test_unknown_form_stops_and_writes_nothing(self):
+        for name, stock in self.each():
+            f = self.dir / "Bar.qml"
+            changed = stock.replace("    visible: !remapGuard.remapping", "    visible: !remapGuard.remapping && root.ready", 1)
+            f.write_text(changed)
+            out = patch_file(f)
+            self.assertNotEqual(out.returncode, 0)
+            self.assertIn("could not find the bar's visible line", out.stderr)
+            self.assertEqual(f.read_text(), changed)
+
+
 HOVER = r"""
 var calls = [];
 var root = {
@@ -724,7 +859,8 @@ class FullPanelLayout(unittest.TestCase):
         self.assertIn('visible: barWindow.notchBlack || barWindow.notchClear\n      color: barWindow.notchBlack ? "black" : "transparent"',
                       self.text)
         # The one-pixel repaint dot is the bar's colour: not over the wallpaper.
-        self.assertIn('      visible: !barWindow.notchClear\n      color: root.transparent ? "transparent" : root.background', self.text)
+        self.assertIn('      visible: !barWindow.notchClear\n', self.text)
+        self.assertIn('      color: barWindow.color.a < 1 ? "transparent" : barWindow.color\n', self.text)
 
     def test_shown_bar_and_fullscreen_as_before(self):
         self.assertEqual(self.state("fullpanel", False, False), (False, False, False))   # the bar in the strip

@@ -69,6 +69,25 @@ printf 'import QtQuick\nimport qs.Commons as Commons\nItem { property color fg: 
 t "nothing to do (QtQuick 6.11 already where needed)" "$(run --qmltypes "$T/qt612.qmltypes")" "a new Omarchy file without bare Color: nothing to do"
 t "0" "$(grep -cF "$MARK" "$T/s/shell/plugins/bar/Bar.qml")" "  and it stays as Omarchy shipped it"
 
+# --- Omarchy's own files (omarchy-shell/README.md): omarchy-mac's use the bare
+#     Color; upstream's from October 2026 say Commons.Color (omacom/omarchy#14553)
+#     and stay as they are. A clone of an older bar, as Omanotch made it, still
+#     gets the import (omacom/omarchy#14672) ---
+O=$R/src/tests/omarchy-shell
+rm -rf "$T/s"; mkdir -p "$T/s/plugins/me.bar"
+cp -R "$O/omarchy-a06ec133/shell" "$T/s/shell"
+cp "$O/omarchy-mac-ba546a61/shell/plugins/bar/Bar.qml" "$T/s/plugins/me.bar/Bar.qml"
+cp "$T/s/plugins/me.bar/Bar.qml" "$T/s/plugins/me.bar/Bar.qml.before-notchbar"
+python3 "$R/src/omanotch/guest/bar/apply-patch.py" "$T/s/plugins/me.bar/Bar.qml" >/dev/null
+t "patched 2 files (QtQuick 6.11)" "$(run --qmltypes "$T/qt612.qmltypes")" "upstream's shell and an older bar clone: the clone"
+t "plugins/me.bar/Bar.qml plugins/me.bar/Bar.qml.before-notchbar " "$(patched)" "  the clone and its Omanotch copy, nothing of upstream's"
+t "" "$(diff -r "$O/omarchy-a06ec133/shell" "$T/s/shell")" "  upstream's files as they came"
+t "already patched (v$(sed -n 's/^VERSION = //p' "$R/src/omanotch/guest/bar/apply-patch.py"))" \
+  "$(python3 "$R/src/omanotch/guest/bar/apply-patch.py" "$T/s/plugins/me.bar/Bar.qml")" "  Omanotch's patch still sees itself in the clone"
+rm -rf "$T/s/shell"; cp -R "$O/omarchy-mac-ba546a61/shell" "$T/s/shell"
+t "patched 3 files (QtQuick 6.11)" "$(python3 "$FIX" --qmltypes "$T/qt612.qmltypes" "$T/s/shell")" "omarchy-mac's shell: its files with the bare Color"
+has "$T/s/shell/plugins/bar/Bar.qml" "import QtQuick 6.11 $MARK" "  its bar among them"
+
 # --- Qt 6.11 (no QtQuick Color): nothing on stock files, marked lines go back ---
 shell
 t "nothing to do (Qt has no QtQuick Color)" "$(run --qmltypes "$T/qt611.qmltypes")" "6.11: stock files untouched"

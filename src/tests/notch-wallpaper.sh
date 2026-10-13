@@ -2,18 +2,22 @@
 # Omanotch's wallpaper patch (src/omanotch/guest/background/apply-patch.py):
 # the wallpaper is laid out once over the NOTCH strip and the built-in display,
 # so with the bar hidden the strip shows the image's rows right above the
-# display's. Offline: the patch on Omarchy's own Background.qml (v4.0.4,
-# notch-wallpaper/README), then its pairing helpers and canvas run in
+# display's. Offline: the patch on Omarchy's own Background.qml, as
+# omarchy-mac has it and as upstream Omarchy has it from October 2026
+# (omarchy-shell/README.md), then its pairing helpers and canvas run in
 # JavaScript (node, or macOS's osascript) on sample layouts.
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd)
 patch="$R/src/omanotch/guest/background/apply-patch.py"
-fixture="$R/src/tests/notch-wallpaper/Background-v4.0.4.qml"
-out=$(mktemp -d)
-trap 'rm -rf "$out"' EXIT
 fail=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
+
+for fixture in "$R"/src/tests/omarchy-shell/*/shell/plugins/background/Background.qml; do
+name=${fixture#"$R"/src/tests/omarchy-shell/}; name=${name%%/*}
+echo "== $name"
+out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
 
 # The patch applies to Omarchy's file, once.
 cp "$fixture" "$out/Background.qml"
@@ -51,15 +55,31 @@ import importlib.util, subprocess, sys
 spec = importlib.util.spec_from_file_location("bg", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 full, stock = open(sys.argv[2]).read(), open(sys.argv[3]).read()
 for piece in m.PIECES:
-    if piece not in full or piece in stock:
-        print("piece not in the patch, or already in Omarchy's file: %r" % piece); sys.exit(1)
-    open(sys.argv[4], "w").write(full.replace(piece, ""))
+    # A tuple: one of these lines, by Omarchy's form.
+    found = [q for q in (piece if isinstance(piece, tuple) else (piece,)) if q in full]
+    if not found or any(q in stock for q in found):
+        print("piece not in the patch, or already in Omarchy's file: %r" % (piece,)); sys.exit(1)
+    cut = full
+    for q in found:
+        cut = cut.replace(q, "")
+    open(sys.argv[4], "w").write(cut)
     out = subprocess.run([sys.executable, sys.argv[1], sys.argv[4]], capture_output=True, text=True)
     if out.returncode or "incomplete or older" not in out.stdout or open(sys.argv[4]).read() != full:
         print("not patched again without %r: %s %s" % (piece, out.stdout, out.stderr)); sys.exit(1)
 print(len(m.PIECES))
 PY
 ) && ok "each of the $r pieces missing: patched again from the backup" || bad "$r"
+
+# The wallpaper is decoded at the canvas's size (strip and display together):
+# by the patch on the older file, by Omarchy itself on the newer one.
+if grep -q "readonly property int decodeWidth:" "$fixture"; then
+  [[ $(grep -c "Math.ceil(notchCanvas.width \* screen.devicePixelRatio)\|Math.ceil(notchCanvas.height \* screen.devicePixelRatio)" "$out/clean.qml") == 2 &&
+     $(grep -c "sourceSize: panel.notchImageSize" "$out/clean.qml") == 0 ]] &&
+    ok "decoded at the canvas's size (Omarchy's own decode size)" || bad "decode size on the newer Background.qml"
+else
+  [[ $(grep -c "sourceSize: panel.notchImageSize" "$out/clean.qml") == 3 ]] &&
+    ok "decoded at the canvas's size (the patch's own)" || bad "decode size on the older Background.qml"
+fi
 
 # The helpers and the canvas, as JavaScript.
 qml="$out/Background.qml"
@@ -189,6 +209,8 @@ fi
 echo "$res" | grep -v '^JS'
 echo "$res2" | grep -v '^JS'
 [[ $res == *JSOK* && $res2 == *JSOK* ]] || fail=1
+rm -rf "$out"
+done
 
 echo "notch-wallpaper: $([[ $fail == 0 ]] && echo all ok || echo FAILED)"
 exit $fail

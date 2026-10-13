@@ -41,6 +41,12 @@ picture only changed when the reveal ended. With the NOTCH output there are
 always two (the strip and the built-in display), so the display often skipped
 the animation. The patch lets a late output join the running reveal.
 
+Omarchy's Background.qml changed in October 2026: it decodes the wallpaper
+at the display's size itself (decodeWidth/decodeHeight, from the image's own
+size), draws stills through BackgroundMedia and can be suspended. Where a
+step's anchor differs, both forms are known: on the newer one the patch only
+makes that decode size the canvas's (strip and display together).
+
 The patch is versioned like the bar patch; an older version, or a file with
 the version line but a piece of the patch missing (PIECES, #354), is restored
 from <Background.qml>.before-notchbar (kept by install.sh) and patched again.
@@ -50,30 +56,35 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 7
+VERSION = 8
 VERSION_LINE = f"// omarchy-notch-bar background patch v{VERSION}"
 
 
 # One line each step below leaves in the file and no stock Background.qml has.
 # All of them must be there for a file with VERSION_LINE to count as patched.
+# A tuple: one of its lines, for a step that differs between Omarchy's forms.
+DECODED = "      readonly property int decodeWidth: sized ? Math.ceil(notchCanvas.width * "  # 5., newer form
 PIECES = [
     "  function notchPeerOf(s) {\n",                                             # 1. pairing helpers
     "      WlrLayershell.layer: root.notchIsStrip(panel.modelData) ? WlrLayer.Overlay : WlrLayer.Background\n",  # 2.
-    "      visible: !remapGuard.remapping && !notchRemap.remapping\n",            # 3. remap
+    " && !notchRemap.remapping\n",                                                # 3. remap
     "        id: notchCanvas\n",                                                  # 4. shared canvas, 5. decode size
-    "        id: base\n        anchors.fill: notchCanvas\n        sourceSize: panel.notchImageSize\n        retainWhileLoading: true\n",
-    "        id: oldFrame\n        anchors.fill: notchCanvas\n        sourceSize: panel.notchImageSize\n        retainWhileLoading: true\n",
+    ("        id: base\n        anchors.fill: notchCanvas\n        sourceSize: panel.notchImageSize\n        retainWhileLoading: true\n",
+     "        id: base\n        anchors.fill: notchCanvas\n        path: "),
+    ("        id: oldFrame\n        anchors.fill: notchCanvas\n        sourceSize: panel.notchImageSize\n        retainWhileLoading: true\n",
+     DECODED),
     "        id: incomingLayer\n        anchors.fill: notchCanvas\n",
     "        id: revealMask\n        anchors.fill: notchCanvas\n",
-    "      readonly property size notchImageSize: ",
-    "          id: incomingFrame\n          anchors.fill: parent\n          sourceSize: panel.notchImageSize\n",
+    ("      readonly property size notchImageSize: ", DECODED),
+    ("          id: incomingFrame\n          anchors.fill: parent\n          sourceSize: panel.notchImageSize\n",
+     "      readonly property int decodeHeight: sized ? Math.ceil(notchCanvas.height * "),
     "      // omarchy-notch-bar: a late output joins a running reveal.\n",        # 6. late outputs
 ]
 
 
 def missing_pieces(text):
     """The PIECES not in text (each may appear more than once)."""
-    return [p for p in PIECES if text.count(p) < 1]
+    return [p for p in PIECES if not any(text.count(q) for q in (p if isinstance(p, tuple) else (p,)))]
 
 
 def replace_once(text, old, new):
@@ -81,6 +92,20 @@ def replace_once(text, old, new):
     if count != 1:
         sys.exit(f"apply-patch: expected exactly one match, found {count}:\n{old}")
     return text.replace(old, new)
+
+
+def find_variant(text, olds, what):
+    """The index of the one form in olds that text has, exactly once."""
+    found = [i for i, old in enumerate(olds) if text.count(old) == 1]
+    if len(found) != 1 or any(text.count(old) > 1 for old in olds):
+        sys.exit(f"apply-patch: could not find {what} (Omarchy changed it?)")
+    return found[0]
+
+
+def replace_variant(text, variants, what):
+    """Replace the one (old, new) of variants whose old text has, exactly once."""
+    i = find_variant(text, [old for old, _ in variants], what)
+    return text.replace(variants[i][0], variants[i][1])
 
 
 def main():
@@ -137,8 +162,11 @@ def main():
                         "      WlrLayershell.layer: root.notchIsStrip(panel.modelData) ? WlrLayer.Overlay : WlrLayer.Background\n")
 
     # 3. A remap that fires when the output moves (see the docstring).
-    text = replace_once(text, "      visible: !remapGuard.remapping\n", """      // omarchy-notch-bar: notchRemap, see below.
-      visible: !remapGuard.remapping && !notchRemap.remapping
+    #    Omarchy's own condition stays (from about October 2026 also
+    #    suspended), with the remap added.
+    stock_visible = ["!remapGuard.remapping", "!remapGuard.remapping && !root.suspended"]
+    text = replace_variant(text, [(f"      visible: {v}\n", """      // omarchy-notch-bar: notchRemap, see below.
+      visible: VISIBLE && !notchRemap.remapping
 
       // omarchy-notch-bar: remaps the wallpaper when its output really moved
       // (Quickshell's screens only signal geometryChanged, so Omarchy's
@@ -166,10 +194,12 @@ def main():
         Timer { id: notchRemapSettle; interval: 200; onTriggered: notchRemap.remapping = true }
         Timer { interval: 100; running: notchRemap.remapping; onTriggered: notchRemap.remapping = false }
       }
-""")
+""".replace("VISIBLE", v)) for v in stock_visible], "the wallpaper's visible line")
 
     # 4. The shared canvas: the strip on top, the built-in display below it.
-    text = replace_once(text, '''      Image {
+    #    The wallpaper is an Image, from about October 2026 Omarchy's
+    #    BackgroundMedia (stills; a video is another program's layer).
+    text = replace_variant(text, [(f'''      {kind} {{
         id: base
         anchors.fill: parent
 ''', '''      // omarchy-notch-bar: strip + built-in display as one area. On the
@@ -185,10 +215,10 @@ def main():
         height: parent.height + (peer ? peer.height : 0)
       }
 
-      Image {
+      KIND {
         id: base
         anchors.fill: notchCanvas
-''')
+'''.replace("KIND", kind)) for kind in ("Image", "BackgroundMedia")], "the wallpaper's image")
     text = replace_once(text, '''        id: oldFrame
         anchors.fill: parent
 ''', '''        id: oldFrame
@@ -206,8 +236,17 @@ def main():
 ''')
 
     # 5. Decode the image at the size it is shown at (see the docstring); never
-    #    0x0, which would mean the image's own size.
-    text = replace_once(text, "      property bool maskReady: false\n", """      property bool maskReady: false
+    #    0x0, which would mean the image's own size. Omarchy from about
+    #    October 2026 does that itself, at the display's size: there it
+    #    becomes the canvas's.
+    stock_decode = '''      readonly property int decodeWidth: sized ? Math.ceil(width * screen.devicePixelRatio) : 0
+      readonly property int decodeHeight: sized ? Math.ceil(height * screen.devicePixelRatio) : 0
+'''
+    if text.count(stock_decode) == 1:
+        text = text.replace(stock_decode, "      // omarchy-notch-bar: the canvas's size (strip and display together).\n" +
+                            stock_decode.replace("(width *", "(notchCanvas.width *").replace("(height *", "(notchCanvas.height *"))
+    else:
+        text = replace_once(text, "      property bool maskReady: false\n", """      property bool maskReady: false
       // omarchy-notch-bar: the wallpaper at the size it is shown at.
       readonly property real notchDpr: panel.modelData && panel.modelData.devicePixelRatio > 0
                                        ? panel.modelData.devicePixelRatio : 1
@@ -215,15 +254,15 @@ def main():
       readonly property size notchImageSize: Qt.size(Math.max(64, Math.ceil(notchCanvas.width * notchDpr / 64) * 64),
                                                      Math.max(64, Math.ceil(notchCanvas.height * notchDpr / 64) * 64))
 """)
-    # The shown image stays while a new size decodes (no grey flash).
-    for image in ("base", "oldFrame"):
-        text = replace_once(text, f"        id: {image}\n        anchors.fill: notchCanvas\n",
-                            f"        id: {image}\n        anchors.fill: notchCanvas\n"
-                            "        sourceSize: panel.notchImageSize\n"
-                            "        retainWhileLoading: true\n")
-    text = replace_once(text, "          id: incomingFrame\n          anchors.fill: parent\n",
-                        "          id: incomingFrame\n          anchors.fill: parent\n"
-                        "          sourceSize: panel.notchImageSize\n")
+        # The shown image stays while a new size decodes (no grey flash).
+        for image in ("base", "oldFrame"):
+            text = replace_once(text, f"        id: {image}\n        anchors.fill: notchCanvas\n",
+                                f"        id: {image}\n        anchors.fill: notchCanvas\n"
+                                "        sourceSize: panel.notchImageSize\n"
+                                "        retainWhileLoading: true\n")
+        text = replace_once(text, "          id: incomingFrame\n          anchors.fill: parent\n",
+                            "          id: incomingFrame\n          anchors.fill: parent\n"
+                            "          sourceSize: panel.notchImageSize\n")
 
     # 6. An output whose new image is ready while the reveal runs joins it
     #    (see the docstring): only a finished reveal is too late.

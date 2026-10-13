@@ -27,7 +27,7 @@ def panel(optional=True):
     lines += ["  property var displays: []\n",
               "    var parsed = Model.parseDisplays(displaysJson)\n",
               '    text: Quickshell.screens.length > 1 ? "󰍺" : "󰍹"\n']
-    return "Panel {\n" + "".join(lines) + "}\n"
+    return build.COMMONS + "Panel {\n" + "".join(lines) + "}\n"
 
 
 class Build(unittest.TestCase):
@@ -84,6 +84,21 @@ class Build(unittest.TestCase):
         (self.source / "Panel.qml").write_text(panel().replace("Quickshell.screens.length", "screens.count"))
         self.assertEqual(self.build(), 0)
         self.assertNotIn(NOTCH_LINE, (self.out / "Panel.qml").read_text())
+
+    def test_omarchys_colours_by_commons(self):
+        # Qt 6.12: a bare Color is QtQuick's own (#376). The row's colour is
+        # Commons.Color, with the alias imported once (Omarchy's newer panel
+        # imports it itself).
+        self.assertEqual(self.build(), 0)
+        text = (self.out / "Panel.qml").read_text()
+        self.assertIn("Style.hoverFillFor(root.bar.foreground, Commons.Color.accent)", text)
+        self.assertNotIn(", Color.accent)", text)
+        self.assertEqual(text.count(build.COMMONS_ALIAS), 1)
+        (self.source / "Panel.qml").write_text(build.COMMONS_ALIAS + panel())
+        self.assertEqual(self.build(), 0)
+        self.assertEqual((self.out / "Panel.qml").read_text().count(build.COMMONS_ALIAS), 1)
+        (self.source / "Panel.qml").write_text(panel().replace(build.COMMONS, ""))
+        self.assertEqual(self.build(), 1)
 
     def test_patch_path(self):
         # The same copy of src/ in the repository and in the VM (/usr/local/share/omacvm).

@@ -446,6 +446,9 @@ jobs:
       - name: Omarchy's shell colours on Qt 6.12 (the fix on made-up shell files, the check's row; issue 376)
         run: src/tests/shell-colors.sh
 
+      - name: OmacVM's edits of Omarchy's shell on omarchy-mac's and upstream's files (toasts, display panels, night light indicator)
+        run: src/tests/omarchy-shell.sh
+
       - name: OmacVM.app moves VM folders safely (fixtures, small disk images)
         run: src/tests/app-storage.sh
 
@@ -599,6 +602,9 @@ jobs:
 
       - name: Omarchy's shell colours on Qt 6.12 on Linux (GNU tools, the live shell's log by its pid)
         run: src/tests/shell-colors.sh
+
+      - name: OmacVM's edits of Omarchy's shell on Linux (GNU tools, as in the VM)
+        run: src/tests/omarchy-shell.sh
 
       - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
         run: src/tests/touchid-client.sh
