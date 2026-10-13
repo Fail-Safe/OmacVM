@@ -1079,6 +1079,47 @@ int main(void) {
     soOn = 0; swipeOutLook(); sent();
   }
 
+  // ---- the Dock's swipe events (as macOS 26 and older read them, and as macOS 27 does) ----
+  {
+    CGPoint at = CGPointMake(100, 200);
+    CGEventRef extra, e = dockSwipeEvent(0, kSwipeChanged, -0.75, 0, at, &extra);
+    float f = -0.75f; uint32_t bits; memcpy(&bits, &f, sizeof bits);
+    check(e && extra && CGEventGetIntegerValueField(e, 55) == 30 && CGEventGetIntegerValueField(e, 110) == 23 &&
+          CGEventGetIntegerValueField(e, 132) == kSwipeChanged && CGEventGetIntegerValueField(e, 134) == kSwipeChanged &&
+          CGEventGetDoubleValueField(e, 124) == -0.75 && (uint32_t)CGEventGetIntegerValueField(e, 135) == bits &&
+          CGEventGetIntegerValueField(e, 123) == 1 && CGEventGetIntegerValueField(extra, 55) == 29,
+          "events (fields): Changed at -0.75: the Dock's swipe, phase, progress (also as a float's bits), horizontal, plus the gesture event");
+    CFRelease(e); CFRelease(extra);
+    e = dockSwipeEvent(0, kSwipeEnded, -1.2, -3.5, at, &extra);
+    check(e && CGEventGetIntegerValueField(e, 132) == kSwipeEnded && CGEventGetDoubleValueField(e, 129) == -3.5, "events (fields): Ended carries the speed");
+    CFRelease(e); CFRelease(extra);
+    HIDEventRef (*copyHID)(CGEventRef) = (HIDEventRef (*)(CGEventRef))dlsym(RTLD_DEFAULT, "SLEventCopyIOHIDEvent");
+    uint32_t (*hidType)(HIDEventRef) = (uint32_t (*)(HIDEventRef))dlsym(RTLD_DEFAULT, "IOHIDEventGetType");
+    CFIndex (*hidInt)(HIDEventRef, uint32_t) = (CFIndex (*)(HIDEventRef, uint32_t))dlsym(RTLD_DEFAULT, "IOHIDEventGetIntegerValue");
+    double (*hidFloat)(HIDEventRef, uint32_t) = (double (*)(HIDEventRef, uint32_t))dlsym(RTLD_DEFAULT, "IOHIDEventGetFloatValue");
+    uint32_t (*hidPhase)(HIDEventRef) = (uint32_t (*)(HIDEventRef))dlsym(RTLD_DEFAULT, "IOHIDEventGetPhase");
+    CFArrayRef (*hidKids)(HIDEventRef) = (CFArrayRef (*)(HIDEventRef))dlsym(RTLD_DEFAULT, "IOHIDEventGetChildren");
+    if (!lookUpHID() || !copyHID || !hidType || !hidInt || !hidFloat || !hidPhase || !hidKids) {
+      printf("ok   events (IOHIDEvent): not on this macOS, skipped\n");
+    } else {
+      e = dockSwipeEvent(1, kSwipeChanged, -0.75, 0, at, &extra);
+      HIDEventRef h = e ? copyHID(e) : NULL;
+      check(e && !extra && CGEventGetType(e) == 30 && h && hidType(h) == 23 && hidInt(h, HID_FIELD(23, 1)) == 1 &&
+            hidInt(h, HID_FIELD(23, 5)) == 3 && hidFloat(h, HID_FIELD(23, 2)) == -0.75 && hidPhase(h) == kSwipeChanged,
+            "events (IOHIDEvent, macOS 27): a type-30 event carrying a Dock swipe: horizontal, the Dock's flavor, progress, phase");
+      if (h) CFRelease(h);
+      if (e) CFRelease(e);
+      e = dockSwipeEvent(1, kSwipeCancelled, 0.4, 2.5, at, &extra);
+      h = e ? copyHID(e) : NULL;
+      CFArrayRef kids = h ? hidKids(h) : NULL;
+      HIDEventRef v = kids && CFArrayGetCount(kids) == 1 ? CFArrayGetValueAtIndex(kids, 0) : NULL;
+      check(h && hidPhase(h) == kSwipeCancelled && v && hidType(v) == 9 && hidFloat(v, HID_FIELD(9, 0)) == 2.5,
+            "events (IOHIDEvent): Cancelled carries the speed as a velocity event");
+      if (h) CFRelease(h);
+      if (e) CFRelease(e);
+    }
+  }
+
   // Which apps the combo goes back to.
   check(isOther(terminal, -1, "Terminal", 1), "back to: a regular app");
   check(!isOther(terminal, -1, "Raycast", 0), "... not an accessory app (Raycast, Alfred, Spotlight, a quick panel)");

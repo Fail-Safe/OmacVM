@@ -104,6 +104,7 @@
 #include <IOKit/IOKitLib.h>
 #include <fcntl.h>
 #include <mach-o/dyld.h>
+#include <mach/mach_time.h>
 #include <signal.h>
 #include <spawn.h>
 #include <sys/stat.h>
@@ -1786,7 +1787,132 @@ static CGEventFlags heldNow(void) { return CGEventSourceFlagsState(kCGEventSourc
 // the settings domain for the next start.
 static int swipeSign = 1;
 
+// ---- the Dock's swipe: what a trackpad's three/four-finger swipe gives the Dock ----
+// macOS 27 reads it from an IOHIDEvent attached to the event (private,
+// IOKit + SkyLight, looked up at run time; Mac Mouse Fix found the same,
+// TouchSimulator.m); the event's fields, which older macOS reads, are
+// ignored there (the mini, 2026-10-13). progress: in the Dock's units,
+// negative toward the Space on the right (one Space = 1 + 1 / (n - 1) for
+// a display with n Spaces); the end's speed in the same units per second.
+// Ended finishes the move, Cancelled goes back (a trackpad's own swipe
+// decides that at the lift).
+#define kSwipeChanged 2
+#define kSwipeCancelled 8
+#define HID_DOCK_SWIPE 23
+#define HID_VELOCITY 9
+#define HID_FIELD(type, i) ((uint32_t)(type) << 16 | (uint32_t)(i))
+#define HID_PHASE_SHIFT 24
+#define HID_FLAVOR_DOCK 3
+typedef const void *HIDEventRef;
+static HIDEventRef (*hidCreate)(CFAllocatorRef, uint32_t, uint64_t, uint32_t);
+static void (*hidSetInt)(HIDEventRef, uint32_t, CFIndex);
+static void (*hidSetFloat)(HIDEventRef, uint32_t, double);
+static void (*hidAppend)(HIDEventRef, HIDEventRef, uint32_t);
+static void (*hidAttach)(CGEventRef, HIDEventRef);
+
+static int lookUpHID(void) {
+  static int looked, ok;
+  if (!looked) {
+    looked = 1;
+    dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY);
+    hidCreate = (HIDEventRef (*)(CFAllocatorRef, uint32_t, uint64_t, uint32_t))dlsym(RTLD_DEFAULT, "IOHIDEventCreate");
+    hidSetInt = (void (*)(HIDEventRef, uint32_t, CFIndex))dlsym(RTLD_DEFAULT, "IOHIDEventSetIntegerValue");
+    hidSetFloat = (void (*)(HIDEventRef, uint32_t, double))dlsym(RTLD_DEFAULT, "IOHIDEventSetFloatValue");
+    hidAppend = (void (*)(HIDEventRef, HIDEventRef, uint32_t))dlsym(RTLD_DEFAULT, "IOHIDEventAppendEvent");
+    hidAttach = (void (*)(CGEventRef, HIDEventRef))dlsym(RTLD_DEFAULT, "SLEventSetIOHIDEvent");
+    ok = hidCreate && hidSetInt && hidSetFloat && hidAppend && hidAttach;
+    if (!ok) logf_("swipe out: macOS gives no way to post the Dock's swipe here (IOHIDEvent): one step at the lift");
+  }
+  return ok;
+}
+
+// The swipe as macOS 27 and newer read it (else the fields).
+static int hidSwipeOS(void) {
+  static int v = -1;
+  if (v < 0) { v = 0; if (__builtin_available(macOS 27.0, *)) v = 1; }
+  return v;
+}
+static int (*hidSwipeFn)(void) = hidSwipeOS;
+
+// One event of the Dock's swipe; *extra: a second one to post right after it
+// (the gesture event the fields need), or NULL. NULL: none could be made.
+static CGEventRef dockSwipeEvent(int asHID, int phase, double progress, double speed, CGPoint at, CGEventRef *extra) {
+  *extra = NULL;
+  int end = phase == kSwipeEnded || phase == kSwipeCancelled;
+  if (asHID) {
+    if (!lookUpHID()) return NULL;
+    uint64_t now = mach_absolute_time();
+    HIDEventRef h = hidCreate(kCFAllocatorDefault, HID_DOCK_SWIPE, now, (uint32_t)phase << HID_PHASE_SHIFT);
+    if (!h) return NULL;
+    hidSetInt(h, HID_FIELD(HID_DOCK_SWIPE, 1), 1);                 // motion: horizontal
+    hidSetInt(h, HID_FIELD(HID_DOCK_SWIPE, 5), HID_FLAVOR_DOCK);   // flavor: the Dock's
+    hidSetFloat(h, HID_FIELD(HID_DOCK_SWIPE, 2), progress);
+    if (end) {
+      HIDEventRef v = hidCreate(kCFAllocatorDefault, HID_VELOCITY, now, 0);
+      if (v) {
+        hidSetFloat(v, HID_FIELD(HID_VELOCITY, 0), speed);
+        hidSetFloat(v, HID_FIELD(HID_VELOCITY, 1), speed);
+        hidSetFloat(v, HID_FIELD(HID_VELOCITY, 2), 0);
+        hidAppend(h, v, 0);
+        CFRelease(v);
+      }
+    }
+    CGEventRef e = CGEventCreate(NULL);
+    if (e) {
+      CGEventSetType(e, (CGEventType)kCGSEventDockControl);
+      CGEventSetLocation(e, at);
+      hidAttach(e, h);
+    }
+    CFRelease(h);
+    return e;
+  }
+  CGEventRef dock = CGEventCreate(NULL), gesture = CGEventCreate(NULL);
+  if (!dock || !gesture) {
+    if (dock) CFRelease(dock);
+    if (gesture) CFRelease(gesture);
+    return NULL;
+  }
+  float f = (float)progress; uint32_t bits; memcpy(&bits, &f, sizeof bits);
+  CGEventSetIntegerValueField(gesture, kCGSEventTypeField, kCGSEventGesture);
+  CGEventSetIntegerValueField(dock, kCGSEventTypeField, kCGSEventDockControl);
+  CGEventSetIntegerValueField(dock, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
+  CGEventSetIntegerValueField(dock, kCGEventGesturePhase, phase);
+  CGEventSetIntegerValueField(dock, 134, phase);                    // the phase again, as a trackpad's
+  CGEventSetDoubleValueField(dock, kCGEventGestureSwipeProgress, progress);
+  CGEventSetIntegerValueField(dock, kCGEventScrollGestureFlagBits, (int64_t)bits);   // the progress as a float's bits
+  CGEventSetIntegerValueField(dock, kCGEventGestureSwipeMotion, 1);  // horizontal
+  CGEventSetIntegerValueField(dock, 165, 1);
+  CGEventSetDoubleValueField(dock, kCGEventGestureScrollY, 1.401298464e-45);    // FLT_TRUE_MIN: horizontal
+  CGEventSetDoubleValueField(dock, kCGEventGestureZoomDeltaX, 1.401298464e-45);
+  if (end) {
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeVelocityX, speed);
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeVelocityY, speed);
+  }
+  CGEventSetLocation(dock, at);
+  CGEventSetLocation(gesture, at);
+  *extra = gesture;
+  return dock;
+}
+
+static int dockPost(int phase, double progress, double speed, CGPoint at) {
+  CGEventRef extra, e = dockSwipeEvent(hidSwipeFn(), phase, progress, speed, at, &extra);
+  if (!e) return 0;
+  CGEventPost(kCGSessionEventTap, e);   // after the HID taps (ours, QEMU's): they never see it
+  CFRelease(e);
+  if (extra) { CGEventPost(kCGSessionEventTap, extra); CFRelease(extra); }
+  return 1;
+}
+
+static int (*dockPostFn)(int, double, double, CGPoint) = dockPost;   // a seam for the offline test
+
 static int dockSwipe(CGPoint at, int phase, int right) {
+  if (hidSwipeFn()) {
+    // macOS 27 reads only the HID event: a short way toward that Space,
+    // then finished (Ended always finishes; the way's sign is known there).
+    double s = right ? -1.0 : 1.0;
+    if (phase == kSwipeBegan) return dockPostFn(kSwipeBegan, s * 0.05, 0, at) && dockPostFn(kSwipeChanged, s * 0.2, 0, at);
+    return dockPostFn(kSwipeEnded, s * 0.2, s * 2.0, at);
+  }
   CGEventRef dock = CGEventCreate(NULL), gesture = CGEventCreate(NULL);
   if (!dock || !gesture) {
     if (dock) CFRelease(dock);
@@ -1829,7 +1955,7 @@ static int postSwipe(CGDirectDisplayID d, CGRect b, int dir) {
   (void)d;
   CGPoint p = pointerNow();
   CGPoint at = CGRectContainsPoint(b, p) ? p : CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b));
-  int right = dir * swipeSign > 0;
+  int right = hidSwipeFn() ? dir > 0 : dir * swipeSign > 0;   // the HID event's way is known
   return dockSwipe(at, kSwipeBegan, right) && dockSwipe(at, kSwipeEnded, right);
 }
 
