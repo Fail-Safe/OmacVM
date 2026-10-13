@@ -266,17 +266,17 @@ final class Updater: ObservableObject {
         config.timeoutIntervalForResource = 30 * 60
         config.allowsExpensiveNetworkAccess = manual
         config.allowsConstrainedNetworkAccess = manual
-        let session = URLSession(configuration: config)
-        defer { session.finishTasksAndInvalidate() }
+        let net = Transfer(configuration: config)
+        defer { net.finish() }
 
         let feed: Appcast, feedData: Data, feedSig: Data
         do {
-            let (raw, code) = try await fetch(feedURL, cap: Appcast.maxFeedBytes, session: session)
+            let (raw, code) = try await net.data(feedURL, cap: Appcast.maxFeedBytes)
             // The server answered: the week starts again even without a feed
             // (no release has one yet), so nobody asks every hour.
             lastCheck = Date()
             guard code == 200 else { return failed("no update feed (HTTP \(code)) at \(feedURL.absoluteString)") }
-            let (sig, scode) = try await fetch(feedURL.appendingPathExtension("sig"), cap: Appcast.maxSignatureBytes, session: session)
+            let (sig, scode) = try await net.data(feedURL.appendingPathExtension("sig"), cap: Appcast.maxSignatureBytes)
             guard scode == 200 else { return failed("the update feed has no signature (HTTP \(scode))") }
             switch Appcast.verified(feed: raw, signature: sig, keys: keys) {
             case .success(let f): feed = f; feedData = raw; feedSig = sig
@@ -312,7 +312,7 @@ final class Updater: ObservableObject {
         downloading = feed.version.description
         defer { downloading = nil }
         do {
-            let s = try await stage(feed, data: feedData, signature: feedSig, session: session)
+            let s = try await stage(feed, data: feedData, signature: feedSig, net: net)
             staged = s
             log("ready: \(s.version) at \(s.app.path)")
             return .ready(s.version)
@@ -326,33 +326,20 @@ final class Updater: ObservableObject {
         return .failed(why)
     }
 
-    private func fetch(_ url: URL, cap: Int, session: URLSession) async throws -> (Data, Int) {
-        let (bytes, response) = try await session.bytes(from: url)
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard code == 200 else { return (Data(), code) }
-        var data = Data()
-        for try await b in bytes {
-            data.append(b)
-            if data.count > cap { throw HelperError.io("\(url.lastPathComponent) is larger than \(cap) bytes") }
-        }
-        return (data, code)
-    }
-
     private var stagedRoot: URL { home.appendingPathComponent("staged") }
 
-    /// Downloads to staged/VERSION, checks size and digest, unpacks, checks
-    /// the app. Anything that fails leaves nothing behind. The signed feed is
-    /// kept there too: a later launch checks it again for the teams.
-    private func stage(_ feed: Appcast, data: Data, signature: Data, session: URLSession) async throws -> Staged {
+    /// Downloads to staged/VERSION (never more bytes than the feed names),
+    /// checks size and digest, unpacks, checks the app. Anything that fails
+    /// leaves nothing behind. The signed feed is kept there too: a later
+    /// launch checks it again for the teams.
+    private func stage(_ feed: Appcast, data: Data, signature: Data, net: Transfer) async throws -> Staged {
         let fm = FileManager.default
         try? fm.removeItem(at: stagedRoot)
         let dir = stagedRoot.appendingPathComponent(feed.version.description)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         do {
-            let (tmp, response) = try await session.download(from: feed.url)
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             let zip = dir.appendingPathComponent("update.zip")
-            try fm.moveItem(at: tmp, to: zip)
+            let code = try await net.file(feed.url, to: zip, length: feed.length)
             guard code == 200 else { throw HelperError.io("the download failed (HTTP \(code))") }
             let id = bundleID
             let app = try await Task.detached { () throws -> URL in

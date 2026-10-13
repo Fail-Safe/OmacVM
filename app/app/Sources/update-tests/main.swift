@@ -413,5 +413,98 @@ expect(UpdateFolders.device(URL(fileURLWithPath: "/dev")) != UpdateFolders.devic
 expect(UpdateFolders.work(for: elsewhere, home: home).path == "/dev/.omacvm-updates/\(UpdateFolders.key(for: elsewhere))",
        "app on another volume: work next to it")
 
+// Transfer: the feed, its signature and the zip, with their limits while the
+// bytes come in (a made-up server in this process: MockHTTP).
+final class MockHTTP: URLProtocol {
+    struct Reply { var status = 200; var headers: [String: String] = [:]; var chunks: [Data] = []; var redirect: String? = nil }
+    static let lock = NSLock()
+    nonisolated(unsafe) static var replies: [String: Reply] = [:]
+    nonisolated(unsafe) static var requests: [String] = []
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard let url = request.url else { return }
+        let r: Reply? = MockHTTP.lock.withLock { MockHTTP.requests.append(url.absoluteString); return MockHTTP.replies[url.absoluteString] }
+        guard let r else { client?.urlProtocol(self, didFailWithError: URLError(.cannotFindHost)); return }
+        if let to = r.redirect, let t = URL(string: to) {
+            let resp = HTTPURLResponse(url: url, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: ["Location": to])!
+            client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: t), redirectResponse: resp)
+            return
+        }
+        let resp = HTTPURLResponse(url: url, statusCode: r.status, httpVersion: "HTTP/1.1", headerFields: r.headers)!
+        client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+        for c in r.chunks { client?.urlProtocol(self, didLoad: c) }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+func serve(_ url: String, _ r: MockHTTP.Reply) { MockHTTP.lock.withLock { MockHTTP.replies[url] = r } }
+func blocking(_ body: @escaping @Sendable () async -> Void) {
+    let done = DispatchSemaphore(value: 0)
+    Task.detached { await body(); done.signal() }
+    done.wait()
+}
+do {
+    let cfg = URLSessionConfiguration.ephemeral
+    cfg.protocolClasses = [MockHTTP.self]
+    let net = Transfer(configuration: cfg)
+    let mb = Data(repeating: 0x5a, count: 1 << 20)
+    let zipBytes = Data((0..<(3 * (1 << 20) + 12345)).map { UInt8($0 & 0xff) })
+    serve("https://feed.test/feed.json", .init(headers: ["Content-Length": "15"], chunks: [Data("{\"schema\": 1}\n".utf8)]))
+    serve("https://feed.test/none.json", .init(status: 404, chunks: [Data("not found".utf8)]))
+    serve("https://feed.test/said-big.json", .init(headers: ["Content-Length": "\(70 * 1024)"], chunks: [mb]))
+    serve("https://feed.test/sent-big.json", .init(chunks: [Data(repeating: 1, count: 40 * 1024), Data(repeating: 2, count: 40 * 1024)]))
+    serve("https://feed.test/u.zip", .init(headers: ["Content-Length": "\(zipBytes.count)"],
+                                           chunks: stride(from: 0, to: zipBytes.count, by: 100_000).map { zipBytes[$0..<min($0 + 100_000, zipBytes.count)] }))
+    serve("https://feed.test/long.zip", .init(chunks: [zipBytes, Data([1, 2, 3])]))
+    serve("https://feed.test/short.zip", .init(chunks: [zipBytes.prefix(1000)]))
+    serve("https://feed.test/said-long.zip", .init(headers: ["Content-Length": "\(zipBytes.count + 1)"], chunks: [zipBytes]))
+    serve("https://github.test/latest.zip", .init(redirect: "https://assets.test/u.zip"))
+    serve("https://assets.test/u.zip", .init(headers: ["Content-Length": "\(zipBytes.count)"], chunks: [zipBytes]))
+    serve("https://github.test/plain.zip", .init(redirect: "http://assets.example/u.zip"))
+    serve("https://feed.test/gone.zip", .init(status: 404, chunks: [Data("no".utf8)]))
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("transfer-tests-\(getpid())")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let zip = dir.appendingPathComponent("update.zip")
+    let exists = { FileManager.default.fileExists(atPath: zip.path) }
+    func thrown(_ body: @escaping @Sendable () async throws -> Void) -> Error? {
+        let box = ErrorBox()
+        blocking { do { try await body() } catch { box.error = error } }
+        return box.error
+    }
+    final class ErrorBox: @unchecked Sendable { var error: Error? }
+    final class Got: @unchecked Sendable { var data = Data(); var status = 0; var steps: [Int64] = [] }
+    let g = Got()
+    blocking { if let (d, s) = try? await net.data(URL(string: "https://feed.test/feed.json")!, cap: 64 * 1024) { g.data = d; g.status = s } }
+    expect(g.status == 200 && g.data == Data("{\"schema\": 1}\n".utf8), "transfer: the feed into memory")
+    blocking { if let (d, s) = try? await net.data(URL(string: "https://feed.test/none.json")!, cap: 64 * 1024) { g.data = d; g.status = s } }
+    expect(g.status == 404 && g.data.isEmpty, "transfer: 404 comes back as the status, no body")
+    var e = thrown { _ = try await net.data(URL(string: "https://feed.test/said-big.json")!, cap: 64 * 1024) }
+    expect((e as? Transfer.Failure) == .tooLarge("said-big.json", 64 * 1024), "transfer: a feed that says it is larger than its limit: refused at the header")
+    e = thrown { _ = try await net.data(URL(string: "https://feed.test/sent-big.json")!, cap: 64 * 1024) }
+    expect((e as? Transfer.Failure) == .tooLarge("sent-big.json", 64 * 1024), "transfer: a feed that sends more than its limit: cut off")
+    let len = Int64(zipBytes.count)
+    blocking { g.status = (try? await net.file(URL(string: "https://feed.test/u.zip")!, to: zip, length: len) { n in g.steps.append(n) }) ?? -1 }
+    expect(g.status == 200 && (try? Data(contentsOf: zip)) == zipBytes, "transfer: the zip into its file, exactly the feed's length")
+    expect(!g.steps.isEmpty && g.steps == g.steps.sorted() && g.steps.last == len, "transfer: progress rises to the size")
+    e = thrown { _ = try await net.file(URL(string: "https://feed.test/long.zip")!, to: zip, length: len) }
+    expect((e as? Transfer.Failure) == .tooLarge("long.zip", len) && !exists(), "transfer: more bytes than the feed names: cut off, nothing kept")
+    e = thrown { _ = try await net.file(URL(string: "https://feed.test/short.zip")!, to: zip, length: len) }
+    expect((e as? Transfer.Failure) == .wrongLength(len, 1000) && !exists(), "transfer: fewer bytes: refused, nothing kept")
+    expect(e?.localizedDescription == "the download has the wrong size (1000 bytes, the feed says \(len))", "transfer: the reason reads as a sentence for the window")
+    e = thrown { _ = try await net.file(URL(string: "https://feed.test/said-long.zip")!, to: zip, length: len) }
+    expect((e as? Transfer.Failure) == .tooLarge("said-long.zip", len) && !exists(), "transfer: a header with more than the feed names: refused at once")
+    blocking { g.status = (try? await net.file(URL(string: "https://github.test/latest.zip")!, to: zip, length: len)) ?? -1 }
+    expect(g.status == 200 && (try? Data(contentsOf: zip)) == zipBytes, "transfer: a redirect on https is followed")
+    e = thrown { _ = try await net.file(URL(string: "https://github.test/plain.zip")!, to: zip, length: len) }
+    expect((e as? Transfer.Failure) == .redirect("http://assets.example/u.zip") && !exists()
+           && !MockHTTP.lock.withLock({ MockHTTP.requests.contains("http://assets.example/u.zip") }),
+           "transfer: a redirect to plain http is not followed")
+    blocking { g.status = (try? await net.file(URL(string: "https://feed.test/gone.zip")!, to: zip, length: len)) ?? -1 }
+    expect(g.status == 404 && !exists(), "transfer: 404 for the zip: the status, nothing kept")
+    net.finish()
+    try? FileManager.default.removeItem(at: dir)
+}
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
