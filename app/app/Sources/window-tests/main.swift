@@ -3,6 +3,7 @@
 // Custom resources, the disk's size (slider bounds, smaller in steps), "omacvm in Terminal", the window's
 // height, the keyboard note. Exit 0 when all pass. CI runs it on every pull request.
 import Foundation
+import OmacVMIcon
 import OmacVMWindow
 
 var failures = 0

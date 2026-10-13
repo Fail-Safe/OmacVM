@@ -2,6 +2,7 @@ import Foundation
 import OmacVMFeatures
 import OmacVMUSB
 import OmacVMUpdate
+import OmacVMIcon
 import OmacVMWindow
 
 /// `OmacVM --settings-dump`: every setting of the VM window as the window
