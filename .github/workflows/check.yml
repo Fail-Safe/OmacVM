@@ -437,6 +437,9 @@ jobs:
       - name: Guest check accepts NOTCH right above the built-in display (offline)
         run: src/tests/notch-check.sh
 
+      - name: Omarchy's shell colours on Qt 6.12 (the fix on made-up shell files, the check's row; issue 376)
+        run: src/tests/shell-colors.sh
+
       - name: OmacVM.app moves VM folders safely (fixtures, small disk images)
         run: src/tests/app-storage.sh
 
@@ -587,6 +590,9 @@ jobs:
 
       - name: A feature switch on Linux (GNU sed, glide off path)
         run: src/tests/feature-switch.sh
+
+      - name: Omarchy's shell colours on Qt 6.12 on Linux (GNU tools, the live shell's log by its pid)
+        run: src/tests/shell-colors.sh
 
       - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
         run: src/tests/touchid-client.sh
