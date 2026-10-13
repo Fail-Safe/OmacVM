@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.1 (unreleased)
+## 3.1.1
 
 Omarchy's shell draws again on Qt 6.12, and the settings sidebar marks the section at the top again.
 
