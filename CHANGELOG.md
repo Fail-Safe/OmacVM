@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.3 (unreleased)
+## 3.1.3
 
 Omanotch is ready for Omarchy's next shell.
 
