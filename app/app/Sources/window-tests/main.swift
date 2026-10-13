@@ -364,11 +364,12 @@ expect(WindowSize.defaultHeight(visible: 400) == 500, "a tiny screen: never belo
 
 // MARK: The sidebar follows the scroll (ScrollSpy)
 
-// The settings page as the window lays it out: five sections, their tops in
-// the content, and the content's height (General, Display, Input, Sharing &
-// Devices, Storage & Updates; the last two never reach the top).
-let spyTops: [Double] = [10, 384, 1135, 1406, 1690]
-let spyContent = 2330.0
+// The settings page as the window lays it out (measured in 3.1.0, a stopped
+// VM): five sections, their headings in the content, and the content's height
+// (General, Display, Input, Sharing & Devices, Storage & Updates; the last two
+// never reach the top).
+let spyTops: [Double] = [14, 259, 734, 963, 1170]
+let spyContent = 1548.0
 // The visible part under the 52 pt header: the 500 pt minimum, a 13-inch
 // MacBook Air (760 and 860 pt windows), a tall window, and the Air with the
 // update banner (52 + 52 pt).
@@ -397,12 +398,42 @@ for window: Double in [500, 760, 860, 1400, 808] {
         offset -= 0.5
     }
     expect(back == [4, 3, 2, 1, 0], "\(Int(window)) pt window: scrolling back up, in reverse (\(back))")
+    // Mid-page (before the last stretch): the section whose heading passed the
+    // line 90 pt below the top, as usual. (The 1400 pt window scrolls less than
+    // its height: its whole scroll is the last stretch.)
+    let stretchStart = maxOffset - min(maxOffset, viewport - 90)
+    var usual = true
+    offset = 0
+    while offset <= stretchStart {
+        let line = spyTops.lastIndex { $0 <= offset + 90 } ?? 0
+        if at(offset) != line { usual = false }
+        offset += 0.5
+    }
+    expect(usual, "\(Int(window)) pt window: mid-page, the section at the 90 pt line (up to \(Int(stretchStart)) of \(Int(maxOffset)) pt)")
 }
+// Mid-page examples: Display's heading at the line marks Display, half a point
+// before not yet (760 pt window); in the 500 pt window the same for Input.
+expect(ScrollSpy.current(tops: spyTops, offset: 169, maxOffset: spyContent - 708, viewport: 708) == 1
+       && ScrollSpy.current(tops: spyTops, offset: 168.5, maxOffset: spyContent - 708, viewport: 708) == 0,
+       "760 pt window: Display marked when its heading reaches the line, not before")
+expect(ScrollSpy.current(tops: spyTops, offset: 644, maxOffset: spyContent - 448, viewport: 448) == 2
+       && ScrollSpy.current(tops: spyTops, offset: 643.5, maxOffset: spyContent - 448, viewport: 448) == 1,
+       "500 pt window: Input marked when its heading reaches the line, not before")
 // Near the top the line is 90 pt down, as before: a section 80 pt down counts, one 120 pt down not yet.
 expect(ScrollSpy.current(tops: [0, 80, 1000], offset: 0, maxOffset: 2000, viewport: 700) == 1, "top: a section 80 pt down is marked")
 expect(ScrollSpy.current(tops: [0, 120, 1000], offset: 0, maxOffset: 2000, viewport: 700) == 0, "top: a section 120 pt down not yet")
-expect(ScrollSpy.probe(offset: 0, progress: 0, viewport: 700) == 90 && ScrollSpy.probe(offset: 300, progress: 1, viewport: 700) == 1000,
-       "the probe: 90 pt down at the top, the content's end at the bottom")
+// The probe: 90 pt down until the last stretch (here from 1390 of 2000), then
+// twice as fast to the content's end; a scroll shorter than that moves it all
+// the way.
+expect(ScrollSpy.probe(offset: 0, maxOffset: 2000, viewport: 700) == 90, "the probe: 90 pt down at the top")
+expect(ScrollSpy.probe(offset: 1000, maxOffset: 2000, viewport: 700) == 1090
+       && ScrollSpy.probe(offset: 1390, maxOffset: 2000, viewport: 700) == 1480,
+       "the probe: still 90 pt down mid-page and where the last stretch starts")
+expect(ScrollSpy.probe(offset: 1695, maxOffset: 2000, viewport: 700) == 2090, "the probe: halfway through the last stretch, halfway down")
+expect(ScrollSpy.probe(offset: 2000, maxOffset: 2000, viewport: 700) == 2700, "the probe: the content's end at the bottom")
+expect(ScrollSpy.probe(offset: 150, maxOffset: 300, viewport: 700) == 545
+       && ScrollSpy.probe(offset: 300, maxOffset: 300, viewport: 700) == 1000,
+       "the probe: a short scroll (300 pt) moves it all the way, to the end at the bottom")
 // Everything fits (a tall window): nothing scrolls, the first section is marked.
 expect(ScrollSpy.current(tops: [10, 300, 500], offset: 0, maxOffset: -400, viewport: 1348) == 0, "it all fits: the first section")
 expect(ScrollSpy.current(tops: [], offset: 0, maxOffset: 100, viewport: 500) == 0, "no sections: the first")
