@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Swipe out to macOS follows your fingers.** Past your first or last workspace the macOS Space
+  beside the VM now moves with the swipe, like a macOS Space switch: pull back to stay in the VM,
+  let go (or flick) to finish (#342). It used to wait for the lift and then jump in one step.
+  Inside the VM, Hyprland's workspace swipe is as before. The VM needs Update VM (or `omacvm
+  update`) for it; until then the swipe out works as before.
+- The escape combo's fallback swipe (when macOS's Space shortcut does not move the Space) now
+  works on macOS 27 too.
+
 ## 3.1.5
 
 Skip the notch: when the bar is full, its items continue on the other side of the notch (an opt-in setting).
