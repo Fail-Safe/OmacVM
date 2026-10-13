@@ -3,9 +3,11 @@ import OmacVMIcon
 import SwiftUI
 
 /// The app icon's look (IconTheme, org.omacvm.app appIconTheme): drawn for
-/// the header, the Dock (NSApp.applicationIconImage, at each launch and when
-/// it changes) and QEMU's window (OMACVM_ICON: a PNG in the run folder). The
-/// icon in the app bundle stays as it is.
+/// the header, the Dock and QEMU's window (OMACVM_ICON: a PNG in the run
+/// folder). In the Dock: the launcher's tile (NSApp.applicationIconImage, at
+/// launch, when it changes and each time the launcher comes back after a VM:
+/// macOS drops it when the app goes .accessory and back) and QEMU's while the
+/// VM runs. The icon in the app bundle stays as it is.
 @MainActor
 enum AppIcon {
     static let changed = Notification.Name("OmacVM.AppIcon.changed")
