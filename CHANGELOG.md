@@ -3,7 +3,9 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.3
+
+Omanotch is ready for Omarchy's next shell.
 
 - **Omanotch is ready for Omarchy's next shell.** Upstream Omarchy changed its bar and wallpaper in
   October 2026 (omarchy-mac has not shipped that yet), and Omanotch's patches no longer applied to
