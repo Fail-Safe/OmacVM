@@ -471,9 +471,13 @@ def log_entries(text):
     return out
 
 
+LATER = "later"
+
+
 def restart_and_check(copies):
     """Restarts the shell. The copies that did not load -> why; None when the
-    shell did not come back at all."""
+    shell did not come back at all; LATER when it did not restart (the session
+    got locked in the meantime: Omarchy refuses then)."""
     answered = any(c.ipc for c in copies) and bar_answers()
     before = shell_logs()
     t0 = time.time()
@@ -485,6 +489,8 @@ def restart_and_check(copies):
     time.sleep(4)   # the plugins load after the shell answers
     text = ""
     logs = sorted((p for p in shell_logs() - before if os.path.exists(p)), key=os.path.getmtime)
+    if not logs:
+        return LATER   # still the shell from before: it never saw the new files
     for p in logs[-1:]:
         with open(p, errors="replace") as f:
             text = f.read()
@@ -626,6 +632,11 @@ def follow(install=False):
     if not todo:
         return rc
     bad = restart_and_check([c for c, _ in todo])
+    if bad == LATER:
+        for c, _ in todo:
+            roll_back(c)
+        print("copies: the shell did not restart (the session is locked?): after the unlock")
+        return 3
     for c, p in todo:
         why = "the shell did not come back after the restart" if bad is None else bad.get(c.name)
         if why:
@@ -738,14 +749,23 @@ def main(argv):
         for st, name, d in check_lines():
             print(f"{st}\t{name}\t{d}")
         return 0
-    if "--wait" in argv:
-        if not needs_work():
-            print("copies: up to date")
-            return 0
+    # One at a time (install.sh, the service).
+    os.makedirs(STATE, exist_ok=True)
+    lock = open(os.path.join(STATE, ".lock"), "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    if "--wait" not in argv:
+        return follow(install="--install" in argv)
+    if not needs_work():
+        print("copies: up to date")
+        return 0
+    for _ in range(3):
         if not wait_quiet():
-            print("copies: no quiet moment (an update or the lock screen): at the next login")
-            return 0
-    return follow(install="--install" in argv)
+            break
+        rc = follow()
+        if rc != 3:
+            return rc
+    print("copies: no quiet moment (an update or the lock screen): at the next login")
+    return 0
 
 
 if __name__ == "__main__":

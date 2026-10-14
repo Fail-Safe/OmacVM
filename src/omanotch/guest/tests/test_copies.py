@@ -68,6 +68,8 @@ class Copies(unittest.TestCase):
 
         def restart(copies):
             self.restarts += 1
+            if self.refuse == m.LATER:
+                return m.LATER
             return {c.name: self.refuse[c.name] for c in copies if c.name in self.refuse}
 
         def run(cmd, timeout=30):
@@ -291,6 +293,21 @@ class Copies(unittest.TestCase):
         self.refuse = {"bar": "TypeError"}
         self.assertEqual(self.follow(), 1)
         self.assertEqual(self.files(self.copy()), before)
+
+    def test_a_shell_that_did_not_restart_tries_again_later(self):
+        """Locked between the look and the restart: Omarchy refuses the
+        restart; the files go back and it is tried again (not a failure)."""
+        self.follow(install=True)
+        before = self.files(self.copy())
+        self.shell("bar", UPSTREAM)
+        self.refuse = self.m.LATER
+        self.assertEqual(self.follow(), 3)
+        self.assertEqual(self.files(self.copy()), before)
+        self.assertEqual(self.state()["result"], "current")
+        self.assertTrue(self.m.needs_work())
+        self.refuse = {}
+        self.assertEqual(self.follow(), 0)
+        self.assertEqual(self.entry().read_bytes(), self.patched("bar", UPSTREAM))
 
     def test_shell_colors_lines_are_not_your_edits(self):
         self.follow(install=True)
