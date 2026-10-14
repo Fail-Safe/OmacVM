@@ -763,6 +763,13 @@ elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | g
     bad "notch display" "the strip shows the bar and a bar is also on $b: two bars on the MacBook (omarchy-restart-shell)"
   else ok "notch display" "$b$([[ $spot == above ]] && echo ", NOTCH right above it")$([[ $parked == true ]] && echo ", its bar in the strip")"; fi
 else skip "Omanotch" "not installed (omacvm enable omanotch, on a MacBook with a notch)"; fi
+# Its copies of Omarchy's bar and background follow Omarchy's updates
+# (src/omanotch/guest/copies.py; WARN: kept as they are, and why).
+if [[ $OMANOTCH != off && -f $H/.local/lib/omanotch/copies.py ]]; then
+  while IFS=$'\t' read -r cst cname cdetail; do
+    case $cst in ok) ok "$cname" "$cdetail" ;; warn) warn "$cname" "$cdetail" ;; esac
+  done < <(as_user python3 "$H/.local/lib/omanotch/copies.py" --check 2>/dev/null)
+fi
 
 section "Control centre"
 FEATURE=control-centre
