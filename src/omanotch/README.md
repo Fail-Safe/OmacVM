@@ -216,10 +216,13 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   cloned bar loadable at all; newer versions don't need that. The bar and
   background patches fit omarchy-mac's shell and upstream Omarchy's from
   October 2026 (a notch floor, a bar thickness per screen, the wallpaper
-  decoded at the display's size). A clone made by an Omanotch older than its
-  copies' record, from an Omarchy older than the one installed, is left as it
-  is (which of its changes are yours is not known): move it away and run
-  `./guest/install.sh` again to start from Omarchy's newest.
+  decoded at the display's size). A clone from before the copies kept a record
+  (OmacVM 3.1.11 and older) is made new from the installed Omarchy once, at the
+  next `./guest/install.sh` (OmacVM's Update VM). If it differed from what
+  Omanotch makes (your edits, an older Omarchy or patch), the whole folder is
+  kept first beside it, hidden from Omarchy
+  (`~/.config/omarchy/plugins/.$USER.bar.before-3.1.13`), and `omacvm check`
+  says where for two weeks or until it is deleted.
 - Cursor handling uses the window-server property `SetsCursorInBackground`,
   which is not public API (but widely used and stable for years).
 - At the exact moment the pointer crosses into the strip you may catch a

@@ -23,12 +23,16 @@ rules:
     now), merged three ways with the copy as it is against what OmacVM wrote
     the last time (kept in ~/.local/state/omanotch/copies/NAME/written). Your
     own edits stay when they merge cleanly (git merge-file).
-  * They overlap Omarchy's changes, the patch does not fit Omarchy's new file,
-    or what the copy was made from is not known (a copy older than this, made
-    from an older Omarchy): the copy stays as it is, and omacvm check and the
-    control centre say so (the overlapping files, both sides marked, in
-    .../copies/NAME/conflict). Tried again when Omarchy, the patch or the copy
-    changes.
+  * They overlap Omarchy's changes, or the patch does not fit Omarchy's new
+    file: the copy stays as it is, and omacvm check and the control centre say
+    so (the overlapping files, both sides marked, in .../copies/NAME/conflict).
+    Tried again when Omarchy, the patch or the copy changes.
+  * A copy without a record (made before OmacVM kept one, 3.1.11 and older)
+    becomes what OmacVM makes now, once, and that is its record from then on.
+    If it differs from that (your edits, an older Omarchy or patch), the whole
+    folder is kept first beside it, hidden from Omarchy
+    (~/.config/omarchy/plugins/.$USER.bar.before-3.1.13), and omacvm check
+    says where for two weeks or until it is deleted.
   * After a change the shell restarts and must load the copies without errors
     (and the bar answer on its notchbar IPC target); otherwise every changed
     file goes back as it was and the shell restarts again.
@@ -58,7 +62,6 @@ SHELL_COLORS = "/usr/local/lib/omacvm/shell-colors.py"
 QML_CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache"), "quickshell/qmlcache")
 PACMAN_LOCK = "/var/lib/pacman/db.lck"
 BACKUP = ".before-notchbar"
-MARK = "omarchy-notch-bar"
 
 # shell-colors.py's marked import (OmacVM's, #376): back to the plain import.
 PINNED = re.compile(r"^import QtQuick \d+\.\d+ // omacvm #376: QtQuick's own Color \(Qt 6\.12\) would hide Omarchy's[ \t]*$", re.M)
@@ -209,17 +212,6 @@ def expected(c, stock):
     tree["manifest.json"] = dump(clone_manifest(stock["manifest.json"], c.source, f"{USER}.{c.name}"))
     tree[c.entry] = patch_text(c, stock[c.entry])
     return tree
-
-
-def version_of(c, text):
-    """The patch's version in the entry file: 0 = none."""
-    m = re.search(rb"// omarchy-notch-bar (?:background )?patch v(\d+)", text or b"")
-    return int(m.group(1)) if m else (0 if MARK.encode() not in (text or b"") else -1)
-
-
-def current_version(c):
-    with open(c.patcher) as f:
-        return int(re.search(r"^VERSION = (\d+)$", f.read(), re.M).group(1))
 
 
 # ---- the three-way merge ----
@@ -529,17 +521,22 @@ def recolor(c):
 
 # ---- one copy ----
 
-def origin(c, stock, ours, before):
-    """What OmacVM made of the plugin the copy came from, patched as the copy
-    is now (None: not known). The copy came from Omarchy's plugin as it is
-    now when its entry file before the patch is Omarchy's."""
-    orig_entry = before if before is not None else ours.get(c.entry)
-    if orig_entry is None or orig_entry != stock.get(c.entry):
-        return None
-    base = expected(c, stock)
-    if version_of(c, ours.get(c.entry)) == 0:
-        base[c.entry] = stock[c.entry]   # a copy without the patch yet (just cloned)
-    return base
+def same_copy(ours, theirs):
+    """The copy is what OmacVM makes now (manifest.json by its content)."""
+    if set(ours) != set(theirs):
+        return False
+    return all(same_manifest(ours[r], theirs[r]) if r == "manifest.json" else ours[r] == theirs[r] for r in ours)
+
+
+def backup_dir(c):
+    """Where a copy from before OmacVM kept a record goes before it is made
+    new: beside it, hidden (Omarchy loads no plugin from a dot folder)."""
+    base = os.path.join(PLUGINS, f".{os.path.basename(c.dir)}.before-3.1.13")
+    path, n = base, 1
+    while os.path.exists(path):
+        n += 1
+        path = f"{base}-{n}"
+    return path
 
 
 def plan(c, install):
@@ -552,51 +549,44 @@ def plan(c, install):
         raise Stop("misfit", f"Omarchy's {c.source} plugin is not installed")
     stock = read_tree(sd)
     stock_sum, patch_sum = tree_sum(stock), file_sum(c.patcher)
+    fresh = False
     if not os.path.isfile(os.path.join(c.dir, c.entry)):
         if not install:
             raise Stop("missing", f"{show(c.dir)} is gone: Omarchy's own {c.name} is in use (repair Omanotch to make it again)")
         out = run(["omarchy-plugin-clone", c.source], 60)[1]
         if not os.path.isfile(os.path.join(c.dir, c.entry)):
             raise Stop("missing", f"omarchy plugin clone {c.source} made no copy ({out[:120]})")
-        s = None   # a new copy: anything kept was about another one
+        s, fresh = None, True   # a new copy: anything kept was about another one
     if s and s.get("result") == "current" and (s.get("stock"), s.get("patch")) == (stock_sum, patch_sum):
         return None
     ours_raw = raw_tree(c)
     ours = read_tree(c.dir)
-    before = normalize(c.entry + BACKUP, ours_raw.get(c.entry + BACKUP))
     tried = {"stock": stock_sum, "patch": patch_sum, "copy": tree_sum(ours)}
-    if s and s.get("result") not in ("current", "missing") and s.get("tried") == tried:
+    if s and s.get("result") in ("conflict", "misfit", "rolled-back") and s.get("tried") == tried:
         raise Stop(s["result"], s.get("why", ""), s.get("files", []), tried)
+    backup = False
     try:
         theirs = expected(c, stock)
-        replaced = None
-        if s and os.path.isdir(c.state_file("written")):
-            base = read_tree(c.state_file("written"))
+        if s and not fresh and os.path.isdir(c.state_file("written")):
+            result, edits, conflicts = merge(c, read_tree(c.state_file("written")), ours, theirs)
+            if conflicts:
+                write_tree(c.state_file("conflict"), {rel: m for rel, m in conflicts.items() if m is not None})
+                raise Stop("conflict", "your edits overlap Omarchy's changes in " + ", ".join(sorted(conflicts)), sorted(conflicts))
         else:
-            # No record yet: a copy from before this, or just cloned. An
-            # older patch is replaced as install.sh always did (from the
-            # unpatched backup); the copy before that goes to the state folder.
-            v = version_of(c, ours.get(c.entry))
-            if v not in (0, current_version(c)):
-                if before is None or MARK.encode() in before:
-                    raise Stop("unknown", f"its {c.entry} has an older patch and no clean {c.entry}{BACKUP}")
-                replaced = ours_raw[c.entry]
-                ours[c.entry] = patch_text(c, before)
-            base = origin(c, stock, ours, before)
-            if base is None:
-                raise Stop("unknown", "it was made from an older Omarchy, so which of its changes are yours is not known")
-        result, edits, conflicts = merge(c, base, ours, theirs)
-        if conflicts:
-            write_tree(c.state_file("conflict"), {rel: m for rel, m in conflicts.items() if m is not None})
-            raise Stop("conflict", "your edits overlap Omarchy's changes in " + ", ".join(sorted(conflicts)), sorted(conflicts))
+            # No record: just cloned, or a copy from before OmacVM kept one
+            # (3.1.11 and older). It becomes what OmacVM makes now, and that is
+            # the record from here on. One that differs from it (your edits, an
+            # older Omarchy or patch) is kept whole beside it first (follow()).
+            result, edits = dict(theirs), []
+            if same_manifest(ours.get("manifest.json"), theirs["manifest.json"]):
+                result["manifest.json"] = ours["manifest.json"]
+            backup = not fresh and not same_copy(ours, theirs)
     except Stop as e:
         e.tried = tried
         raise
-    if replaced is not None:
-        write_file(c.state_file("replaced", c.entry), replaced)
     return {"result": result, "theirs": theirs, "edits": edits, "ours_raw": ours_raw,
-            "stock_entry": stock[c.entry], "tried": tried, "replaced": replaced is not None,
-            "changed": replaced is not None or tree_sum(result) != tree_sum(ours)
+            "stock_entry": stock[c.entry], "tried": tried, "backup": backup,
+            "changed": tree_sum(result) != tree_sum(ours)
             or normalize(c.entry + BACKUP, ours_raw.get(c.entry + BACKUP)) != stock[c.entry]}
 
 
@@ -605,8 +595,11 @@ def commit(c, p, updated):
     shutil.rmtree(c.state_file("pending"), ignore_errors=True)
     shutil.rmtree(c.state_file("conflict"), ignore_errors=True)
     old = load_state(c) or {}
-    save_state(c, {"result": "current", "stock": p["tried"]["stock"], "patch": p["tried"]["patch"],
-                   "edits": p["edits"], "updated": now() if updated else old.get("updated", "")})
+    s = {"result": "current", "stock": p["tried"]["stock"], "patch": p["tried"]["patch"],
+         "edits": p["edits"], "updated": now() if updated else old.get("updated", "")}
+    if p.get("backup_path") or old.get("backup"):
+        s["backup"], s["backup_at"] = (p["backup_path"], now()) if p.get("backup_path") else (old["backup"], old.get("backup_at", ""))
+    save_state(c, s)
 
 
 def stopped(c, e):
@@ -640,6 +633,9 @@ def follow(install=False):
                 commit(c, p, updated=False)
             print(f"{c.title}: up to date")
             continue
+        if p["backup"]:
+            p["backup_path"] = backup_dir(c)
+            shutil.copytree(c.dir, p["backup_path"], symlinks=True)
         apply(c, p["ours_raw"], p["result"], p["stock_entry"])
         recolor(c)
         todo.append((c, p))
@@ -654,14 +650,18 @@ def follow(install=False):
         return rc
     bad = restart_and_check([c for c, _ in todo])
     if bad == LATER:
-        for c, _ in todo:
+        for c, p in todo:
             roll_back(c)
+            if p.get("backup_path"):
+                shutil.rmtree(p["backup_path"], ignore_errors=True)
         print("copies: the shell did not restart (the session is locked?): after the unlock")
         return 3
     for c, p in todo:
         why = "the shell did not come back after the restart" if bad is None else bad.get(c.name)
         if why:
             roll_back(c)
+            if p.get("backup_path"):
+                shutil.rmtree(p["backup_path"], ignore_errors=True)   # the copy is that one again
             stopped(c, Stop("rolled-back", f"Omarchy's {c.name} with OmacVM's patch did not load ({why}): back as it was",
                             tried=p["tried"]))
             print(f"{c.title}: rolled back: {why}")
@@ -669,8 +669,8 @@ def follow(install=False):
         else:
             commit(c, p, updated=True)
             kept = f" (your edits kept: {', '.join(p['edits'])})" if p["edits"] else ""
-            replaced = f"; the copy before the patch's update: {show(c.state_file('replaced', c.entry))}" if p["replaced"] else ""
-            print(f"{c.title}: follows Omarchy's {c.name}{kept}{replaced}")
+            made = f"; made new, the copy before is in {show(p['backup_path'])}" if p.get("backup_path") else ""
+            print(f"{c.title}: follows Omarchy's {c.name}{kept}{made}")
     if rc:
         restart_and_check([])
     print("copies: the shell restarted")
@@ -726,6 +726,8 @@ def needs_work():
         if s.get("result") == "current":
             if (s.get("stock"), s.get("patch")) != sums:
                 return True
+        elif s.get("result") == "unknown":   # 3.1.12's: such a copy is made new now
+            return True
         else:
             t = s.get("tried") or {}
             if (t.get("stock"), t.get("patch"), t.get("copy")) != sums + (tree_sum(read_tree(c.dir)),):
@@ -734,6 +736,18 @@ def needs_work():
 
 
 # ---- omacvm check ----
+
+BACKUP_DAYS = 14
+
+
+def backup_note(s):
+    """The line about a copy made new: while its backup is there, for two weeks."""
+    try:
+        at = datetime.datetime.strptime(s.get("backup_at", ""), "%Y-%m-%d %H:%M")
+    except ValueError:
+        return False
+    return os.path.isdir(s.get("backup", "")) and datetime.datetime.now() - at < datetime.timedelta(days=BACKUP_DAYS)
+
 
 def check_lines():
     """(ok|warn, name, detail) for each copy Omanotch keeps."""
@@ -750,14 +764,18 @@ def check_lines():
             if sd and (tree_sum(read_tree(sd)), file_sum(c.patcher)) != (s.get("stock"), s.get("patch")):
                 out.append(("ok", c.title, f"Omarchy's {c.name} changed: the copy follows when the session is unlocked, or at the next login"))
                 continue
+            if backup_note(s):
+                out.append(("warn", c.title, f"made new from Omarchy's {c.name} on {s['backup_at'][:10]}; the copy before is "
+                                              f"in {show(s['backup'])}, in case you had changed it (delete it to hide this)"))
+                continue
             d = "follows Omarchy's updates" + (f" (last {s['updated']})" if s.get("updated") else "")
             if s.get("edits"):
                 d += f"; your edits kept: {', '.join(s['edits'])}"
             out.append(("ok", c.title, d))
         elif res == "conflict":
             out.append(("warn", c.title, f"not updated, kept as it is: {s.get('why')} (both sides marked in {show(c.state_file('conflict'))})"))
-        elif res == "unknown":
-            out.append(("warn", c.title, f"not updated, kept as it is: {s.get('why')} (to start from Omarchy's newest: move {show(c.dir)} away, then repair Omanotch)"))
+        elif res == "unknown":   # 3.1.12's: made new at the next Update VM
+            out.append(("ok", c.title, "made new from Omarchy's at the next Update VM"))
         elif res == "missing" and os.path.isdir(c.dir):
             out.append(("ok", c.title, "back: follows Omarchy's updates from the next login"))
         else:
