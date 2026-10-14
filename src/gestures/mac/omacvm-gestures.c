@@ -2707,6 +2707,8 @@ static int dockMisses;                   // finished swipes in a row that did no
 static volatile double takeQuietUntil;   // the real trackpad's gesture events dropped until then
 static volatile double takeTravel = TAKE_TRAVEL;   // trackpad widths per Space ("SwipeOutTravel")
 #define TAKE_QUIET 0.4                   // s after a taken swipe's end
+#define TAKE_PINCH_MIN 0.03              // trackpad widths the fingers' spread changes in a pinch ...
+#define TAKE_PINCH_RATIO 0.25            // ... and this share of it (fingers drift a little in a swipe)
 #define TAKE_SETTLE 0.6                  // s macOS takes to slide the VM's Space back
 static double takeHoldUntil;             // the capture check waits until then (takeLock)
 
@@ -2923,10 +2925,21 @@ static int takePadFrame(MTTouch **c, int k) {
   if (k) { cx /= k; cy /= k; }
   for (int i = 0; i < k; i++) spread += hypot(c[i]->normalized.pos.x - cx, (c[i]->normalized.pos.y - cy) * tpH / (tpW > 0 ? tpW : 1));
   if (k) spread /= k;
+  static int spreadK;
   int sl = 0, sr = 0;
-  if (padTake.state == TAKE_IDLE && k >= 3) { takeSides(&sl, &sr); spread0 = spread; }
-  else if (padTake.state == TAKE_WATCH && k >= 3 && fabs(spread - spread0) >= TAKE_MIN) { padTake.state = TAKE_PASS; return TK_FLUSH; }
+  if (padTake.state == TAKE_IDLE && k >= 3) takeSides(&sl, &sr);
+  int was = padTake.state;
   int tk = takeFrame(&padTake, k, sl, sr, ddx, ddy, takeTravel, takeClock());
+  // Still not clear which way: fingers spreading or closing (a pinch) are no
+  // swipe. Measured for the same fingers only: one more coming down (3, then
+  // the 4th of a four-finger swipe) changes the spread by itself.
+  if (tk == TK_HOLD) {
+    if (was == TAKE_IDLE || k != spreadK) { spread0 = spread; spreadK = k; }
+    else if (fabs(spread - spread0) >= TAKE_PINCH_MIN && fabs(spread - spread0) >= TAKE_PINCH_RATIO * spread0) {
+      padTake.state = TAKE_PASS;
+      return TK_FLUSH;
+    }
+  }
   takeAct(&padTake, tk, "trackpad");
   return tk;
 }

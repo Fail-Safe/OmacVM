@@ -209,6 +209,22 @@ static void pad(int k, double x, double y) {
   frameCb((MTDeviceRef)&fakePadDev, t, k, 0, 0);
   clk += 0.008;
 }
+// k fingers at x, x + 0.06, ... (each keeps its place when another comes down).
+static void padAt(int k, double x) {
+  MTTouch t[8]; memset(t, 0, sizeof t);
+  for (int i = 0; i < k; i++) {
+    t[i].pathIndex = 3 + i; t[i].state = 4; t[i].zTotal = 0.5f;
+    t[i].normalized.pos.x = (float)(x + 0.06 * i); t[i].normalized.pos.y = 0.5f;
+  }
+  frameCb((MTDeviceRef)&fakePadDev, t, k, 0, 0);
+  clk += 0.008;
+}
+// A four-finger swipe as a hand makes it: three fingers come down, the 4th a
+// frame later, then all of them move from x0 to x1.
+static void padFour(double x0, double x1, int steps) {
+  padAt(3, x0); padAt(4, x0);
+  for (int s = 1; s <= steps; s++) padAt(4, x0 + (x1 - x0) * s / steps);
+}
 // k fingers from x0 to x1 (y0 to y1) in steps frames of 8 ms.
 static void padMove(int k, double x0, double x1, double y0, double y1, int steps) {
   for (int s = 0; s <= steps; s++) pad(k, x0 + (x1 - x0) * s / steps, y0 + (y1 - y0) * s / steps);
@@ -1335,6 +1351,14 @@ int main(void) {
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
     padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
     check(world[0].cur == 103 && dockMisses == 0 && dockFollows, "follow: ... the next one macOS follows: the misses start again");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+
+    // Four fingers that come down one after the other (user, 2026-10-14: "works flawlessly with 3
+    // fingers, but with 4 it aint"): the 4th finger changes the spread, it is no pinch.
+    nDockEv = 0;
+    padFour(0.5, 0.25, 30); padLift(); guestGot();
+    check(dockLast() == kSwipeEnded && world[0].cur == 103 && gotFrames == 0,
+          "fingers: four fingers that come down one after the other: out with the fingers (a 4th finger is no pinch)");
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
 
     // Two displays with "all": the fingers' display follows them, the other one the shortcut.
