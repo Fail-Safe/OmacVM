@@ -3,7 +3,9 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.6 (unreleased)
+
+Swipe out to macOS follows your fingers, like a macOS Space switch.
 
 - **Swipe out to macOS follows your fingers.** Past your first or last workspace the macOS Space
   beside the VM now moves with the swipe, like a macOS Space switch: pull back to stay in the VM,
