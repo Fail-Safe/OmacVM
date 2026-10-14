@@ -19,8 +19,8 @@ not the left one with left-command-key=off); Caps Lock as before.
 
 Upstream: upstreamable (upstream's ui/cocoa.m has the same toggle).
 Test: app/runtime/Tests/keys/test-modifier-state.sh (the rules, and with the
-patched ui/cocoa.m the wiring); synthetic events into a test VM on the Mac
-mini (tracks/412-universal-control-shift.md).
+patched ui/cocoa.m the wiring); src/tests/e2e/modifier-keys.sh (key events
+into a real VM, the guest's keyboard read back; 3.1.8 failed 5 of its 15).
 Applies after omacvm-cocoa-present-unseen.patch, before App Nap's.
 
 --- a/ui/cocoa.m
