@@ -175,11 +175,21 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   pointer on the bar's free space shows Omarchy's auto-hidden indicators, and
   they stay until it leaves the strip, as on the bar itself. Tray icons show up but can't be clicked
   in the strip.
-- The bar and background clones are forks of Omarchy's plugins. After an
-  Omarchy update that changes them, re-clone and run `./guest/install.sh`
-  again — the patches are versioned and refuse to apply blindly. The display
-  panel copy is built again by itself when Omarchy's panel changed (at the next
-  notchcast start); if the patch no longer fits, Omarchy's own panel comes back.
+- The bar and background clones follow Omarchy's updates the way Omarchy
+  updates its own plugins (`omarchy plugin update`: your changes stay when
+  they don't touch what comes in, the update is refused when they do, and
+  rolled back when it fails). After an update of Omarchy's bar or background
+  (OmacVM's pacman hook, and at each login: `omanotch-copies.service`,
+  `guest/copies.py`) a clone becomes Omarchy's new plugin with the patch again,
+  merged three ways with your clone against what Omanotch wrote the last time
+  (`~/.local/state/omanotch/copies/`), so your own edits stay when they merge
+  cleanly. When they overlap Omarchy's changes, or the patch does not fit the
+  new file, the clone stays as it is and `omacvm check` (and the control
+  centre) say so, with both sides marked in `.../copies/<name>/conflict`.
+  After a change the shell restarts and must load the clone without errors,
+  else every changed file goes back. The display panel copy is built again by
+  itself when Omarchy's panel changed (at the next notchcast start); if the
+  patch no longer fits, Omarchy's own panel comes back.
 - Hyprland warns about overlapping monitors after layout changes. The overlap
   is deliberate; `notchbar.lua` dismisses that one warning and nothing else.
 - Several VMs at once: the strip shows the bar of the VM whose window is full
@@ -206,8 +216,10 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   cloned bar loadable at all; newer versions don't need that. The bar and
   background patches fit omarchy-mac's shell and upstream Omarchy's from
   October 2026 (a notch floor, a bar thickness per screen, the wallpaper
-  decoded at the display's size); a clone made before an Omarchy update keeps
-  its older bar until it is cloned again.
+  decoded at the display's size). A clone made by an Omanotch older than its
+  copies' record, from an Omarchy older than the one installed, is left as it
+  is (which of its changes are yours is not known): move it away and run
+  `./guest/install.sh` again to start from Omarchy's newest.
 - Cursor handling uses the window-server property `SetsCursorInBackground`,
   which is not public API (but widely used and stable for years).
 - At the exact moment the pointer crosses into the strip you may catch a

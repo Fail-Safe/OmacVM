@@ -648,6 +648,16 @@ final class Control {
 
   // ---- status: the Mac's view of this VM's features ----
   private func statusAnswer(_ cli: String, _ vm: VMEntry, _ version: String) -> [String: Any] {
+    var body = statusBody(cli, vm, version)
+    // macOS's "Adjust keyboard brightness in low light" (no key without a
+    // keyboard light): the control centre's note by the keyboard light. Read
+    // at each ask (the control centre asks while it is open), never cached or
+    // logged.
+    if let auto = KeyboardLight.autoAdjust() { body["keyboard_light_auto"] = auto }
+    return body
+  }
+
+  private func statusBody(_ cli: String, _ vm: VMEntry, _ version: String) -> [String: Any] {
     let key = vmKey(vm)
     if let c = q.sync(execute: { status[key] }), Date().timeIntervalSince(c.at) < 30 { return c.body }
     // One run per VM at a time; others get the last answer meanwhile.

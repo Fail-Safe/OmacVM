@@ -14,6 +14,11 @@ systemctl --user disable --now notchcast.service >/dev/null 2>&1 || true
 rm -f "$HOME/.config/systemd/user/notchcast.service" "$HOME/.local/bin/notchcast"
 # The bar clone stays patched: it must not start parked at the next login.
 rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/omanotch/expect"
+# The copies no longer follow Omarchy (what OmacVM wrote last stays in
+# ~/.local/state/omanotch/copies: turned on again, they go on from there).
+systemctl --user disable --now omanotch-copies.service >/dev/null 2>&1 || true
+rm -f "$HOME/.config/systemd/user/omanotch-copies.service"
+rm -rf "$HOME/.local/lib/omanotch"
 systemctl --user daemon-reload
 
 say "removing Hyprland config"
@@ -28,7 +33,7 @@ hyprctl reload >/dev/null 2>&1 || true
 say "restoring Omarchy's background"
 if [[ -d $HOME/.config/omarchy/plugins/$USER.background ]]; then
   omarchy-plugin-enable omarchy.background >/dev/null 2>&1 || true
-  rm -rf "$HOME/.config/omarchy/plugins/$USER.background"
+  rm -rf "$HOME/.config/omarchy/plugins/$USER.background" "${XDG_STATE_HOME:-$HOME/.local/state}/omanotch/copies/background"
   omarchy-shell -q shell rescanPlugins >/dev/null 2>&1 || true
 fi
 
@@ -49,6 +54,6 @@ say "restoring Omarchy's bar"
 omarchy-shell -q notchbar setParked false || true
 if [[ ${1:-} == --remove-bar-clone ]]; then
   if command -v omarchy-bar-use >/dev/null; then omarchy-bar-use omarchy.bar >/dev/null 2>&1 || true; fi
-  rm -rf "$HOME/.config/omarchy/plugins/$USER.bar"
+  rm -rf "$HOME/.config/omarchy/plugins/$USER.bar" "${XDG_STATE_HOME:-$HOME/.local/state}/omanotch/copies/bar"
 fi
 say "done"

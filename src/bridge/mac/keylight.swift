@@ -42,7 +42,7 @@ enum KeyboardSteps {
 enum KeyboardLight {
   private typealias Get = @convention(c) (AnyObject, Selector, UInt64) -> Float
   private typealias Set = @convention(c) (AnyObject, Selector, Float, UInt64) -> Bool
-  private typealias IsBuiltIn = @convention(c) (AnyObject, Selector, UInt64) -> Bool
+  private typealias Ask = @convention(c) (AnyObject, Selector, UInt64) -> Bool
   private static let getSel = NSSelectorFromString("brightnessForKeyboard:")
   private static let setSel = NSSelectorFromString("setBrightness:forKeyboard:")
   private static let levelSel = NSSelectorFromString("backlightLevelForKeyboard:")
@@ -56,7 +56,7 @@ enum KeyboardLight {
     guard let c = client,
           let ids = c.perform(NSSelectorFromString("copyKeyboardBacklightIDs"))?.takeRetainedValue() as? [NSNumber] else { return nil }
     let sel = NSSelectorFromString("isKeyboardBuiltIn:")
-    let builtIn = c.responds(to: sel) ? unsafeBitCast(c.method(for: sel), to: IsBuiltIn.self) : nil
+    let builtIn = c.responds(to: sel) ? unsafeBitCast(c.method(for: sel), to: Ask.self) : nil
     return (ids.first { builtIn?(c, sel, $0.uint64Value) ?? true } ?? ids.first)?.uint64Value
   }()
   private static var lastOn: Float = 0.5   // for the toggle key
@@ -97,4 +97,32 @@ enum KeyboardLight {
   }
 
   static func toggle() -> Bool { guard let now = get() else { return false }; return set(now > 0 ? 0 : lastOn) }
+
+  private static func ask(_ name: String) -> Bool? {
+    let sel = NSSelectorFromString(name)
+    guard let c = client, let k = keyboard, c.responds(to: sel) else { return nil }
+    return unsafeBitCast(c.method(for: sel), to: Ask.self)(c, sel, k)
+  }
+
+  /// macOS's "Adjust keyboard brightness in low light" (System Settings >
+  /// Keyboard) is on for this keyboard: in bright light macOS then keeps the
+  /// keys unlit, whatever level is set. nil: no keyboard light here, or a
+  /// macOS without the call. Read when asked (the control centre's note).
+  static func autoAdjust() -> Bool? {
+    guard let on = ask("isAutoBrightnessEnabledForKeyboard:") else { return nil }
+    return on && ask("isAmbientFeatureAvailableOnKeyboard:") != false
+  }
+
+  /// What macOS says about the light now, for a person looking into it
+  /// (src/tests/keyboard-light.sh --state): nil without a keyboard light.
+  static func state() -> [String: Any]? {
+    guard let v = get() else { return nil }
+    var d: [String: Any] = ["brightness": v, "level": level() ?? -1]
+    for (k, sel) in [("auto", "isAutoBrightnessEnabledForKeyboard:"), ("ambient_sensor", "isAmbientFeatureAvailableOnKeyboard:"),
+                     ("saturated", "isBacklightSaturatedOnKeyboard:"), ("suppressed", "isBacklightSuppressedOnKeyboard:"),
+                     ("dimmed", "isBacklightDimmedOnKeyboard:")] {
+      if let b = ask(sel) { d[k] = b }
+    }
+    return d
+  }
 }

@@ -418,6 +418,7 @@ class DetailsScreen(Screen):
                              else "nothing failed") + "\n", style="bright_black")
         for c in r.checks:
             mark, style = {"ok": ("ok", "green"), "skip": ("›", "blue") if c.human else ("–", "bright_black"),
+                           "warn": ("~", "yellow"),
                            "fail": ("!" if c.human else "x", "yellow" if c.human else "red")}[c.status]
             t.append(f"  {mark:<3}", style=style)
             t.append(f"{'Mac' if c.side == 'mac' else 'VM':<4}", style="bright_black")
@@ -426,8 +427,11 @@ class DetailsScreen(Screen):
                 # A long detail (often the step to take) on its own line, under the name.
                 sep = f"\n{' ' * 9}" if len(c.name) + len(c.detail) + 11 > self.size.width - 4 else "  "
                 # A step for the person (a failure, or a hint such as 1Password's own switch) stands out.
-                t.append(sep + c.detail, style="" if c.status == "fail" or c.human else "bright_black")
+                t.append(sep + c.detail, style="" if c.status in ("fail", "warn") or c.human else "bright_black")
             t.append("\n")
+            note = S.keyboard_auto_note(c, app.c.keyboard_auto)
+            if note:
+                t.append(f"{' ' * 9}{note}\n", style="yellow")
         t.append(f"\nLog, last {60 if self.full_log else 12} lines" + ("" if self.full_log else "  (l: more)") + "\n", style="bold")
         for line in self.log_lines or ["(nothing logged)"]:
             t.append("  " + line + "\n", style="bright_black")

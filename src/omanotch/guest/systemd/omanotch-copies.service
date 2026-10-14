@@ -1,0 +1,17 @@
+[Unit]
+Description=Omanotch: its copies of Omarchy's bar and background follow Omarchy's updates
+Documentation=https://github.com/gillesgoetsch/omacvm/tree/main/src/omanotch
+After=graphical-session.target omacvm-omanotch.service
+PartOf=graphical-session.target
+ConditionPathExists=%h/.local/lib/omanotch/copies.py
+
+[Service]
+Type=oneshot
+# At each login and after OmacVM's pacman hook (an update of Omarchy's bar or
+# background): a quick look, and only when one changed it waits for the end of
+# the update and an unlocked session, then follows (copies.py).
+ExecStart=/bin/bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec python3 %h/.local/lib/omanotch/copies.py --wait'
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=graphical-session.target

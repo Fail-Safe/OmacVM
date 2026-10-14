@@ -3,6 +3,25 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.12
+
+- **Omanotch's bar follows Omarchy's updates and keeps your edits.** Omanotch runs its own copy of
+  Omarchy's bar and background, and that copy stayed at the Omarchy it was made from. Now it follows
+  each Omarchy update the way Omarchy updates its own plugins: your own changes in the copy stay
+  when they don't touch what Omarchy changed. When they do, or OmacVM's patch doesn't fit the new
+  bar yet, the copy stays as it is and `omacvm check` and the control centre say so. If the new
+  bar doesn't load, it goes back to the one before.
+- **A new VM's Omanotch bar could stay unpatched.** Right after setting up a VM with Omanotch, the
+  shell could keep its compiled copy of the bar from before the patch, also after restarts: no bar
+  beside the notch. Update VM fixes such a VM, and OmacVM now clears that compiled copy whenever it
+  changes the bar.
+- **The control centre shows warnings:** a feature that works, but not quite as it should, says
+  why on its row (they were left out before).
+- **A note by the keyboard light while macOS keeps it off** (MacBooks). With "Adjust keyboard
+  brightness in low light" on, macOS turns the keyboard light off in bright light, and Shift with
+  the brightness keys cannot light it then. The control centre says so next to the keyboard light,
+  only while that setting is on.
+
 ## 3.1.11
 
 - **Swipe out to macOS with four fingers.** With four fingers the swipe out mostly did nothing:

@@ -133,6 +133,19 @@ def test_works_when_checked_and_nothing_failed(features):
     assert S.status_of(by(features, "mac-clock"), True, None, [], None)[0] is S.Status.WORKS
 
 
+def test_a_warning_works_and_says_why(features):
+    """WARN lines (works, not as it should): Omanotch's bar copy kept as it is."""
+    c = S.parse_check_tsv("warn\tbar copy\tnot updated, kept as it is: your edits overlap\t\tomanotch\n")
+    assert [(x.status, x.feature) for x in c] == [("warn", "omanotch")]
+    st, note = S.status_of(by(features, "omanotch"), True, None, c, None)
+    assert st is S.Status.WORKS and note == "bar copy: not updated, kept as it is: your edits overlap"
+    # A failure still comes first; a Mac warning says it is the Mac's.
+    assert S.status_of(by(features, "omanotch"), True, None, c + [chk("fail", "omanotch", name="n", detail="d")], None)[0] \
+        is S.Status.FAILING
+    m = S.parse_mac_checks([{"status": "warn", "name": "media keys", "detail": "not known", "feature": "bridge"}])
+    assert S.status_of(by(features, "bridge"), True, None, m, None) == (S.Status.WORKS, "Mac: media keys: not known")
+
+
 # ---- rows ----
 
 def test_rows_map_checks_and_local_avail(features):

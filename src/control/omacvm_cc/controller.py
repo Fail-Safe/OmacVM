@@ -79,6 +79,10 @@ class Controller:
         # next look of each side (the VM's checks, the Mac's status).
         self.stale_vm: set[str] = set()
         self.stale_mac: set[str] = set()
+        # macOS adjusts the keyboard light by itself ("Adjust keyboard
+        # brightness in low light"): the note by the keyboard light. Only from
+        # the Mac's answer of the moment, never from the cache.
+        self.keyboard_auto = False
         self.job_ends = 0   # bumped at each job's end: a look that started before it clears nothing
 
     # ---- the Mac ----
@@ -109,9 +113,11 @@ class Controller:
             self.mac_error = None
         except BridgeError as e:
             self.hello, self.mac_error = None, e
+            self.keyboard_auto = False
             return
         try:
             st = self.bridge.status()
+            self.keyboard_auto = st.get("keyboard_light_auto") is True
             if not st.get("pending"):
                 self.mac_status = st
                 if ends == self.job_ends:
@@ -119,6 +125,7 @@ class Controller:
                 self.local.save_cache(mac_status=st)
         except BridgeError as e:
             self.mac_error = e
+            self.keyboard_auto = False
         self.refresh_mouse_swipe()
         self.refresh_gestures()
 

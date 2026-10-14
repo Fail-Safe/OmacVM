@@ -58,6 +58,9 @@ class FakeMac:
         self.nonces: set = set()
         self.graphics: dict | None = None   # an OmacVM.app VM's Graphics (omacvm graphics --json)
         self.notch_area: dict | None = None  # an OmacVM.app VM's notch area (omacvm notch --json), with graphics
+        # macOS's "Adjust keyboard brightness in low light" (None: a Mac without
+        # a keyboard light, no key and no keyboard light check)
+        self.keyboard_auto: bool | None = None
         self.gpu_memory: dict | None = None  # an OmacVM.app VM's graphics memory (None: an older Mac without it)
         self.gpu_memory_at: list[float] = []  # when each gpu-memory request came
         self.mouse_swipe: dict | None = None   # {"magic_mouse", "fingers"} (None: an older Mac without it)
@@ -163,12 +166,17 @@ class FakeMac:
                         st["notch"] = fake.notch_area
                     return self.send(200, st)
                 if p == "/omacvm/status":
-                    return self.send(200, {"omacvm": fake.version, "features": [
+                    st = {"omacvm": fake.version, "features": [
                         {"name": "omanotch", "on": False, "available": fake.notch,
                          "reason": "" if fake.notch else "needs a MacBook with a notch"}],
                         "checks": [{"status": "fail", "name": "keyboard/trackpad access", "detail":
                                     "waiting for Accessibility: System Settings > Privacy & Security", "needs_human": True,
-                                    "feature": "gestures"}]})
+                                    "feature": "gestures"}]}
+                    if fake.keyboard_auto is not None:
+                        st["keyboard_light_auto"] = fake.keyboard_auto
+                        st["checks"].append({"status": "ok", "name": "keyboard light", "feature": "bridge",
+                                             "detail": "4 steps below macOS's lowest (keyboard_low_steps in config.json)"})
+                    return self.send(200, st)
                 if p == "/omacvm/updates":
                     return self.send(200, fake.updates())
                 if p.startswith("/omacvm/jobs/"):

@@ -573,6 +573,22 @@ When = PostTransaction
 Exec = /usr/local/lib/omacvm/omanotch-notifications.sh on
 HOOK
   if [[ -n $(/usr/local/lib/omacvm/omanotch-notifications.sh on || true) ]]; then restart_shell_later; fi
+  # Omanotch's copies of Omarchy's bar and background follow Omarchy's
+  # updates (its omanotch-copies.service, started from here after one).
+  install -Dm755 "$R/guest/omanotch-copies-hook.sh" /usr/local/lib/omacvm/omanotch-copies-hook
+  install -Dm644 /dev/stdin /etc/pacman.d/hooks/zz-omacvm-omanotch-copies.hook <<'HOOK'
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Target = usr/share/omarchy/shell/plugins/bar/*
+Target = usr/share/omarchy/shell/plugins/background/*
+
+[Action]
+Description = OmacVM: Omanotch's copies of Omarchy's bar and background follow it
+When = PostTransaction
+Exec = /usr/local/lib/omacvm/omanotch-copies-hook
+HOOK
 else
   # Also an Omanotch queued for the next login, not built yet.
   omanotch_off

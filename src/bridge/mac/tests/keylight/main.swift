@@ -2,6 +2,8 @@
 //   keylight-test          the steps, the dark-step skip, the popup value (no hardware)
 //   keylight-test live     this Mac's keyboard light: the dimmest step is kept and
 //                          lit, then the level from before comes back
+//   keylight-test state    what macOS says about it now (reads only): the level,
+//                          its auto setting, bright light ("saturated")
 import Foundation
 
 var failed = 0
@@ -119,6 +121,15 @@ func live() {
   check(KeyboardLight.step(up: false, low: true) == 0, "one press down: off")
 }
 
-if CommandLine.arguments.dropFirst().first == "live" { live() } else { offline() }
+switch CommandLine.arguments.dropFirst().first {
+case "live": live()
+case "state":
+  if let d = KeyboardLight.state() {
+    for k in d.keys.sorted() { print("\(k) \(d[k]!)") }
+    print("auto adjust (the control centre's note) \(KeyboardLight.autoAdjust().map { "\($0)" } ?? "unknown")")
+  } else { print("no keyboard light on this Mac") }
+  exit(0)
+default: offline()
+}
 if failed > 0 { print("\(failed) failed"); exit(1) }
 print("all passed")

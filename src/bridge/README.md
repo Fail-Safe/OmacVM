@@ -539,7 +539,19 @@ a key press never ends on "on but dark". Whether the keys flicker that low
 has not been seen yet (only a person can): if they do,
 `"keyboard_low_steps": false` in `config.json` and a restart of the Bridge
 bring back macOS's steps. `src/tests/keyboard-light.sh` tests the steps
-(`--live`: on this Mac's keyboard, then back to the level from before).
+(`--live`: on this Mac's keyboard, then back to the level from before;
+`--state` only reads what macOS says about the light).
+
+In bright light macOS keeps the keyboard light off while its "Adjust keyboard
+brightness in low light" is on (System Settings > Keyboard): the ambient light
+sensor overrides the level that is set (CoreBrightness reports the backlight
+"saturated"). Seen on a MacBook Air M2 (macOS 26, daylight): Shift + the
+brightness keys moved the level one step per press, the keys stayed dark;
+with the setting off every press lit them. So the Bridge cannot light it
+then either. While that setting is on, the control centre shows a note by the
+keyboard light (the Bridge's `/omacvm/status` answers `keyboard_light_auto`,
+read at each ask from `isAutoBrightnessEnabledForKeyboard:`; nothing in the
+log or `omacvm check`).
 
 macOS 15 has no public way to show its own volume popup on demand, so the VM
 draws it.

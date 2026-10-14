@@ -1691,3 +1691,26 @@ def test_graphics_row_fits_and_details_say_it_all(tmp_path, monkeypatch):
     finally:
         mac.stop()
         checks.stop()
+
+
+def test_keyboard_light_note_only_while_macos_adjusts_it(world):
+    """The Bridge's details: by the keyboard light, a note while macOS's
+    "Adjust keyboard brightness in low light" is on, none while it is off."""
+    from omacvm_cc import state as S
+    from omacvm_cc.tui import DetailsScreen
+    for auto in (True, False):
+        world.keyboard_auto = auto
+
+        async def go():
+            a = app()
+            async with a.run_test(size=(110, 40)) as pilot:
+                assert await settle(pilot, lambda: a.c.linked and a.c.mac_status and any(
+                    c.name == "keyboard light" for r in a.rows for c in r.checks))
+                _move_to(a, "bridge")
+                await pilot.press("enter")
+                assert await settle(pilot, lambda: isinstance(a.screen, DetailsScreen))
+                await pilot.pause(0.2)
+                body = " ".join(str(a.screen.query_one("#body").render()).split())
+                assert "keyboard light" in body
+                assert (S.KEYBOARD_AUTO_NOTE in body) is auto, body
+        asyncio.run(go())
