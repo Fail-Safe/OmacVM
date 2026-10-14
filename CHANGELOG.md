@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.11
 
 - **Swipe out to macOS with four fingers.** With four fingers the swipe out mostly did nothing:
   the fourth finger coming down a moment after the others looked like a pinch. Now it follows the
