@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.7 (unreleased)
 
 - **Shift and the brightness keys set the keyboard light reliably** (MacBooks, VM in front). Shift
   was often missed, so Shift + brightness changed the display instead (from a dim screen down to
