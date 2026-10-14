@@ -62,11 +62,20 @@
 //   P                                 Glide: macOS recognized a pinch (magnify)
 //   K <code> <0|1|2>                  UTM: a Cmd shortcut as Super+key (Linux keycode)
 //                                     (any app: a Magic Mouse flick as Back/Forward, 158/159)
-//   X <on|off>                        Swipe out to macOS on or off (on connect and when it changes)
+//   X <on 2|off>                      Swipe out to macOS on or off (on connect and when it changes).
+//                                     "2": this helper takes the swipe itself (below); a guest
+//                                     from 3.1.0-3.1.5 reads only "on" and says X left|right
 // and from the guest, once the handshake holds:
-//   X <left|right>                    a swipe went past its first or last workspace: out to the
-//                                     macOS Space on that side (only after "X on"; acted on only
-//                                     for the VM in front while captured, at most once a second)
+//   E <l> <r>                         (after "X on 2") where a swipe of fingers going left and
+//                                     right would go now: left|right = out to the macOS Space on
+//                                     that side, - = the guest's own workspace swipe; at once and
+//                                     on every workspace change. Such a swipe is the Mac's: it is
+//                                     held back from the guest until its way is clear and then
+//                                     drives macOS's own Space swipe (swipe-take.h)
+//   X <left|right>                    (guests from 3.1.0-3.1.5, after "X on") a swipe went past
+//                                     its first or last workspace: out to the macOS Space on
+//                                     that side in one step (acted on only for the VM in front
+//                                     while captured, at most once a second)
 // and first, the handshake (any VM on these networks, and any Mac program on
 // 127.0.0.1, can connect; neither side ever sends the Bridge's token itself):
 //   C <guest nonce>                   from the guest: 32 hex digits
@@ -101,9 +110,11 @@
 #include <time.h>
 #include "scroll-model.h"
 #include "mouse-model.h"
+#include "swipe-take.h"
 #include <IOKit/IOKitLib.h>
 #include <fcntl.h>
 #include <mach-o/dyld.h>
+#include <mach/mach_time.h>
 #include <signal.h>
 #include <spawn.h>
 #include <sys/stat.h>
@@ -225,7 +236,10 @@ static int vmOffSpace;
 // 1 = UTM, 2 = Fusion, 3 = OmacVM.app, the index into listenAddrs). One connection per VM used to mean
 // two running VMs pushed each other off every two seconds.
 #define MAX_CLIENTS 8
-static struct { int fd, net, gestures, glide, target; unsigned gen; char ip[32], name[256]; } clients[MAX_CLIENTS];
+// edge: where the guest says a swipe of fingers going left [0] and right [1]
+// goes now ("E", -1 the macOS Space on the left, +1 on the right, 0 its own
+// swipe); edgeKnown: it said so since it connected.
+static struct { int fd, net, gestures, glide, target, edge[2], edgeKnown; unsigned gen; char ip[32], name[256]; } clients[MAX_CLIENTS];
 static volatile int frontNet = -1;
 static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
@@ -265,7 +279,9 @@ static int pinchSent;             // P sent for the current two-finger touch
 // a two-finger swipe is dropped until then (monoNow; it runs out by itself,
 // so a mouse gone mid-swipe never keeps scrolling from the VM).
 #define MAX_MICE 4
-static struct { MTDeviceRef dev; uint64_t id; int w, h, sent, fingers; MouseState st; } mice[MAX_MICE];
+// take: its swipe as the Mac's (swipe out to macOS); takeAt: the swipe's
+// travel on the guest's touchpad at the last frame (trackpad widths).
+static struct { MTDeviceRef dev; uint64_t id; int w, h, sent, fingers; MouseState st; SwipeTake take; double takeAt; } mice[MAX_MICE];
 static int nMice;
 static pthread_mutex_t mouseLock = PTHREAD_MUTEX_INITIALIZER;   // mice
 static volatile double mouseSwipeUntil;
@@ -407,6 +423,14 @@ static float d0, cx0, cy0;
 
 static int touching(const MTTouch *t) { return t->state >= 1 && t->state <= 5 && t->zTotal > 0.0f; }
 
+// Swipe out that follows the fingers (below, with the swipe out): what
+// becomes of this trackpad frame (TK_*), and the frames held back meanwhile.
+static int takePadFrame(MTTouch **c, int k);
+static int keepFrame(const char *line, size_t len);
+static void takePadPass(void);
+static void flushKept(void);
+static void dropKept(void);
+
 static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int frame) {
   (void)ts; (void)frame;
   MTTouch *c[16]; int k = 0;
@@ -453,12 +477,34 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
   }
   if (k != 2) pinchArmed = 0;
 
+  char buf[1024]; int len = 0;
   if (send) {
-    char buf[1024]; int len = snprintf(buf, sizeof buf, "F %d", k);
+    len = snprintf(buf, sizeof buf, "F %d", k);
     for (int i = 0; i < k && len < (int)sizeof buf - 64; i++)
       len += snprintf(buf + len, sizeof buf - (size_t)len, " %d %.5f %.5f %.3f", c[i]->pathIndex,
                       c[i]->normalized.pos.x, 1.0f - c[i]->normalized.pos.y, c[i]->zTotal);
     buf[len++] = '\n';
+  }
+  // A swipe at the VM's edge may be the Mac's (swipe out to macOS): held
+  // back until its way is clear, then the guest's after all, or never.
+  switch (takePadFrame(c, k)) {
+  case TK_HOLD:
+    if (!len || keepFrame(buf, (size_t)len)) return 0;
+    takePadPass();   // too many to hold: the guest's after all
+    flushKept();
+    break;
+  case TK_FLUSH:
+    flushKept();   // then this frame, as any other
+    break;
+  case TK_BEGIN: case TK_MOVE: case TK_END: case TK_DROP:
+    dropKept();
+    if (forwarding) { sendLine("F 0\n", 4); forwarding = 0; }   // a two-finger touch it began as
+    return 0;
+  default:
+    break;
+  }
+
+  if (len) {
     sendLine(buf, (size_t)len);
     forwarding = 1;
   } else if (forwarding) {
@@ -473,6 +519,7 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
 // capture is read right), but only a captured VM that wants gestures gets
 // anything.
 static int mouseSwipeFingers(void);
+static int takeMouseFrame(SwipeTake *t, int k, double step);
 static int mouseFrameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int frame) {
   (void)ts; (void)frame;
   MouseTouch c[16]; int k = 0;
@@ -492,6 +539,7 @@ static int mouseFrameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int
   float dx = mice[m].st.dx;
   int on = capturing && gesturesOn();
   char buf[256]; int len = 0;
+  int taken = 0;
   if (act == MOUSE_SWIPE && on) {
     // Four fingers (or three, MouseSwipeFingers) in the middle of the guest's
     // touchpad, moved sideways as the two on the mouse (the guest scales by
@@ -499,22 +547,36 @@ static int mouseFrameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int
     // workspaces with 3 and 4 fingers, and users who give 3 fingers to
     // something else (window snapping) keep 4 for it. Read when a swipe
     // starts, so a change in the app counts from the next swipe.
-    if (!mice[m].sent) mice[m].fingers = mouseSwipeFingers();
+    if (!mice[m].sent && mice[m].take.state == TAKE_IDLE) mice[m].fingers = mouseSwipeFingers();
     int nf = mice[m].fingers == 3 ? 3 : 4;
-    float o = MOUSE_SWIPE_GAIN * dx * 100.0f / (float)(tpW > 0 ? tpW : 15600);
+    float scale = MOUSE_SWIPE_GAIN * 100.0f / (float)(tpW > 0 ? tpW : 15600);
+    // At the VM's edge it may be the Mac's swipe out (as a trackpad's): its
+    // first frame brings the travel that made it a swipe.
+    double at = dx * scale, step = mice[m].take.state == TAKE_IDLE ? at + (mice[m].st.ax - mice[m].st.sx) * scale : at - mice[m].takeAt;
+    mice[m].takeAt = at;
+    int tk = takeMouseFrame(&mice[m].take, nf, step);
+    taken = tk != TK_FORWARD && tk != TK_FLUSH;
+    float o = dx * scale;
     if (o > 0.35f) o = 0.35f;
     if (o < -0.35f) o = -0.35f;
-    len = snprintf(buf, sizeof buf, "F %d", nf);
-    for (int i = 0; i < nf; i++)
-      len += snprintf(buf + len, sizeof buf - (size_t)len, " %d %.5f %.5f %.3f", MOUSE_FINGER_ID + i,
-                      0.5f - 0.05f * (float)(nf - 1) + 0.1f * (float)i + o, 0.5f, 0.5f);
-    buf[len++] = '\n';
-    mice[m].sent = 1;
+    if (!taken) {
+      len = snprintf(buf, sizeof buf, "F %d", nf);
+      for (int i = 0; i < nf; i++)
+        len += snprintf(buf + len, sizeof buf - (size_t)len, " %d %.5f %.5f %.3f", MOUSE_FINGER_ID + i,
+                        0.5f - 0.05f * (float)(nf - 1) + 0.1f * (float)i + o, 0.5f, 0.5f);
+      buf[len++] = '\n';
+      mice[m].sent = 1;
+    }
     mouseSwipeUntil = monoNow() + MOUSE_SWIPE_HOLD;
-  } else if (act == MOUSE_SWIPE_END && mice[m].sent) {
-    len = snprintf(buf, sizeof buf, "F 0\n");
-    logf_("Magic Mouse: two-finger swipe %s, %.0f mm -> %d-finger swipe in the VM", before >= 0 ? "right" : "left", fabsf(before),
-          mice[m].fingers == 3 ? 3 : 4);
+  } else if (act == MOUSE_SWIPE_END && (mice[m].sent || mice[m].take.state != TAKE_IDLE)) {
+    int tk = takeMouseFrame(&mice[m].take, 0, 0);
+    if (mice[m].sent) {
+      len = snprintf(buf, sizeof buf, "F 0\n");
+      logf_("Magic Mouse: two-finger swipe %s, %.0f mm -> %d-finger swipe in the VM", before >= 0 ? "right" : "left", fabsf(before),
+            mice[m].fingers == 3 ? 3 : 4);
+    } else if (tk == TK_END) {
+      logf_("Magic Mouse: two-finger swipe %s, %.0f mm -> swipe out to macOS", before >= 0 ? "right" : "left", fabsf(before));
+    }
     mice[m].sent = 0;
     mouseSwipeUntil = monoNow() + MOUSE_SWIPE_HOLD;
   } else if ((act == MOUSE_BACK || act == MOUSE_FORWARD) && on) {
@@ -1174,10 +1236,19 @@ static void logPermissions(void) {
 }
 
 static void swipeOutLook(void);
+static void takeLook(void);
+static void replayLook(void);
+static int takeOn(void);
 static void updateCapture(CFRunLoopTimerRef t, void *info) {
   (void)info;
   logPermissions();
   swipeOutLook();
+  // While a swipe out is the Mac's, macOS's own Space move shows other
+  // windows and apps: the capture stays as it is until it is over.
+  if (takeOn()) {
+    if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + 0.2);
+    return;
+  }
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
   int net = vmNet(pid, name, &frontForeign);
@@ -1192,6 +1263,8 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   // Space (its full-screen VM on a Space not shown).
   if (other || (net >= 0 && !front)) win = frontWindow(pid);
   frontChanged(pid, net, front, title, win, other);
+  takeLook();   // where a swipe out would go (only while it may)
+  replayLook();
   if (t) {
     // Every 0.2 s while a VM app is in front, else every 2 s; the slow look
     // may come up to 0.5 s late so macOS can batch it with other wake-ups.
@@ -1786,7 +1859,132 @@ static CGEventFlags heldNow(void) { return CGEventSourceFlagsState(kCGEventSourc
 // the settings domain for the next start.
 static int swipeSign = 1;
 
+// ---- the Dock's swipe: what a trackpad's three/four-finger swipe gives the Dock ----
+// macOS 27 reads it from an IOHIDEvent attached to the event (private,
+// IOKit + SkyLight, looked up at run time; Mac Mouse Fix found the same,
+// TouchSimulator.m); the event's fields, which older macOS reads, are
+// ignored there (the mini, 2026-10-13). progress: in the Dock's units,
+// negative toward the Space on the right (one Space = 1 + 1 / (n - 1) for
+// a display with n Spaces); the end's speed in the same units per second.
+// Ended finishes the move, Cancelled goes back: the trackpad's own swipe
+// decides that at the lift, so do we (swipe-take.h).
+#define kSwipeChanged 2
+#define kSwipeCancelled 8
+#define HID_DOCK_SWIPE 23
+#define HID_VELOCITY 9
+#define HID_FIELD(type, i) ((uint32_t)(type) << 16 | (uint32_t)(i))
+#define HID_PHASE_SHIFT 24
+#define HID_FLAVOR_DOCK 3
+typedef const void *HIDEventRef;
+static HIDEventRef (*hidCreate)(CFAllocatorRef, uint32_t, uint64_t, uint32_t);
+static void (*hidSetInt)(HIDEventRef, uint32_t, CFIndex);
+static void (*hidSetFloat)(HIDEventRef, uint32_t, double);
+static void (*hidAppend)(HIDEventRef, HIDEventRef, uint32_t);
+static void (*hidAttach)(CGEventRef, HIDEventRef);
+
+static int lookUpHID(void) {
+  static int looked, ok;
+  if (!looked) {
+    looked = 1;
+    dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY);
+    hidCreate = (HIDEventRef (*)(CFAllocatorRef, uint32_t, uint64_t, uint32_t))dlsym(RTLD_DEFAULT, "IOHIDEventCreate");
+    hidSetInt = (void (*)(HIDEventRef, uint32_t, CFIndex))dlsym(RTLD_DEFAULT, "IOHIDEventSetIntegerValue");
+    hidSetFloat = (void (*)(HIDEventRef, uint32_t, double))dlsym(RTLD_DEFAULT, "IOHIDEventSetFloatValue");
+    hidAppend = (void (*)(HIDEventRef, HIDEventRef, uint32_t))dlsym(RTLD_DEFAULT, "IOHIDEventAppendEvent");
+    hidAttach = (void (*)(CGEventRef, HIDEventRef))dlsym(RTLD_DEFAULT, "SLEventSetIOHIDEvent");
+    ok = hidCreate && hidSetInt && hidSetFloat && hidAppend && hidAttach;
+    if (!ok) logf_("swipe out: macOS gives no way to post the Dock's swipe here (IOHIDEvent): one step at the lift");
+  }
+  return ok;
+}
+
+// The swipe as macOS 27 and newer read it (else the fields).
+static int hidSwipeOS(void) {
+  static int v = -1;
+  if (v < 0) { v = 0; if (__builtin_available(macOS 27.0, *)) v = 1; }
+  return v;
+}
+static int (*hidSwipeFn)(void) = hidSwipeOS;
+
+// One event of the Dock's swipe; *extra: a second one to post right after it
+// (the gesture event the fields need), or NULL. NULL: none could be made.
+static CGEventRef dockSwipeEvent(int asHID, int phase, double progress, double speed, CGPoint at, CGEventRef *extra) {
+  *extra = NULL;
+  int end = phase == kSwipeEnded || phase == kSwipeCancelled;
+  if (asHID) {
+    if (!lookUpHID()) return NULL;
+    uint64_t now = mach_absolute_time();
+    HIDEventRef h = hidCreate(kCFAllocatorDefault, HID_DOCK_SWIPE, now, (uint32_t)phase << HID_PHASE_SHIFT);
+    if (!h) return NULL;
+    hidSetInt(h, HID_FIELD(HID_DOCK_SWIPE, 1), 1);                 // motion: horizontal
+    hidSetInt(h, HID_FIELD(HID_DOCK_SWIPE, 5), HID_FLAVOR_DOCK);   // flavor: the Dock's
+    hidSetFloat(h, HID_FIELD(HID_DOCK_SWIPE, 2), progress);
+    if (end) {
+      HIDEventRef v = hidCreate(kCFAllocatorDefault, HID_VELOCITY, now, 0);
+      if (v) {
+        hidSetFloat(v, HID_FIELD(HID_VELOCITY, 0), speed);
+        hidSetFloat(v, HID_FIELD(HID_VELOCITY, 1), speed);
+        hidSetFloat(v, HID_FIELD(HID_VELOCITY, 2), 0);
+        hidAppend(h, v, 0);
+        CFRelease(v);
+      }
+    }
+    CGEventRef e = CGEventCreate(NULL);
+    if (e) {
+      CGEventSetType(e, (CGEventType)kCGSEventDockControl);
+      CGEventSetLocation(e, at);
+      hidAttach(e, h);
+    }
+    CFRelease(h);
+    return e;
+  }
+  CGEventRef dock = CGEventCreate(NULL), gesture = CGEventCreate(NULL);
+  if (!dock || !gesture) {
+    if (dock) CFRelease(dock);
+    if (gesture) CFRelease(gesture);
+    return NULL;
+  }
+  float f = (float)progress; uint32_t bits; memcpy(&bits, &f, sizeof bits);
+  CGEventSetIntegerValueField(gesture, kCGSEventTypeField, kCGSEventGesture);
+  CGEventSetIntegerValueField(dock, kCGSEventTypeField, kCGSEventDockControl);
+  CGEventSetIntegerValueField(dock, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
+  CGEventSetIntegerValueField(dock, kCGEventGesturePhase, phase);
+  CGEventSetIntegerValueField(dock, 134, phase);                    // the phase again, as a trackpad's
+  CGEventSetDoubleValueField(dock, kCGEventGestureSwipeProgress, progress);
+  CGEventSetIntegerValueField(dock, kCGEventScrollGestureFlagBits, (int64_t)bits);   // the progress as a float's bits
+  CGEventSetIntegerValueField(dock, kCGEventGestureSwipeMotion, 1);  // horizontal
+  CGEventSetIntegerValueField(dock, 165, 1);
+  CGEventSetDoubleValueField(dock, kCGEventGestureScrollY, 1.401298464e-45);    // FLT_TRUE_MIN: horizontal
+  CGEventSetDoubleValueField(dock, kCGEventGestureZoomDeltaX, 1.401298464e-45);
+  if (end) {
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeVelocityX, speed);
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeVelocityY, speed);
+  }
+  CGEventSetLocation(dock, at);
+  CGEventSetLocation(gesture, at);
+  *extra = gesture;
+  return dock;
+}
+
+static int dockPost(int phase, double progress, double speed, CGPoint at) {
+  CGEventRef extra, e = dockSwipeEvent(hidSwipeFn(), phase, progress, speed, at, &extra);
+  if (!e) return 0;
+  CGEventPost(kCGSessionEventTap, e);   // after the HID taps (ours, QEMU's): they never see it
+  CFRelease(e);
+  if (extra) { CGEventPost(kCGSessionEventTap, extra); CFRelease(extra); }
+  return 1;
+}
+
+static int (*dockPostFn)(int, double, double, CGPoint) = dockPost;   // a seam for the offline test
+
 static int dockSwipe(CGPoint at, int phase, int right) {
+  if (hidSwipeFn()) {
+    // macOS 27 reads only the HID event: a short way toward that Space,
+    // then finished (Ended always finishes; the way's sign is known there).
+    double s = right ? -1.0 : 1.0;
+    if (phase == kSwipeBegan) return dockPostFn(kSwipeBegan, s * 0.05, 0, at) && dockPostFn(kSwipeChanged, s * 0.2, 0, at);
+    return dockPostFn(kSwipeEnded, s * 0.2, s * 2.0, at);
+  }
   CGEventRef dock = CGEventCreate(NULL), gesture = CGEventCreate(NULL);
   if (!dock || !gesture) {
     if (dock) CFRelease(dock);
@@ -1829,7 +2027,7 @@ static int postSwipe(CGDirectDisplayID d, CGRect b, int dir) {
   (void)d;
   CGPoint p = pointerNow();
   CGPoint at = CGRectContainsPoint(b, p) ? p : CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b));
-  int right = dir * swipeSign > 0;
+  int right = hidSwipeFn() ? dir > 0 : dir * swipeSign > 0;   // the HID event's way is known
   return dockSwipe(at, kSwipeBegan, right) && dockSwipe(at, kSwipeEnded, right);
 }
 
@@ -2343,58 +2541,83 @@ static void leaveVM(void) {
 }
 
 // ---- Swipe out to macOS (#342) ----
-// The guest decides (its workspaces as they were when the swipe began, the
-// fingers' way at the lift) and says "X left|right"; the Mac moves the way
-// the combo does (EscapeSwipe: the pointer's display, or each display that
-// shows the VM), only to that side: no Space there = nothing, no notice
-// (user, 2026-10-12). Then the same checks as the combo's (its shortcut, a
-// Dock swipe, the other direction once). Pressed in macOS, the combo goes
-// back into the VM, as after the combo.
+// A guest that says where swipes go ("E", after "X on 2") leaves such a
+// swipe to the Mac, which follows the fingers (below, "Swipe out that
+// follows the fingers"). A guest from 3.1.0-3.1.5 decides (its workspaces as
+// they were when the swipe began, the fingers' way at the lift) and says "X
+// left|right"; the Mac then moves the way the combo does (EscapeSwipe: the
+// pointer's display, or each display that shows the VM), only to that side:
+// no Space there = nothing, no notice (user, 2026-10-12). Then the same
+// checks as the combo's (its shortcut, a Dock swipe, the other direction
+// once). Pressed in macOS, the combo goes back into the VM, as after the
+// combo.
 static volatile int swipeOut = -1;   // the setting as last read (written on the main thread), -1: not yet
+// "2": this helper follows the fingers itself (the guest says where swipes go,
+// "E"); a guest from 3.1.0-3.1.5 reads "on" and decides at the lift ("X").
+#define SWIPE_OUT_ON "X on 2\n"
 static double swipeOutLooked = -1, swipeOutAt = -1;
 static double swipeOutEvery = 1.0;   // s between two looks at the setting (the offline test sets 0)
 static double swipeOutGap = 1.0;     // s: at most one swipe out in this time
 
 // The setting, looked at with the capture check (at most once a second):
-// every guest learns a change ("X on|off"), a new one on connect.
+// every guest learns a change ("X on 2|off"), a new one on connect.
+static void takeTravelLook(void);
 static void swipeOutLook(void) {
   double now = monoNow();
   if (swipeOutLooked >= 0 && now - swipeOutLooked < swipeOutEvery) return;
   swipeOutLooked = now;
   int on = swipeOutFn() ? 1 : 0;
+  if (on) takeTravelLook();
   if (on == swipeOut) return;
   swipeOut = on;
   logf_("swipe out to macOS %s", on ? "on" : "off");
-  sendTo(1, on ? "X on\n" : "X off\n", on ? 5 : 6);
+  if (!on) {
+    // A guest says where swipes go again after the next "X on 2".
+    pthread_mutex_lock(&sendLock);
+    for (int i = 0; i < MAX_CLIENTS; i++) clients[i].edgeKnown = 0;
+    pthread_mutex_unlock(&sendLock);
+  }
+  sendTo(1, on ? SWIPE_OUT_ON : "X off\n", on ? strlen(SWIPE_OUT_ON) : 6);
 }
 
-static void leaveVMToward(int dir) {
+// Out of the VM toward one side (dir): the pointer's display, or with
+// EscapeSwipe all each display that shows the VM, one Space with macOS's
+// shortcut (the combo's way). done: a display the fingers already took out
+// (the swipe that follows them): only the others follow, with "all".
+// Returns how many displays it moves.
+static int leaveToward(int dir, CGDirectDisplayID done) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
   CGPoint p = pointerFn();
   const char *side = dir < 0 ? "left" : "right";
+  if (done && !all) return 0;
   nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0; movesCancelled = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
     int at = spaceIndex(d, d->current);
-    if (at < 0 || !showsVM(d, wins, nw) || !(all || CGRectContainsPoint(d->bounds, p))) continue;
+    if (d->id == done || at < 0 || !showsVM(d, wins, nw) || !(all || CGRectContainsPoint(d->bounds, p))) continue;
     if (at + dir < 0 || at + dir >= d->n) continue;   // no Space on that side of this display
     if (addMove(d, dir, d->spaces[at + dir])) rememberOn(left, d->id, d->current);
   }
   if (!nMoves) {
-    logf_("swipe out to the %s: %s", side, nd ? "no macOS Space on that side: nothing done" : "macOS gives no Spaces information: nothing done");
-    return;
+    if (!done) logf_("swipe out to the %s: %s", side, nd ? "no macOS Space on that side: nothing done" : "macOS gives no Spaces information: nothing done");
+    return 0;
   }
   // As the combo: macOS gets the trackpad and keys back at once (the guest
   // lets go), and the Dock swipe below is not dropped by our own tap.
-  capturing = 0; escaped = 1;
-  logf_("swipe out to the %s: capture off", side);
-  sendState("esc");
+  if (capturing) {
+    capturing = 0; escaped = 1;
+    logf_("swipe out to the %s: capture off", side);
+    sendState("esc");
+  }
   whenKeysUp(^{
-    if (runMoves(BY_SHORTCUT, "swipe out")) after(^{ checkLeave(BY_SHORTCUT); });
+    if (runMoves(BY_SHORTCUT, done ? "swipe out, the other displays" : "swipe out")) after(^{ checkLeave(BY_SHORTCUT); });
     else { shortcutOff = 1; checkLeave(BY_SHORTCUT); }
   }, 50);
+  return nMoves;
 }
+
+static void leaveVMToward(int dir) { leaveToward(dir, 0); }
 
 // "X left|right" from a guest (main thread): only the VM in front, captured,
 // with the setting on, and one at a time.
@@ -2421,11 +2644,306 @@ static void swipeOutFrom(int fd, unsigned gen, int dir) {
   leaveVMToward(dir);
 }
 
-// One line a guest sent after its handshake (its reader thread): acted on
-// on the main thread. Anything else is skipped.
+// "E" (after "X on 2"): left -1, right +1, "-" 0; anything else 2.
+static int edgeWord(const char *w) {
+  return !strcmp(w, "left") ? -1 : !strcmp(w, "right") ? 1 : !strcmp(w, "-") ? 0 : 2;
+}
+
+// One line a guest sent after its handshake (its reader thread). "E <l> <r>"
+// is kept with its connection (the trackpad's thread reads it when a swipe
+// begins); "X left|right" is acted on on the main thread. Anything else is
+// skipped.
 static void guestLine(int fd, unsigned gen, const char *line) {
+  char a[8], b[8], more;
+  if (!strncmp(line, "E ", 2) && sscanf(line + 2, "%7s %7s %c", a, b, &more) == 2) {
+    int l = edgeWord(a), r = edgeWord(b);
+    if (l == 2 || r == 2) return;
+    pthread_mutex_lock(&sendLock);
+    for (int i = 0; i < MAX_CLIENTS; i++)
+      if (clients[i].fd == fd && clients[i].gen == gen) { clients[i].edge[0] = l; clients[i].edge[1] = r; clients[i].edgeKnown = 1; }
+    pthread_mutex_unlock(&sendLock);
+    if (verbose) logf_("swipe out: fingers to the left %s, to the right %s", a, b);
+    return;
+  }
   int dir = !strcmp(line, "X left") ? -1 : !strcmp(line, "X right") ? 1 : 0;
   if (dir) dispatch_async(dispatch_get_main_queue(), ^{ swipeOutFrom(fd, gen, dir); });
+}
+
+// ---- Swipe out that follows the fingers ----
+// With a guest that says where swipes go ("E", after "X on 2"), a swipe out
+// of the VM is the Mac's: held back from the guest until its way is clear
+// (swipe-take.h), then macOS's own Space swipe on the pointer's display
+// follows the fingers and finishes or goes back at the lift; the guest sees
+// none of it. If macOS does not follow (a finished one did not change the
+// Space), it is the one step as before (leaveToward); twice in a row, the
+// one step from then on until the helper starts again. (Whether the display
+// moves while the swipe runs cannot be asked from here: macOS's
+// CGSManagedDisplayIsAnimating said no in this helper while the Space
+// followed, the mini 2026-10-14.) A Magic Mouse's swipe too (mouseFrameCb).
+
+// What the capture check last saw of the pointer's display while a VM is
+// captured (main thread writes, the trackpad's and the mouse's threads read).
+typedef struct {
+  int ok, n, left, right;   // n: its Spaces; left, right: one beside the VM's
+  CGDirectDisplayID id;
+  CGRect b;
+  uint64_t vmSpace;
+} TakeDisplay;
+// The swipe the Mac has now (one at a time).
+typedef struct {
+  int on, follows, toward;
+  double began, unit;       // unit: the Dock's progress for one Space there
+  CGPoint at;
+  TakeDisplay d;
+} TakeRun;
+static TakeDisplay takeDisp;
+static TakeRun takeRun;
+static pthread_mutex_t takeLock = PTHREAD_MUTEX_INITIALIZER;   // takeDisp, takeRun.on
+static SwipeTake padTake;
+static double (*takeClockFn)(void) = monoNow;   // the offline test's own clock
+static double takeClock(void) { return takeClockFn(); }
+static volatile int dockFollows = 1;     // 0: macOS did not follow twice in a row: one step from then on (main thread writes)
+static int dockMisses;                   // finished swipes in a row that did not change the Space (main thread)
+static volatile double takeQuietUntil;   // the real trackpad's gesture events dropped until then
+static volatile double takeTravel = TAKE_TRAVEL;   // trackpad widths per Space ("SwipeOutTravel")
+#define TAKE_QUIET 0.4                   // s after a taken swipe's end
+#define TAKE_SETTLE 0.6                  // s macOS takes to slide the VM's Space back
+static double takeHoldUntil;             // the capture check waits until then (takeLock)
+
+// "SwipeOutTravel" (hidden, for tuning; defaults write org.omacvm.gestures
+// SwipeOutTravel -float 0.5): how much of the trackpad's width moves macOS
+// one Space. Not set or out of 0.15-1.5: TAKE_TRAVEL.
+static void takeTravelLook(void) {
+  CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("SwipeOutTravel"), GESTURES_DOMAIN);
+  double t = 0;
+  if (v && CFGetTypeID(v) == CFNumberGetTypeID()) CFNumberGetValue((CFNumberRef)v, kCFNumberDoubleType, &t);
+  if (v) CFRelease(v);
+  takeTravel = t >= 0.15 && t <= 1.5 ? t : TAKE_TRAVEL;
+}
+
+// A guest in front that says where swipes go, with a way out.
+static int edgesKnown(void) {
+  int any = 0;
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i].fd >= 0 && clients[i].target && clients[i].edgeKnown && (clients[i].edge[0] || clients[i].edge[1])) any = 1;
+  pthread_mutex_unlock(&sendLock);
+  return any;
+}
+
+// With the capture check (main thread): the pointer's display, while it is
+// worth knowing.
+static void takeLook(void) {
+  TakeDisplay t = { 0 };
+  if (capturing && swipeOut == 1 && edgesKnown()) {
+    DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
+    CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
+    CGPoint p = pointerFn();
+    for (int i = 0; i < nd; i++) {
+      const DisplaySpaces *d = &ds[i];
+      int at = spaceIndex(d, d->current);
+      if (at < 0 || !CGRectContainsPoint(d->bounds, p) || !showsVM(d, wins, nw)) continue;
+      t = (TakeDisplay){ 1, d->n, at > 0, at + 1 < d->n, d->id, d->bounds, d->current };
+      break;
+    }
+  }
+  pthread_mutex_lock(&takeLock);
+  takeDisp = t;
+  if (takeRun.on && takeClock() - takeRun.began > 10) takeRun.on = 0;   // its end never came
+  pthread_mutex_unlock(&takeLock);
+}
+
+// When a swipe begins: where fingers going left and right go (every VM in
+// front must say the same; 0 = the guest's), only toward a macOS Space.
+static void takeSides(int *sl, int *sr) {
+  *sl = *sr = 0;
+  if (swipeOut != 1) return;
+  int e[2] = { 0, 0 }, n = 0, all = 1;
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (clients[i].fd < 0 || !clients[i].target) continue;
+    if (!clients[i].edgeKnown) all = 0;
+    else if (!n++) { e[0] = clients[i].edge[0]; e[1] = clients[i].edge[1]; }
+    else for (int w = 0; w < 2; w++) if (e[w] != clients[i].edge[w]) e[w] = 0;
+  }
+  pthread_mutex_unlock(&sendLock);
+  if (!n || !all) return;
+  pthread_mutex_lock(&takeLock);
+  TakeDisplay t = takeDisp; int busy = takeRun.on;
+  pthread_mutex_unlock(&takeLock);
+  if (!t.ok || busy) return;
+  for (int w = 0; w < 2; w++) {
+    int s = (e[w] < 0 && t.left) || (e[w] > 0 && t.right) ? e[w] : 0;
+    if (w) *sr = s; else *sl = s;
+  }
+}
+
+// macOS did not follow a swipe (main thread): that one goes in one step; two
+// in a row, every one from then on (logged once).
+static void takeMissed(const char *why) {
+  if (!dockFollows) return;
+  if (++dockMisses < 2) { logf_("swipe out: macOS did not follow this swipe (%s): one step", why); return; }
+  dockFollows = 0;
+  logf_("swipe out: macOS does not follow the swipe here (%s): one step at the lift from now on", why);
+}
+
+static void takeLanded(TakeRun r, int looks);
+
+// A taken swipe's end (main thread).
+static void takeEnded(TakeRun r, int commit, double progress, double speed) {
+  const char *side = r.toward < 0 ? "left" : "right";
+  if (!commit) {
+    logf_("swipe out to the %s: back into the VM (%.2f of a Space, %.1f Spaces/s)", side, progress, speed);
+    // macOS slides the VM's Space back: the capture check waits for that too.
+    pthread_mutex_lock(&takeLock); takeRun.on = 0; takeHoldUntil = takeClock() + TAKE_SETTLE; pthread_mutex_unlock(&takeLock);
+    return;
+  }
+  swipeOutAt = monoNow();
+  if (!r.follows) {
+    logf_("swipe out to the %s: one step (%.2f of a Space, %.1f Spaces/s)", side, progress, speed);
+    pthread_mutex_lock(&takeLock); takeRun.on = 0; pthread_mutex_unlock(&takeLock);
+    leaveToward(r.toward, 0);
+    return;
+  }
+  rememberOn(left, r.d.id, r.d.vmSpace);   // the combo in macOS goes back to it
+  logf_("swipe out to the %s: out with the fingers (%.2f of a Space, %.1f Spaces/s)%s", side, progress, speed,
+        capturing ? ": capture off" : "");
+  if (capturing) { capturing = 0; escaped = 1; sendState("esc"); }
+  after(^{ takeLanded(r, 0); });
+}
+
+// Did macOS finish it: the display shows another Space. Else the one step.
+static void takeLanded(TakeRun r, int looks) {
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
+  const DisplaySpaces *d = displayIn(ds, nd, r.d.id);
+  if (d && d->current == r.d.vmSpace && looks < LATE_LOOKS) { afterLook(^{ takeLanded(r, looks + 1); }); return; }
+  pthread_mutex_lock(&takeLock); takeRun.on = 0; pthread_mutex_unlock(&takeLock);
+  if (!d) { logf_("swipe out: the display is gone"); return; }
+  if (d->current != r.d.vmSpace) {
+    dockMisses = 0;
+    logf_("swipe out: out of the VM's Space (macOS's swipe)");
+    if (!leaveToward(r.toward, r.d.id)) focusPointerDisplay();   // with "all" the other displays follow
+    return;
+  }
+  takeMissed("a finished swipe did not change the Space");
+  leaveToward(r.toward, 0);
+}
+
+// A swipe out is the Mac's now (until macOS has finished it, at most 5 s), or
+// macOS still slides the VM's Space back after one: the capture check waits.
+static int takeOn(void) {
+  pthread_mutex_lock(&takeLock);
+  double now = takeClock();
+  int on = (takeRun.on && now - takeRun.began < 5) || now < takeHoldUntil;
+  pthread_mutex_unlock(&takeLock);
+  return on;
+}
+
+static double takeUnits(double spaces) { return -takeRun.toward * spaces * takeRun.unit; }
+
+// What a frame of a swipe the Mac may take does (the trackpad's or a Magic
+// Mouse's thread): macOS's swipe begins, moves, ends.
+static void takeAct(SwipeTake *s, int tk, const char *who) {
+  double now = takeClock();
+  if (tk == TK_BEGIN) {
+    pthread_mutex_lock(&takeLock);
+    takeRun.on = 1; takeRun.d = takeDisp; takeRun.toward = s->toward; takeRun.began = now;
+    takeRun.follows = dockFollows && (!hidSwipeFn() || lookUpHID());
+    takeRun.unit = takeRun.d.n <= 1 ? 2.0 : 1.0 + 1.0 / (takeRun.d.n - 1);
+    CGPoint p = pointerFn();
+    takeRun.at = CGRectContainsPoint(takeRun.d.b, p) ? p : CGPointMake(CGRectGetMidX(takeRun.d.b), CGRectGetMidY(takeRun.d.b));
+    pthread_mutex_unlock(&takeLock);
+    logf_("swipe out to the %s (%s): %s", s->toward < 0 ? "left" : "right", who,
+          takeRun.follows ? "macOS's Space follows the fingers" : "one step at the lift");
+    if (takeRun.follows && !dockPostFn(kSwipeBegan, takeUnits(s->progress), 0, takeRun.at)) takeRun.follows = 0;
+  } else if (tk == TK_MOVE && takeRun.follows) {
+    dockPostFn(kSwipeChanged, takeUnits(s->progress), 0, takeRun.at);
+  } else if (tk == TK_END) {
+    int commit = takeRun.follows ? s->commit : s->along >= TAKE_STEP_MIN && s->speed > TAKE_BACK;
+    if (takeRun.follows) dockPostFn(commit ? kSwipeEnded : kSwipeCancelled, takeUnits(s->progress), takeUnits(s->speed), takeRun.at);
+    takeQuietUntil = monoNow() + TAKE_QUIET;
+    TakeRun r = takeRun;
+    double progress = s->progress, speed = s->speed;
+    dispatch_async(dispatch_get_main_queue(), ^{ takeEnded(r, commit, progress, speed); });
+  }
+}
+
+// Capture gone while a swipe was the Mac's (another app came to the front,
+// a permission taken away): macOS's swipe goes back, the rest is dropped.
+static int takeAbort(SwipeTake *s, int k) {
+  if (s->state == TAKE_TAKEN) {
+    if (takeRun.follows) dockPostFn(kSwipeCancelled, takeUnits(s->progress), 0, takeRun.at);
+    takeQuietUntil = monoNow() + TAKE_QUIET;
+    pthread_mutex_lock(&takeLock); takeRun.on = 0; pthread_mutex_unlock(&takeLock);
+    logf_("swipe out: capture ended during the swipe: back");
+    s->state = k ? TAKE_DONE : TAKE_IDLE;
+    return TK_DROP;
+  }
+  if (s->state == TAKE_DONE) { if (!k) s->state = TAKE_IDLE; return TK_DROP; }
+  s->state = TAKE_IDLE;
+  return TK_FORWARD;
+}
+
+// The frames held back from the guest while a swipe's way is not clear
+// (the trackpad's thread).
+static char kept[16384];
+static size_t keptLen;
+static int keepFrame(const char *line, size_t len) {
+  if (keptLen + len > sizeof kept) return 0;
+  memcpy(kept + keptLen, line, len); keptLen += len;
+  return 1;
+}
+static void flushKept(void) {
+  if (!keptLen) return;
+  sendLine(kept, keptLen);
+  keptLen = 0;
+  forwarding = 1;
+}
+static void dropKept(void) { keptLen = 0; }
+static void takePadPass(void) { padTake.state = TAKE_PASS; }
+
+// A trackpad frame (frameCb): its fingers' movement since the last frame
+// (those in both), into the model.
+static int takePadFrame(MTTouch **c, int k) {
+  static struct { int id; float x, y; } last[16];
+  static int nLast;
+  double ddx = 0, ddy = 0; int common = 0;
+  for (int i = 0; i < k; i++)
+    for (int j = 0; j < nLast; j++)
+      if (last[j].id == c[i]->pathIndex) { ddx += c[i]->normalized.pos.x - last[j].x; ddy += c[i]->normalized.pos.y - last[j].y; common++; }
+  if (common) { ddx /= common; ddy = ddy / common * (tpW > 0 ? (double)tpH / tpW : 0.6); }   // up/down in trackpad widths too
+  nLast = k;
+  for (int i = 0; i < k; i++) { last[i].id = c[i]->pathIndex; last[i].x = c[i]->normalized.pos.x; last[i].y = c[i]->normalized.pos.y; }
+  if (!(capturing && gesturesOn())) { dropKept(); return takeAbort(&padTake, k); }
+  // How far apart the fingers are (in trackpad widths): a pinch or spread
+  // while the way is not clear is no swipe.
+  static double spread0;
+  double cx = 0, cy = 0, spread = 0;
+  for (int i = 0; i < k; i++) { cx += c[i]->normalized.pos.x; cy += c[i]->normalized.pos.y; }
+  if (k) { cx /= k; cy /= k; }
+  for (int i = 0; i < k; i++) spread += hypot(c[i]->normalized.pos.x - cx, (c[i]->normalized.pos.y - cy) * tpH / (tpW > 0 ? tpW : 1));
+  if (k) spread /= k;
+  int sl = 0, sr = 0;
+  if (padTake.state == TAKE_IDLE && k >= 3) { takeSides(&sl, &sr); spread0 = spread; }
+  else if (padTake.state == TAKE_WATCH && k >= 3 && fabs(spread - spread0) >= TAKE_MIN) { padTake.state = TAKE_PASS; return TK_FLUSH; }
+  int tk = takeFrame(&padTake, k, sl, sr, ddx, ddy, takeTravel, takeClock());
+  takeAct(&padTake, tk, "trackpad");
+  return tk;
+}
+
+// A Magic Mouse's swipe frame (mouseFrameCb, mouseLock held): k virtual
+// fingers (0: its end), step: its travel on the guest's touchpad since the
+// last one (trackpad widths). The mouse's surface is a third of a trackpad's
+// width: one Space for half the travel (half a Space: 13 mm on the mouse,
+// about what switches a workspace in the VM).
+#define TAKE_MOUSE_TRAVEL 0.5
+static int takeMouseFrame(SwipeTake *t, int k, double step) {
+  if (!(capturing && gesturesOn())) return takeAbort(t, k);
+  int sl = 0, sr = 0;
+  if (t->state == TAKE_IDLE && k >= 3) takeSides(&sl, &sr);
+  int tk = takeFrame(t, k, sl, sr, step, 0, takeTravel * TAKE_MOUSE_TRAVEL, takeClock());
+  takeAct(t, tk, "Magic Mouse");
+  return tk;
 }
 
 // Into the VM again: the pointer's display (or, with "all", each display the
@@ -2695,7 +3213,9 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     pinchSent = 1;
     if (verbose) logf_("pinch (macOS)");
   }
-  return capturing && gesturesOn() ? NULL : e;   // a gesture event type
+  // A gesture event type. Also just after a swipe the Mac took (TAKE_QUIET):
+  // the trackpad's own end of it must not reach the Dock's swipe.
+  return (capturing && gesturesOn()) || monoNow() < takeQuietUntil ? NULL : e;
 }
 
 // The VM's name from its hello: base64, so a name may hold spaces. Anything
@@ -2800,6 +3320,7 @@ static unsigned addClient(int c, int net, const char *ip, int gestures, int glid
   if (slot < 0) { closeClient(clients[0].fd); slot = 0; }   // full: drop the oldest slot
   clients[slot].fd = c; clients[slot].net = net; clients[slot].gen = ++gens;
   clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
+  clients[slot].edge[0] = clients[slot].edge[1] = 0; clients[slot].edgeKnown = 0;
   snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
   snprintf(clients[slot].name, sizeof clients[slot].name, "%s", name);
   logf_("guest connected: %s (gestures %s, scroll momentum %s%s%s%s%s)", ip, gestures ? "on" : "off",
@@ -2814,7 +3335,7 @@ static unsigned addClient(int c, int net, const char *ip, int gestures, int glid
   send(c, b, (size_t)n, MSG_NOSIGNAL);
   n = sizeLine(b, sizeof b);   // the Mac's scrolling direction and the trackpad's size
   send(c, b, (size_t)n, MSG_NOSIGNAL);
-  if (swipeOut == 1) send(c, "X on\n", 5, MSG_NOSIGNAL);   // Swipe out to macOS (else off, as the guest starts)
+  if (swipeOut == 1) send(c, SWIPE_OUT_ON, strlen(SWIPE_OUT_ON), MSG_NOSIGNAL);   // Swipe out to macOS (else off, as the guest starts)
   return gen;
 }
 
@@ -3023,6 +3544,7 @@ static int startMouse(MTDeviceRef d, int w, int h, int family, int product) {
     mice[slot].dev = d; mice[slot].id = id; mice[slot].sent = 0;
     mice[slot].w = w > 0 ? w : 5150; mice[slot].h = h > 0 ? h : 9050;
     mouseStateInit(&mice[slot].st);
+    takeReset(&mice[slot].take);
   }
   pthread_mutex_unlock(&mouseLock);
   if (known || slot < 0) return 0;
@@ -3096,6 +3618,7 @@ static void stopDevice(MTDeviceRef d, MTFrameCallback cb) {
   if (MTDeviceIsRunning(d)) MTDeviceStop(d);
 }
 static void (*stopDeviceFn)(MTDeviceRef, MTFrameCallback) = stopDevice;
+static int isReplayDev(MTDeviceRef d);
 
 static void stopTrackpads(void) {
   MTDeviceRef p[MAX_PADS], m[MAX_MICE];
@@ -3109,11 +3632,94 @@ static void stopTrackpads(void) {
   for (int i = 0; i < nm; i++) m[i] = mice[i].dev;
   nMice = 0;
   pthread_mutex_unlock(&mouseLock);
-  for (int i = 0; i < np; i++) stopDeviceFn(p[i], frameCb);
-  for (int i = 0; i < nm; i++) stopDeviceFn(m[i], mouseFrameCb);
+  for (int i = 0; i < np; i++) if (!isReplayDev(p[i])) stopDeviceFn(p[i], frameCb);
+  for (int i = 0; i < nm; i++) if (!isReplayDev(m[i])) stopDeviceFn(m[i], mouseFrameCb);
   fingers = 0;
   if (np + nm) logf_("trackpads let go: %d trackpad%s, %d Magic Mouse", np, np == 1 ? "" : "s", nm);
 }
+
+#if GESTURES_TEST_IDENTITY
+// ---- the test identity only: finger frames from a file ----
+// A Mac without a trackpad (the Mac mini) cannot make the swipe out happen
+// for real: its end-to-end test plays made-up frames into the real
+// callbacks. OMACVM_TEST_REPLAY_DIR=<dir> at start: <dir>/next.tsv is taken
+// with the capture check (renamed to playing.tsv), played on its own thread
+// and removed. Lines: <seconds> pad|mouse <n> [<id> <x> <y>]... (0..1, y up,
+// as MultitouchSupport gives them). Never in the helper that ships
+// (GESTURES_TEST_IDENTITY: build.sh with OMACVM_HELPER_TEST=1).
+static char replayDir[900];
+static int replayPadDev, replayMouseDev;   // their addresses stand for the devices
+static volatile int replaying;
+static int isReplayDev(MTDeviceRef d) { return d == (MTDeviceRef)&replayPadDev || d == (MTDeviceRef)&replayMouseDev; }
+
+static void replayDevices(void) {
+  pthread_mutex_lock(&padLock);
+  int have = 0;
+  for (int i = 0; i < nPads; i++) have |= pads[i].dev == (MTDeviceRef)&replayPadDev;
+  if (!have && nPads < MAX_PADS) {
+    pads[nPads].dev = (MTDeviceRef)&replayPadDev; pads[nPads].id = 0; pads[nPads].fingers = 0;
+    pads[nPads].w = 15600; pads[nPads].h = 9600; nPads++;
+  }
+  pthread_mutex_unlock(&padLock);
+  pthread_mutex_lock(&mouseLock);
+  have = 0;
+  for (int i = 0; i < nMice; i++) have |= mice[i].dev == (MTDeviceRef)&replayMouseDev;
+  if (!have && nMice < MAX_MICE) {
+    mice[nMice].dev = (MTDeviceRef)&replayMouseDev; mice[nMice].id = 0; mice[nMice].sent = 0;
+    mice[nMice].w = 5150; mice[nMice].h = 9050;
+    mouseStateInit(&mice[nMice].st); takeReset(&mice[nMice].take); nMice++;
+  }
+  pthread_mutex_unlock(&mouseLock);
+}
+
+static void *replayMain(void *arg) {
+  char *path = arg, line[2048];
+  FILE *f = fopen(path, "r");
+  double t0 = monoNow();
+  int frame = 0;
+  while (f && fgets(line, sizeof line, f)) {
+    double t; char kind[8]; int n, off = 0;
+    if (sscanf(line, "%lf %7s %d%n", &t, kind, &n, &off) != 3 || n < 0 || n > 16) continue;
+    MTTouch tch[16]; memset(tch, 0, sizeof tch);
+    const char *q = line + off; int k = 0;
+    for (int i = 0; i < n; i++) {
+      int id, used = 0; float x, y;
+      if (sscanf(q, "%d %f %f%n", &id, &x, &y, &used) != 3) break;
+      q += used;
+      tch[k].pathIndex = tch[k].fingerID = id; tch[k].state = 4; tch[k].zTotal = 0.5f;
+      tch[k].normalized.pos.x = x; tch[k].normalized.pos.y = y; k++;
+    }
+    double wait = t0 + t - monoNow();
+    if (wait > 0) usleep((useconds_t)(wait * 1e6));
+    if (!strcmp(kind, "mouse")) mouseFrameCb((MTDeviceRef)&replayMouseDev, tch, k, t, frame++);
+    else frameCb((MTDeviceRef)&replayPadDev, tch, k, t, frame++);
+  }
+  if (f) fclose(f);
+  unlink(path);
+  logf_("replay: done (%d frames)", frame);
+  free(path);
+  replaying = 0;
+  return NULL;
+}
+
+static void replayLook(void) {
+  if (!replayDir[0] || replaying || inputPaused) return;
+  char next[1024], playing[1024];
+  snprintf(next, sizeof next, "%s/next.tsv", replayDir);
+  snprintf(playing, sizeof playing, "%s/playing.tsv", replayDir);
+  if (rename(next, playing)) return;
+  replayDevices();
+  replaying = 1;
+  logf_("replay: %s", playing);
+  pthread_t th;
+  char *arg = strdup(playing);
+  if (!arg || pthread_create(&th, NULL, replayMain, arg)) { free(arg); replaying = 0; return; }
+  pthread_detach(th);
+}
+#else
+static int isReplayDev(MTDeviceRef d) { (void)d; return 0; }
+static void replayLook(void) {}
+#endif
 
 static void appActivated(void) { updateCapture(captureTimer, NULL); }
 
@@ -3218,6 +3824,10 @@ int main(int argc, char **argv) {
     else logf_("unknown option %s, ignored", argv[i]);
   }
   signal(SIGPIPE, SIG_IGN);
+#if GESTURES_TEST_IDENTITY
+  const char *rd = getenv("OMACVM_TEST_REPLAY_DIR");
+  if (rd && rd[0] == '/') { snprintf(replayDir, sizeof replayDir, "%s", rd); logf_("test identity: frames from %s/next.tsv", replayDir); }
+#endif
 
   tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure

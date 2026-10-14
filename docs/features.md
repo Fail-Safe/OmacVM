@@ -182,11 +182,14 @@ back with the keyboard.
 **Swipe out to macOS** (off by default; OmacVM.app's setting, the control
 centre, or `defaults write org.omacvm.gestures SwipeOut -bool true` for
 Parallels, UTM and VMware Fusion): swipe past your first or last workspace and
-you are on the macOS Space beside the VM, as with ⌃⌥ Esc (the same *This
-monitor* / *All monitors*). Left of the first workspace is the Space on the
-left. On the right, the first swipe from your last workspace opens a new empty
-one as usual; swipe on from there to the Space on the right. With no Space on
-that side nothing happens. A Magic Mouse's swipe counts too.
+the macOS Space beside the VM follows your fingers, as a macOS Space swipe
+does: pull back to stay in the VM, let go to finish (a quick flick is enough).
+Left of the first workspace is the Space on the left. On the right, the first
+swipe from your last workspace opens a new empty one as usual; swipe on from
+there to the Space on the right. With no Space on that side nothing happens.
+A Magic Mouse's swipe counts too. With *All monitors*, the other monitors that
+show the VM follow once you let go. Inside the VM, Hyprland's own workspace
+swipe is as before.
 
 A **Magic Mouse** in the full-screen VM: two fingers sideways swipe
 Omarchy's workspaces, as four fingers on a trackpad (macOS's own Space

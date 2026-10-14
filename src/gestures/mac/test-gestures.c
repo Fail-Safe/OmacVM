@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
   if (argc < 3) return 2;
   int want = argc - 2;
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
-  // TEST_SWIPE_OUT=1: Swipe out to macOS on, so each guest gets "X on" with
+  // TEST_SWIPE_OUT=1: Swipe out to macOS on, so each guest gets "X on 2" with
   // its hello; its lines are read and acted on (here: no VM in front).
   if (getenv("TEST_SWIPE_OUT")) swipeOut = 1;
   int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
@@ -74,6 +74,8 @@ int main(int argc, char **argv) {
   if (getenv("TEST_SWIPE_OUT")) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.5, false);
   for (int i = 0; i < MAX_CLIENTS; i++)
     if (clients[i].fd >= 0) printf("live %s %s\n", clients[i].name, clients[i].ip);
+  for (int i = 0; i < MAX_CLIENTS; i++)   // what each guest said about its swipes ("E")
+    if (clients[i].fd >= 0 && clients[i].edgeKnown) printf("edges %s %d %d\n", clients[i].name, clients[i].edge[0], clients[i].edge[1]);
   for (int i = 0; i < MAX_CLIENTS; i++)
     if (clients[i].fd >= 0)
       printf("client %s: %s\n", clients[i].name, clients[i].net == NET_APP ? "app" : clients[i].net == NET_UTM ? "utm" : "other");

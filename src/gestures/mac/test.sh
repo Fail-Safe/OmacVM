@@ -30,10 +30,18 @@
 #    nothing posted, swiped or activated). The marker is the same in
 #    Gestures, the Bridge and QEMU's patch. The guest names the combo pressed,
 #    and after the old one the new one, once per VM; no other notice (test-escape-notice.py).
-#    Swipe out to macOS (#342): "X left|right" from the guest in front moves the same way,
-#    only to that side (test-escape.c); the guest decides at the lift from Hyprland's
-#    workspaces at the swipe's start (test-swipe-out.py, a made-up Hyprland); the line
-#    goes over the real connection (2b).
+#    Swipe out to macOS (#342): with a guest that says where swipes go ("E", after
+#    "X on 2") a swipe out at the VM's edge is the Mac's: held back from the guest
+#    until its way is clear, then macOS's own Space swipe follows the fingers (a
+#    made-up Dock: Began, Changed..., Ended or Cancelled at the lift: pulled back,
+#    slow, flick), the Magic Mouse's too; inward, up and down, a tap, a pinch, no
+#    Space on that side, the setting off or a guest that says nothing: the guest's;
+#    macOS not following: the one step at the lift; the Dock swipe's events as
+#    macOS 26 and 27 read them (swipe-take.h, test-escape.c). "X left|right" from a
+#    guest of 3.1.0-3.1.5 still moves in one step. The guest says "E" at once and on
+#    every workspace change from Hyprland's event socket (test-swipe-out.py, a
+#    made-up Hyprland), or decides at the lift for an older Mac; the lines go over
+#    the real connection (2b).
 # 6. Scroll momentum takes only a trackpad's scrolling (built-in or Magic
 #    Trackpad, also one connected later): wheel mice, smooth-scrolling mice and
 #    a Magic Mouse go to the VM app one to one (test-scroll.c, made-up events
@@ -108,14 +116,18 @@ class Stub:
     touch = types.SimpleNamespace(down=False)
     def __getattr__(self, name): return lambda *a, **k: None
 if mode == "swipe":
-    # Swipe out: once the Mac says "X on", a swipe past the first workspace.
+    # Swipe out: once the Mac says "X on 2", where swipes go ("E", as the
+    # daemon's watcher says it), and a swipe past the first workspace the way
+    # daemons from 3.1.0-3.1.5 say it ("X left").
     real_set = g.SWIPE.set
-    def set_(on):
-        real_set(on)
-        print(f"guest: swipe out {'on' if on else 'off'}", flush=True)
+    def set_(on, version=1):
+        real_set(on, version)
+        print(f"guest: swipe out {'on' if on else 'off'} {version}", flush=True)
         if on:
+            g.SWIPE.send(b"E right left\n")
             g.SWIPE.send(b"X left\n")
     g.SWIPE.set = set_
+    g.hypr_socket = lambda: None   # no Hyprland here: the watcher has nothing to say
 if mode in ("once", "swipe"):
     t = threading.Thread(target=lambda: g.run(Stub(), Stub(), Stub()), daemon=True)
     t.start(); t.join(1.5)
@@ -224,16 +236,27 @@ expect "$T/out2" "accepted 2"
 if (( took <= 4 )); then echo "ok   connected again ${took} s after the switch"; else echo "FAIL connected again only after ${took} s" >&2; fail=1; fi
 expect "$T/out2" "live App VM 127.0.0.1"         # one connection: the old one was dropped
 reject "$T/out2" "live App VM 192.168.77.2"
-# 2b. Swipe out to macOS (#342): with it on the guest hears "X on" with the Mac's
-#     hello, and its "X left" is read and acted on by the Mac (no VM in front here:
+# 2b. Swipe out to macOS (#342): with it on the guest hears "X on 2" with the Mac's
+#     hello; where its swipes go ("E") is kept with its connection, and its "X left"
+#     (daemons 3.1.0-3.1.5) is read and acted on by the Mac (no VM in front here:
 #     ignored, and said so); with it off the guest never hears "X on".
 TEST_SWIPE_OUT=1 mac "$T/out4" 3
 guest "App VM" app "" swipe OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest4" 2>&1 || true
 wait "$MAC" || true
-expect "$T/guest4" "guest: swipe out on"
+expect "$T/guest4" "guest: swipe out on 2"
 grep -q 'swipe out to the left from "App VM": its VM is not the one in front: ignored' "$T/out4" &&
   echo "ok   swipe out: the guest's X left reached the Mac over its connection (and was checked)" ||
   { echo "FAIL swipe out: the Mac did not read the guest's X left" >&2; cat "$T/out4" >&2; fail=1; }
+expect "$T/out4" "edges App VM 1 -1"   # its "E right left", kept with its connection
+# ... the same on the other three routes (each on its own network's address).
+for r in "parallels 0 10.211.55.2" "utm 1 192.168.64.1" "fusion 2 172.16.5.1"; do
+  set -- $r
+  TEST_SWIPE_OUT=1 mac "$T/out-$1" "$2,$3"
+  guest "$1 VM" "$1" "" swipe OMACVM_HOST="$3" > "$T/guest-$1" 2>&1 || true
+  wait "$MAC" || true
+  expect "$T/guest-$1" "guest: swipe out on 2"
+  expect "$T/out-$1" "edges $1 VM 1 -1"
+done
 mac "$T/out5" 3
 guest "App VM" app "" swipe OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest5" 2>&1 || true
 wait "$MAC" || true
