@@ -13,10 +13,14 @@ in more words.
   the fourth finger coming down a moment after the others looked like a pinch. Now it follows the
   fingers like with three.
 - **Swipe out follows the fingers your VM switches workspaces with.** If you give 3 fingers to
-  something else (moving focus, tiling) and swipe workspaces with 4, only 4 fingers swipe out to
-  macOS and 3 fingers stay with the VM. OmacVM reads your Hyprland gestures, also after you change
-  them. Setting up gestures no longer adds a 3-finger workspace swipe when you use 3 fingers for
-  something else.
+  something else (moving focus, snapping windows) and swipe workspaces with 4, only 4 fingers swipe
+  out to macOS and 3 fingers stay with the VM. OmacVM reads your Hyprland gestures, also after you
+  change them. Setting up gestures no longer adds a 3-finger workspace swipe when you use 3 fingers
+  for something else.
+- **A second display keeps the scale you pick** (OmacVM.app with a second Mac display, #416, thanks
+  @fbalazsy). Picking 1.25x for Virtual-2 in the display panel lasted only until the next display
+  sync, which put the display's own scale back. The pick is now saved per display and stays after a
+  Hyprland reload and unplugging the display. The main display keeps Omarchy's own scaling.
 
 ## 3.1.9
 
