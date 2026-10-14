@@ -25,7 +25,7 @@
 #                        path; "latest" downloads releases/latest (gh); default: none (the run
 #                        then does not count for the gate)
 #     --only LIST        steps (comma list): prepare,baseline,switches,fastnet,touchid,graphics,
-#                        updates,window,unplug,update (default: all; update needs --previous)
+#                        updates,keys,window,unplug,update (default: all; update needs --previous)
 #     --slow             also the slow switches (thp-kernel, x86-apps: builds in the VM)
 #     --features LIST    only these switches (comma list; while working on a fix: never counts for the gate)
 #     --out DIR          results (default ~/omacvm-e2e/<time>): summary.tsv, result.json, logs
@@ -795,6 +795,16 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
   start_vm && reachable 60 || res window-start FAIL "$(vminfo)"
 }
 
+# The VM's modifier keys from each event's flags (#412; modifier-keys.sh, on the running VM).
+step_keys() {
+  log "keys: modifier key cases into the VM (Universal Control's ways included)"
+  perl -e 'alarm 300; exec @ARGV' "$HERE/modifier-keys.sh" --vm "$VM" --out "$OUT/keys" > "$OUT/keys.log" 2>&1
+  local rc=$?
+  while IFS=$'\t' read -r st r d; do res "$st" "$r" "$d"; done < "$OUT/keys/summary.tsv" 2>/dev/null
+  (( rc == 0 )) || grep -q FAIL "$OUT/keys/summary.tsv" 2>/dev/null ||
+    res keys FAIL "modifier-keys.sh ended $rc: $(tail -2 "$OUT/keys.log" | tr '\n' '|')"
+}
+
 # The VM's display unplugged under it, its window there (#402; display-unplug.sh, the VM stopped).
 step_unplug() {
   if (( HIDDEN )); then res unplug skip "needs windows on this Mac's displays (--hidden)"; return; fi
@@ -814,6 +824,7 @@ steps() {   # every step on the running VM of this pass
     if [[ $CC_UP == 1 ]]; then "step_$st"
     else res "$st" FAIL "not run: the control centre did not come up (baseline-start)"; fi
   done
+  want keys && step_keys
   want window && step_window
   # While working on the test: the VM stays up this long first, to look at it (ssh, the cc's tmux).
   [[ ${OMACVM_E2E_HOLD:-} =~ ^[0-9]+$ ]] && { log "holding ${OMACVM_E2E_HOLD} s (OMACVM_E2E_HOLD), VM at ${IP:-?}"; sleep "$OMACVM_E2E_HOLD"; }
