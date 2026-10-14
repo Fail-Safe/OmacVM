@@ -282,7 +282,7 @@ final class MediaKeys {
   }
 
   func start() {
-    brightnessKeys.onKey = { [weak self] key in self?.keyboardBrightness(key) }
+    brightnessKeys.onKey = { [weak self] key, mods in self?.keyboardBrightness(key, mods) }
     let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.check() }
     t.tolerance = 0.5
     RunLoop.main.add(t, forMode: .common)
@@ -437,20 +437,15 @@ final class MediaKeys {
                    vmKeys: omacvm && vmKeys.socket(for: app.processIdentifier) != nil)
   }
 
-  /// The VM in front, the key after Shift (as in Omarchy: Shift + brightness
-  /// keys = keyboard backlight, a MacBook has no keys of its own for it;
-  /// Option + brightness keys = small steps) and where it goes (MediaRoute,
-  /// keys-model.swift). nil: no VM in front.
-  private func decide(_ pressed: MediaKey, _ flags: CGEventFlags, _ front: FrontWindows)
+  /// The VM in front, the key after Shift and Option (BrightnessCombo, as in
+  /// Omarchy: Shift + brightness keys = keyboard backlight, Option = small
+  /// steps) and where it goes (MediaRoute, keys-model.swift). nil: no VM in front.
+  private func decide(_ pressed: MediaKey, _ mods: KeyMods, command: Bool, _ front: FrontWindows)
     -> (vm: FrontVM, key: MediaKey, route: KeyRoute, fine: Bool)? {
     let vm = frontVM(front)
     vmInFront = vm != nil
     guard let vm else { return nil }
-    var key = pressed
-    let shift = flags.contains(.maskShift), option = flags.contains(.maskAlternate)
-    if shift && !option {
-      if key == .brightnessUp { key = .keyboardUp } else if key == .brightnessDown { key = .keyboardDown }
-    }
+    let (key, option) = BrightnessCombo.key(pressed, mods)
     // Only what this key needs is asked (CoreAudio, the display cache).
     let volume = key == .volumeUp || key == .volumeDown, brightness = key == .brightnessUp || key == .brightnessDown
     let route = MediaRoute.route(key, vm: vm,
@@ -459,7 +454,7 @@ final class MediaKeys {
                                  macBrightness: brightness ? Brightness.displayID : nil,
                                  external: brightness ? externalState(vm) : .unknown,
                                  keyboardLight: [.keyboardUp, .keyboardDown, .keyboardToggle].contains(key) && KeyboardLight.get() != nil,
-                                 command: flags.contains(.maskCommand))
+                                 command: command)
     return (vm, key, route, option)
   }
 
@@ -470,8 +465,9 @@ final class MediaKeys {
           let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
     let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
     guard let pressed = MediaKey(rawValue: code) else { return false }
+    let mods = KeyMods(event.flags)
     let front = FrontWindows()   // one copy of the window list for every question below
-    guard let d = decide(pressed, event.flags, front) else { return false }   // no VM: macOS's keys
+    guard let d = decide(pressed, mods, command: event.flags.contains(.maskCommand), front) else { return false }   // no VM: macOS's keys
     let (vm, key, route, option) = d
     switch route {
     case .macOS(let why):
@@ -504,9 +500,11 @@ final class MediaKeys {
 
   /// A brightness key read from the keyboard (main thread). Only while an
   /// OmacVM VM is in front, to the display the rule picks (MediaRoute);
-  /// anything else is macOS's, which handles these keys itself.
-  private func keyboardBrightness(_ pressed: MediaKey) {
-    guard config.captureKeys, let d = decide(pressed, CGEventSource.flagsState(.combinedSessionState), FrontWindows()),
+  /// anything else is macOS's, which handles these keys itself. Shift and
+  /// Option come from the keyboard too (HIDKeyboards: macOS's session does
+  /// not see Shift while QEMU has the keyboard).
+  private func keyboardBrightness(_ pressed: MediaKey, _ mods: KeyMods) {
+    guard config.captureKeys, let d = decide(pressed, mods, command: false, FrontWindows()),
           d.vm.omacvm else { return }
     let (vm, key, route, fine) = d
     let display: CGDirectDisplayID?

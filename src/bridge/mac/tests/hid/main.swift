@@ -15,7 +15,8 @@ func check(_ ok: Bool, _ what: String, line: Int = #line) {
 
 let b = BrightnessKeys()
 var got: [MediaKey] = []
-b.onKey = { got.append($0) }
+var gotMods: [KeyMods] = []
+b.onKey = { got.append($0); gotMods.append($1) }
 // Key repeat: timers are run by hand here (macOS's delay 0.25 s, interval 0.03 s in this test).
 var timers: [(after: Double, run: () -> Void)] = []
 b.repeatTimes = { (0.25, 0.03) }
@@ -96,12 +97,56 @@ check(got == [.brightnessDown, .brightnessUp], "PC keyboard: its brightness keys
 
 // ---- The MacBook Air's keyboard as macOS 27 gives it: two IOHIDDevice copies (keyboard 1/6 and consumer control 12/1) ----
 let air: [Int] = [11, 12]   // every value comes once from each copy
-timers = []; got = []
+let shiftL: UInt32 = 0xE1, shiftR: UInt32 = 0xE5, optL: UInt32 = 0xE2
+timers = []; got = []; gotMods = []
 key(20, 7, 0x3A, true, map: macbook, copies: air); key(20, 7, 0x3A, false, map: macbook, copies: air)
 check(got == [.brightnessDown] && timers.count == 1, "Air keyboard given twice: F1 is one press, one step (was two: \(got.count))")
 check(reads[20] == 1, "... its map is read once")
 key(20, 7, 0x3A, true, map: macbook, copies: [12]); key(20, 7, 0x3A, false, map: macbook, copies: [12])
 check(got.count == 1, "... a value from the second copy alone is not read")
+timers = []; got = []; gotMods = []
+// Shift + F1, Shift + F2 (Shift read from the keyboard, not from macOS's session).
+key(20, 7, shiftL, true, map: macbook, copies: air)
+key(20, 7, 0x3A, true, map: macbook, copies: air); key(20, 7, 0x3A, false, map: macbook, copies: air)
+key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air)
+key(20, 7, shiftL, false, map: macbook, copies: air)
+check(got == [.brightnessDown, .brightnessUp] && gotMods == [KeyMods(shift: true), KeyMods(shift: true)],
+      "Shift + F1, Shift + F2: down and up, each read with Shift (\(gotMods))")
+check(got.map { BrightnessCombo.key($0, KeyMods(shift: true)).key } == [.keyboardDown, .keyboardUp], "... = keyboard light down, up")
+timers = []; got = []; gotMods = []
+key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air)
+check(gotMods == [KeyMods()], "Shift let go: F2 alone is the display again")
+// Key up order: the brightness key let go before Shift, and after.
+timers = []; got = []; gotMods = []
+key(20, 7, shiftR, true, map: macbook, copies: air); key(20, 7, 0x3B, true, map: macbook, copies: air)
+key(20, 7, shiftR, false, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air)   // Shift up first
+key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air)
+check(gotMods == [KeyMods(shift: true), KeyMods()], "Shift up before F2 up: that press was Shift's, the next plain F2 is not")
+timers = []; got = []; gotMods = []
+// Option: small steps; Shift + Option: the display's small steps.
+timers = []; got = []; gotMods = []
+key(20, 7, optL, true, map: macbook, copies: air); key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air)
+key(20, 7, shiftL, true, map: macbook, copies: air); key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air)
+key(20, 7, shiftL, false, map: macbook, copies: air); key(20, 7, optL, false, map: macbook, copies: air)
+check(gotMods == [KeyMods(option: true), KeyMods(shift: true, option: true)], "Option + F2, Shift + Option + F2: read with them")
+// Shift on the Air, F1 on a Magic Keyboard (and the other way): any keyboard's Shift counts.
+timers = []; got = []; gotMods = []
+key(20, 7, shiftL, true, map: macbook, copies: air); tap(4, 7, 0x3A, map: btMap); key(20, 7, shiftL, false, map: macbook, copies: air)
+key(4, 7, shiftL, true, map: btMap); key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air); key(4, 7, shiftL, false, map: btMap)
+check(gotMods == [KeyMods(shift: true), KeyMods(shift: true)], "Shift on one keyboard, the brightness key on another: Shift")
+// A keyboard that goes away with Shift held (Bluetooth off): its Shift is not held any more.
+timers = []; got = []; gotMods = []
+key(4, 7, shiftL, true, map: btMap); key(4, 7, 0x3B, true, map: btMap)
+b.removed(device: 4); runTimers(5)
+check(got.count == 1 && timers.isEmpty, "a keyboard gone mid-hold: its repeats stop")
+key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air)
+check(gotMods.last == KeyMods(), "... and its Shift is not held for the next press")
+// Fast presses: 30 quick Shift + F2 taps (no repeats), each one step with Shift.
+timers = []; got = []; gotMods = []
+key(20, 7, shiftL, true, map: macbook, copies: air)
+for _ in 0..<30 { key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air) }
+key(20, 7, shiftL, false, map: macbook, copies: air)
+check(got.count == 30 && gotMods.allSatisfy { $0.shift }, "30 quick Shift + F2: 30 steps, all with Shift (\(got.count))")
 timers = []
 
 // ---- this Mac's keyboards, read only ----
