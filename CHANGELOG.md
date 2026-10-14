@@ -9,6 +9,14 @@ in more words.
   Universal Control** (OmacVM.app). Shift was released the moment it was pressed, so Shift+2 typed
   2. The VM now sets each modifier from the flags macOS sends with every key, instead of flipping it
   on each change (#412, thanks @ylorn).
+- **Swipe out to macOS with four fingers.** With four fingers the swipe out mostly did nothing:
+  the fourth finger coming down a moment after the others looked like a pinch. Now it follows the
+  fingers like with three.
+- **Swipe out follows the fingers your VM switches workspaces with.** If you give 3 fingers to
+  something else (moving focus, tiling) and swipe workspaces with 4, only 4 fingers swipe out to
+  macOS and 3 fingers stay with the VM. OmacVM reads your Hyprland gestures, also after you change
+  them. Setting up gestures no longer adds a 3-finger workspace swipe when you use 3 fingers for
+  something else.
 
 ## 3.1.9
 
