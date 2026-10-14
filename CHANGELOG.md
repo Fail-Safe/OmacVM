@@ -3,9 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.9 (unreleased)
 
-- Skip the notch: Omarchy's hidden indicators (Dictate, Screen Recording and the others) now open left of the notch when they don't fit right of it. The tray stays where Omarchy has it, and the notch looks untouched until you point at the bar. Fixed: the weather and the tray jumping back and forth while the indicators showed, the room kept for them (a gap once a module was turned off), and the tray's expander not opening after pointing at the notch. The setting's (i) shows it. Update VM brings the new bar.
+- **Skip the notch: the hidden indicators open left of the notch** when they don't fit right of it
+  (Dictate, Screen Recording and the others). The tray stays where Omarchy has it, and the notch
+  looks untouched until you point at the bar. Fixed: the weather and the tray jumping back and
+  forth while the indicators showed, the room kept for them (a gap once a module was turned off),
+  and the tray's "<" not opening after pointing at the notch. The setting's (i) shows it. Update VM
+  brings the new bar.
 
 ## 3.1.8
 
