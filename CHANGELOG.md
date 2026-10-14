@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.9 (unreleased)
+## 3.1.9
 
 - **Skip the notch: the hidden indicators open left of the notch** when they don't fit right of it
   (Dictate, Screen Recording and the others). The tray stays where Omarchy has it, and the notch
