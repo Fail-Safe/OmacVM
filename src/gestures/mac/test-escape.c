@@ -1251,7 +1251,7 @@ int main(void) {
     check(!nDockEv && gotFrames == 31 && world[0].cur == 102 && capturing, "follow: fingers left, no Space on the right: the guest's swipe, nothing moves");
     layout(1, three3, 3, NULL, 0); world[0].cur = 102; settle(vm, NET_APP); guestGot(); takeLook();
 
-    // A guest that never said where swipes go (3.1.0-3.1.4): frames as always.
+    // A guest that never said where swipes go (3.1.0-3.1.5): frames as always.
     clients[0].edgeKnown = 0; takeLook();
     padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
     check(!nDockEv && gotFrames == 31 && !takeDisp.ok, "follow: no E from the guest: every frame to it at once, no Dock swipe");

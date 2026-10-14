@@ -27,7 +27,7 @@ and sends, after "X on 2":
   E <l> <r>                         where a swipe of fingers going left and right goes now:
                                     left|right = out to the macOS Space on that side, - = a
                                     workspace swipe here; at once and on every workspace change
-or, after "X on" (Mac helpers 3.1.0-3.1.4):
+or, after "X on" (Mac helpers 3.1.0-3.1.5):
   X <left|right>                    a swipe went past the first or last workspace: out to the
                                     macOS Space on that side
 

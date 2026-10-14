@@ -351,7 +351,7 @@ event("workspace>>1")
 check(told(1, wait=0.5) == [] and not g.SWIPE.on, "X off: nothing sent on changes")
 line("X on")
 H.world(1, [1, 2], {1: 1, 2: 1})
-check(swipe(0.3) == ["X left"] and told(1, wait=0.3) == [], "X on (a Mac helper from 3.1.0-3.1.4): X left at the lift as before, no E")
+check(swipe(0.3) == ["X left"] and told(1, wait=0.3) == [], "X on (a Mac helper from 3.1.0-3.1.5): X left at the lift as before, no E")
 check(g.edge_sides({"active": 2, "ids": [1, 2], "empty": True, "invert": True, "create_new": True}) == ("right", "-") and
       g.edge_sides({"active": 2, "ids": [1, 2, 3], "empty": True, "invert": True, "create_new": True}) == ("-", "-") and
       g.edge_sides(None) == ("-", "-") and

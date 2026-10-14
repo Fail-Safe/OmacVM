@@ -38,7 +38,7 @@
 #    Space on that side, the setting off or a guest that says nothing: the guest's;
 #    macOS not following: the one step at the lift; the Dock swipe's events as
 #    macOS 26 and 27 read them (swipe-take.h, test-escape.c). "X left|right" from a
-#    guest of 3.1.0-3.1.4 still moves in one step. The guest says "E" at once and on
+#    guest of 3.1.0-3.1.5 still moves in one step. The guest says "E" at once and on
 #    every workspace change from Hyprland's event socket (test-swipe-out.py, a
 #    made-up Hyprland), or decides at the lift for an older Mac; the lines go over
 #    the real connection (2b).
@@ -118,7 +118,7 @@ class Stub:
 if mode == "swipe":
     # Swipe out: once the Mac says "X on 2", where swipes go ("E", as the
     # daemon's watcher says it), and a swipe past the first workspace the way
-    # daemons from 3.1.0-3.1.4 say it ("X left").
+    # daemons from 3.1.0-3.1.5 say it ("X left").
     real_set = g.SWIPE.set
     def set_(on, version=1):
         real_set(on, version)
@@ -238,7 +238,7 @@ expect "$T/out2" "live App VM 127.0.0.1"         # one connection: the old one w
 reject "$T/out2" "live App VM 192.168.77.2"
 # 2b. Swipe out to macOS (#342): with it on the guest hears "X on 2" with the Mac's
 #     hello; where its swipes go ("E") is kept with its connection, and its "X left"
-#     (daemons 3.1.0-3.1.4) is read and acted on by the Mac (no VM in front here:
+#     (daemons 3.1.0-3.1.5) is read and acted on by the Mac (no VM in front here:
 #     ignored, and said so); with it off the guest never hears "X on".
 TEST_SWIPE_OUT=1 mac "$T/out4" 3
 guest "App VM" app "" swipe OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest4" 2>&1 || true

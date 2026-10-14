@@ -64,7 +64,7 @@
 //                                     (any app: a Magic Mouse flick as Back/Forward, 158/159)
 //   X <on 2|off>                      Swipe out to macOS on or off (on connect and when it changes).
 //                                     "2": this helper takes the swipe itself (below); a guest
-//                                     from 3.1.0-3.1.4 reads only "on" and says X left|right
+//                                     from 3.1.0-3.1.5 reads only "on" and says X left|right
 // and from the guest, once the handshake holds:
 //   E <l> <r>                         (after "X on 2") where a swipe of fingers going left and
 //                                     right would go now: left|right = out to the macOS Space on
@@ -72,7 +72,7 @@
 //                                     on every workspace change. Such a swipe is the Mac's: it is
 //                                     held back from the guest until its way is clear and then
 //                                     drives macOS's own Space swipe (swipe-take.h)
-//   X <left|right>                    (guests from 3.1.0-3.1.4, after "X on") a swipe went past
+//   X <left|right>                    (guests from 3.1.0-3.1.5, after "X on") a swipe went past
 //                                     its first or last workspace: out to the macOS Space on
 //                                     that side in one step (acted on only for the VM in front
 //                                     while captured, at most once a second)
@@ -2543,7 +2543,7 @@ static void leaveVM(void) {
 // ---- Swipe out to macOS (#342) ----
 // A guest that says where swipes go ("E", after "X on 2") leaves such a
 // swipe to the Mac, which follows the fingers (below, "Swipe out that
-// follows the fingers"). A guest from 3.1.0-3.1.4 decides (its workspaces as
+// follows the fingers"). A guest from 3.1.0-3.1.5 decides (its workspaces as
 // they were when the swipe began, the fingers' way at the lift) and says "X
 // left|right"; the Mac then moves the way the combo does (EscapeSwipe: the
 // pointer's display, or each display that shows the VM), only to that side:
@@ -2553,7 +2553,7 @@ static void leaveVM(void) {
 // combo.
 static volatile int swipeOut = -1;   // the setting as last read (written on the main thread), -1: not yet
 // "2": this helper follows the fingers itself (the guest says where swipes go,
-// "E"); a guest from 3.1.0-3.1.4 reads "on" and decides at the lift ("X").
+// "E"); a guest from 3.1.0-3.1.5 reads "on" and decides at the lift ("X").
 #define SWIPE_OUT_ON "X on 2\n"
 static double swipeOutLooked = -1, swipeOutAt = -1;
 static double swipeOutEvery = 1.0;   // s between two looks at the setting (the offline test sets 0)
