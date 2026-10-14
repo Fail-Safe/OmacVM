@@ -511,7 +511,9 @@ def restart_and_check(copies):
         where = f"/plugins/{os.path.basename(c.dir)}/"
         lines = [e for e in log_entries(text) if where in e and ERROR.search(e) and "Binding loop" not in e]
         if lines:
-            bad[c.name] = " ".join(lines[0].split()[2:])[:200]
+            # From the copy's own path on: "Bar.qml[14:-1]: ReferenceError: ..."
+            e = " ".join(lines[0].split())
+            bad[c.name] = e[e.index(where) + len(where):][:160]
         elif c.ipc and answered:
             # Answered before: must answer again (a few tries: the bar loads last).
             if not any(bar_answers() or time.sleep(2) for _ in range(5)):
@@ -780,9 +782,9 @@ def main(argv):
     for _ in range(3):
         if not wait_quiet():
             break
-        rc = follow()
-        if rc != 3:
-            return rc
+        if follow() != 3:
+            return 0   # a copy that went back is in its record (omacvm check), not a failed service
+
     print("copies: no quiet moment (an update or the lock screen): at the next login")
     return 0
 
