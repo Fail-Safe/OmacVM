@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.12 (unreleased)
 
 - **Omanotch's bar follows Omarchy's updates and keeps your edits.** Omanotch runs its own copy of
   Omarchy's bar and background, and that copy stayed at the Omarchy it was made from. Now it follows
