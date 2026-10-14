@@ -2707,6 +2707,8 @@ static int dockMisses;                   // finished swipes in a row that did no
 static volatile double takeQuietUntil;   // the real trackpad's gesture events dropped until then
 static volatile double takeTravel = TAKE_TRAVEL;   // trackpad widths per Space ("SwipeOutTravel")
 #define TAKE_QUIET 0.4                   // s after a taken swipe's end
+#define TAKE_SETTLE 0.6                  // s macOS takes to slide the VM's Space back
+static double takeHoldUntil;             // the capture check waits until then (takeLock)
 
 // "SwipeOutTravel" (hidden, for tuning; defaults write org.omacvm.gestures
 // SwipeOutTravel -float 0.5): how much of the trackpad's width moves macOS
@@ -2792,7 +2794,8 @@ static void takeEnded(TakeRun r, int commit, double progress, double speed) {
   const char *side = r.toward < 0 ? "left" : "right";
   if (!commit) {
     logf_("swipe out to the %s: back into the VM (%.2f of a Space, %.1f Spaces/s)", side, progress, speed);
-    pthread_mutex_lock(&takeLock); takeRun.on = 0; pthread_mutex_unlock(&takeLock);
+    // macOS slides the VM's Space back: the capture check waits for that too.
+    pthread_mutex_lock(&takeLock); takeRun.on = 0; takeHoldUntil = takeClock() + TAKE_SETTLE; pthread_mutex_unlock(&takeLock);
     return;
   }
   swipeOutAt = monoNow();
@@ -2826,10 +2829,12 @@ static void takeLanded(TakeRun r, int looks) {
   leaveToward(r.toward, 0);
 }
 
-// A swipe out is the Mac's now (until macOS has finished it), at most 5 s.
+// A swipe out is the Mac's now (until macOS has finished it, at most 5 s), or
+// macOS still slides the VM's Space back after one: the capture check waits.
 static int takeOn(void) {
   pthread_mutex_lock(&takeLock);
-  int on = takeRun.on && takeClock() - takeRun.began < 5;
+  double now = takeClock();
+  int on = (takeRun.on && now - takeRun.began < 5) || now < takeHoldUntil;
   pthread_mutex_unlock(&takeLock);
   return on;
 }

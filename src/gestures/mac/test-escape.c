@@ -1192,6 +1192,8 @@ int main(void) {
     padSwipe(3, 0.6, 0.4, 20); padSwipe(3, 0.4, 0.55, 10); padLift(); guestGot();
     check(dockLast() == kSwipeCancelled && !dockCount(kSwipeEnded) && world[0].cur == 102 && capturing && gotFrames == 0 && !gotOther[0],
           "follow: pulled back halfway: Cancelled, still in the VM and captured, the guest got nothing");
+    int held = takeOn(); clk += 0.7;
+    check(held && !takeOn(), "follow: ... the capture check waits while macOS slides the VM's Space back (0.6 s)");
     // Slow and short, then still: back.
     nDockEv = 0;
     padSwipe(3, 0.6, 0.5, 40); for (int i = 0; i < 10; i++) pad(3, 0.5, 0.5);
