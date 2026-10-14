@@ -10,6 +10,7 @@ in more words.
   windows out of full screen and QEMU crashed while letting go of the other display's window: the
   VM was gone and Omarchy started from scratch. Now the VM keeps running and its window goes to a
   display that is left (#402, thanks @epicoun).
+- Skip the notch: Omarchy's hidden indicators (Dictate, Screen Recording and the others) now open left of the notch when they don't fit right of it. The tray stays where Omarchy has it, and the notch looks untouched until you point at the bar. The setting's (i) shows it. Update VM brings the new bar.
 
 ## 3.1.7
 
