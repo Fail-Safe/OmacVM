@@ -3,12 +3,8 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.10
+## Unreleased
 
-- **Shift and the other modifier keys work when you type on another Mac's keyboard through
-  Universal Control** (OmacVM.app). Shift was released the moment it was pressed, so Shift+2 typed
-  2. The VM now sets each modifier from the flags macOS sends with every key, instead of flipping it
-  on each change (#412, thanks @ylorn).
 - **Swipe out to macOS with four fingers.** With four fingers the swipe out mostly did nothing:
   the fourth finger coming down a moment after the others looked like a pinch. Now it follows the
   fingers like with three.
@@ -21,6 +17,13 @@ in more words.
   @fbalazsy). Picking 1.25x for Virtual-2 in the display panel lasted only until the next display
   sync, which put the display's own scale back. The pick is now saved per display and stays after a
   Hyprland reload and unplugging the display. The main display keeps Omarchy's own scaling.
+
+## 3.1.10
+
+- **Shift and the other modifier keys work when you type on another Mac's keyboard through
+  Universal Control** (OmacVM.app). Shift was released the moment it was pressed, so Shift+2 typed
+  2. The VM now sets each modifier from the flags macOS sends with every key, instead of flipping it
+  on each change (#412, thanks @ylorn).
 
 ## 3.1.9
 
