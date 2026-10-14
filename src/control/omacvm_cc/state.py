@@ -51,7 +51,7 @@ class Feature:
 @dataclass(frozen=True)
 class Check:
     side: str        # mac | vm
-    status: str      # ok | fail | skip
+    status: str      # ok | warn (works, not as it should) | fail | skip
     name: str
     detail: str
     human: bool
@@ -222,7 +222,7 @@ def parse_check_tsv(text: str, side: str = "vm") -> list[Check]:
     out = []
     for line in text.splitlines():
         f = line.split("\t")
-        if len(f) < 3 or f[0] not in ("ok", "fail", "skip"):
+        if len(f) < 3 or f[0] not in ("ok", "warn", "fail", "skip"):
             continue
         f += [""] * (5 - len(f))
         out.append(Check(side=side, status=f[0], name=f[1], detail=f[2], human=f[3] == "1", feature=f[4]))
@@ -233,7 +233,7 @@ def parse_mac_checks(items: list[dict]) -> list[Check]:
     """The Mac's checks as the Bridge sends them (omacvm check --json --mac-only)."""
     out = []
     for c in items or []:
-        if not isinstance(c, dict) or c.get("status") not in ("ok", "fail", "skip"):
+        if not isinstance(c, dict) or c.get("status") not in ("ok", "warn", "fail", "skip"):
             continue
         out.append(Check(side="mac", status=c["status"], name=str(c.get("name", "")),
                          detail=str(c.get("detail", "")), human=bool(c.get("needs_human")),
@@ -281,6 +281,12 @@ def status_of(f: Feature, on: bool, avail: Avail | None, checks: list[Check] | N
     if failed:
         c = failed[0]
         return Status.FAILING, f"{c.name}: {c.detail}" if c.detail else c.name
+    # Works, but not as it should (say, Omanotch's bar copy kept as it is):
+    # the row says so.
+    warned = [c for c in checks or [] if c.status == "warn"]
+    if warned:
+        c = warned[0]
+        return Status.WORKS, ("Mac: " if c.side == "mac" else "") + (f"{c.name}: {c.detail}" if c.detail else c.name)
     return Status.WORKS, ""
 
 

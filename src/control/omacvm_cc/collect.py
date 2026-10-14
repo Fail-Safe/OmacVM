@@ -47,7 +47,7 @@ def full_name(user: str) -> str:
 def check_lines(checks) -> str:
     """ok lines are counted, the others listed."""
     ok = sum(1 for c in checks if c.status == "ok")
-    out = [f"{'FAIL' if c.status == 'fail' else 'skip'} {c.side:3} {c.feature or '-':16} {c.name}: {c.detail}"
+    out = [f"{ {'fail': 'FAIL', 'warn': 'WARN'}.get(c.status, 'skip')} {c.side:3} {c.feature or '-':16} {c.name}: {c.detail}"
            f"{' (needs a person)' if c.human else ''}" for c in checks if c.status != "ok"]
     return "\n".join(out + [f"{ok} checks ok"])
 
