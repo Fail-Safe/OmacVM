@@ -23,10 +23,10 @@ b.after = { timers.append(($0, $1)) }
 func runTimers(_ n: Int) { for _ in 0..<n where !timers.isEmpty { timers.removeFirst().run() } }
 var reads: [UInt64: Int] = [:]
 let macbook: [UInt32: UInt32] = [HIDUsage.f1: 0x00FF_0005, HIDUsage.f2: 0x00FF_0004, 0x0007_0044: 0x000C_00EA]
-func key(_ dev: UInt64, _ page: UInt32, _ usage: UInt32, _ down: Bool, map: [UInt32: UInt32], fnState: Bool = false) {
+func key(_ dev: UInt64, _ page: UInt32, _ usage: UInt32, _ down: Bool, map: [UInt32: UInt32], fnState: Bool = false, copies: [Int] = [0]) {
   let u = HIDUsage.of(page: page, usage: usage)
   guard BrightnessKeys.wanted(u) else { return }   // as the IOKit callback filters
-  b.input(device: dev, usage: u, pressed: down, fnState: fnState) { reads[dev, default: 0] += 1; return map }
+  for c in copies { b.input(device: dev, copy: c, usage: u, pressed: down, fnState: fnState) { reads[dev, default: 0] += 1; return map } }
 }
 func tap(_ dev: UInt64, _ page: UInt32, _ usage: UInt32, map: [UInt32: UInt32], fnState: Bool = false) {
   key(dev, page, usage, true, map: map, fnState: fnState); key(dev, page, usage, false, map: map, fnState: fnState)
@@ -93,6 +93,16 @@ timers = []
 got = []
 tap(3, 0x0C, 0x70, map: [:]); tap(3, 0x0C, 0x6F, map: [:]); tap(3, 7, 0x3A, map: [:])
 check(got == [.brightnessDown, .brightnessUp], "PC keyboard: its brightness keys act, its F1 is F1")
+
+// ---- The MacBook Air's keyboard as macOS 27 gives it: two IOHIDDevice copies (keyboard 1/6 and consumer control 12/1) ----
+let air: [Int] = [11, 12]   // every value comes once from each copy
+timers = []; got = []
+key(20, 7, 0x3A, true, map: macbook, copies: air); key(20, 7, 0x3A, false, map: macbook, copies: air)
+check(got == [.brightnessDown] && timers.count == 1, "Air keyboard given twice: F1 is one press, one step (was two: \(got.count))")
+check(reads[20] == 1, "... its map is read once")
+key(20, 7, 0x3A, true, map: macbook, copies: [12]); key(20, 7, 0x3A, false, map: macbook, copies: [12])
+check(got.count == 1, "... a value from the second copy alone is not read")
+timers = []
 
 // ---- this Mac's keyboards, read only ----
 let m = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))

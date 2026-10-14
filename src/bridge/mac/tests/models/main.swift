@@ -374,6 +374,14 @@ check(stepsDone == 20, "hid: a held key's 20 repeats: 20 steps (\(stepsDone))")
 check(own.macOSDidIt(2, pressAt: 20.2, before: 0.5, after: 0.5625), "hid: another display: its own check (macOS's change counts)")
 check(own.macOSDidIt(1, pressAt: 25, before: 0.5, after: 0.5625), "hid: a press 4 s after the last step: the check is back")
 
+// ---- one keyboard given twice by IOHIDManager (HIDCopies) ----
+var cp = HIDCopies()
+check(cp.take(device: 7, copy: 100) && cp.take(device: 7, copy: 100), "copies: the first copy of a keyboard is read")
+check(!cp.take(device: 7, copy: 200) && !cp.take(device: 7, copy: 200), "copies: its second copy (same registry id) is not")
+check(cp.take(device: 8, copy: 200), "copies: another keyboard is read")
+cp.removed(device: 7)
+check(cp.take(device: 7, copy: 300) && !cp.take(device: 7, copy: 100), "copies: plugged in again: its new first copy is read")
+
 // ---- QEMU's control socket ----
 check(QMPKeys.socketPath(["-name", "Omarchy", "-qmp", "unix:/Users/a/Library/Caches/OmacVM/run/x.qmp,server=on,wait=off"])
       == "/Users/a/Library/Caches/OmacVM/run/x.qmp", "QMP: the socket from the command line")

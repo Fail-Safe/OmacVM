@@ -376,6 +376,25 @@ struct HIDKeyboards {
   }
 }
 
+/// IOHIDManager hands the Bridge a keyboard once for every matching rule it
+/// fits (macOS 27: two IOHIDDevice copies of one registry entry), and every
+/// copy delivers every key value. A MacBook's own keyboard is a keyboard and
+/// a consumer control, so each press came twice and stepped twice (from a
+/// dim 0.0625 one press went to 0: a black screen). Only the first copy seen
+/// of each keyboard is read.
+struct HIDCopies {
+  private var first: [UInt64: Int] = [:]   // registry id -> the copy read
+
+  /// True: read this value. `copy` tells the IOHIDDevice objects apart.
+  mutating func take(device: UInt64, copy: Int) -> Bool {
+    if let f = first[device] { return f == copy }
+    first[device] = copy
+    return true
+  }
+
+  mutating func removed(device: UInt64) { first[device] = nil }
+}
+
 /// One press can reach the Bridge twice: from the keyboard (IOHIDManager) and
 /// as macOS's media-key event (the tap), where a Mac delivers both. Whichever
 /// comes first acts; the other path's copy within `window` s is dropped.
