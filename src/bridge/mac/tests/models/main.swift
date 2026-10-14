@@ -375,7 +375,7 @@ check(stepsDone == 20, "hid: a held key's 20 repeats: 20 steps (\(stepsDone))")
 check(own.macOSDidIt(2, pressAt: 20.2, before: 0.5, after: 0.5625), "hid: another display: its own check (macOS's change counts)")
 check(own.macOSDidIt(1, pressAt: 25, before: 0.5, after: 0.5625), "hid: a press 4 s after the last step: the check is back")
 
-// ---- Shift and Option with the brightness keys (BrightnessCombo) ----
+// ---- Shift and Option with the brightness keys (BrightnessCombo, KeyHold) ----
 let none = KeyMods(), shift = KeyMods(shift: true), opt = KeyMods(option: true), shiftOpt = KeyMods(shift: true, option: true)
 func combo(_ k: MediaKey, _ m: KeyMods) -> String { let r = BrightnessCombo.key(k, m); return "\(r.key)\(r.fine ? " fine" : "")" }
 check(combo(.brightnessUp, none) == "brightnessUp" && combo(.brightnessDown, none) == "brightnessDown", "combo: brightness alone: the display")
@@ -389,6 +389,25 @@ check(combo(.keyboardUp, none) == "keyboardUp" && combo(.keyboardDown, opt) == "
       "combo: a keyboard-light key (older MacBooks) stays itself; Option: small steps")
 check(KeyMods(CGEventFlags.maskShift) == shift && KeyMods([.maskShift, .maskAlternate]) == shiftOpt && KeyMods([.maskCommand]) == none,
       "combo: the event's flags read as Shift / Option (Command is not one of them)")
+// A held key keeps what its first press meant.
+var hold = KeyHold()
+check(hold.down(.brightnessUp, repeating: false, mods: shift) == shift, "hold: Shift + brightness up pressed: Shift")
+check(hold.down(.brightnessUp, repeating: true, mods: none) == shift, "hold: Shift let go, the key still held: its repeats stay on the keyboard light")
+check(hold.down(.brightnessUp, repeating: true, mods: opt) == shift, "hold: Option pressed during the hold: still the first press's")
+check(hold.up(.brightnessUp) == shift, "hold: key up after Shift: goes where the press went")
+check(hold.up(.brightnessUp) == nil, "hold: a second key up: nothing held")
+check(hold.down(.brightnessUp, repeating: false, mods: none) == none, "hold: the next press without Shift: the display")
+check(hold.down(.brightnessUp, repeating: true, mods: shift) == none, "hold: Shift pressed during a plain hold: the display to the end")
+_ = hold.up(.brightnessUp)
+_ = hold.down(.brightnessDown, repeating: false, mods: shift)
+check(hold.up(.brightnessDown) == shift, "hold: Shift let go AFTER the key: the same (key up first, then Shift)")
+_ = hold.down(.brightnessDown, repeating: false, mods: shift)   // its key up never comes
+check(hold.down(.brightnessDown, repeating: false, mods: none) == none, "hold: a key up that never came: the next first press starts anew")
+check(hold.down(.brightnessUp, repeating: true, mods: shift) == shift, "hold: a repeat with nothing held: read as it comes")
+_ = hold.down(.brightnessUp, repeating: false, mods: shift)
+_ = hold.down(.brightnessDown, repeating: false, mods: none)
+check(hold.down(.brightnessUp, repeating: true, mods: none) == shift && hold.down(.brightnessDown, repeating: true, mods: shift) == none,
+      "hold: two keys held: each keeps its own")
 
 // ---- Shift and Option read from the keyboard (HIDKeyboards) ----
 var kbm = HIDKeyboards()

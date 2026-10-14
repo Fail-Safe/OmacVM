@@ -17,14 +17,15 @@ final class BrightnessKeys {
   private var ids: [Int: UInt64] = [:]                 // IOHIDDevice copy -> registry id (for its removal)
   private var said: String?
   private var asked = false
-  /// A brightness key and the Shift/Option held with it.
+  /// A brightness key and the Shift/Option it was pressed with (a repeat:
+  /// those of its first press).
   var onKey: ((MediaKey, KeyMods) -> Void)?
 
   // A held key repeats at macOS's key repeat speed (Keyboard settings): HID
   // sends one press and one release, no repeats. Stops on release, on another
   // brightness press, or after `maxRepeats` (a release that never came).
   static let maxRepeats = 64
-  private var held: (device: UInt64, usage: UInt32, key: MediaKey)?
+  private var held: (device: UInt64, usage: UInt32, key: MediaKey, mods: KeyMods)?
   private var holdID = 0
   var repeatTimes: () -> (delay: Double, interval: Double) = { (NSEvent.keyRepeatDelay, NSEvent.keyRepeatInterval) }
   var after: (Double, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
@@ -129,9 +130,10 @@ final class BrightnessKeys {
     }()
     if !pressed, let h = held, h.device == id, h.usage == usage { held = nil }
     guard let key = keyboards.value(device: id, usage: usage, pressed: pressed, map: map, fnState: fnState) else { return }
-    onKey?(key, keyboards.mods)
+    let mods = keyboards.mods
+    onKey?(key, mods)
     holdID += 1
-    held = (id, usage, key)
+    held = (id, usage, key, mods)
     let hold = holdID
     after(max(0.05, repeatTimes().delay)) { [weak self] in self?.repeatKey(hold, 0) }
   }
@@ -144,9 +146,11 @@ final class BrightnessKeys {
     if held?.device == id { held = nil }
   }
 
+  /// A held key's repeat: what its first press meant, whatever Shift and
+  /// Option do meanwhile (as KeyHold does for the tap's repeats).
   private func repeatKey(_ hold: Int, _ n: Int) {
     guard hold == holdID, let h = held, n < Self.maxRepeats else { return }
-    onKey?(h.key, keyboards.mods)
+    onKey?(h.key, h.mods)
     after(max(0.015, repeatTimes().interval)) { [weak self] in self?.repeatKey(hold, n + 1) }
   }
 

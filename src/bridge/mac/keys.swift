@@ -229,6 +229,7 @@ final class MediaKeys {
   private let brightnessKeys = BrightnessKeys()
   private var brightnessOnce = BrightnessOnce()   // main thread
   private var ownSteps = OwnSteps()               // main thread
+  private var tapHold = KeyHold()                 // main thread: a held key's modifiers (the tap's repeats)
 
   var status: String {
     if !config.captureKeys { return "Media keys: off (macOS handles them)" }
@@ -463,9 +464,11 @@ final class MediaKeys {
   func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
     guard config.captureKeys, type.rawValue == 14, event.getIntegerValueField(.eventSourceUserData) != VMKeys.marker,
           let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
-    let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
+    let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA, repeating = ns.data1 & 0x1 == 1
     guard let pressed = MediaKey(rawValue: code) else { return false }
-    let mods = KeyMods(event.flags)
+    // A held key's repeats and its key up go where its first press went (KeyHold).
+    let mods = down ? tapHold.down(pressed, repeating: repeating, mods: KeyMods(event.flags))
+                    : tapHold.up(pressed) ?? KeyMods(event.flags)
     let front = FrontWindows()   // one copy of the window list for every question below
     guard let d = decide(pressed, mods, command: event.flags.contains(.maskCommand), front) else { return false }   // no VM: macOS's keys
     let (vm, key, route, option) = d

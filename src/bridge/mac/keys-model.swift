@@ -242,6 +242,25 @@ enum BrightnessCombo {
   }
 }
 
+/// A held key keeps what its first press meant. Its repeats come with the
+/// modifiers of their own moment, so Shift let go during a hold moved the
+/// rest of it from the keyboard light to the display. Key up ends a hold; a
+/// first press (not a repeat) always starts a new one, so a key up that never
+/// came does not stick.
+struct KeyHold {
+  private var held: [MediaKey: KeyMods] = [:]
+
+  /// The modifiers to read this key-down with.
+  mutating func down(_ k: MediaKey, repeating: Bool, mods: KeyMods) -> KeyMods {
+    if repeating, let m = held[k] { return m }
+    held[k] = mods
+    return mods
+  }
+
+  /// Key up: the hold's modifiers (the up goes where its down went), or nil.
+  mutating func up(_ k: MediaKey) -> KeyMods? { held.removeValue(forKey: k) }
+}
+
 /// The VM app in front as the key path sees it. `omacvm`: an OmacVM.app VM
 /// (also windowed); Parallels, UTM and Fusion count only full screen.
 /// `display`: the Mac display it is on, `builtin` whether that is the

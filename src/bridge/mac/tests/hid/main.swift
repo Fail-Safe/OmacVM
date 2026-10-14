@@ -123,6 +123,21 @@ key(20, 7, shiftR, false, map: macbook, copies: air); key(20, 7, 0x3B, false, ma
 key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air)
 check(gotMods == [KeyMods(shift: true), KeyMods()], "Shift up before F2 up: that press was Shift's, the next plain F2 is not")
 timers = []; got = []; gotMods = []
+// A held Shift + F2, Shift let go mid-hold: every repeat stays on the keyboard light.
+key(20, 7, shiftL, true, map: macbook, copies: air); key(20, 7, 0x3B, true, map: macbook, copies: air)
+runTimers(3)
+key(20, 7, shiftL, false, map: macbook, copies: air)
+runTimers(10)
+key(20, 7, 0x3B, false, map: macbook, copies: air); runTimers(5)
+check(got.count == 14 && gotMods.allSatisfy { $0 == KeyMods(shift: true) },
+      "held Shift + F2, Shift let go after 3 repeats: all 14 steps with Shift (\(gotMods.filter { !$0.shift }.count) without)")
+check(timers.isEmpty, "... F2 let go: the repeats stop")
+// A plain held F1, Shift pressed mid-hold: the display to the end.
+timers = []; got = []; gotMods = []
+key(20, 7, 0x3A, true, map: macbook, copies: air); runTimers(2)
+key(20, 7, shiftL, true, map: macbook, copies: air); runTimers(4)
+key(20, 7, 0x3A, false, map: macbook, copies: air); key(20, 7, shiftL, false, map: macbook, copies: air)
+check(got.count == 7 && gotMods.allSatisfy { $0 == KeyMods() }, "held F1, Shift pressed mid-hold: all 7 steps on the display")
 // Option: small steps; Shift + Option: the display's small steps.
 timers = []; got = []; gotMods = []
 key(20, 7, optL, true, map: macbook, copies: air); key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 0x3B, false, map: macbook, copies: air)
@@ -148,6 +163,57 @@ for _ in 0..<30 { key(20, 7, 0x3B, true, map: macbook, copies: air); key(20, 7, 
 key(20, 7, shiftL, false, map: macbook, copies: air)
 check(got.count == 30 && gotMods.allSatisfy { $0.shift }, "30 quick Shift + F2: 30 steps, all with Shift (\(got.count))")
 timers = []
+
+// ---- stress: 1000 presses on the Air's keyboard (both copies), through the Bridge's rule to the keyboard light ----
+// A made-up Mac: the display's level and the keyboard light with every step (KeyboardSteps, the low ones on).
+// Each brightness key the reader hands over goes where the Bridge sends it with the VM in front (BrightnessCombo).
+var light: Float = 0, display: Float = 0.5, displayMoves = 0, lightMoves = 0
+b.onKey = { k, m in
+  let (to, _) = BrightnessCombo.key(k, m)
+  switch to {
+  case .keyboardUp, .keyboardDown:
+    var now = light
+    light = KeyboardSteps.settle(from: light, up: to == .keyboardUp, low: true, set: { now = $0; return true }, lit: { now > 0 }) ?? light
+    lightMoves += 1
+  default: display += to == .brightnessUp ? 1 / 32 : -1 / 32; displayMoves += 1
+  }
+}
+var seed: UInt64 = 0x5EED
+func rnd(_ n: Int) -> Int { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Int((seed >> 33) % UInt64(n)) }
+var presses = 0, shiftPresses = 0, wrong = 0, stuck = 0
+let ladder: [Float] = [0] + KeyboardSteps.low + (1...16).map { Float($0) / 16 }
+while presses < 1000 {
+  let up = rnd(2) == 0, usage: UInt32 = up ? 0x3B : 0x3A
+  let withShift = rnd(5) != 0   // mostly Shift combos, some plain presses between
+  let (d0, l0) = (displayMoves, light)
+  if withShift { key(20, 7, rnd(2) == 0 ? shiftL : shiftR, true, map: macbook, copies: air) }
+  key(20, 7, usage, true, map: macbook, copies: air)
+  let repeats = rnd(4) == 0 ? 1 + rnd(8) : 0   // a quarter of them held for some repeats
+  let shiftOffAt = withShift && rnd(3) == 0 ? rnd(repeats + 1) : -1   // Shift let go mid-press
+  for i in 0..<repeats {
+    if i == shiftOffAt { key(20, 7, shiftL, false, map: macbook, copies: air); key(20, 7, shiftR, false, map: macbook, copies: air) }
+    runTimers(1)
+  }
+  let shiftFirst = rnd(2) == 0   // key up order
+  if withShift && shiftFirst { key(20, 7, shiftL, false, map: macbook, copies: air); key(20, 7, shiftR, false, map: macbook, copies: air) }
+  key(20, 7, usage, false, map: macbook, copies: air)
+  if withShift && !shiftFirst { key(20, 7, shiftL, false, map: macbook, copies: air); key(20, 7, shiftR, false, map: macbook, copies: air) }
+  runTimers(3)   // nothing may run after the key up
+  timers = []
+  presses += 1 + repeats
+  if withShift {
+    shiftPresses += 1 + repeats
+    if displayMoves != d0 { wrong += 1 }   // the display moved on a Shift combo
+    // The light moved one step per press and repeat, or stood at its end.
+    var want = l0
+    for _ in 0...repeats { want = KeyboardSteps.next(want, up: up, low: true) }
+    if light != want { stuck += 1 }
+  } else if light != l0 { wrong += 1 }   // a plain press moved the keyboard light
+}
+check(wrong == 0, "stress: \(presses) presses (\(shiftPresses) with Shift): the display never moved on a Shift combo, the light never on a plain press (\(wrong) wrong)")
+check(stuck == 0, "stress: the keyboard light followed every Shift press and repeat, through the low steps and off (\(stuck) off)")
+check(ladder.contains(light), "stress: the light ends on one of its steps (\(light))")
+b.onKey = { got.append($0); gotMods.append($1) }
 
 // ---- this Mac's keyboards, read only ----
 let m = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
