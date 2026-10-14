@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.13 (unreleased)
 
 - **Omanotch's bar from before 3.1.12 is made new once.** A bar copy without a saved original
   (set up with OmacVM 3.1.11 or older) could not follow Omarchy's updates and needed a step by
