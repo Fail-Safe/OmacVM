@@ -453,9 +453,22 @@ def shell_logs():
 
 # Errors a copy's QML raises while the shell loads it. Binding loops and other
 # warnings are no refusal (Omarchy's own bar has some).
-ERROR = re.compile(r"TypeError|ReferenceError|SyntaxError|is not a type|is not installed|Cannot assign|"
-                   r"unavailable|[Ff]ailed to load|not found|Expected token|Unexpected token|"
-                   r"Non-existent attached object|Invalid property assignment|Error:")
+ERROR = re.compile(r"TypeError|ReferenceError|SyntaxError|is not a type|is not installed|is not defined|"
+                   r"Cannot assign|Unable to assign|Cannot read property|unavailable|[Ff]ailed to load|not found|"
+                   r"Expected token|Unexpected token|Non-existent attached object|Invalid property assignment|"
+                   r"Property value set multiple times|No such file or directory|Error:|^\S+ \S+\s+ERROR")
+ENTRY = re.compile(r"^\d{4}-\d\d-\d\d \d")
+
+
+def log_entries(text):
+    """The shell log's entries: a dated line with the lines under it."""
+    out = []
+    for line in text.splitlines():
+        if ENTRY.match(line) or not out:
+            out.append(line)
+        else:
+            out[-1] += "\n" + line
+    return out
 
 
 def restart_and_check(copies):
@@ -478,9 +491,9 @@ def restart_and_check(copies):
     bad = {}
     for c in copies:
         where = f"/plugins/{os.path.basename(c.dir)}/"
-        lines = [l for l in text.splitlines() if where in l and ERROR.search(l)]
+        lines = [e for e in log_entries(text) if where in e and ERROR.search(e) and "Binding loop" not in e]
         if lines:
-            bad[c.name] = lines[0].strip()[:200]
+            bad[c.name] = " ".join(lines[0].split()[2:])[:200]
         elif c.ipc and answered:
             # Answered before: must answer again (a few tries: the bar loads last).
             if not any(bar_answers() or time.sleep(2) for _ in range(5)):
