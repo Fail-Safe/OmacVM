@@ -37,7 +37,9 @@
 #    slow, flick), the Magic Mouse's too; inward, up and down, a tap, a pinch, no
 #    Space on that side, the setting off or a guest that says nothing: the guest's;
 #    macOS not following: the one step at the lift; the Dock swipe's events as
-#    macOS 26 and 27 read them (swipe-take.h, test-escape.c). "X left|right" from a
+#    macOS 26 and 27 read them (swipe-take.h, test-escape.c); only the finger counts the
+#    guest switches workspaces with ("G", Hyprland's gestures: 4 fingers with 3 given to
+#    tiling), four fingers coming down one after the other are no pinch. "X left|right" from a
 #    guest of 3.1.0-3.1.5 still moves in one step. The guest says "E" at once and on
 #    every workspace change from Hyprland's event socket (test-swipe-out.py, a
 #    made-up Hyprland), or decides at the lift for an older Mac; the lines go over
@@ -124,6 +126,7 @@ if mode == "swipe":
         real_set(on, version)
         print(f"guest: swipe out {'on' if on else 'off'} {version}", flush=True)
         if on:
+            g.SWIPE.send(b"G 4lr\n")
             g.SWIPE.send(b"E right left\n")
             g.SWIPE.send(b"X left\n")
     g.SWIPE.set = set_
@@ -247,7 +250,7 @@ expect "$T/guest4" "guest: swipe out on 2"
 grep -q 'swipe out to the left from "App VM": its VM is not the one in front: ignored' "$T/out4" &&
   echo "ok   swipe out: the guest's X left reached the Mac over its connection (and was checked)" ||
   { echo "FAIL swipe out: the Mac did not read the guest's X left" >&2; cat "$T/out4" >&2; fail=1; }
-expect "$T/out4" "edges App VM 1 -1"   # its "E right left", kept with its connection
+expect "$T/out4" "edges App VM 1 -1 ways 10 10"   # its "E right left" and "G 4lr", kept with its connection
 # ... the same on the other three routes (each on its own network's address).
 for r in "parallels 0 10.211.55.2" "utm 1 192.168.64.1" "fusion 2 172.16.5.1"; do
   set -- $r
@@ -255,7 +258,7 @@ for r in "parallels 0 10.211.55.2" "utm 1 192.168.64.1" "fusion 2 172.16.5.1"; d
   guest "$1 VM" "$1" "" swipe OMACVM_HOST="$3" > "$T/guest-$1" 2>&1 || true
   wait "$MAC" || true
   expect "$T/guest-$1" "guest: swipe out on 2"
-  expect "$T/out-$1" "edges $1 VM 1 -1"
+  expect "$T/out-$1" "edges $1 VM 1 -1 ways 10 10"
 done
 mac "$T/out5" 3
 guest "App VM" app "" swipe OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest5" 2>&1 || true
@@ -290,6 +293,9 @@ grep -E '^(ok|FAIL|skip) ' "$T/notice"
 # Swipe out to macOS in the guest, against a made-up Hyprland (#342).
 python3 "$HERE/../guest/test-swipe-out.py" "$HERE/../guest/omacvm-gestures" > "$T/swipe-out" 2>&1 || fail=1
 grep -E '^(ok|FAIL|skip) ' "$T/swipe-out"
+# ... and install.sh's gesture lines: only for a count with no sideways gesture yet.
+bash "$HERE/../guest/test-install-gestures.sh" > "$T/install-gestures" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/install-gestures"
 # 6. Which scrolling scroll momentum takes.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \

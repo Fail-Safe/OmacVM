@@ -209,6 +209,22 @@ static void pad(int k, double x, double y) {
   frameCb((MTDeviceRef)&fakePadDev, t, k, 0, 0);
   clk += 0.008;
 }
+// k fingers at x, x + 0.06, ... (each keeps its place when another comes down).
+static void padAt(int k, double x) {
+  MTTouch t[8]; memset(t, 0, sizeof t);
+  for (int i = 0; i < k; i++) {
+    t[i].pathIndex = 3 + i; t[i].state = 4; t[i].zTotal = 0.5f;
+    t[i].normalized.pos.x = (float)(x + 0.06 * i); t[i].normalized.pos.y = 0.5f;
+  }
+  frameCb((MTDeviceRef)&fakePadDev, t, k, 0, 0);
+  clk += 0.008;
+}
+// A four-finger swipe as a hand makes it: three fingers come down, the 4th a
+// frame later, then all of them move from x0 to x1.
+static void padFour(double x0, double x1, int steps) {
+  padAt(3, x0); padAt(4, x0);
+  for (int s = 1; s <= steps; s++) padAt(4, x0 + (x1 - x0) * s / steps);
+}
 // k fingers from x0 to x1 (y0 to y1) in steps frames of 8 ms.
 static void padMove(int k, double x0, double x1, double y0, double y1, int steps) {
   for (int s = 0; s <= steps; s++) pad(k, x0 + (x1 - x0) * s / steps, y0 + (y1 - y0) * s / steps);
@@ -1337,6 +1353,49 @@ int main(void) {
     check(world[0].cur == 103 && dockMisses == 0 && dockFollows, "follow: ... the next one macOS follows: the misses start again");
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
 
+    // The fingers the guest switches workspaces with (user, 2026-10-14: "3 finger is for window tiling,
+    // and 4 for workspace swiping"): "G", Hyprland's gestures.
+    nDockEv = 0;
+    padFour(0.5, 0.25, 30); padLift(); guestGot();
+    check(dockLast() == kSwipeEnded && world[0].cur == 103 && gotFrames == 0,
+          "fingers: four fingers that come down one after the other (no G: any 3+): out with the fingers (a 4th finger is no pinch)");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    const char *badG[] = { "G", "G 1lr", "G 4", "G 4x", "G 10lr", "G 4lr,3l", "G -lr", "G 4lr  3l x" };
+    for (int i = 0; i < 8; i++) guestLine(clients[0].fd, g0, badG[i]);
+    check(!clients[0].waysKnown, "fingers: malformed G lines: ignored");
+    guestLine(clients[0].fd, g0, "G 4lr");
+    check(clients[0].waysKnown && clients[0].ways[0] == 1u << 4 && clients[0].ways[1] == 1u << 4, "fingers: G 4lr kept");
+    nDockEv = 0;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(!nDockEv && gotFrames == 31 && world[0].cur == 102 && capturing,
+          "fingers: G 4lr, three fingers out at the edge: the guest's (they tile there), no swipe out");
+    nDockEv = 0;
+    padFour(0.5, 0.25, 30); padLift(); guestGot();
+    check(dockLast() == kSwipeEnded && world[0].cur == 103 && gotFrames == 0, "fingers: G 4lr, four fingers (one after the other): out with the fingers");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    guestLine(clients[0].fd, g0, "G 4l");
+    nDockEv = 0;
+    padFour(0.3, 0.55, 30); padLift(); guestGot();
+    check(!nDockEv && world[0].cur == 102 && gotFrames > 30, "fingers: G 4l (4 fingers right do something else): four fingers right: the guest's");
+    guestLine(clients[0].fd, g0, "G -");
+    nDockEv = 0;
+    padFour(0.5, 0.25, 30); padLift(); guestGot();
+    check(!nDockEv && world[0].cur == 102 && gotFrames > 30, "fingers: G - (no workspace swipe set): nothing is the Mac's");
+    guestLine(clients[0].fd, g0, "G 3lr 4lr");
+    nDockEv = 0;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(dockLast() == kSwipeEnded && world[0].cur == 103, "fingers: G 3lr 4lr: three fingers out as before");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    guestLine(clients[0].fd, g0, "G 3lr");
+    nDockEv = 0;
+    for (int i = 0; i <= 20; i++) mouse2(0.3 + 0.02 * i);
+    mouseLift(); guestGot();
+    check(!nDockEv && gotFrames > 10 && world[0].cur == 102,
+          "fingers: G 3lr, a Magic Mouse sending four virtual fingers (MouseSwipeFingers): its swipe stays the guest's");
+    soOn = 0; swipeOutLook(); guestGot();
+    check(!clients[0].waysKnown, "fingers: SwipeOut off: what the guest said is forgotten (G too)");
+    soOn = 1; swipeOutLook(); guestGot(); guestLine(clients[0].fd, g0, "E right left"); takeLook();
+
     // Two displays with "all": the fingers' display follows them, the other one the shortcut.
     const uint64_t in2[] = { 201, 202 }, out2[] = { 301, 302 };
     layout(2, in2, 2, out2, 2);
@@ -1363,20 +1422,28 @@ int main(void) {
           "model: past half a Space finishes; under it only a flick; going back never");
     SwipeTake s; takeReset(&s);
     double t = 0;
-    check(takeFrame(&s, 3, 1, -1, 0, 0, 0.5, t) == TK_HOLD, "model: three fingers at an edge: held");
+    check(takeFrame(&s, 3, 1, -1, 1, -1, 0, 0, 0.5, t) == TK_HOLD, "model: three fingers at an edge: held");
     int r = TK_HOLD;
-    for (int i = 0; i < 40 && r == TK_HOLD; i++) r = takeFrame(&s, 3, 1, -1, 0, 0, 0.5, t += 0.008);
+    for (int i = 0; i < 40 && r == TK_HOLD; i++) r = takeFrame(&s, 3, 1, -1, 1, -1, 0, 0, 0.5, t += 0.008);
     check(r == TK_FLUSH && s.state == TAKE_PASS, "model: resting longer than 0.25 s: the guest's");
     takeReset(&s);
-    takeFrame(&s, 3, 1, 0, -0.01, 0, 0.5, t);
-    check(takeFrame(&s, 3, 1, 0, -0.015, 0, 0.5, t += 0.008) == TK_BEGIN && s.toward == 1 && fabs(s.progress - 0.025 / 0.5) < 1e-9,
+    takeFrame(&s, 3, 1, 0, 1, 0, -0.01, 0, 0.5, t);
+    check(takeFrame(&s, 3, 1, 0, 1, 0, -0.015, 0, 0.5, t += 0.008) == TK_BEGIN && s.toward == 1 && fabs(s.progress - 0.025 / 0.5) < 1e-9,
           "model: 2.5 % of the width to the left: taken, from where the fingers are");
-    takeFrame(&s, 3, 0, 0, 0.05, 0, 0.5, t += 0.008);
+    takeFrame(&s, 3, 0, 0, 0, 0, 0.05, 0, 0.5, t += 0.008);
     check(s.progress == 0 && s.state == TAKE_TAKEN, "model: back past the start: the VM's Space, not further");
-    check(takeFrame(&s, 2, 0, 0, 0, 0, 0.5, t += 0.008) == TK_END && !s.commit && s.state == TAKE_DONE, "model: one finger up: the end, back");
-    check(takeFrame(&s, 3, 1, -1, -0.2, 0, 0.5, t += 0.008) == TK_DROP && takeFrame(&s, 0, 0, 0, 0, 0, 0.5, t) == TK_DROP && s.state == TAKE_IDLE,
+    check(takeFrame(&s, 2, 0, 0, 0, 0, 0, 0, 0.5, t += 0.008) == TK_END && !s.commit && s.state == TAKE_DONE, "model: one finger up: the end, back");
+    check(takeFrame(&s, 3, 1, -1, 1, -1, -0.2, 0, 0.5, t += 0.008) == TK_DROP && takeFrame(&s, 0, 0, 0, 0, 0, 0, 0, 0.5, t) == TK_DROP && s.state == TAKE_IDLE,
           "model: after the end nothing until every finger is up");
-    check(takeFrame(&s, 3, 0, 0, 0, 0, 0.5, t) == TK_FORWARD && s.state == TAKE_PASS, "model: no way out either way: the guest's at once");
+    check(takeFrame(&s, 3, 0, 0, 0, 0, 0, 0, 0.5, t) == TK_FORWARD && s.state == TAKE_PASS, "model: no way out either way: the guest's at once");
+    takeReset(&s);
+    check(takeFrame(&s, 3, 1, -1, 0, 0, 0, 0, 0.5, t) == TK_HOLD, "model: an edge, but 3 fingers do not switch workspaces: held (a 4th may come)");
+    takeFrame(&s, 4, 1, -1, 1, -1, -0.01, 0, 0.5, t += 0.008);
+    check(takeFrame(&s, 4, 1, -1, 1, -1, -0.015, 0, 0.5, t += 0.008) == TK_BEGIN, "model: ... the 4th finger down, then the way: taken (4 fingers switch)");
+    takeReset(&s);
+    takeFrame(&s, 3, 1, -1, 0, 0, -0.01, 0, 0.5, t);
+    check(takeFrame(&s, 3, 1, -1, 0, 0, -0.015, 0, 0.5, t += 0.008) == TK_FLUSH && s.state == TAKE_PASS,
+          "model: ... three fingers going out: the guest's (they do something else there)");
   }
 
   // ---- the Dock's swipe events (as macOS 26 and older read them, and as macOS 27 does) ----

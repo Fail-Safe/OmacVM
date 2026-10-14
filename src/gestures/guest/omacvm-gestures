@@ -24,6 +24,9 @@ from a listener without the proof is acted on. Then it reads lines:
   N <why>                           (Mac helpers up to 3.0.18) the escape combo found no way
                                     out to macOS: ignored, no notice any more
 and sends, after "X on 2":
+  G <n><ways>... | G -              which swipes switch workspaces (Hyprland's gestures): e.g.
+                                    "G 4lr" = 4 fingers going left and right, "G -" = none;
+                                    at once and after each config reload (when it can be read)
   E <l> <r>                         where a swipe of fingers going left and right goes now:
                                     left|right = out to the macOS Space on that side, - = a
                                     workspace swipe here; at once and on every workspace change
@@ -731,6 +734,230 @@ def swipe_out_side(state, dx, dy, width):
     return "right" if state.get("empty") or not state.get("create_new", True) else None
 
 
+# ---- which swipes switch workspaces: Hyprland's hl.gesture lines ----
+# Hyprland (Lua config, 0.55 on) offers no query for its gestures, so they are
+# read from the config files in the order Hyprland runs them: hyprland.lua and
+# what it requires or dofiles (~/.local/state, ~/.config, then Omarchy's own
+# files, as Omarchy's bootstrap sets package.path). Hyprland keeps the first
+# gesture for a finger count and way (a later one it would shadow is refused,
+# "unset" removes one) and, for a swipe, takes the first of those whose way
+# fits (horizontal, left or right, any "swipe"). A swipe out only follows a
+# count and way that switch workspaces there: with 3 fingers given to moving
+# focus and 4 to workspaces, only 4 fingers swipe out (user, 2026-10-14).
+# A count and way that any other sideways gesture uses, even one Hyprland
+# would refuse, stays the VM's too: a config can wrap hl.gesture and drop
+# lines (one drops OmacVM's own 3-finger line so 3 fingers snap windows), and
+# taking a swipe the user gave to something else is the worse mistake.
+LUA_STRING = r'"(?:[^"\\]|\\.)*"|' + r"'(?:[^'\\]|\\.)*'"
+
+
+def lua_code(text):
+    """Lua source without its comments (strings kept)."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "\"'":
+            m = re.compile(LUA_STRING).match(text, i)
+            j = m.end() if m else n
+            out.append(text[i:j])
+            i = j
+        elif text.startswith("--", i):
+            m = re.compile(r"--\[(=*)\[").match(text, i)
+            if m:
+                j = text.find("]" + m[1] + "]", m.end())
+                i = n if j < 0 else j + len(m[1]) + 2
+            else:
+                j = text.find("\n", i)
+                i = n if j < 0 else j
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def table_at(code, i):
+    """The {...} table that starts at code[i] (strings skipped), or None."""
+    depth, j, n = 0, i, len(code)
+    while j < n:
+        c = code[j]
+        if c in "\"'":
+            m = re.compile(LUA_STRING).match(code, j)
+            j = m.end() if m else n
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return code[i:j + 1]
+        j += 1
+    return None
+
+
+def gesture_fields(table):
+    """fingers, direction, action ("other" for a function), mods? of one
+    hl.gesture table: its own fields only (not those of a function inside)."""
+    top, depth, i = [], 0, 0
+    while i < len(table):   # the table's own level: depth 1 (strings skipped)
+        c = table[i]
+        if c in "\"'":
+            m = re.compile(LUA_STRING).match(table, i)
+            j = m.end() if m else len(table)
+            top.append(table[i:j] if depth == 1 else " " * (j - i))
+            i = j
+            continue
+        depth += c in "{([" and 1 or 0
+        top.append(c if depth == 1 else " ")
+        depth -= c in "})]" and 1 or 0
+        i += 1
+    top = "".join(top)
+
+    def field(name, pattern):
+        m = re.search(r"(?<![\w.])" + name + r"\s*=\s*" + pattern, top)
+        return m[1] if m else None
+    fingers = field("fingers", r"(\d+)\b")
+    direction = field("direction", r"[\"']([A-Za-z]+)[\"']")
+    action = field("action", r"[\"']([A-Za-z_]+)[\"']")
+    if action is None and re.search(r"(?<![\w.])action\s*=", top):
+        action = "other"
+    return (int(fingers) if fingers else None, (direction or "").lower(), action,
+            bool(re.search(r"(?<![\w.])mods\s*=", top)))
+
+
+def hypr_lua_files(home, omarchy):
+    """(path, code) of Hyprland's config in the order it runs, following
+    require("a.b") and dofile("...") with a plain string."""
+    roots = [f"{home}/.local/state", f"{home}/.config"] + ([omarchy] if omarchy else [])
+    seen, order = set(), []
+
+    def visit(path):
+        real = os.path.realpath(path)
+        if real in seen or not os.path.isfile(real) or len(seen) > 200:
+            return
+        seen.add(real)
+        try:
+            with open(real, errors="replace") as f:
+                code = lua_code(f.read())
+        except OSError:
+            return
+        pos = 0
+        for m in re.finditer(r"""\b(require|dofile)\s*\(?\s*(["'])([^"']+)\2""", code):
+            order.append((real, code[pos:m.start()]))
+            pos = m.end()
+            name = m[3]
+            if m[1] == "dofile":
+                visit(name.replace("~", home, 1))
+            else:
+                for r in roots:
+                    p = f"{r}/{name.replace('.', '/')}.lua"
+                    if os.path.isfile(p):
+                        visit(p)
+                        break
+        order.append((real, code[pos:]))
+
+    visit(f"{home}/.config/hypr/hyprland.lua")
+    return order
+
+
+# Hyprland's names for a way (dirForString) and the axis each lies on.
+WAY_NAMES = {"swipe": "swipe", "left": "left", "l": "left", "right": "right", "r": "right", "up": "up", "u": "up",
+             "top": "up", "t": "up", "down": "down", "d": "down", "bottom": "down", "b": "down",
+             "horizontal": "horizontal", "horiz": "horizontal", "vertical": "vertical", "vert": "vertical",
+             "pinch": "pinch", "pinchin": "pinchin", "zoomin": "pinchin", "pinchout": "pinchout", "zoomout": "pinchout"}
+WAY_AXIS = {"left": "horizontal", "right": "horizontal", "horizontal": "horizontal", "up": "vertical",
+            "down": "vertical", "vertical": "vertical", "swipe": "swipe", "pinch": "pinch", "pinchin": "pinch",
+            "pinchout": "pinch"}
+
+
+def omarchy_dir(home):
+    """Omarchy's own files (omarchy-mac's or the package's), or None."""
+    return next((d for d in (f"{home}/.local/share/omarchy", "/usr/share/omarchy")
+                 if os.path.isfile(f"{d}/default/hypr/bootstrap.lua")), None)
+
+
+def hypr_gestures(parts):
+    """(fingers, way, action, mods) of each hl.gesture table in these parts."""
+    for _, code in parts:
+        for m in re.finditer(r"\bhl\s*\.\s*gesture\s*\(\s*(?=\{)", code):
+            table = table_at(code, m.end())
+            if table:
+                fingers, direction, action, mods = gesture_fields(table)
+                yield fingers, WAY_NAMES.get(direction), action, mods
+
+
+def sideways_counts(home):
+    """For install.sh: the finger counts a sideways gesture (any action, no
+    key held) already uses, in Hyprland's config or any file in
+    ~/.config/hypr; None when a count is not written out."""
+    parts = hypr_lua_files(home, omarchy_dir(home))
+    seen = {path for path, _ in parts}
+    for path in sorted(glob.glob(f"{home}/.config/hypr/*.lua")):
+        if os.path.realpath(path) not in seen:
+            try:
+                with open(path, errors="replace") as f:
+                    parts.append((path, lua_code(f.read())))
+            except OSError:
+                pass
+    counts = set()
+    for fingers, way, action, mods in hypr_gestures(parts):
+        if mods or action == "unset" or way not in ("horizontal", "left", "right", "swipe"):
+            continue
+        if fingers is None:
+            return None
+        counts.add(fingers)
+    return counts
+
+
+def workspace_swipes(home=None, omarchy=None):
+    """Which swipes switch workspaces: {fingers: "l", "r" or "lr"} (fingers
+    going left / right), {} for none, None when Hyprland's config cannot be
+    read (or one gesture's fingers are not a plain number)."""
+    if home is None:
+        try:
+            home = pwd.getpwnam(desktop_user() or "").pw_dir
+        except KeyError:
+            return None
+    if omarchy is None:
+        omarchy = omarchy_dir(home)
+    parts = hypr_lua_files(home, omarchy)
+    if not parts:
+        return None
+    gestures = []   # [fingers, direction, action, mods] as Hyprland keeps them
+    others = []     # [fingers, direction, mods] of every gesture for something else
+    for fingers, direction, action, mods in hypr_gestures(parts):
+        if fingers is None:
+            if action in ("workspace", None, "other"):
+                return None   # a count that is not written out: cannot tell
+            continue
+        if not direction:
+            continue
+        if action == "unset":
+            gestures = [g for g in gestures if not (g[0] == fingers and g[1] == direction and g[3] == mods)]
+            others = [o for o in others if o != [fingers, direction, mods]]
+            continue
+        if action != "workspace":
+            others.append([fingers, direction, mods])
+        a = WAY_AXIS[direction]
+        if any(g[0] == fingers and g[3] == mods and
+               (g[1] == a or g[1] == direction or (a in ("horizontal", "vertical") and g[1] == "swipe"))
+               for g in gestures):
+            continue   # shadowed: Hyprland refuses it
+        gestures.append([fingers, direction, action, mods])
+    ways = {}
+    for n in sorted({g[0] for g in gestures}):
+        for way, word in (("l", "left"), ("r", "right")):
+            g = next((g for g in gestures if g[0] == n and not g[3] and g[1] in ("horizontal", word, "swipe")), None)
+            if g and g[2] == "workspace" and not any(
+                    o[0] == n and not o[2] and o[1] in ("horizontal", word, "swipe") for o in others):
+                ways[n] = ways.get(n, "") + way
+    return ways
+
+
+def swipes_line(ways):
+    """The "G" line: "G 4lr", "G 3l 4lr", "G -" for none."""
+    return "G " + (" ".join(f"{n}{w}" for n, w in sorted(ways.items())) or "-") + "\n"
+
+
 HYPR_EVENTS = {b"workspace", b"workspacev2", b"focusedmon", b"focusedmonv2", b"createworkspace", b"createworkspacev2",
                b"destroyworkspace", b"destroyworkspacev2", b"moveworkspace", b"moveworkspacev2", b"renameworkspace",
                b"activespecial", b"activespecialv2", b"openwindow", b"closewindow", b"movewindow", b"movewindowv2",
@@ -749,6 +976,8 @@ class SwipeOut:
         self.box = {}            # the workspaces at this swipe's start ("state"; a thread reads them)
         self.reader = None
         self.said = None         # the last "E" line sent on this connection
+        self.gsaid = None        # the last "G" line sent on this connection
+        self.fingers = 0         # the most fingers of this swipe (for a Mac from 3.1.0-3.1.5)
         self.waker = None        # (read end, write end): wakes the watcher at once
         self.watcher = None
 
@@ -758,27 +987,38 @@ class SwipeOut:
                   f"{' (the Mac follows the fingers)' if on and version >= 2 else ''}", flush=True)
         self.on, self.version = on, version
         self.cancel()
-        self.said = None
+        self.said = self.gsaid = None
         if on and version >= 2:
-            if self.watcher is None:
+            start = self.watcher is None
+            if start:
                 self.waker = socket.socketpair()
                 self.waker[0].setblocking(False)
                 self.watcher = threading.Thread(target=self.watch, daemon=True)
-                self.watcher.start()
             try:
                 self.waker[1].send(b"!")
             except OSError:
                 pass
+            # A new watcher only after the wake-up: its first look takes it,
+            # so it says where swipes go once, not twice.
+            if start:
+                self.watcher.start()
 
-    def tell(self, state):
-        """Where swipes go now, to the Mac (only when it changed)."""
-        line = "E %s %s\n" % edge_sides(state)
+    def tell(self, state, ways=None):
+        """Where swipes go now and which swipes switch workspaces (G, when
+        Hyprland's config could be read), to the Mac: only what changed. A
+        Mac helper from 3.1.6-3.1.10 skips G and takes any 3+-finger swipe."""
         send = self.send
-        if line == self.said or not send or not (self.on and self.version >= 2):
+        if not send or not (self.on and self.version >= 2):
             return
+        line = "E %s %s\n" % edge_sides(state)
+        gline = swipes_line(ways) if ways is not None else None
         try:
-            send(line.encode())
-            self.said = line
+            if gline and gline != self.gsaid:
+                send(gline.encode())
+                self.gsaid = gline
+            if line != self.said:
+                send(line.encode())
+                self.said = line
         except OSError:
             pass   # the connection is going: run() connects again and the Mac asks anew
 
@@ -820,15 +1060,16 @@ class SwipeOut:
         workspace events, after a wake-up (a new connection) and now and
         then without one."""
         buf, dirty, last = b"", True, 0.0
+        ways = workspace_swipes()   # Hyprland's gestures: read now and after each config reload
         while self.on and self.version >= 2:
             now = time.monotonic()
             if dirty or now - last >= EDGE_RECHECK:
-                self.tell(workspaces_now(sock))
+                self.tell(workspaces_now(sock), ways)
                 dirty, last = False, now
             r, _, _ = select.select([ev, self.waker[0]], [], [], EDGE_RECHECK)
             if self.waker[0] in r:
                 self.woken(0)
-                dirty, self.said = True, None
+                dirty, self.said, self.gsaid = True, None, None
             if ev not in r:
                 continue
             data = ev.recv(65536)
@@ -836,8 +1077,10 @@ class SwipeOut:
                 return   # Hyprland went away
             buf += data
             *lines, buf = buf.split(b"\n")
-            if not any(line.partition(b">>")[0] in HYPR_EVENTS for line in lines):
+            names = [line.partition(b">>")[0] for line in lines]
+            if not any(n in HYPR_EVENTS for n in names):
                 continue
+            reload = b"configreloaded" in names
             # The rest of the burst (a workspace change is several events):
             # read until it is quiet, at most EDGE_BURST.
             until = time.monotonic() + EDGE_BURST
@@ -848,7 +1091,10 @@ class SwipeOut:
                 more = ev.recv(65536)
                 if not more:
                     return
+                reload = reload or b"configreloaded>>" in buf + more
                 buf = (buf + more).rpartition(b"\n")[2]
+            if reload:
+                ways = workspace_swipes()
             dirty = True
 
     def cancel(self):
@@ -857,6 +1103,7 @@ class SwipeOut:
     @staticmethod
     def _read(box):
         box["state"] = workspaces_now()
+        box["ways"] = workspace_swipes()
 
     def frame(self, contacts):
         if not self.on or self.version >= 2:
@@ -864,10 +1111,11 @@ class SwipeOut:
         if len(contacts) >= 3:
             c = (sum(x for _, x, _ in contacts) / len(contacts), sum(y for _, _, y in contacts) / len(contacts))
             if self.start is None:
-                self.start, self.box = c, {}
+                self.start, self.box, self.fingers = c, {}, 0
                 self.reader = threading.Thread(target=self._read, args=(self.box,), daemon=True)
                 self.reader.start()
             self.end = c
+            self.fingers = max(self.fingers, len(contacts))
             return
         if self.start is not None:
             start, end = self.start, self.end
@@ -883,6 +1131,9 @@ class SwipeOut:
         side = swipe_out_side(state, dx, dy, W)
         if not side or not self.send:
             return
+        ways = self.box.get("ways")
+        if ways is not None and ("l" if dx < 0 else "r") not in ways.get(self.fingers, ""):
+            return   # that many fingers do something else here (Hyprland's gestures)
         print(f"omacvm-gestures: swipe out to the {side} (workspace {state['active']} of {state['ids']} "
               f"on {state['monitor']})", flush=True)
         self.send(f"X {side}\n".encode())
@@ -1115,4 +1366,9 @@ def serve(pad, keys, glide):
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:2] == ["--sideways"] and len(sys.argv) == 3:
+        # install.sh: which finger counts a sideways gesture already uses ("?": cannot tell).
+        counts = sideways_counts(sys.argv[2])
+        print("?" if counts is None else " ".join(map(str, sorted(counts))))
+    else:
+        main()

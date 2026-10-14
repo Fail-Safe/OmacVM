@@ -66,6 +66,9 @@
 //                                     "2": this helper takes the swipe itself (below); a guest
 //                                     from 3.1.0-3.1.5 reads only "on" and says X left|right
 // and from the guest, once the handshake holds:
+//   G <n><ways>... | G -              (after "X on 2") which swipes switch workspaces there
+//                                     (Hyprland's gestures): "G 4lr" = 4 fingers going left and
+//                                     right; a swipe out follows only those counts and ways
 //   E <l> <r>                         (after "X on 2") where a swipe of fingers going left and
 //                                     right would go now: left|right = out to the macOS Space on
 //                                     that side, - = the guest's own workspace swipe; at once and
@@ -238,8 +241,10 @@ static int vmOffSpace;
 #define MAX_CLIENTS 8
 // edge: where the guest says a swipe of fingers going left [0] and right [1]
 // goes now ("E", -1 the macOS Space on the left, +1 on the right, 0 its own
-// swipe); edgeKnown: it said so since it connected.
-static struct { int fd, net, gestures, glide, target, edge[2], edgeKnown; unsigned gen; char ip[32], name[256]; } clients[MAX_CLIENTS];
+// swipe); edgeKnown: it said so since it connected. ways: which finger counts
+// switch workspaces going left [0] / right [1] there (bit n: n fingers; "G",
+// Hyprland's gestures); waysKnown: it said so (else any 3 or more).
+static struct { int fd, net, gestures, glide, target, edge[2], edgeKnown, waysKnown; unsigned ways[2], gen; char ip[32], name[256]; } clients[MAX_CLIENTS];
 static volatile int frontNet = -1;
 static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
@@ -2574,7 +2579,7 @@ static void swipeOutLook(void) {
   if (!on) {
     // A guest says where swipes go again after the next "X on 2".
     pthread_mutex_lock(&sendLock);
-    for (int i = 0; i < MAX_CLIENTS; i++) clients[i].edgeKnown = 0;
+    for (int i = 0; i < MAX_CLIENTS; i++) clients[i].edgeKnown = clients[i].waysKnown = 0;
     pthread_mutex_unlock(&sendLock);
   }
   sendTo(1, on ? SWIPE_OUT_ON : "X off\n", on ? strlen(SWIPE_OUT_ON) : 6);
@@ -2649,12 +2654,38 @@ static int edgeWord(const char *w) {
   return !strcmp(w, "left") ? -1 : !strcmp(w, "right") ? 1 : !strcmp(w, "-") ? 0 : 2;
 }
 
+// "G": which finger counts switch workspaces going left and right, from
+// tokens like "4lr", "3l" (2-9 fingers), or "-" for none. 0: not that form.
+static int waysFrom(const char *s, unsigned ways[2]) {
+  ways[0] = ways[1] = 0;
+  if (!strcmp(s, "-")) return 1;
+  int n = 0;
+  while (*s) {
+    while (*s == ' ') s++;
+    if (!*s) break;
+    if (*s < '2' || *s > '9' || ++n > 16) return 0;
+    unsigned bit = 1u << (*s++ - '0'), any = 0;
+    for (; *s == 'l' || *s == 'r'; s++) { ways[*s == 'r'] |= bit; any = 1; }
+    if (!any || (*s && *s != ' ')) return 0;
+  }
+  return n > 0;
+}
+
 // One line a guest sent after its handshake (its reader thread). "E <l> <r>"
-// is kept with its connection (the trackpad's thread reads it when a swipe
-// begins); "X left|right" is acted on on the main thread. Anything else is
-// skipped.
+// and "G ..." are kept with its connection (the trackpad's thread reads them
+// when a swipe begins); "X left|right" is acted on on the main thread.
+// Anything else is skipped.
 static void guestLine(int fd, unsigned gen, const char *line) {
   char a[8], b[8], more;
+  unsigned ways[2];
+  if (!strncmp(line, "G ", 2) && waysFrom(line + 2, ways)) {
+    pthread_mutex_lock(&sendLock);
+    for (int i = 0; i < MAX_CLIENTS; i++)
+      if (clients[i].fd == fd && clients[i].gen == gen) { clients[i].ways[0] = ways[0]; clients[i].ways[1] = ways[1]; clients[i].waysKnown = 1; }
+    pthread_mutex_unlock(&sendLock);
+    if (verbose) logf_("swipe out: workspaces switch with %s", line + 2);
+    return;
+  }
   if (!strncmp(line, "E ", 2) && sscanf(line + 2, "%7s %7s %c", a, b, &more) == 2) {
     int l = edgeWord(a), r = edgeWord(b);
     if (l == 2 || r == 2) return;
@@ -2707,6 +2738,8 @@ static int dockMisses;                   // finished swipes in a row that did no
 static volatile double takeQuietUntil;   // the real trackpad's gesture events dropped until then
 static volatile double takeTravel = TAKE_TRAVEL;   // trackpad widths per Space ("SwipeOutTravel")
 #define TAKE_QUIET 0.4                   // s after a taken swipe's end
+#define TAKE_PINCH_MIN 0.03              // trackpad widths the fingers' spread changes in a pinch ...
+#define TAKE_PINCH_RATIO 0.25            // ... and this share of it (fingers drift a little in a swipe)
 #define TAKE_SETTLE 0.6                  // s macOS takes to slide the VM's Space back
 static double takeHoldUntil;             // the capture check waits until then (takeLock)
 
@@ -2753,21 +2786,26 @@ static void takeLook(void) {
   pthread_mutex_unlock(&takeLock);
 }
 
-// When a swipe begins: where fingers going left and right go (every VM in
-// front must say the same; 0 = the guest's), only toward a macOS Space.
-static void takeSides(int *sl, int *sr) {
+// Where fingers going left and right go out (every VM in front must say the
+// same; 0 = the guest's), only toward a macOS Space, with k fingers: only a
+// count the guest switches workspaces with that way ("G"; a guest that did
+// not say: any 3 or more). k = 0: with any count (worth holding back?).
+static void takeSides(int *sl, int *sr, int k) {
   *sl = *sr = 0;
   if (swipeOut != 1) return;
   int e[2] = { 0, 0 }, n = 0, all = 1;
+  unsigned ok[2] = { ~0u << 3, ~0u << 3 };   // fingers allowed per way: 3 and more
   pthread_mutex_lock(&sendLock);
   for (int i = 0; i < MAX_CLIENTS; i++) {
     if (clients[i].fd < 0 || !clients[i].target) continue;
     if (!clients[i].edgeKnown) all = 0;
     else if (!n++) { e[0] = clients[i].edge[0]; e[1] = clients[i].edge[1]; }
     else for (int w = 0; w < 2; w++) if (e[w] != clients[i].edge[w]) e[w] = 0;
+    if (clients[i].waysKnown) for (int w = 0; w < 2; w++) ok[w] &= clients[i].ways[w];
   }
   pthread_mutex_unlock(&sendLock);
   if (!n || !all) return;
+  for (int w = 0; w < 2; w++) if (k > 0 ? k > 31 || !(ok[w] & 1u << k) : !(ok[w] & ~7u)) e[w] = 0;
   pthread_mutex_lock(&takeLock);
   TakeDisplay t = takeDisp; int busy = takeRun.on;
   pthread_mutex_unlock(&takeLock);
@@ -2923,10 +2961,22 @@ static int takePadFrame(MTTouch **c, int k) {
   if (k) { cx /= k; cy /= k; }
   for (int i = 0; i < k; i++) spread += hypot(c[i]->normalized.pos.x - cx, (c[i]->normalized.pos.y - cy) * tpH / (tpW > 0 ? tpW : 1));
   if (k) spread /= k;
-  int sl = 0, sr = 0;
-  if (padTake.state == TAKE_IDLE && k >= 3) { takeSides(&sl, &sr); spread0 = spread; }
-  else if (padTake.state == TAKE_WATCH && k >= 3 && fabs(spread - spread0) >= TAKE_MIN) { padTake.state = TAKE_PASS; return TK_FLUSH; }
-  int tk = takeFrame(&padTake, k, sl, sr, ddx, ddy, takeTravel, takeClock());
+  static int spreadK;
+  int wl = 0, wr = 0, sl = 0, sr = 0;
+  if (padTake.state == TAKE_IDLE && k >= 3) takeSides(&wl, &wr, 0);
+  if ((padTake.state == TAKE_IDLE || padTake.state == TAKE_WATCH) && k >= 3) takeSides(&sl, &sr, k);
+  int was = padTake.state;
+  int tk = takeFrame(&padTake, k, wl, wr, sl, sr, ddx, ddy, takeTravel, takeClock());
+  // Still not clear which way: fingers spreading or closing (a pinch) are no
+  // swipe. Measured for the same fingers only: one more coming down (3, then
+  // the 4th of a four-finger swipe) changes the spread by itself.
+  if (tk == TK_HOLD) {
+    if (was == TAKE_IDLE || k != spreadK) { spread0 = spread; spreadK = k; }
+    else if (fabs(spread - spread0) >= TAKE_PINCH_MIN && fabs(spread - spread0) >= TAKE_PINCH_RATIO * spread0) {
+      padTake.state = TAKE_PASS;
+      return TK_FLUSH;
+    }
+  }
   takeAct(&padTake, tk, "trackpad");
   return tk;
 }
@@ -2939,9 +2989,9 @@ static int takePadFrame(MTTouch **c, int k) {
 #define TAKE_MOUSE_TRAVEL 0.5
 static int takeMouseFrame(SwipeTake *t, int k, double step) {
   if (!(capturing && gesturesOn())) return takeAbort(t, k);
-  int sl = 0, sr = 0;
-  if (t->state == TAKE_IDLE && k >= 3) takeSides(&sl, &sr);
-  int tk = takeFrame(t, k, sl, sr, step, 0, takeTravel * TAKE_MOUSE_TRAVEL, takeClock());
+  int sl = 0, sr = 0;   // its virtual fingers (MouseSwipeFingers): as many as the guest gets
+  if ((t->state == TAKE_IDLE || t->state == TAKE_WATCH) && k >= 3) takeSides(&sl, &sr, k);
+  int tk = takeFrame(t, k, sl, sr, sl, sr, step, 0, takeTravel * TAKE_MOUSE_TRAVEL, takeClock());
   takeAct(t, tk, "Magic Mouse");
   return tk;
 }
@@ -3321,6 +3371,7 @@ static unsigned addClient(int c, int net, const char *ip, int gestures, int glid
   clients[slot].fd = c; clients[slot].net = net; clients[slot].gen = ++gens;
   clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
   clients[slot].edge[0] = clients[slot].edge[1] = 0; clients[slot].edgeKnown = 0;
+  clients[slot].ways[0] = clients[slot].ways[1] = 0; clients[slot].waysKnown = 0;
   snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
   snprintf(clients[slot].name, sizeof clients[slot].name, "%s", name);
   logf_("guest connected: %s (gestures %s, scroll momentum %s%s%s%s%s)", ip, gestures ? "on" : "off",
