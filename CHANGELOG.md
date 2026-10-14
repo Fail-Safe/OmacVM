@@ -3,6 +3,10 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- Chromium no longer says "Failed to load extension" at every start after an `omacvm apply` of only some features: the no-AV1 extension now lives outside the folder apply replaces (#406, thanks @fbalazsy).
+
 ## 3.1.6
 
 Swipe out to macOS follows your fingers, like a macOS Space switch.
