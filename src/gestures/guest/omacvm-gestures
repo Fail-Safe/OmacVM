@@ -946,15 +946,19 @@ class SwipeOut:
         self.cancel()
         self.said = self.gsaid = None
         if on and version >= 2:
-            if self.watcher is None:
+            start = self.watcher is None
+            if start:
                 self.waker = socket.socketpair()
                 self.waker[0].setblocking(False)
                 self.watcher = threading.Thread(target=self.watch, daemon=True)
-                self.watcher.start()
             try:
                 self.waker[1].send(b"!")
             except OSError:
                 pass
+            # A new watcher only after the wake-up: its first look takes it,
+            # so it says where swipes go once, not twice.
+            if start:
+                self.watcher.start()
 
     def tell(self, state, ways=None):
         """Where swipes go now and which swipes switch workspaces (G, when
