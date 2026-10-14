@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.5 (unreleased)
+## 3.1.5
 
 Skip the notch: when the bar is full, its items continue on the other side of the notch (an opt-in setting).
 
