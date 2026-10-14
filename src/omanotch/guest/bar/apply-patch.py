@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 32
+VERSION = 33
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -82,7 +82,7 @@ PIECES = [
     "    Translate { id: notchPeekMove; x: slot.notchPeekDx }\n",           # 9. open left of the housing
     "      if (parent && typeof parent.forceLayout === \"function\") parent.forceLayout()\n",  # 9. row now
     "    z: modulePointer.dragging ? 100 : (slot.notchShift && slot.notchShift.peekAt !== undefined ? -1 : 0)\n",
-    "        property var notchSkipPrev: null\n",                              # 4. decisions stick
+    "        function notchSkipKeep() {\n",                                  # 4. decisions stick
     "            notchShown: moduleListRoot.notchShown\n",                     # 8. glide on after a rebuild
     "  function notchPeekActiveIn(area) {\n",                               # 1. their width at rest
     "    function notchSettle() {\n",                                         # 9. one glide per change
@@ -1001,10 +1001,12 @@ def main():
                                 Style.space(6), Style.space(8), Style.space(24), notchSkipPrev, Style.space(12))
           : null
         // The decisions it made last (see notchSkipPlace's `stick`), kept
-        // only when they change, so this settles after one more round.
+        // only when they change and once this round of changes is over (not
+        // inside the layout's own binding), so it settles after one more round.
         property var notchSkipPrev: null
         property string notchSkipPrevKey: ""
-        onNotchSkipChanged: {
+        onNotchSkipChanged: Qt.callLater(notchSkipKeep)
+        function notchSkipKeep() {
           var st = notchSkip ? notchSkip.state : null
           var key = st ? JSON.stringify(st) : ""
           if (key === notchSkipPrevKey) return
