@@ -9,6 +9,7 @@ runs it on Omarchy's own Bar.qml as omarchy-mac and upstream have it
 (src/tests/omarchy-shell).
 """
 import json
+import os
 import math
 import pathlib
 import re
@@ -133,6 +134,7 @@ Item {
 
     required property var entry
     property string region: ""
+    z: modulePointer.dragging ? 100 : 0
   }
 }
 '''
@@ -176,7 +178,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertEqual(V, 25)
+        self.assertEqual(V, 27)
         self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
@@ -755,7 +757,7 @@ console.log(JSON.stringify(out))
 
 
 SKIP = r"""
-function place(width, pad, left, right, housing, beside, edge, gap, keep) { BODY }
+function place(width, pad, left, right, housing, beside, edge, gap, keep, prev, stick) { BODY }
 console.log(JSON.stringify(CASES.map(function (c) { return place.apply(null, c) })));
 """
 
@@ -776,6 +778,9 @@ class SkipTheNotch(unittest.TestCase):
                 for left, right, housing, beside in cases]
         js = SKIP.replace("BODY", body).replace("CASES", json.dumps(args))
         out = json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)
+        for r in out:
+            if r:
+                r.pop("state", None)
         if not places:   # each item's place on the bar (n): test_places_on_the_bar
             for r in out:
                 for s in (r or {}).get("left", []) + (r or {}).get("right", []):
@@ -1039,6 +1044,30 @@ class SkipTheNotch(unittest.TestCase):
     def test_no_indicators_no_peek(self):
         r = self.one([27, 105.5], [81, 21, 27, 133, 150])
         self.assertFalse(any("peekAt" in s or s.get("peekHidden") for s in r["right"]))
+
+    def test_a_slot_places_its_row_before_it_shifts(self):
+        # The parked copy (1 px tall) draws no frame when the indicators open,
+        # so Omarchy's row kept its old places under the new shift (Omanotch's
+        # clicks went to the wrong items until its next frame). Both shells.
+        for bar in SHELLS:
+            d = pathlib.Path(tempfile.mkdtemp())
+            try:
+                f = d / "Bar.qml"
+                f.write_text(bar.read_text())
+                subprocess.run([sys.executable, str(PATCH), str(f)], check=True, capture_output=True)
+                text = f.read_text()
+            finally:
+                shutil.rmtree(d)
+            with self.subTest(omarchy=bar.parts[-5]):
+                m = re.search(r"    onNotchShiftChanged: \{\n(.*?)\n    \}\n", text, re.S)
+                self.assertIsNotNone(m)
+                body = m.group(1)
+                self.assertIn('parent.forceLayout()', body)
+                self.assertLess(body.index("parent.forceLayout()"), body.index("notchShownX ="))
+                # The slot sits right in Omarchy's Row (or Column): forceLayout is theirs.
+                m = re.search(r"id: horizontalModuleList\n\n      Row \{\n(.*?)\n    Component \{", text, re.S)
+                self.assertIsNotNone(m)
+                self.assertRegex(m.group(1), r"\n        Repeater \{\n(?:.*\n){0,3}          ModuleSlot \{")
 
     def test_the_real_shells_have_the_same_layout(self):
         # The layout function as both Omarchy shells' patched bars have it.
@@ -1400,6 +1429,259 @@ class Centre(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "node not installed")
     def test_flush_centred_in_the_housing_height(self):
         self.check(32)
+
+
+# Skip the notch on every notched MacBook, macOS size and Omarchy scale, with
+# many bars. Notch width: the camera housing's panel pixels (Air 13/15: 311.7,
+# Pro 14/16: 396, as macOS reports it: 179 pt on an Air 13 at 1470, 198 pt on a
+# Pro 16 at 1728), centred. The guest gets the panel at 2 px per point; Omarchy's
+# scale s makes it 2W/s wide (the FullPanel presets and Omanotch's).
+DEVICES = [
+    ("Air 13", 2560, 311.7, [1024, 1280, 1470, 1710]),
+    ("Air 15", 2880, 311.7, [1280, 1440, 1710, 2048]),
+    ("Pro 14", 3024, 396, [1147, 1352, 1512, 1800]),
+    ("Pro 16", 3456, 396, [1312, 1496, 1728, 2056]),
+]
+OMARCHY_SCALES = [1, 1.25, 1.5, 1.6, 5 / 3, 1.75, 2, 3, 4]
+
+
+def tray_width(n):
+    """Omarchy's tray with n icons in its drawer: the "<" expander and the drawer's room."""
+    return 0 if n == 0 else 27 + 27 * n
+
+
+def bars():
+    """Bars people have: (name, left, right, beside, indicators index), widths in the bar's
+    points, left to right. The indicators as [now, at rest, hidden ones' width]."""
+    out = []
+    for ws in (1, 5, 10):
+        for tray in (0, 1, 3, 6, 10, 16, 24):
+            for hidden in (0, 1, 5):
+                for active in (0, 1):
+                    for weather in (True, False):
+                        for others in ("all", "few"):
+                            left = [27, 21.1 * ws + 0.5]
+                            right = []
+                            if tray:
+                                right.append(tray_width(tray))
+                            if weather:
+                                right.append(21)
+                            ind = len(right) if hidden or active else None
+                            if ind is not None:
+                                right.append([21 * active, 21 * active, 21 * hidden])
+                            if others == "all":
+                                right += [27, 133, 27] + [27] * 6 + [27]
+                            else:
+                                right += [27]
+                            right.append(132.5)
+                            name = "ws %d, tray %d, hidden %d, active %d, weather %s, %s" % (
+                                ws, tray, hidden, active, "on" if weather else "off", others)
+                            out.append((name, left, right, [0, 0], ind))
+    # Moved modules: the clock in the centre (beside the housing), the tray on the
+    # left, a long window title on the left.
+    for tray in (0, 6, 16):
+        out.append(("clock in the centre, tray %d" % tray, [27, 106], ([tray_width(tray)] if tray else []) +
+                    [21, [0, 0, 105]] + [27] * 8, [0, 132.5], 2 if tray else 1))
+        out.append(("tray on the left %d" % tray, [27, 106] + ([tray_width(tray)] if tray else []),
+                    [21, [0, 0, 105]] + [27] * 8 + [132.5], [0, 0], 1))
+        out.append(("window title on the left, tray %d" % tray, [27, 106, 300], ([tray_width(tray)] if tray else []) +
+                    [21, [0, 0, 105]] + [27] * 8 + [132.5], [0, 0], 2 if tray else 1))
+    return out
+
+
+MATRIX = r"""
+function place(width, pad, left, right, housing, beside, edge, gap, keep, prev, stick) { BODY }
+var cases = CASES, out = [];
+for (var i = 0; i < cases.length; i++) out.push(place.apply(null, cases[i]));
+console.log(JSON.stringify(out));
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node not installed")
+class Matrix(unittest.TestCase):
+    """Every device, size and scale with many bars, the indicators closed and
+    open: nothing on the housing, nothing overlaps, the menu and the clock stay,
+    a peek moves nothing Omarchy's own peek would not, where it opens never
+    depends on the peek, and a bar that fits is Omarchy's own."""
+
+    PAD, EDGE, GAP, KEEP, STICK = 8, 6, 8, 24, 12
+
+    def run_cases(self, args):
+        body = function(patched(), "notchSkipPlace")
+        out = []
+        for k in range(0, len(args), 4000):
+            js = MATRIX.replace("BODY", body).replace("CASES", json.dumps(args[k:k + 4000]))
+            out += json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)
+        return out
+
+    @staticmethod
+    def rects(r, left, right, ind, open_):
+        """What shows on the bar: (name, start, end) per visible part."""
+        shown = []
+        for i, (s, w) in enumerate(zip(r["left"], left)):
+            if not s["hidden"] and w > 0:
+                shown.append(("L%d" % i, s["n"] + s["x"], s["n"] + s["x"] + w))
+        for i, (s, e) in enumerate(zip(r["right"], right)):
+            w = e[0] if isinstance(e, list) else e
+            if s["hidden"] or w <= 0:
+                continue
+            x = s["n"] + s["x"]
+            if i == ind and isinstance(e, list) and open_ and s.get("peekAt") is not None:
+                p = e[2]
+                if w - p > 0:
+                    shown.append(("R%d" % i, x + p, x + w))
+                if not s.get("peekHidden"):
+                    shown.append(("peek", s["peekAt"], s["peekAt"] + p))
+            else:
+                shown.append(("R%d" % i, x, x + w))
+        return shown
+
+    def test_every_device_size_and_scale(self):
+        geos, cases, meta = [], [], []
+        for dev, panel, notch_px, sizes in DEVICES:
+            for size in sizes:
+                nw = notch_px * size / panel
+                for s in OMARCHY_SCALES:
+                    W = 2 * size / s
+                    nl = (W - 2 * nw / s) / 2
+                    geos.append((dev, size, s, W, [nl, nl + 2 * nw / s]))
+        allbars = bars()
+        for gi, (dev, size, s, W, housing) in enumerate(geos):
+            for bi, (name, left, right, beside, ind) in enumerate(allbars):
+                for open_ in (False, True):
+                    r = [e[:] if isinstance(e, list) else e for e in right]
+                    if ind is not None and isinstance(r[ind], list) and open_:
+                        r[ind] = [r[ind][1] + r[ind][2], r[ind][1], r[ind][2]]
+                    cases.append([W, self.PAD, left, r, housing, beside, self.EDGE, self.GAP, self.KEEP, None, self.STICK])
+                    meta.append((gi, bi, open_, r))
+        out = self.run_cases(cases)
+        fails, stats = [], {}
+        for k in range(0, len(out), 2):
+            (gi, bi, _, rc), (_, _, _, ro) = meta[k], meta[k + 1]
+            dev, size, s, W, (nl, nr) = geos[gi]
+            name, left, right, beside, ind = allbars[bi]
+            closed, opened = out[k], out[k + 1]
+            where = "%s at %d pt, scale %.3g, %s" % (dev, size, s, name)
+            st = stats.setdefault((dev, size), {"bars": 0, "fits": 0, "jumped": 0, "hidden": 0, "left": 0, "fails": 0})
+            st["bars"] += 1
+            if closed is None or opened is None:
+                fails.append(where + ": no layout")
+                continue
+            wallL = nl - (self.EDGE + beside[0] if beside[0] > 0 else 0)
+            wallR = nr + (self.EDGE + beside[1] if beside[1] > 0 else 0)
+            for r, rr, open_ in ((closed, rc, False), (opened, ro, True)):
+                shown = sorted(self.rects(r, left, rr, ind, open_), key=lambda e: e[1])
+                for a, b in zip(shown, shown[1:]):
+                    if a[2] > b[1] + 0.01:
+                        fails.append("%s (%s): %s overlaps %s" % (where, "open" if open_ else "closed", a, b))
+                for e in shown:
+                    if e[1] < wallR - 0.01 and e[2] > wallL + 0.01:
+                        fails.append("%s (%s): %s on the housing %.1f-%.1f" % (where, "open" if open_ else "closed", e, nl, nr))
+                    if e[1] < -0.01 or e[2] > W + 0.01:
+                        fails.append("%s: %s off the bar" % (where, e))
+                if r["left"][0]["hidden"] or r["left"][0]["x"] != 0 or r["right"][-1]["hidden"] or r["right"][-1]["x"] != 0:
+                    fails.append(where + ": the menu or the clock moved")
+            # A peek moves nothing but the indicators, or, opening in place, what
+            # Omarchy's own peek moves (the right side's items before them).
+            if ind is not None and isinstance(right[ind], list):
+                p = right[ind][2]
+                inplace = opened["right"][ind].get("peekAt") is None
+                for side in ("left", "right"):
+                    for i, (a, b) in enumerate(zip(closed[side], opened[side])):
+                        if side == "right" and i == ind:
+                            continue
+                        want = 0
+                        if side == "right" and inplace and i < ind and not a["hidden"] and a["x"] == 0:
+                            want = -p
+                        moved = (b["n"] + b["x"]) - (a["n"] + a["x"])
+                        if a["hidden"] != b["hidden"] or abs(moved - want) > 0.01:
+                            fails.append("%s: %s item %d moved %.1f on the peek (want %.1f)" % (where, side, i, moved, want))
+                if closed["right"][ind].get("peekAt") != opened["right"][ind].get("peekAt"):
+                    fails.append(where + ": where they open changed with the peek")
+                if opened["right"][ind].get("peekAt") is not None:
+                    st["left"] += 1
+            # Omarchy's own bar has nothing on the housing (closed and open):
+            # the setting changes nothing.
+            def off_clear(r, rr):
+                for i, s_ in enumerate(r["left"]):
+                    w = left[i]
+                    if w > 0 and s_["n"] < wallR and s_["n"] + w > wallL:
+                        return False
+                for i, s_ in enumerate(r["right"]):
+                    e = rr[i]
+                    w = e[0] if isinstance(e, list) else e
+                    if w > 0 and s_["n"] < wallR and s_["n"] + w > wallL:
+                        return False
+                return True
+            if off_clear(closed, rc) and off_clear(opened, ro):
+                st["fits"] += 1
+                for r in (closed, opened):
+                    if any(e["x"] != 0 or e["hidden"] or e.get("peekAt") is not None for e in r["left"] + r["right"]):
+                        fails.append(where + ": fits, yet the layout differs from Omarchy's")
+                        break
+            st["jumped"] += closed["jumped"] > 0
+            st["hidden"] += closed["hidden"] > 0
+            # Hidden in order: on each side's overflow, after the first hidden item all are hidden.
+            for side, order in (("left", range(len(closed["left"]))), ("right", range(len(closed["right"]) - 1, -1, -1))):
+                seen = False
+                for i in order:
+                    h = closed[side][i]["hidden"]
+                    if seen and not h and closed[side][i]["x"] != 0:
+                        fails.append("%s: %s item %d shows after a hidden one" % (where, side, i))
+                    seen = seen or h
+        if os.environ.get("MATRIX_REPORT"):
+            print("\n| device | macOS size (pt) | bars x scales | fit (= setting off) | some jumped | some hidden | peek opens left |")
+            print("|---|---|---|---|---|---|---|")
+            for (dev, size), v in stats.items():
+                print("| %s | %d | %d | %d | %d | %d | %d |" % (dev, size, v["bars"], v["fits"], v["jumped"], v["hidden"], v["left"]))
+            print("%d layouts (closed and open), %d failures" % (len(out), len(fails)))
+        if os.environ.get("MATRIX_FAILS"):
+            print("\n".join(fails))
+        self.assertEqual(fails[:20], [], "%d failures" % len(fails))
+
+    def test_a_wobbling_width_moves_nothing_back_and_forth(self):
+        # A stats readout that grows and shrinks by 6 points with the tray's
+        # edge right at the housing (3 pt clear, then 3 pt under): the tray
+        # jumps once and stays until there is room to spare. Without sticking
+        # it would jump back and forth every time.
+        W, housing = 1470, [645.5, 824.5]
+        body = function(patched(), "notchSkipPlace")
+
+        def run(stick):
+            prev, sides = None, []
+            for k in range(20):
+                stats = 133 + (6 if k % 2 else 0)
+                right = [0, 21, [0, 0, 105], 27, stats, 27] + [27] * 6 + [132.5]
+                # the tray's width that puts its edge 3 pt right of the housing at stats 133
+                others = sum(e[0] if isinstance(e, list) else e for e in right) - stats + 133
+                right[0] = (W - self.PAD - others) - (housing[1] + 3)
+                js = MATRIX.replace("BODY", body).replace("CASES", json.dumps(
+                    [[W, self.PAD, [27, 106], right, housing, [0, 0], self.EDGE, self.GAP, self.KEEP, prev, stick]]))
+                r = json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)[0]
+                prev = r["state"]
+                sides.append(r["right"][0]["x"] != 0)
+            return sides
+
+        sticky, plain = run(self.STICK), run(0)
+        self.assertEqual(sticky, [False] + [True] * 19)   # jumps at the first growth, then stays
+        self.assertEqual(plain, [k % 2 == 1 for k in range(20)])   # what it guards against
+
+    def test_decisions_follow_a_real_change(self):
+        # Sticking never keeps an item under the housing, and a module removed
+        # (the list changed) starts afresh.
+        body = function(patched(), "notchSkipPlace")
+        def one(right, prev):
+            js = MATRIX.replace("BODY", body).replace("CASES", json.dumps(
+                [[1470, self.PAD, [27, 106], right, [645.5, 824.5], [0, 0], self.EDGE, self.GAP, self.KEEP, prev, self.STICK]]))
+            return json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)[0]
+        full = [300, 21, [0, 0, 105], 27, 133, 27] + [27] * 6 + [132.5]
+        a = one(full, None)
+        self.assertNotEqual(a["right"][0]["x"], 0)          # the wide tray jumped
+        b = one([81] + full[1:4] + full[5:], a["state"])    # tray small, stats gone
+        self.assertEqual(b["right"][0]["x"], 0)             # back on its side at once
+        c = one([81, 21, [0, 0, 105], 27, 133, 27] + [27] * 6 + [132.5], b["state"])
+        for s in c["right"]:
+            self.assertFalse(s["hidden"])
 
 
 if __name__ == "__main__":
