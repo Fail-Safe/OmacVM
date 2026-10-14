@@ -5,11 +5,13 @@
 //
 //   clang -fobjc-arc -framework Foundation -framework CoreGraphics \
 //     virtual-display.m -o virtual-display
-//   ./virtual-display WIDTHxHEIGHT [--hidpi] [--at X,Y] [--name NAME]
+//   ./virtual-display WIDTHxHEIGHT [--hidpi] [--at X,Y | --main] [--name NAME]
 //
 // WIDTHxHEIGHT is the size in points; --hidpi gives it 2x pixels (Retina).
 // --at puts its top-left corner at X,Y in the Mac's display arrangement
-// (points, origin at the main display's top-left). Prints "id=<display id>"
+// (points, origin at the main display's top-left). --main makes it the main
+// display (the menu bar): the whole arrangement moves so that it sits at
+// the origin. Prints "id=<display id>"
 // once the display is up.
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
@@ -50,23 +52,25 @@ int main(int argc, const char **argv)
 {
     @autoreleasepool {
         unsigned w = 0, h = 0;
-        BOOL hidpi = NO, place = NO;
+        BOOL hidpi = NO, place = NO, makeMain = NO;
         int x = 0, y = 0;
         NSString *name = @"OmacVM Test Display";
         for (int i = 1; i < argc; i++) {
             if (!strcmp(argv[i], "--hidpi")) {
                 hidpi = YES;
+            } else if (!strcmp(argv[i], "--main")) {
+                makeMain = YES;
             } else if (!strcmp(argv[i], "--at") && i + 1 < argc) {
                 place = sscanf(argv[++i], "%d,%d", &x, &y) == 2;
             } else if (!strcmp(argv[i], "--name") && i + 1 < argc) {
                 name = [NSString stringWithUTF8String:argv[++i]];
             } else if (sscanf(argv[i], "%ux%u", &w, &h) != 2) {
-                fprintf(stderr, "usage: virtual-display WIDTHxHEIGHT [--hidpi] [--at X,Y] [--name NAME]\n");
+                fprintf(stderr, "usage: virtual-display WIDTHxHEIGHT [--hidpi] [--at X,Y | --main] [--name NAME]\n");
                 return 2;
             }
         }
         if (!w || !h) {
-            fprintf(stderr, "usage: virtual-display WIDTHxHEIGHT [--hidpi] [--at X,Y] [--name NAME]\n");
+            fprintf(stderr, "usage: virtual-display WIDTHxHEIGHT [--hidpi] [--at X,Y | --main] [--name NAME]\n");
             return 2;
         }
         unsigned k = hidpi ? 2 : 1;
@@ -95,6 +99,23 @@ int main(int argc, const char **argv)
             return 1;
         }
         CGDirectDisplayID id = display.displayID;
+        if (makeMain) {
+            // The main display is the one at (0,0): move every display by this one's place.
+            [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:1.0]];
+            CGRect self_ = CGDisplayBounds(id);
+            CGDirectDisplayID all[16];
+            uint32_t n = 0;
+            CGDisplayConfigRef config;
+            if (CGGetOnlineDisplayList(16, all, &n) == kCGErrorSuccess &&
+                CGBeginDisplayConfiguration(&config) == kCGErrorSuccess) {
+                for (uint32_t i = 0; i < n; i++) {
+                    CGRect b = CGDisplayBounds(all[i]);
+                    CGConfigureDisplayOrigin(config, all[i], (int32_t)(b.origin.x - self_.origin.x),
+                                             (int32_t)(b.origin.y - self_.origin.y));
+                }
+                CGCompleteDisplayConfiguration(config, kCGConfigureForSession);
+            }
+        }
         if (place) {
             // The new display needs a moment before it can be placed.
             [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:1.0]];

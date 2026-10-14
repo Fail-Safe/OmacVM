@@ -22,6 +22,7 @@ was green; nobody had pressed the switches in a real VM.
 | graphics | Graphics: OpenGL, Vulkan (restart), Automatic | `omacvm graphics --json` agrees; this start is Vulkan |
 | updates | U, c (check again) | no error; the Bridge's `update check: X (N parts)` |
 | window | Check Now, the Fast network switch (Turn On…/Turn Off… before 3.0.5) in the app's window (VM stopped) | no error in the window; the VM's `fast-network` file |
+| unplug | a 6K virtual display plugged in and taken away while the VM's window is on it (`display-unplug.sh`): full screen with one window per display (3 times), Full screen including notch (a made-up notch, twice), a window (VM stopped first; not with `--hidden`) | the same QEMU runs on 8 s after each unplug, the VM answers over SSH, no new crash report (#402) |
 | update | the release before installed, its Update VM, the features a new VM has, its control centre (`previous-*`); the app updates itself to this build (local feed, throwaway key); Update VM; every switch again | the app's version and signature, `update.log`, the switches as above |
 
 The control centre is the real one: `omacvm` in tmux, started in the desktop

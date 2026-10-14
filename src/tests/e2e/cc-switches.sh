@@ -25,7 +25,7 @@
 #                        path; "latest" downloads releases/latest (gh); default: none (the run
 #                        then does not count for the gate)
 #     --only LIST        steps (comma list): prepare,baseline,switches,fastnet,touchid,graphics,
-#                        updates,window,update (default: all; update needs --previous)
+#                        updates,window,unplug,update (default: all; update needs --previous)
 #     --slow             also the slow switches (thp-kernel, x86-apps: builds in the VM)
 #     --features LIST    only these switches (comma list; while working on a fix: never counts for the gate)
 #     --out DIR          results (default ~/omacvm-e2e/<time>): summary.tsv, result.json, logs
@@ -795,6 +795,17 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
   start_vm && reachable 60 || res window-start FAIL "$(vminfo)"
 }
 
+# The VM's display unplugged under it, its window there (#402; display-unplug.sh, the VM stopped).
+step_unplug() {
+  if (( HIDDEN )); then res unplug skip "needs windows on this Mac's displays (--hidden)"; return; fi
+  log "unplug: the display the VM's window is on unplugged (limit 25 min)"
+  perl -e 'alarm 1500; exec @ARGV' "$HERE/display-unplug.sh" --vm "$VM" --out "$OUT/unplug" > "$OUT/unplug.log" 2>&1
+  local rc=$?
+  while IFS=$'\t' read -r st r d; do res "$st" "$r" "$d"; done < "$OUT/unplug/summary.tsv" 2>/dev/null
+  (( rc == 0 )) || grep -q FAIL "$OUT/unplug/summary.tsv" 2>/dev/null ||
+    res unplug FAIL "display-unplug.sh ended $rc: $(tail -2 "$OUT/unplug.log" | tr '\n' '|')"
+}
+
 steps() {   # every step on the running VM of this pass
   local st
   log "baseline"; baseline start   # every step below works through the control centre it starts
@@ -822,6 +833,7 @@ if [[ $ONLY != ",update," ]]; then
     if d=$(update_vm_window); then res update-vm ok "$d"; else res update-vm FAIL "$d"; fi
   fi
   start_pass && steps
+  want unplug && step_unplug
   remove_clones
 fi
 

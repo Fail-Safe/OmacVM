@@ -1,0 +1,119 @@
+From: OmacVM
+Subject: [PATCH] cocoa: FullPanel's state lets go of a window that is freed
+
+What: a window's FullPanel state now hangs on the window through a small
+owner object that only the window holds. When the window is freed, the
+owner tells the state first (windowGone): it forgets the window, stops
+observing, and puts the menu bar and the app's presentation back without
+asking the window anything. Blocks and observers that still hold the state
+(a refresh after a Space change, the presentation observer) find no window
+and do nothing.
+
+Why: #402. A VM started in "Full screen including notch" (OMACVM_FULLPANEL=1)
+died when the display its window was on was unplugged: macOS took the
+windows out of full screen, the display's own window (one window per display)
+was closed, and when AppKit's exit-full-screen transition let go of it the
+window was freed. Freeing it freed its state, whose dealloc asked the half
+freed window -isKeyWindow (SIGSEGV in -[NSWindow isKeyWindow] under
+-[OmacVMFullPanelState dealloc], crash report on the Mac mini 2026-10-14).
+The state kept an unretained pointer to its window.
+
+Upstream: not sent (OmacVM's FullPanel).
+Test: app/runtime/Tests/display/test-fullpanel-window-gone.sh (the wiring in
+the patched ui/cocoa.m at build time); src/tests/e2e/display-unplug.sh (a
+virtual display unplugged under a real VM, also with FullPanel; the release
+gate). Applies after omacvm-cocoa-fullpanel-scale.patch.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -3092,9 +3092,23 @@
+ static char omacvm_fullpanel_state_key;
+ static int omacvm_fullpanel_reveal_state;
+ 
++/*
++ * A window's state hangs on it through this owner, which only the window
++ * holds: freed with the window, it tells the state the window is gone
++ * before anything else can use it (#402).
++ */
++@interface OmacVMFullPanelOwner : NSObject
++{
++@public
++    OmacVMFullPanelState *state;
++}
++@end
++
+ static OmacVMFullPanelState *omacvm_fullpanel_state(NSWindow *window)
+ {
+-    return window ? objc_getAssociatedObject(window, &omacvm_fullpanel_state_key) : nil;
++    OmacVMFullPanelOwner *owner = window ?
++        objc_getAssociatedObject(window, &omacvm_fullpanel_state_key) : nil;
++    return owner ? owner->state : nil;
+ }
+ 
+ static bool omacvm_fullpanel_load_skylight(void)
+@@ -3256,6 +3270,7 @@
+ - (void)scheduleRefresh:(NSString *)reason;
+ - (bool)refreshForReason:(NSString *)reason;
+ - (void)finishReturn:(NSString *)reason checksLeft:(unsigned)checks;
++- (void)windowGone;
+ @end
+ 
+ /*
+@@ -3467,6 +3482,25 @@
+     [center addObserver:self selector:@selector(windowDidBecomeKey:)
+                    name:NSWindowDidBecomeKeyNotification object:w];
+     return self;
++}
++
++/*
++ * The window is being freed (OmacVMFullPanelOwner), e.g. a display's window
++ * closed while macOS took it out of full screen because its display was
++ * unplugged (#402): it must not be asked anything any more. Blocks and
++ * observers that still hold this state find no window; the menu bar and the
++ * app's presentation come back without it (the rules need it only while
++ * the strip is covered).
++ */
++- (void)windowGone
++{
++    window = nil;
++    if (workspace_observing) {
++        [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
++        workspace_observing = false;
++    }
++    [[NSNotificationCenter defaultCenter] removeObserver:self];
++    [self showMenuBar];
+ }
+ 
+ - (void)dealloc
+@@ -3919,7 +3953,16 @@
+     }
+     [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+ }
++
++@end
+ 
++@implementation OmacVMFullPanelOwner
++- (void)dealloc
++{
++    [state windowGone];
++    [state release];
++    [super dealloc];
++}
+ @end
+ 
+ /* Before a window enters full screen: its state, the hooks (once per class). */
+@@ -3938,10 +3981,11 @@
+     bool sky = omacvm_fullpanel_load_skylight();
+     bool reveal = omacvm_fullpanel_install_reveal_observer();
+ 
+-    OmacVMFullPanelState *state = [[OmacVMFullPanelState alloc] initWithWindow:window];
+-    objc_setAssociatedObject(window, &omacvm_fullpanel_state_key, state,
++    OmacVMFullPanelOwner *owner = [[OmacVMFullPanelOwner alloc] init];
++    owner->state = [[OmacVMFullPanelState alloc] initWithWindow:window];
++    objc_setAssociatedObject(window, &omacvm_fullpanel_state_key, owner,
+                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+-    [state release];
++    [owner release];
+ 
+     if (!frame || !sky || !reveal) {
+         fprintf(stderr, "omacvm: full panel: a private part is missing; using normal full screen\n");
