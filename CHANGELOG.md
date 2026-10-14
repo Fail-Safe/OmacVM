@@ -11,6 +11,10 @@ in more words.
   when they don't touch what Omarchy changed. When they do, or OmacVM's patch doesn't fit the new
   bar yet, the copy stays as it is and `omacvm check` and the control centre say so. If the new
   bar doesn't load, it goes back to the one before.
+- **A new VM's Omanotch bar could stay unpatched.** Right after setting up a VM with Omanotch, the
+  shell could keep its compiled copy of the bar from before the patch, also after restarts: no bar
+  beside the notch. Update VM fixes such a VM, and OmacVM now clears that compiled copy whenever it
+  changes the bar.
 - **The control centre shows warnings:** a feature that works, but not quite as it should, says
   why on its row (they were left out before).
 - **A note by the keyboard light while macOS keeps it off** (MacBooks). With "Adjust keyboard
