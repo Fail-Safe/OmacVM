@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 27
+VERSION = 28
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -83,6 +83,7 @@ PIECES = [
     "      if (parent && typeof parent.forceLayout === \"function\") parent.forceLayout()\n",  # 9. row now
     "    z: modulePointer.dragging ? 100 : (slot.notchShift && slot.notchShift.peekAt !== undefined ? -1 : 0)\n",
     "        property var notchSkipPrev: null\n",                              # 4. decisions stick
+    "            notchShown: moduleListRoot.notchShown\n",                     # 8. glide on after a rebuild
 ]
 
 
@@ -1199,6 +1200,9 @@ def main():
     // to right (a horizontal list).
     property var notchShift: null
     readonly property var notchWidths: item && item.notchWidths ? item.notchWidths : []
+    // Where each module showed last on this bar: Omarchy makes the whole list
+    // again when a module comes or goes, and the new items glide on from there.
+    property var notchShown: ({})
 ''')
     text = replace_once(text, '''      Row {
         spacing: 0
@@ -1239,6 +1243,7 @@ def main():
             region: moduleListRoot.region
             notchSlotIndex: index
             notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)
+            notchShown: moduleListRoot.notchShown
           }
         }
       }
@@ -1295,6 +1300,7 @@ def main():
     property real notchPlaceX: 0
     property real notchShiftX: 0
     property bool notchPlaced: false
+    property var notchShown: null
     transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }
     opacity: slot.notchShiftGone ? 0 : 1
     enabled: !slot.notchShiftGone
@@ -1321,14 +1327,25 @@ def main():
       notchLastWidth = width
       // Set before the values, so the change itself slides and fades or not.
       // A slot's first place (Omarchy made the list again: a module came or
-      // went) is taken at once, not from the bar's edge.
-      var placed = notchPlaced
+      // went) glides on from where this module showed before, else it is
+      // taken at once (not from the bar's edge).
+      // Only our own moves glide: an item in Omarchy's place before and after
+      // moves as Omarchy moves it.
+      var placed = notchPlaced, was = s && notchShown ? notchShown[moduleName] : undefined
       notchPlaced = !!s
-      notchSlide.enabled = placed && animate && !peeked && (notchSlideRun.running || s.x !== notchShiftX)
+      var from = !placed && s && animate && was !== undefined && (was.ours || s.x !== 0) ? was.x : undefined
+      if (from !== undefined) {
+        notchSlide.enabled = false
+        notchPlaceX = s.n
+        notchShownX = from
+      }
+      notchSlide.enabled = animate && !peeked && (from !== undefined ? from !== s.n + s.x
+        : placed && (notchSlideRun.running || s.x !== notchShiftX))
       notchFade.enabled = placed && animate
       notchShiftX = s ? s.x : 0
       notchPlaceX = s ? s.n : 0
       notchShownX = s ? s.n + s.x : 0
+      if (s && notchShown) notchShown[moduleName] = { x: s.n + s.x, ours: s.x !== 0 || s.hidden === true }
       if (gone !== notchShiftGone) notchShiftGone = gone
       notchPeekApply()
     }
