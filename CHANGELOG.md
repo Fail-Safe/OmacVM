@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.6 (unreleased)
+## 3.1.6
 
 Swipe out to macOS follows your fingers, like a macOS Space switch.
 
