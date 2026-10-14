@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.10 (unreleased)
 
 - **Shift and the other modifier keys work when you type on another Mac's keyboard through
   Universal Control** (OmacVM.app). Shift was released the moment it was pressed, so Shift+2 typed
