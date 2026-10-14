@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 24
+VERSION = 25
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -78,7 +78,8 @@ PIECES = [
     "    property var notchBeside: [0, 0]\n",                                # 5.
     "            notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)\n",  # 8. lists
     "    transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }\n",  # 9. items
-    "  function notchPeekBlockIn(item, depth) {\n",                       # 1. room for the indicators' peek
+    "  function notchPeekBlockIn(item, depth) {\n",                       # 1. the indicators' hidden ones
+    "    Translate { id: notchPeekMove; x: slot.notchPeekDx }\n",           # 9. open left of the housing
 ]
 
 
@@ -363,20 +364,27 @@ def main():
   property bool notchSkipBoot: false
   // Where the items of the left and right lists go on a bar in the notch
   // strip. In: the bar's width, Omarchy's margin at the screen edges (pad),
-  // each list's items left to right, each a width or [width, room] (room:
-  // its width when it peeks: Omarchy's indicators show their hidden ones on
-  // hover), the housing [left, right], the room of the centre widgets beside
-  // it [before, after] (`edge` from it), the gap to the housing (or those
-  // widgets) and the room a jumped item keeps from the other side's own
-  // items. Everything is decided on rooms, so a peek moves no other item:
-  // it shows in room kept free for it. Items past their side's end jump
-  // over and continue on the other side in the same order; they hide only
-  // when that side is full too, and then the rest of them as well. The
-  // first item from each screen edge (the menu, the clock at the far right)
-  // always stays. An item sits in its room as Omarchy aligns it: left items
-  // at the room's start, right items at its end. Out: per item {x: shift
-  // from Omarchy's place, hidden, n: that place on the bar}, and how many
-  // items jumped and hid; null when the housing is not on the bar.
+  // each list's items left to right, each a width or [width now, width at
+  // rest, peek] (Omarchy's indicators: at rest without their hidden ones,
+  // peek the width those take when they show on hover), the housing [left,
+  // right], the width of the centre widgets beside it [before, after]
+  // (`edge` from it), the gap a jumped item keeps to the housing (or those
+  // widgets) and the room it keeps from the other side's own items.
+  // Everything is decided at rest, so a peek moves nothing across the notch:
+  // an item stays on its side while it does not reach under the housing;
+  // past that it jumps over and continues on the other side in the same
+  // order, and hides only when that side is full too (then the rest of them
+  // as well). The first item from each screen edge (the menu, the clock at
+  // the far right) always stays. Items sit where Omarchy aligns them: left
+  // ones at their start, right ones at their end.
+  // The indicators' peek (right list): where they are, as Omarchy shows it,
+  // when the right side has room for it; else the hidden ones open left of
+  // the housing (or left of what jumped there), `gap` from it, and hide only
+  // when the left side is full too.
+  // Out: per item {x: shift from Omarchy's place, hidden, n: that place on
+  // the bar}, for the indicators also peekAt (where their hidden ones start
+  // on the bar; none: in place) and peekHidden; how many items jumped and
+  // hid; null when the housing is not on the bar.
   function notchSkipPlace(width, pad, left, right, housing, beside, edge, gap, keep) {
     var W = Number(width), nl = Number(housing[0]), nr = Number(housing[1])
     if (!(W > 0 && nl > 0 && nr > nl && nr < W)) return null
@@ -385,12 +393,14 @@ def main():
     var wallL = before > 0 ? nl - edge - before : nl
     var wallR = after > 0 ? nr + edge + after : nr
     function sizes(e) {
-      var w = Math.max(0, Number(Array.isArray(e) ? e[0] : e) || 0)
-      return { w: w, r: Math.max(w, Number(Array.isArray(e) ? e[1] : e) || 0) }
+      var a = Array.isArray(e) ? e : [e]
+      var w = Math.max(0, Number(a[0]) || 0)
+      var r = a.length > 1 ? Math.max(0, Number(a[1]) || 0) : w
+      return { w: w, r: r, p: a.length > 2 ? Math.max(0, Number(a[2]) || 0) : 0 }
     }
-    // n: Omarchy's place (its rows, at today's widths); b: the item's room.
+    // n: Omarchy's place (its rows, at today's widths); b: the item's place at rest.
     var L = [], R = [], out = { left: [], right: [], jumped: 0, hidden: 0 }
-    var i, s, x = pad, b = pad
+    var i, s, x = pad, b = pad, pi = -1
     for (i = 0; i < left.length; i++) {
       s = sizes(left[i])
       L.push({ n: x, w: s.w, r: s.r, b: b })
@@ -403,16 +413,19 @@ def main():
       s = sizes(right[i])
       x -= s.w
       b -= s.r
-      R[i] = { n: x, w: s.w, r: s.r, b: b }
+      R[i] = { n: x, w: s.w, r: s.r, p: s.p, b: b }
+      if (s.p > 0 && pi < 0) pi = i
     }
-    // What stays on its own side: rooms up to the gap before its end.
+    // What stays on its own side: not under the housing at rest.
     var keptL = L.length, keptR = 0
-    for (i = 1; i < L.length; i++) if (L[i].b + L[i].r > wallL - gap) { keptL = i; break }
-    for (i = R.length - 2; i >= 0; i--) if (R[i].b < wallR + gap) { keptR = i + 1; break }
+    for (i = 1; i < L.length; i++) if (L[i].b + L[i].r > wallL) { keptL = i; break }
+    for (i = R.length - 2; i >= 0; i--) if (R[i].b < wallR) { keptR = i + 1; break }
     var endL = keptL > 0 ? L[keptL - 1].b + L[keptL - 1].r : pad
     var startR = keptR < R.length ? R[keptR].b : W - pad
-    // The left side's overflow: rooms right of the housing, up to `keep`
-    // before the right side's own items.
+    // The indicators' peek in place: the right side has room for it.
+    var inPlace = pi >= keptR && startR - R[pi].p >= wallR
+    // The left side's overflow: right of the housing, up to `keep` before
+    // the right side's own items.
     var at = wallR + gap, full = false
     for (i = keptL; i < L.length; i++) {
       if (!full && at + L[i].r <= startR - keep) {
@@ -425,8 +438,8 @@ def main():
         if (L[i].w > 0) out.hidden++
       }
     }
-    // The right side's overflow: rooms left of the housing, down to `keep`
-    // after the left side's own items.
+    // The right side's overflow: left of the housing, down to `keep` after
+    // the left side's own items.
     at = wallL - gap
     full = false
     for (i = keptR - 1; i >= 0; i--) {
@@ -440,14 +453,22 @@ def main():
         if (R[i].w > 0) out.hidden++
       }
     }
-    // Hidden ones fade at the housing on their own side.
     for (i = 0; i < L.length; i++) {
       var lx = L[i].hide ? wallL - gap - L[i].w : L[i].b
       out.left.push({ x: lx - L[i].n, hidden: !!L[i].hide, n: L[i].n })
     }
     for (i = 0; i < R.length; i++) {
-      var rx = R[i].hide ? wallR + gap : R[i].b + R[i].r - R[i].w
+      // In place: Omarchy's own places for the right side's items.
+      var rx = R[i].hide ? wallR + gap : inPlace && i >= keptR ? R[i].n : R[i].b + R[i].r - R[i].w
       out.right.push({ x: rx - R[i].n, hidden: !!R[i].hide, n: R[i].n })
+    }
+    // Else the hidden indicators open left of the housing, after what
+    // jumped there; they hide when the left side has no room for them.
+    if (pi >= 0 && !inPlace && !R[pi].hide) {
+      out.right[pi].peekAt = at - R[pi].p
+      out.right[pi].peekHidden = at - R[pi].p < endL + keep
+    } else if (pi >= 0 && R[pi].hide) {
+      out.right[pi].peekHidden = true
     }
     return out
   }
@@ -467,7 +488,8 @@ def main():
   // One item's part of a list's layout ({items, animate}; null: none).
   function notchShiftAt(list, i) {
     var s = list && list.items ? list.items[i] : null
-    return s ? { x: s.x, hidden: s.hidden === true, n: s.n, animate: list.animate === true } : null
+    return s ? { x: s.x, hidden: s.hidden === true, n: s.n, peekAt: s.peekAt, peekHidden: s.peekHidden === true,
+                 animate: list.animate === true } : null
   }
   // --- end omarchy-notch-bar --------------------------------------------
 '''.replace("{VERSION_LINE}", VERSION_LINE))
@@ -552,6 +574,19 @@ def main():
                                 return [p.screen ? String(p.screen.name) : "", p.notchRole, p.parked, p.parkedSize, p.height,
                                         p.notchSkip ? [p.notchSkip.jumped, p.notchSkip.hidden] : null]
                               }) })
+    }
+    // Omarchy's indicators' hidden ones on each bar: [screen, x, width, shown].
+    function peek(): string {
+      var out = []
+      for (var i = 0; i < root.moduleSlots.length; i++) {
+        var s = root.moduleSlots[i], b = s ? s.notchPeekBlock : null
+        var w = s ? root.slotWindow(s) : null
+        if (!b || !b.parent || !w || !w.screen || !w.contentItem) continue
+        var p = b.parent.mapToItem(w.contentItem, 0, 0)
+        out.push([String(w.screen.name), Math.round(p.x * 10) / 10, Math.round(b.parent.width * 10) / 10,
+                  b.parent.width > 0 && b.parent.opacity > 0])
+      }
+      return JSON.stringify(out)
     }
     // Each bar item as it shows: [screen, region, id, x, width, hidden].
     function items(): string {
@@ -992,8 +1027,8 @@ def main():
     readonly property bool hasAnchor: root.entryIndex(entries, root.centerAnchor) !== -1''', '''    property var entries: root.layoutEntries("center")
     // omarchy-notch-bar: keep the camera housing free.
     property bool notchLayout: false
-    // The room of the centre widgets beside the housing [left of it, right
-    // of it] in the horizontal bar (with their peeks), for Skip the notch.
+    // How wide the centre widgets beside the housing are [left of it, right
+    // of it] in the horizontal bar, for Skip the notch.
     property var notchBeside: [0, 0]
     readonly property bool hasAnchor: root.entryIndex(entries, root.centerAnchor) !== -1''')
     # Omarchy's hover area above these (a HoverHandler, from about October
@@ -1027,9 +1062,8 @@ def main():
           target: centerRoot
           property: "notchBeside"
           value: centerRoot.hasAnchor
-            ? [notchCentreBefore.width + notchCentreBefore.notchPeekWidth,
-               centerAnchorModule.width + centerAnchorModule.notchPeekWidth + notchCentreAfter.width + notchCentreAfter.notchPeekWidth]
-            : [0, notchCentreAll.width + notchCentreAll.notchPeekWidth]
+            ? [notchCentreBefore.width, centerAnchorModule.width + notchCentreAfter.width]
+            : [0, notchCentreAll.width]
         }
 
         ModuleList {
@@ -1138,7 +1172,6 @@ def main():
     // to right (a horizontal list).
     property var notchShift: null
     readonly property var notchWidths: item && item.notchWidths ? item.notchWidths : []
-    readonly property real notchPeekWidth: item && item.notchPeekWidth > 0 ? item.notchPeekWidth : 0
 ''')
     text = replace_once(text, '''      Row {
         spacing: 0
@@ -1155,21 +1188,18 @@ def main():
       }
 ''', '''      Row {
         spacing: 0
-        // omarchy-notch-bar: each item's [width, room], by its place in the
-        // list, and the room the peeks in it take.
+        // omarchy-notch-bar: each item's width by its place in the list; the
+        // right list's indicators as [now, at rest, their hidden ones].
         readonly property var notchWidths: {
           var out = []
           for (var i = 0; i < children.length; i++) {
             var c = children[i]
-            if (c && c.notchSlotIndex >= 0) out[c.notchSlotIndex] = [c.width, c.width + c.notchPeekWidth]
+            if (!c || !(c.notchSlotIndex >= 0)) continue
+            out[c.notchSlotIndex] = moduleListRoot.region === "right" && c.notchPeekFull > 0
+              ? [c.width, c.width - c.notchPeekShown, c.notchPeekFull] : c.width
           }
           for (var j = 0; j < out.length; j++) if (out[j] === undefined) out[j] = 0
           return out
-        }
-        readonly property real notchPeekWidth: {
-          var sum = 0
-          for (var i = 0; i < children.length; i++) if (children[i] && children[i].notchPeekWidth > 0) sum += children[i].notchPeekWidth
-          return sum
         }
 
         Repeater {
@@ -1206,12 +1236,30 @@ def main():
     property int notchSlotIndex: -1
     property var notchShift: null
     property bool notchShiftGone: false
-    // Omarchy's indicators: how much wider they get when they peek (0 for
-    // every other widget, and while they show). Kept free by the layout.
+    // Omarchy's indicators: the block of their hidden ones (they show on
+    // hover), its whole width and how much of it shows now; none for every
+    // other widget. Where the layout opens it elsewhere (peekAt, left of the
+    // housing), it moves by a transform of its own, set on Omarchy's item;
+    // with no room there it stays hidden (see-through, no input).
     readonly property var notchPeekBlock: activeItem && activeItem.revealInactiveIndicators !== undefined
       ? root.notchPeekBlockIn(activeItem, 0) : null
-    readonly property real notchPeekWidth: notchPeekBlock && notchPeekBlock.parent
-      ? Math.max(0, notchPeekBlock.implicitWidth - notchPeekBlock.parent.width) : 0
+    readonly property real notchPeekFull: notchPeekBlock ? notchPeekBlock.implicitWidth : 0
+    readonly property real notchPeekShown: notchPeekBlock && notchPeekBlock.parent ? notchPeekBlock.parent.width : 0
+    property real notchPeekOffset: 0
+    property real notchLastWidth: 0
+    readonly property real notchPeekDx: notchShift && notchShift.peekAt !== undefined
+      ? notchShift.peekAt - (notchShownX + notchPeekOffset) : 0
+    Translate { id: notchPeekMove; x: slot.notchPeekDx }
+    function notchPeekApply() {
+      var area = notchPeekBlock ? notchPeekBlock.parent : null
+      if (!area || !area.parent) return
+      var s = notchShift, gone = !!(s && s.peekHidden)
+      notchPeekOffset = area.parent.mapToItem(slot, area.x, 0).x
+      area.transform = s && s.peekAt !== undefined ? [notchPeekMove] : []
+      area.opacity = gone ? 0 : 1
+      area.enabled = !gone
+    }
+    onNotchPeekBlockChanged: notchPeekApply()
     // Where the item shows on the bar and Omarchy's place for it (n), both in
     // bar coordinates from the layout: a new place glides from where the item
     // showed, also while Omarchy's row moves under it (its row moves as a
@@ -1235,13 +1283,18 @@ def main():
     onNotchShiftChanged: {
       var s = notchShift
       var gone = !!(s && s.hidden), animate = !!(s && s.animate)
+      // The indicators opening or closing their hidden ones: their own row
+      // moves inside them at once, so they do not slide either.
+      var peeked = notchPeekFull > 0 && width !== notchLastWidth
+      notchLastWidth = width
       // Set before the values, so the change itself slides and fades or not.
-      notchSlide.enabled = animate && (notchSlideRun.running || s.x !== notchShiftX)
+      notchSlide.enabled = animate && !peeked && (notchSlideRun.running || s.x !== notchShiftX)
       notchFade.enabled = animate
       notchShiftX = s ? s.x : 0
       notchPlaceX = s ? s.n : 0
       notchShownX = s ? s.n + s.x : 0
       if (gone !== notchShiftGone) notchShiftGone = gone
+      notchPeekApply()
     }
 ''')
 

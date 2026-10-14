@@ -176,7 +176,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertEqual(V, 24)
+        self.assertEqual(V, 25)
         self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
@@ -669,8 +669,10 @@ class RealOmarchy(unittest.TestCase):
             self.assertEqual(full.count("transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }"), 1)
             # The housing's centre widths, and the after list named for them.
             self.assertEqual(full.count("id: notchCentreAfter"), 1)
-            self.assertIn("? [notchCentreBefore.width + notchCentreBefore.notchPeekWidth,", full)
-            self.assertIn("centerAnchorModule.width + centerAnchorModule.notchPeekWidth + notchCentreAfter.width + notchCentreAfter.notchPeekWidth]", full)
+            self.assertIn("? [notchCentreBefore.width, centerAnchorModule.width + notchCentreAfter.width]", full)
+            # The indicators' hidden ones: their own transform, set from the bar.
+            self.assertEqual(full.count("    Translate { id: notchPeekMove; x: slot.notchPeekDx }\n"), 1)
+            self.assertIn("area.transform = s && s.peekAt !== undefined ? [notchPeekMove] : []", full)
             # Omanotch's clicks and hover skip hidden items.
             self.assertEqual(full.count("if (!moduleTargetClickable(t) || t.enabled === false) continue"), 2)
 
@@ -761,8 +763,10 @@ console.log(JSON.stringify(CASES.map(function (c) { return place.apply(null, c) 
 @unittest.skipUnless(shutil.which("node"), "node not installed")
 class SkipTheNotch(unittest.TestCase):
     """Skip the notch's layout (notchSkipPlace) on a MacBook Air 13" bar:
-    1470 pt wide, the housing at 640.5-829.5, Omarchy's margins 8, the gap 8,
-    the room kept from the other side's items 24."""
+    1470 pt wide, the housing at 640.5-829.5, Omarchy's margins 8, the gap 8
+    a jumped item keeps to the housing, the room kept from the other side's
+    items 24. An item stays on its side while it does not reach under the
+    housing."""
 
     W, PAD, HOUSING, EDGE, GAP, KEEP = 1470, 8, [640.5, 829.5], 6, 8, 24
 
@@ -809,20 +813,20 @@ class SkipTheNotch(unittest.TestCase):
         right = [24] * 30 + [150]          # 30 tray icons and the clock
         r = self.one([20, 120], right)
         got = self.shown(r, "right", self.starts_right(right))
-        # Items 0-10 no longer fit right of the housing (start < 829.5 + 8):
-        # they continue left of it, in order, the last one 8 from the housing.
-        for i in range(11):
-            self.assertEqual(got[i], [632.5 - 24 * (11 - i), False], i)
-        for i in range(11, 31):
+        # Items 0-9 would reach under the housing (start < 829.5): they
+        # continue left of it, in order, the last one 8 from the housing.
+        for i in range(10):
+            self.assertEqual(got[i], [632.5 - 24 * (10 - i), False], i)
+        for i in range(10, 31):
             self.assertEqual(r["right"][i], {"x": 0, "hidden": False}, i)
-        self.assertGreaterEqual(got[11][0], 829.5 + 8)
-        self.assertEqual((r["jumped"], r["hidden"]), (11, 0))
+        self.assertGreaterEqual(got[10][0], 829.5)
+        self.assertEqual((r["jumped"], r["hidden"]), (10, 0))
 
     def test_workspaces_overflow_continue_right_of_the_housing(self):
         left = [20] + [26] * 30            # the menu and 30 workspaces
         r = self.one(left, [150])
         got = self.shown(r, "left", self.starts_left(left))
-        # Workspaces 1-23 end by 640.5 - 8; 24-30 go on 8 right of the housing.
+        # Workspaces 1-23 end before 640.5; 24-30 go on 8 right of the housing.
         self.assertTrue(all(s == {"x": 0, "hidden": False} for s in r["left"][:24]))
         for k, i in enumerate(range(24, 31)):
             self.assertEqual(got[i], [837.5 + 26 * k, False], i)
@@ -835,21 +839,21 @@ class SkipTheNotch(unittest.TestCase):
         # Each side is full up to the housing, so nothing that jumped has its
         # 24 pt there: all of them hide; what stays is where Omarchy has it.
         self.assertEqual(r["jumped"], 0)
-        self.assertEqual(r["hidden"], 7 + 11)
-        self.assertTrue(all(s["hidden"] for s in r["left"][24:] + r["right"][:11]))
-        self.assertFalse(any(s["hidden"] or s["x"] for s in r["left"][:24] + r["right"][11:]))
+        self.assertEqual(r["hidden"], 7 + 10)
+        self.assertTrue(all(s["hidden"] for s in r["left"][24:] + r["right"][:10]))
+        self.assertFalse(any(s["hidden"] or s["x"] for s in r["left"][:24] + r["right"][10:]))
         # Hidden items fade at the housing on their own side.
         lgot = self.shown(r, "left", self.starts_left(left))
         rgot = self.shown(r, "right", self.starts_right(right))
         self.assertTrue(all(abs(lgot[i][0] + 26 - 632.5) < 1e-9 for i in range(24, 31)))
-        self.assertTrue(all(rgot[i][0] == 837.5 for i in range(11)))
+        self.assertTrue(all(rgot[i][0] == 837.5 for i in range(10)))
 
     def test_24_pt_from_the_other_sides_items(self):
-        # The left side ends at 8 + 20 + 100 = 128. One wide item that does not
+        # The left side ends at 8 + 20 + 90 = 118. One wide item that does not
         # fit right of the housing: shown when it starts 24 after that, hidden
         # half a point closer.
-        fits, close = self.place(([20, 100], [480.5, 150], None, None), ([20, 100], [481, 150], None, None))
-        self.assertEqual(self.shown(fits, "right", self.starts_right([480.5, 150]))[0], [152, False])
+        fits, close = self.place(([20, 90], [490.5, 150], None, None), ([20, 90], [491, 150], None, None))
+        self.assertEqual(self.shown(fits, "right", self.starts_right([490.5, 150]))[0], [142, False])
         self.assertTrue(close["right"][0]["hidden"])
         self.assertEqual((close["jumped"], close["hidden"]), (0, 1))
         # The same for the left side: the right side's own items start at 1312.
@@ -871,18 +875,18 @@ class SkipTheNotch(unittest.TestCase):
         # The clock as Omarchy's centre anchor, right of the housing (100 wide),
         # and a widget before it, left of it (60 wide): the sides end there.
         wall_l, wall_r = 640.5 - 6 - 60, 829.5 + 6 + 100
-        # Many workspaces: 20 end by wall_l - 8, 5 go on 8 after the clock.
+        # Many workspaces: 21 end before wall_l, 4 go on 8 after the clock.
         left = [20] + [26] * 25
         r = self.one(left, [24] * 5 + [150], beside=[60, 100])
         got = self.shown(r, "left", self.starts_left(left))
-        self.assertLessEqual(got[20][0] + 26, wall_l - 8)
-        self.assertEqual([g for g, s in zip(got, r["left"]) if s["x"]], [[wall_r + 8 + 26 * k, False] for k in range(5)])
+        self.assertLessEqual(got[21][0] + 26, wall_l)
+        self.assertEqual([g for g, s in zip(got, r["left"]) if s["x"]], [[wall_r + 8 + 26 * k, False] for k in range(4)])
         # Many tray icons: 10 no longer fit after the clock; they go on 8
         # before the widget left of the housing.
         right = [24] * 25 + [150]
         r = self.one([20, 100], right, beside=[60, 100])
         got = self.shown(r, "right", self.starts_right(right))
-        self.assertGreaterEqual(got[10][0], wall_r + 8)
+        self.assertGreaterEqual(got[10][0], wall_r)
         self.assertEqual([g for g, s in zip(got, r["right"]) if s["x"]], [[wall_l - 8 - 24 * (10 - i), False] for i in range(10)])
 
     def test_workspaces_growing_and_shrinking(self):
@@ -905,7 +909,7 @@ class SkipTheNotch(unittest.TestCase):
     def test_empty_items_take_no_room_and_are_not_counted(self):
         right = [24] * 11 + [0, 0] + [24] * 19 + [150]
         r = self.one([20, 120], right)
-        self.assertEqual(r["jumped"], 11)
+        self.assertEqual(r["jumped"], 10)
 
     def test_places_on_the_bar(self):
         # n: Omarchy's place of each item on the bar, as its rows lay them out
@@ -915,72 +919,130 @@ class SkipTheNotch(unittest.TestCase):
         self.assertEqual([s["n"] for s in r["left"]], self.starts_left(left))
         self.assertEqual([s["n"] for s in r["right"]], self.starts_right(right))
 
-    # Omarchy's indicators peek: hovered (on this bar, or any other bar:
-    # Omarchy shares the peek between bars), they get 84 wider. Their width
-    # here is [now, when they peek]. The layout keeps their room either way,
-    # so nothing else moves: what is checked is where each item shows (n + x).
-    IND = [21, 105]
+    # Omarchy's indicators: [width now, at rest, their hidden ones]. At rest
+    # 21 (an active one), 84 hidden; peeking (hovered on this bar or another:
+    # Omarchy shares the peek between bars) 105.
+    def ind(self, open_):
+        return [105 if open_ else 21, 21, 84]
 
     def shows(self, r):
         return [[round(s["n"] + s["x"], 3), s["hidden"]] for s in r["left"] + r["right"]]
 
-    def peek_cases(self):
-        return [
-            ("right side fits", [20, 120], [54, 21, self.IND, 27, 133, 150]),
-            ("tray beyond the housing", [20, 120], [300, 21, self.IND, 27, 133, 150]),
-            ("tray and weather beyond it", [20, 120], [300, 120, self.IND, 27, 133, 150]),
-            ("both sides full", [20] + [26] * 30, [300, 21, self.IND, 27, 133, 150]),
-            ("indicators on the left", [20, self.IND, 400], [54, 150]),
-            ("indicators jumped over", [20], [21, self.IND, 300, 400, 150]),
-            ("indicators hidden, both sides full", [20, 120], [21, self.IND, 400, 400, 150]),
-        ]
+    def onep(self, left, right, beside=None):
+        return self.place((left, right, None, beside), places=True)[0]
 
-    def test_a_peek_moves_no_other_item(self, body=None):
-        seen = set()
-        for what, left, right in self.peek_cases():
-            peek = lambda l: [[105, 105] if e == self.IND else e for e in l]
-            idle, peeking = self.place((left, right, None, None), (peek(left), peek(right), None, None), places=True, body=body)
-            self.assertEqual((idle["jumped"], idle["hidden"]), (peeking["jumped"], peeking["hidden"]), what)
-            seen.add((idle["jumped"] > 0, idle["hidden"] > 0))
-            a, b = self.shows(idle), self.shows(peeking)
-            where = [i for i, e in enumerate(left + right) if e == self.IND][0]
-            for i, (x, y) in enumerate(zip(a, b)):
-                if i != where:
-                    self.assertEqual(x, y, "%s: item %d moved on a peek" % (what, i))
-            # The indicators grow into their room as Omarchy has them grow:
-            # on the right their right end stays, on the left their start.
-            ind = (idle["left"] + idle["right"])[where], (peeking["left"] + peeking["right"])[where]
-            self.assertEqual(ind[0]["hidden"], ind[1]["hidden"], what)
-            if ind[0]["hidden"]:
-                continue
-            if where < len(left):
-                self.assertEqual(ind[0]["n"] + ind[0]["x"], ind[1]["n"] + ind[1]["x"], what)
-            else:
-                self.assertEqual(ind[0]["n"] + ind[0]["x"] + 21, ind[1]["n"] + ind[1]["x"] + 105, what)
-        # The cases cover nothing jumping, jumping, and hiding.
-        self.assertTrue({(False, False), (True, False)} <= seen and any(h for _, h in seen), seen)
+    # The user's right list on a MacBook Air (tray, weather, the indicators,
+    # spotify ... clock): Omarchy puts the tray at 830.3, 0.8 pt off the housing.
+    def user_right(self, open_):
+        return [81, 21, self.ind(open_), 27, 133, 27, 27, 27.2, 27, 27, 27, 27, 27, 132.5]
 
-    def test_a_peek_beside_the_housing_moves_no_other_item(self):
-        # Indicators among the centre widgets: their room beside the housing
-        # is the peek's, all the time (the bar passes it so).
-        right = [300, 21, 27, 133, 150]
-        idle, peeking = self.place(([20, 120], right, None, [0, 105]), ([20, 120], right, None, [0, 105]), places=True)
-        self.assertEqual(self.shows(idle), self.shows(peeking))
-        r = self.one([20, 120], [24] * 20 + [150], beside=[0, 105])
-        got = self.shown(r, "right", self.starts_right([24] * 20 + [150]))
-        kept = [g for g, s in zip(got, r["right"]) if s["x"] == 0]
-        self.assertGreaterEqual(kept[0][0], 829.5 + 6 + 105 + 8)
+    def omarchy(self, left, right):
+        """Where Omarchy's own rows put each item (no Skip the notch)."""
+        w = lambda e: e[0] if isinstance(e, list) else e
+        return [[x, False] for x in self.starts_left([w(e) for e in left]) + self.starts_right([w(e) for e in right])]
 
-    def test_no_peek_room_is_the_old_layout(self):
-        # Items without a peek: [w, w] is the same as w.
-        for what, left, right in self.peek_cases():
-            plain = lambda l: [21 if e == self.IND else e for e in l]
-            pairs = lambda l: [[21, 21] if e == self.IND else [e, e] for e in l]
-            a, b = self.place((plain(left), plain(right), None, None), (pairs(left), pairs(right), None, None), places=True)
-            self.assertEqual(a, b, what)
+    def test_at_rest_the_bar_is_omarchys(self):
+        # The user's bar (MacBook Air): the tray 5.8 pt from the housing stays;
+        # no room is kept for the indicators' hidden ones.
+        left, right = [27, 105.5], self.user_right(False)
+        r = self.onep(left, right)
+        self.assertEqual(round(r["right"][0]["n"], 3), 830.3)
+        self.assertEqual(self.shows(r), self.omarchy(left, right))
+        self.assertEqual((r["jumped"], r["hidden"]), (0, 0))
+
+    def test_hidden_indicators_open_in_place_when_they_fit(self):
+        # Room right of the housing: they open where they are, as Omarchy
+        # opens them (the items inside them make way), nothing jumps.
+        left, right = [27, 105.5], [54, 21, self.ind(True), 150]
+        r = self.onep(left, right)
+        self.assertEqual(self.shows(r), self.omarchy(left, right))
+        self.assertNotIn("peekAt", r["right"][2])
+        self.assertEqual((r["jumped"], r["hidden"]), (0, 0))
+
+    def test_hidden_indicators_open_left_of_the_housing_when_they_do_not(self):
+        # The user's bar: the tray and the weather stay where they are at
+        # rest; the hidden indicators would push them under the housing, so
+        # they open left of it, 8 from it, growing to the left.
+        left = [27, 105.5]
+        right = self.user_right
+        rest, peek = self.place((left, right(False), None, None), (left, right(True), None, None), places=True)
+        self.assertEqual(self.shows(rest), self.omarchy(left, right(False)))
+        self.assertEqual(peek["right"][2]["peekAt"], 640.5 - 8 - 84)
+        self.assertFalse(peek["right"][2]["peekHidden"])
+        self.assertEqual(rest["right"][2]["peekAt"], peek["right"][2]["peekAt"])
+        # Nothing else moves; the indicators' visible part stays (their right end).
+        a, b = self.shows(rest), self.shows(peek)
+        for i in range(len(a)):
+            if i != len(left) + 2:
+                self.assertEqual(a[i], b[i], i)
+        ra, rb = rest["right"][2], peek["right"][2]
+        self.assertEqual(ra["n"] + ra["x"] + 21, rb["n"] + rb["x"] + 105)
+
+    def test_hidden_indicators_hide_when_the_left_side_is_full(self):
+        # The workspaces leave no 24 pt left of the hidden ones' place.
+        left = [27] + [26] * 19          # ends at 529: 548.5 - 529 < 24
+        r = self.onep(left, self.user_right(True))
+        self.assertTrue(r["right"][2]["peekHidden"])
+        self.assertEqual(r["right"][2]["peekAt"], 640.5 - 8 - 84)
+        left = [27] + [26] * 16          # ends at 451: 548.5 - 451 = 97.5 >= 24
+        r = self.onep(left, self.user_right(True))
+        self.assertFalse(r["right"][2]["peekHidden"])
+
+    def test_a_tray_too_wide_even_without_them(self):
+        # The tray jumps at rest (the original rule); the hidden indicators
+        # then open left of it, and hide when there is no room left of that.
+        # The weather stays at 870, so the hidden ones (84) have no room right
+        # of the housing; the tray (300) is under it at rest and jumps.
+        right = lambda o: [300, 21, self.ind(o), 400, 150]
+        r = self.onep([27, 105.5], right(True))
+        tray = r["right"][0]
+        self.assertTrue(tray["x"] < 0 and not tray["hidden"])
+        tray_at = tray["n"] + tray["x"]
+        self.assertEqual(tray_at + 300, 640.5 - 8)
+        self.assertEqual(r["right"][2]["peekAt"], tray_at - 84)
+        self.assertFalse(r["right"][2]["peekHidden"])
+        r = self.onep([27] + [26] * 8, right(True))   # the workspaces end at 243
+        self.assertTrue(r["right"][2]["peekHidden"])
+        # Once the tray has jumped, a right side with room opens them in place.
+        r = self.onep([27, 105.5], [400, 21, self.ind(True), 27, 133, 150])
+        self.assertNotIn("peekAt", r["right"][2])
+
+    def test_where_they_open_never_depends_on_their_own_peek(self):
+        # Stateless: open or not (a hover on this bar, an external one, the
+        # strip), the same items jump and hide, the hidden ones get the same
+        # place, everything else shows at the same place.
+        user = [81, 21, "I", 27, 133, 27, 27, 27.2, 27, 27, 27, 27, 27, 132.5]
+        cases = [([27, 105.5], [54, 21, "I", 150]), ([27, 105.5], user), ([27] + [26] * 19, user),
+                 ([27, 105.5], [300, 21, "I", 400, 150]), ([27, 105.5], [81, 21, "I", 27, 133, 150]),
+                 ([27, 105.5], [400, 21, "I", 27, 133, 150]), ([27] + [26] * 19, [81, 21, "I", 27, 133, 150]),
+                 ([27] + [26] * 30, [300, 21, "I", 27, 133, 150]), ([27, 105.5], [24] * 30 + ["I", 150])]
+        for left, right in cases:
+            with self.subTest(left=len(left), right=right[:3]):
+                fill = lambda o: [self.ind(o) if e == "I" else e for e in right]
+                a, b = self.place((left, fill(False), None, None), (left, fill(True), None, None), places=True)
+                k = right.index("I")
+                self.assertEqual((a["jumped"], a["hidden"]), (b["jumped"], b["hidden"]))
+                self.assertEqual((a["right"][k].get("peekAt"), a["right"][k].get("peekHidden")),
+                                 (b["right"][k].get("peekAt"), b["right"][k].get("peekHidden")))
+                in_place = "peekAt" not in a["right"][k]
+                sa, sb = self.shows(a), self.shows(b)
+                for i in range(len(sa)):
+                    if i == len(left) + k:
+                        continue
+                    j = i - len(left)
+                    if in_place and 0 <= j < k and a["right"][j]["x"] == 0 and not a["right"][j]["hidden"]:
+                        # In place: the items inside them make way, as in Omarchy.
+                        self.assertEqual(sb[i][0], sa[i][0] - 84)
+                    else:
+                        self.assertEqual(sa[i], sb[i], i)
+
+    def test_no_indicators_no_peek(self):
+        r = self.one([27, 105.5], [81, 21, 27, 133, 150])
+        self.assertFalse(any("peekAt" in s or s.get("peekHidden") for s in r["right"]))
 
     def test_the_real_shells_have_the_same_layout(self):
         # The layout function as both Omarchy shells' patched bars have it.
+        mine = function(patched(), "notchSkipPlace")
         for bar in SHELLS:
             d = pathlib.Path(tempfile.mkdtemp())
             try:
@@ -991,7 +1053,7 @@ class SkipTheNotch(unittest.TestCase):
             finally:
                 shutil.rmtree(d)
             with self.subTest(omarchy=bar.parts[-5]):
-                self.test_a_peek_moves_no_other_item(body=body)
+                self.assertEqual(body, mine)
 
     def test_the_peek_block_is_found(self):
         # Omarchy's indicators in both shells: the horizontal row's hidden
