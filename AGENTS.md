@@ -329,7 +329,12 @@ OmacVM.app (QEMU's window code, mac-ime on only): ◀▶ Omarchy's Fcitx5 + Omac
   org.omacvm.app.test) puts QEMU's tap (`OMACVM_KEYS_LAST=1`,
   `omacvm-cocoa-keys-last.patch`), Gestures' and the Bridge's media-key tap at the
   end of the chain (kCGTailAppendEventTap) instead of the head, so the sharing app
-  sees the keys first (docs/troubleshooting.md, 34).
+  sees the keys first (docs/troubleshooting.md, 34). The guest's modifier keys
+  follow each event's flags, left or right from the NX_DEVICE* bits, never
+  flipped (`omacvm-cocoa-modifier-state*.patch`, ui/omacvm-modifiers.h, #412:
+  with Universal Control Shift went up the moment it went down); only
+  a key going down or a modifier changing presses one, a pointer event only
+  releases (`app/runtime/Tests/keys/test-modifier-state.sh`).
 - Escape combo (Gestures): NEVER take the VM out of full screen or hide it
   (user, 2026-10-05). Out = macOS's own "Move left/right a space" shortcut
   (symbolic hotkeys 79/81, read per press: key, modifiers, enabled), posted
