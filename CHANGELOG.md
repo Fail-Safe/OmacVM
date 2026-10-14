@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Unplugging a display no longer shuts the VM off** (OmacVM.app, Full screen including notch,
+  with a second display). When the display the VM's window was on was unplugged, macOS took the
+  windows out of full screen and QEMU crashed while letting go of the other display's window: the
+  VM was gone and Omarchy started from scratch. Now the VM keeps running and its window goes to a
+  display that is left (#402, thanks @epicoun).
+
 ## 3.1.7
 
 - **Shift and the brightness keys set the keyboard light reliably** (MacBooks, VM in front). Shift
