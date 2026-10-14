@@ -908,6 +908,13 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-close.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-unseen.patch"
 "$native_dir/Tests/display/test-present-unseen.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: frames are drawn for a window out of sight (test-present-unseen.sh)"
+# The guest's modifier keys follow each event's flags, never flipped (#412:
+# another Mac's keyboard through Universal Control got Shift pressed and
+# released at once). Its rules' test, then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-modifier-state-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-modifier-state.patch"
+"$native_dir/Tests/keys/test-modifier-state.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the modifier keys are not set from the flags as tested (test-modifier-state.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
