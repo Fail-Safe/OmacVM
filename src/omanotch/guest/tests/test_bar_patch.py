@@ -178,7 +178,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertEqual(V, 31)
+        self.assertEqual(V, 32)
         self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
@@ -668,7 +668,7 @@ class RealOmarchy(unittest.TestCase):
             self.assertEqual(full.count("id: rightModules"), 1)
             # Each item of a horizontal list, not the vertical ones.
             self.assertEqual(full.count("notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)"), 1)
-            self.assertEqual(full.count("transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }"), 1)
+            self.assertEqual(full.count("transform: Translate { x: slot.notchShift ? slot.notchShownX - (slot.notchEnd ? slot.width : 0) - slot.notchPlaceX : 0 }"), 1)
             # The housing's centre widths, and the after list named for them.
             self.assertEqual(full.count("id: notchCentreAfter"), 1)
             self.assertIn("? [notchCentreBefore.width, centerAnchorModule.width + notchCentreAfter.width]", full)
@@ -1718,6 +1718,8 @@ function Slot(name, memory) {
   this.notchSlide = slide;
   this.notchFade = { enabled: false };
   this.notchPeekApply = function () {};
+  this.region = "left"; this.notchEnd = false;
+  this.notchEdge = function (s) { return s.n + s.x + (self.notchEnd ? self.width : 0) };
   this.notchSettle = function () { with (self) { SETTLE } };
   this.endHold = function () { self.notchHold = false; with (self) { HOLDEND } };
   var shown = 0;
@@ -1812,6 +1814,18 @@ out.push([w.moves.slice(), w.notchNew]);
         self.assertEqual(after, [])                                 # it ended there: nothing moves
         self.assertEqual(weather_held, [[[0, 1234.3, False]], True])  # unseen until the hold ends
         self.assertEqual(weather_after, [[], False])
+
+    def test_a_right_item_keeps_its_end_when_it_grows(self):
+        # The tray (jumped left of the housing, its end kept there) gets one
+        # more icon: it grows to the left at once, nothing glides.
+        out = self.run_steps("""
+var mem = {};
+var t = new Slot("tray", mem); t.notchEnd = true; t.width = 459;
+t.set({x: -735.2, n: 970.8, hidden: false, animate: false}); flush(); t.moves = [];
+t.width = 486; t.set({x: -735.2, n: 943.8, hidden: false, animate: true}); flush();
+out.push(t.moves.slice());
+""")
+        self.assertEqual(out[0], [])
 
     def test_a_peek_glides_nothing(self):
         out = self.run_steps("""

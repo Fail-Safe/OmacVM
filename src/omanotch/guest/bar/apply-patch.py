@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 31
+VERSION = 32
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -77,7 +77,7 @@ PIECES = [
     "        readonly property bool notchSkipActive: root.notchSkipOn && barWindow.notchLayout\n",  # 4.
     "    property var notchBeside: [0, 0]\n",                                # 5.
     "            notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)\n",  # 8. lists
-    "    transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }\n",  # 9. items
+    "    transform: Translate { x: slot.notchShift ? slot.notchShownX - (slot.notchEnd ? slot.width : 0) - slot.notchPlaceX : 0 }\n",  # 9. items
     "  function notchPeekBlockIn(item, depth) {\n",                       # 1. the indicators' hidden ones
     "    Translate { id: notchPeekMove; x: slot.notchPeekDx }\n",           # 9. open left of the housing
     "      if (parent && typeof parent.forceLayout === \"function\") parent.forceLayout()\n",  # 9. row now
@@ -1307,7 +1307,7 @@ def main():
     property real notchPeekOffset: 0
     property real notchLastWidth: 0
     readonly property real notchPeekDx: notchShift && notchShift.peekAt !== undefined
-      ? notchShift.peekAt - (notchShownX + notchPeekOffset) : 0
+      ? notchShift.peekAt - (notchShownX - (notchEnd ? width : 0) + notchPeekOffset) : 0
     Translate { id: notchPeekMove; x: slot.notchPeekDx }
     function notchPeekApply() {
       var area = notchPeekBlock ? notchPeekBlock.parent : null
@@ -1319,10 +1319,10 @@ def main():
       area.enabled = !gone
     }
     onNotchPeekBlockChanged: notchPeekApply()
-    // Where the item shows on the bar and Omarchy's place for it (n), both in
-    // bar coordinates from the layout: a new place glides from where the item
-    // showed, also while Omarchy's row moves under it (its row moves as a
-    // whole when an item in it grows). Omarchy's own moves stay instant.
+    // Where the item shows on the bar (notchShownX, its kept edge) and
+    // Omarchy's place for it (n), both in bar coordinates from the layout: a
+    // new place glides from where the item showed, also while Omarchy's row
+    // moves under it. Omarchy's own moves stay instant.
     property real notchShownX: 0
     property real notchPlaceX: 0
     property real notchShiftX: 0
@@ -1337,7 +1337,12 @@ def main():
       }
       notchSettle()
     }
-    transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }
+    // The edge an item keeps when its own width changes, as Omarchy aligns
+    // it: a right side's item its end (it grows to the left), others their
+    // start. notchShownX is that edge on the bar.
+    readonly property bool notchEnd: region === "right"
+    function notchEdge(s) { return s.n + s.x + (notchEnd ? width : 0) }
+    transform: Translate { x: slot.notchShift ? slot.notchShownX - (slot.notchEnd ? slot.width : 0) - slot.notchPlaceX : 0 }
     opacity: slot.notchShiftGone || slot.notchNew ? 0 : 1
     enabled: !slot.notchShiftGone
     Behavior on notchShownX {
@@ -1387,7 +1392,7 @@ def main():
         // (a new one waits unseen); onNotchHoldChanged moves it once.
         notchSlide.enabled = notchSlideRun.running
         if (!placed) {
-          notchShownX = was !== undefined ? was.x : s.n + s.x
+          notchShownX = was !== undefined ? was.x : notchEdge(s)
           notchNew = was === undefined
         }
         notchPlaceX = s.n
@@ -1400,9 +1405,9 @@ def main():
       var glide = animate && ours && !peeked, running = notchSlideRun.running
       if (!running) notchSlide.enabled = false
       notchPlaceX = s.n
-      if (!placed) notchShownX = glide && was !== undefined ? was.x : s.n + s.x
+      if (!placed) notchShownX = glide && was !== undefined ? was.x : notchEdge(s)
       notchShiftX = s.x
-      if (!glide && !running) notchShownX = s.n + s.x
+      if (!glide && !running) notchShownX = notchEdge(s)
       Qt.callLater(notchSettle)
       notchPeekApply()
     }
@@ -1412,7 +1417,7 @@ def main():
       var s = notchShift
       if (!s) return
       if (!!s.hidden !== notchShiftGone) notchShiftGone = !!s.hidden
-      var to = s.n + s.x
+      var to = notchEdge(s)
       if (Math.abs(notchShownX - to) > 0.01) {
         notchSlide.enabled = !!s.animate
         notchShownX = to
