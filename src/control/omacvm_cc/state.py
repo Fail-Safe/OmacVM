@@ -229,6 +229,17 @@ def parse_check_tsv(text: str, side: str = "vm") -> list[Check]:
     return out
 
 
+# By the Mac's keyboard light check while macOS adjusts it by itself.
+KEYBOARD_AUTO_NOTE = ("in bright light macOS keeps it off while 'Adjust keyboard brightness in low light' "
+                      "is on (System Settings › Keyboard)")
+
+
+def keyboard_auto_note(c: Check, auto: bool) -> str:
+    """The note by one check line: the keyboard light's, while macOS's own
+    setting adjusts it ("" otherwise)."""
+    return KEYBOARD_AUTO_NOTE if auto and c.side == "mac" and c.name == "keyboard light" else ""
+
+
 def parse_mac_checks(items: list[dict]) -> list[Check]:
     """The Mac's checks as the Bridge sends them (omacvm check --json --mac-only)."""
     out = []
