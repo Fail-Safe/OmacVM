@@ -413,5 +413,22 @@ class Copies(unittest.TestCase):
         self.assertEqual(self.check()["bar copy"][0], "ok")
 
 
+    def test_what_counts_as_not_loading(self):
+        """The shell's log as Quickshell writes it: errors naming the copy
+        count, binding loops (Omarchy's own bar has them) and other files do not."""
+        where = f"/plugins/{USER}.bar/"
+        log = "\n".join([
+            "2026-10-13 13:59:27.799  WARN scene: QML Bar at file:///home/x/.config/omarchy/plugins/tester.bar/Bar.qml[12:1]: Binding loop detected for property \"displayCutouts\":",
+            "file:///home/x/.config/omarchy/plugins/tester.bar/Bar.qml:774:3",
+            "2026-10-13 13:59:27.826  WARN scene: file:///usr/share/omarchy/shell/plugins/bar/indicators/Dictation.qml[-1:-1]: No such file or directory",
+            "2026-10-13 13:59:28.001  WARN scene: QML Item: Cannot read property 'x' of undefined",
+            "file:///home/x/.config/omarchy/plugins/tester.bar/Bar.qml:401: TypeError",
+            "2026-10-13 13:59:28.100  INFO quickshell: Configuration Loaded",
+        ])
+        bad = [e for e in self.m.log_entries(log) if where in e and self.m.ERROR.search(e) and "Binding loop" not in e]
+        self.assertEqual(len(bad), 1)
+        self.assertIn("Cannot read property", bad[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
