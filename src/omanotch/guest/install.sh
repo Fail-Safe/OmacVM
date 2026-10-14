@@ -11,6 +11,9 @@
 #   3. clones Omarchy's background into ~/.config/omarchy/plugins/$USER.background
 #      and patches it so the wallpaper runs through the notch strip and the
 #      built-in display as one image (seen when the bar is hidden)
+#      Both copies follow Omarchy's updates and keep your own edits, as
+#      Omarchy's plugins do (guest/copies.py, ~/.local/lib/omanotch, the user
+#      service omanotch-copies.service)
 #   4. clones Omarchy's display panel into ~/.config/omarchy/plugins/omanotch.monitor
 #      with the hidden NOTCH output left out of its display list
 #      (~/.local/bin/omanotch-display-panel builds it again after an Omarchy update)
@@ -26,14 +29,13 @@ plugins=$HOME/.config/omarchy/plugins
 hypr=$HOME/.config/hypr
 units=$HOME/.config/systemd/user
 clone=$plugins/$USER.bar
-bgclone=$plugins/$USER.background
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
 
 [[ $EUID -ne 0 ]] || die "run as your desktop user, not root"
 [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] || die "run inside the Hyprland session (HYPRLAND_INSTANCE_SIGNATURE is unset)"
-for c in gcc wayland-scanner python3 qs hyprctl omarchy-plugin-clone systemctl; do
+for c in gcc wayland-scanner python3 git qs hyprctl omarchy-plugin-clone systemctl; do
   command -v "$c" >/dev/null || die "missing command: $c"
 done
 [[ -f /usr/include/lz4.h ]] || die "missing lz4 headers (pacman -S lz4)"
@@ -47,39 +49,35 @@ bash "$build/build.sh" "$build/out" >/dev/null
 mkdir -p "$bin"
 install -m 755 "$build/out/notchcast" "$bin/notchcast"
 
-say "patching Omarchy's bar"
-if [[ ! -f $clone/Bar.qml ]]; then
-  omarchy-plugin-clone omarchy.bar >/dev/null
-fi
-[[ -f $clone/Bar.qml ]] || die "bar clone not found at $clone"
-# Keep an unpatched copy: apply-patch.py restores it to upgrade older patches.
-if ! grep -q omarchy-notch-bar "$clone/Bar.qml"; then
-  cp "$clone/Bar.qml" "$clone/Bar.qml.before-notchbar"
-fi
-patch_result=$(python3 "$here/bar/apply-patch.py" "$clone/Bar.qml")
-echo "    $patch_result"
-if command -v omarchy-bar-use >/dev/null; then
-  omarchy-bar-use "$USER.bar" >/dev/null 2>&1 || true
-fi
-
-say "patching Omarchy's background"
-if [[ ! -f $bgclone/Background.qml ]]; then
-  omarchy-plugin-clone omarchy.background >/dev/null
-fi
-[[ -f $bgclone/Background.qml ]] || die "background clone not found at $bgclone"
-if ! grep -q omarchy-notch-bar "$bgclone/Background.qml"; then
-  cp "$bgclone/Background.qml" "$bgclone/Background.qml.before-notchbar"
-fi
-bg_result=$(python3 "$here/background/apply-patch.py" "$bgclone/Background.qml")
-echo "    $bg_result"
-
 say "leaving NOTCH out of Omarchy's display panel"
 install -m 755 "$here/monitor/display-panel.py" "$bin/omanotch-display-panel"
 panel_result=$("$bin/omanotch-display-panel") || panel_result="failed (Omarchy's own display panel stays)"
 echo "    $panel_result"
 
-# The shell caches plugin code: a changed patch only takes effect after a restart.
-if [[ $patch_result != already* || $bg_result != already* || $panel_result == patched ]]; then
+say "Omarchy's bar and background with the notch patch (they follow Omarchy's updates)"
+lib=$HOME/.local/lib/omanotch
+mkdir -p "$lib/bar" "$lib/background" "$units"
+install -m 644 "$here/copies.py" "$lib/copies.py"
+install -m 644 "$here/bar/apply-patch.py" "$lib/bar/apply-patch.py"
+install -m 644 "$here/background/apply-patch.py" "$lib/background/apply-patch.py"
+install -m 644 "$here/systemd/omanotch-copies.service" "$units/omanotch-copies.service"
+systemctl --user daemon-reload
+systemctl --user enable omanotch-copies.service >/dev/null 2>&1
+# Makes a missing copy, patches it, and brings a copy up to Omarchy's plugin
+# and this patch, keeping your edits; restarts the shell when it changed one.
+copies_rc=0
+copies_out=$(python3 "$lib/copies.py" --install) || copies_rc=$?
+sed 's/^/    /' <<<"$copies_out"
+[[ -f $clone/Bar.qml ]] || die "bar clone not found at $clone"
+grep -q omarchy-notch-bar "$clone/Bar.qml" || die "the notch patch is not in $clone/Bar.qml (see above)"
+if command -v omarchy-bar-use >/dev/null; then
+  omarchy-bar-use "$USER.bar" >/dev/null 2>&1 || true
+fi
+# A locked session: the service does it right after the unlock.
+if (( copies_rc == 3 )); then systemctl --user start --no-block omanotch-copies.service 2>/dev/null || true; fi
+
+# The shell caches plugin code: a changed panel only takes effect after a restart.
+if [[ $panel_result == patched && $copies_out != *"the shell restarted"* ]]; then
   omarchy-restart-shell >/dev/null 2>&1 || true
 fi
 
