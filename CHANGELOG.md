@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.11
+## Unreleased
 
 - **Omanotch's bar follows Omarchy's updates and keeps your edits.** Omanotch runs its own copy of
   Omarchy's bar and background, and that copy stayed at the Omarchy it was made from. Now it follows
@@ -17,6 +17,9 @@ in more words.
   brightness in low light" on, macOS turns the keyboard light off in bright light, and Shift with
   the brightness keys cannot light it then. The control centre says so next to the keyboard light,
   only while that setting is on.
+
+## 3.1.11
+
 - **Swipe out to macOS with four fingers.** With four fingers the swipe out mostly did nothing:
   the fourth finger coming down a moment after the others looked like a pinch. Now it follows the
   fingers like with three.
