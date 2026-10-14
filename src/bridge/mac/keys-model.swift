@@ -216,6 +216,51 @@ enum MediaKey: Int {
   }
 }
 
+// ---- Shift and Option with a media key ----
+
+/// The modifiers a media key is read with.
+struct KeyMods: Equatable {
+  var shift = false
+  var option = false
+
+  init(shift: Bool = false, option: Bool = false) { self.shift = shift; self.option = option }
+  init(_ flags: CGEventFlags) { self.init(shift: flags.contains(.maskShift), option: flags.contains(.maskAlternate)) }
+}
+
+enum BrightnessCombo {
+  /// What a key means with these modifiers, as in Omarchy: Shift + a
+  /// brightness key = the keyboard light (a MacBook has no keys of its own for
+  /// it); Option = small steps (Shift + Option + brightness: the display's
+  /// small steps, as macOS does). Any other key stays itself.
+  static func key(_ pressed: MediaKey, _ m: KeyMods) -> (key: MediaKey, fine: Bool) {
+    guard m.shift && !m.option else { return (pressed, m.option) }
+    switch pressed {
+    case .brightnessUp: return (.keyboardUp, false)
+    case .brightnessDown: return (.keyboardDown, false)
+    default: return (pressed, false)
+    }
+  }
+}
+
+/// A held key keeps what its first press meant. Its repeats come with the
+/// modifiers of their own moment, so Shift let go during a hold moved the
+/// rest of it from the keyboard light to the display. Key up ends a hold; a
+/// first press (not a repeat) always starts a new one, so a key up that never
+/// came does not stick.
+struct KeyHold {
+  private var held: [MediaKey: KeyMods] = [:]
+
+  /// The modifiers to read this key-down with.
+  mutating func down(_ k: MediaKey, repeating: Bool, mods: KeyMods) -> KeyMods {
+    if repeating, let m = held[k] { return m }
+    held[k] = mods
+    return mods
+  }
+
+  /// Key up: the hold's modifiers (the up goes where its down went), or nil.
+  mutating func up(_ k: MediaKey) -> KeyMods? { held.removeValue(forKey: k) }
+}
+
 /// The VM app in front as the key path sees it. `omacvm`: an OmacVM.app VM
 /// (also windowed); Parallels, UTM and Fusion count only full screen.
 /// `display`: the Mac display it is on, `builtin` whether that is the
@@ -316,6 +361,9 @@ enum HIDUsage {
   /// Brightness up/down: consumer page, Apple's top-case page, Apple's keyboard page.
   static let up: Set<UInt32> = [0x000C_006F, 0x00FF_0004, 0xFF01_0020]
   static let down: Set<UInt32> = [0x000C_0070, 0x00FF_0005, 0xFF01_0021]
+  /// Left and right Shift, left and right Option (keyboard page).
+  static let shift: Set<UInt32> = [0x0007_00E1, 0x0007_00E5]
+  static let option: Set<UInt32> = [0x0007_00E2, 0x0007_00E6]
   static func of(page: UInt32, usage: UInt32) -> UInt32 { page << 16 | (usage & 0xFFFF) }
 }
 
@@ -355,15 +403,39 @@ enum HIDBrightness {
   }
 }
 
-/// Each keyboard's fn key and what a press means. `map`: that keyboard's
-/// FnFunctionUsageMap (empty: none). `fnState`: macOS's "standard function
-/// keys" setting. A press that is a brightness key gives it, nil otherwise.
+/// Each keyboard's fn, Shift and Option keys and what a press means. `map`:
+/// that keyboard's FnFunctionUsageMap (empty: none). `fnState`: macOS's
+/// "standard function keys" setting. A press that is a brightness key gives
+/// it, nil otherwise.
+/// Shift and Option are read here, from the keyboard, not from macOS's
+/// session: while an OmacVM VM has the keyboard, QEMU's key tap takes the
+/// Shift key's events, so the session's flags miss Shift (and pick it up
+/// from the next trackpad move instead, and keep it after Shift is let go).
+/// Any keyboard's Shift counts, as fn does.
 struct HIDKeyboards {
   private var fnDown: Set<UInt64> = []
+  private var modsDown: [UInt64: Set<UInt32>] = [:]   // per keyboard: the Shift and Option keys held
+
+  /// Shift and Option as held now, on any keyboard.
+  var mods: KeyMods {
+    let down = modsDown.values.reduce(into: Set<UInt32>()) { $0.formUnion($1) }
+    return KeyMods(shift: !down.isDisjoint(with: HIDUsage.shift), option: !down.isDisjoint(with: HIDUsage.option))
+  }
+
+  /// A keyboard went away: nothing of it stays held.
+  mutating func removed(device: UInt64) {
+    fnDown.remove(device)
+    modsDown[device] = nil
+  }
 
   mutating func value(device: UInt64, usage: UInt32, pressed: Bool, map: [UInt32: UInt32], fnState: Bool) -> MediaKey? {
     if HIDUsage.fn.contains(usage) {
       if pressed { fnDown.insert(device) } else { fnDown.remove(device) }
+      return nil
+    }
+    if HIDUsage.shift.contains(usage) || HIDUsage.option.contains(usage) {
+      if pressed { modsDown[device, default: []].insert(usage) } else { modsDown[device]?.remove(usage) }
+      if modsDown[device]?.isEmpty == true { modsDown[device] = nil }
       return nil
     }
     guard pressed else { return nil }
@@ -374,6 +446,25 @@ struct HIDKeyboards {
     guard let to = map[usage], !fnDown.isEmpty == fnState else { return nil }
     return HIDBrightness.key(to)
   }
+}
+
+/// IOHIDManager hands the Bridge a keyboard once for every matching rule it
+/// fits (macOS 27: two IOHIDDevice copies of one registry entry), and every
+/// copy delivers every key value. A MacBook's own keyboard is a keyboard and
+/// a consumer control, so each press came twice and stepped twice (from a
+/// dim 0.0625 one press went to 0: a black screen). Only the first copy seen
+/// of each keyboard is read.
+struct HIDCopies {
+  private var first: [UInt64: Int] = [:]   // registry id -> the copy read
+
+  /// True: read this value. `copy` tells the IOHIDDevice objects apart.
+  mutating func take(device: UInt64, copy: Int) -> Bool {
+    if let f = first[device] { return f == copy }
+    first[device] = copy
+    return true
+  }
+
+  mutating func removed(device: UInt64) { first[device] = nil }
 }
 
 /// One press can reach the Bridge twice: from the keyboard (IOHIDManager) and

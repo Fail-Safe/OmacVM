@@ -1,6 +1,7 @@
 // Offline tests of keys-model.swift (when the media-key tap is created again,
 // and when it must go because a permission was taken away)
 // and wifi-model.swift (a steady Wi-Fi state). No permissions, no Wi-Fi.
+import CoreGraphics
 import Foundation
 
 var failed = 0
@@ -373,6 +374,77 @@ for p in pending where !held.macOSDidIt(1, pressAt: p.at, before: p.before, afte
 check(stepsDone == 20, "hid: a held key's 20 repeats: 20 steps (\(stepsDone))")
 check(own.macOSDidIt(2, pressAt: 20.2, before: 0.5, after: 0.5625), "hid: another display: its own check (macOS's change counts)")
 check(own.macOSDidIt(1, pressAt: 25, before: 0.5, after: 0.5625), "hid: a press 4 s after the last step: the check is back")
+
+// ---- Shift and Option with the brightness keys (BrightnessCombo, KeyHold) ----
+let none = KeyMods(), shift = KeyMods(shift: true), opt = KeyMods(option: true), shiftOpt = KeyMods(shift: true, option: true)
+func combo(_ k: MediaKey, _ m: KeyMods) -> String { let r = BrightnessCombo.key(k, m); return "\(r.key)\(r.fine ? " fine" : "")" }
+check(combo(.brightnessUp, none) == "brightnessUp" && combo(.brightnessDown, none) == "brightnessDown", "combo: brightness alone: the display")
+check(combo(.brightnessUp, shift) == "keyboardUp" && combo(.brightnessDown, shift) == "keyboardDown", "combo: Shift + brightness: the keyboard light, macOS's steps")
+check(combo(.brightnessUp, opt) == "brightnessUp fine" && combo(.brightnessDown, opt) == "brightnessDown fine", "combo: Option + brightness: the display's small steps")
+check(combo(.brightnessUp, shiftOpt) == "brightnessUp fine" && combo(.brightnessDown, shiftOpt) == "brightnessDown fine",
+      "combo: Shift + Option + brightness: the display's small steps (as macOS)")
+check(combo(.volumeUp, shift) == "volumeUp" && combo(.volumeDown, opt) == "volumeDown fine" && combo(.mute, shiftOpt) == "mute fine",
+      "combo: Shift does not change a volume key; Option: small steps")
+check(combo(.keyboardUp, none) == "keyboardUp" && combo(.keyboardDown, opt) == "keyboardDown fine" && combo(.keyboardUp, shift) == "keyboardUp",
+      "combo: a keyboard-light key (older MacBooks) stays itself; Option: small steps")
+check(KeyMods(CGEventFlags.maskShift) == shift && KeyMods([.maskShift, .maskAlternate]) == shiftOpt && KeyMods([.maskCommand]) == none,
+      "combo: the event's flags read as Shift / Option (Command is not one of them)")
+// A held key keeps what its first press meant.
+var hold = KeyHold()
+check(hold.down(.brightnessUp, repeating: false, mods: shift) == shift, "hold: Shift + brightness up pressed: Shift")
+check(hold.down(.brightnessUp, repeating: true, mods: none) == shift, "hold: Shift let go, the key still held: its repeats stay on the keyboard light")
+check(hold.down(.brightnessUp, repeating: true, mods: opt) == shift, "hold: Option pressed during the hold: still the first press's")
+check(hold.up(.brightnessUp) == shift, "hold: key up after Shift: goes where the press went")
+check(hold.up(.brightnessUp) == nil, "hold: a second key up: nothing held")
+check(hold.down(.brightnessUp, repeating: false, mods: none) == none, "hold: the next press without Shift: the display")
+check(hold.down(.brightnessUp, repeating: true, mods: shift) == none, "hold: Shift pressed during a plain hold: the display to the end")
+_ = hold.up(.brightnessUp)
+_ = hold.down(.brightnessDown, repeating: false, mods: shift)
+check(hold.up(.brightnessDown) == shift, "hold: Shift let go AFTER the key: the same (key up first, then Shift)")
+_ = hold.down(.brightnessDown, repeating: false, mods: shift)   // its key up never comes
+check(hold.down(.brightnessDown, repeating: false, mods: none) == none, "hold: a key up that never came: the next first press starts anew")
+check(hold.down(.brightnessUp, repeating: true, mods: shift) == shift, "hold: a repeat with nothing held: read as it comes")
+_ = hold.down(.brightnessUp, repeating: false, mods: shift)
+_ = hold.down(.brightnessDown, repeating: false, mods: none)
+check(hold.down(.brightnessUp, repeating: true, mods: none) == shift && hold.down(.brightnessDown, repeating: true, mods: shift) == none,
+      "hold: two keys held: each keeps its own")
+
+// ---- Shift and Option read from the keyboard (HIDKeyboards) ----
+var kbm = HIDKeyboards()
+func hv(_ d: UInt64, _ u: UInt32, _ p: Bool) -> MediaKey? { kbm.value(device: d, usage: u, pressed: p, map: macbookMap, fnState: false) }
+let lShift: UInt32 = 0x0007_00E1, rShift: UInt32 = 0x0007_00E5, lOpt: UInt32 = 0x0007_00E2, rOpt: UInt32 = 0x0007_00E6
+check(hv(1, lShift, true) == nil && kbm.mods == shift, "mods: left Shift down: Shift (and no key)")
+check(hv(1, HIDUsage.f1, true) == .brightnessDown && kbm.mods == shift, "mods: Shift + F1: brightness down, read with Shift")
+_ = hv(1, HIDUsage.f1, false)
+check(hv(1, lShift, false) == nil && kbm.mods == none, "mods: Shift up: none")
+_ = hv(1, lShift, true); _ = hv(1, rShift, true); _ = hv(1, lShift, false)
+check(kbm.mods == shift, "mods: both Shifts, left let go: right still holds")
+_ = hv(1, rShift, false)
+check(kbm.mods == none, "mods: both let go: none")
+_ = hv(1, rOpt, true)
+check(kbm.mods == opt, "mods: right Option: Option")
+_ = hv(1, lShift, true)
+check(kbm.mods == shiftOpt, "mods: Shift + Option")
+_ = hv(1, rOpt, false); _ = hv(1, lShift, false)
+_ = hv(2, lOpt, true)
+check(kbm.mods == opt && hv(1, HIDUsage.f2, true) == .brightnessUp, "mods: Option on another keyboard counts (as fn does)")
+kbm.removed(device: 2)
+check(kbm.mods == none, "mods: that keyboard went away: its Option is not held any more")
+_ = hv(3, lShift, true)
+kbm.removed(device: 3)
+_ = hv(3, lShift, false)
+check(kbm.mods == none, "mods: a key up after its keyboard went: nothing goes wrong")
+_ = hv(1, 0x00FF_0003, true)
+kbm.removed(device: 1)
+check(hv(1, HIDUsage.f1, true) == .brightnessDown, "mods: fn held on a keyboard that went away: not held any more")
+
+// ---- one keyboard given twice by IOHIDManager (HIDCopies) ----
+var cp = HIDCopies()
+check(cp.take(device: 7, copy: 100) && cp.take(device: 7, copy: 100), "copies: the first copy of a keyboard is read")
+check(!cp.take(device: 7, copy: 200) && !cp.take(device: 7, copy: 200), "copies: its second copy (same registry id) is not")
+check(cp.take(device: 8, copy: 200), "copies: another keyboard is read")
+cp.removed(device: 7)
+check(cp.take(device: 7, copy: 300) && !cp.take(device: 7, copy: 100), "copies: plugged in again: its new first copy is read")
 
 // ---- QEMU's control socket ----
 check(QMPKeys.socketPath(["-name", "Omarchy", "-qmp", "unix:/Users/a/Library/Caches/OmacVM/run/x.qmp,server=on,wait=off"])

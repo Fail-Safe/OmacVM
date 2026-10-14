@@ -46,6 +46,45 @@ func offline() {
   check(K.settle(from: 0, up: true, low: true, set: { _ in true }, lit: { nil }) == 0.001, "no level call: trust the step")
   check(K.settle(from: 0, up: true, low: true, set: { _ in false }, lit: { true }) == nil, "a failed set: nil")
 
+  // Every step, up from off to full and back down, with and without the low steps.
+  for low in [true, false] {
+    let ladder: [Float] = [0] + (low ? K.low : []) + (1...16).map { Float($0) / 16 }
+    var walk: [Float] = [0]
+    v = 0
+    for _ in 0..<40 { v = K.next(v, up: true, low: low); if v != walk.last { walk.append(v) } }
+    check(walk == ladder, "low \(low): up from off: every step once, in order, to full (\(walk.count) levels)")
+    walk = [1]
+    for _ in 0..<40 { v = K.next(v, up: false, low: low); if v != walk.last { walk.append(v) } }
+    check(walk == ladder.reversed(), "low \(low): down from full: every step once, in order, to off")
+    // From each level one press each way lands on its neighbour.
+    var neighbours = true
+    for (i, l) in ladder.enumerated() {
+      if K.next(l, up: true, low: low) != ladder[min(i + 1, ladder.count - 1)] { neighbours = false }
+      if K.next(l, up: false, low: low) != ladder[max(i - 1, 0)] { neighbours = false }
+    }
+    check(neighbours, "low \(low): every level, one press up and one down: the next level each way")
+  }
+  // At off: down stays off (the key still answers, nothing is set lower), up lights the keys again.
+  var at: Float = 0, set: [Float] = []
+  for _ in 0..<5 {
+    at = K.settle(from: at, up: false, low: true, set: { set.append($0); return true }, lit: { true }) ?? -1
+  }
+  check(at == 0 && set == [0, 0, 0, 0, 0], "at off, 5 presses down: off, every press answered (\(set))")
+  at = K.settle(from: at, up: true, low: true, set: { _ in true }, lit: { true }) ?? -1
+  check(at == K.low[0], "at off after those: one press up lights the dimmest step (\(at))")
+  // Fast presses: 20 up from off reach full, each a new level (none lost or doubled); more stay full; 20 down reach off.
+  at = 0
+  var seen: [Float] = []
+  for _ in 0..<20 { at = K.settle(from: at, up: true, low: true, set: { _ in true }, lit: { true }) ?? -1; seen.append(at) }
+  check(at == 1 && Set(seen).count == 20, "20 quick presses up from off: 20 levels, full (\(at))")
+  at = K.settle(from: at, up: true, low: true, set: { _ in true }, lit: { true }) ?? -1
+  check(at == 1, "one more up at full: full")
+  for _ in 0..<20 { at = K.settle(from: at, up: false, low: true, set: { _ in true }, lit: { true }) ?? -1 }
+  check(at == 0, "20 quick presses down: off")
+  // A level macOS set itself between steps (the keyboard settings slider): the keys go on from there.
+  check(K.next(0.3, up: true, low: true) == 5.0 / 16 && K.next(0.3, up: false, low: true) == 4.0 / 16,
+        "a level between steps (0.3): up 5/16, down 4/16")
+
   // Omarchy's popup: a lit keyboard never shows 0.
   check(K.osdPercent(0) == 0, "popup: off = 0")
   check(K.osdPercent(0.001) == 1, "popup: 0.001 = 1")

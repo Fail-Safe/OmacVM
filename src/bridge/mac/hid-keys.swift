@@ -6,21 +6,26 @@ import IOKit.hid
 
 // ---- brightness keys from the keyboard (HIDKeyboards: keys-model.swift) ----
 // IOHIDManager on every keyboard, never seized (macOS keeps every key); needs
-// Input Monitoring. Only F1-F12, fn and the brightness usages are looked at,
-// nothing is kept or logged. Main thread (main run loop).
+// Input Monitoring. Only F1-F12, fn, Shift, Option and the brightness usages
+// are looked at (whether they are held, nothing else); no key is logged.
+// Main thread (main run loop).
 final class BrightnessKeys {
   private var manager: IOHIDManager?
   private var keyboards = HIDKeyboards()
+  private var copies = HIDCopies()
   private var maps: [UInt64: [UInt32: UInt32]] = [:]   // per keyboard (registry id)
+  private var ids: [Int: UInt64] = [:]                 // IOHIDDevice copy -> registry id (for its removal)
   private var said: String?
   private var asked = false
-  var onKey: ((MediaKey) -> Void)?
+  /// A brightness key and the Shift/Option it was pressed with (a repeat:
+  /// those of its first press).
+  var onKey: ((MediaKey, KeyMods) -> Void)?
 
   // A held key repeats at macOS's key repeat speed (Keyboard settings): HID
   // sends one press and one release, no repeats. Stops on release, on another
   // brightness press, or after `maxRepeats` (a release that never came).
   static let maxRepeats = 64
-  private var held: (device: UInt64, usage: UInt32, key: MediaKey)?
+  private var held: (device: UInt64, usage: UInt32, key: MediaKey, mods: KeyMods)?
   private var holdID = 0
   var repeatTimes: () -> (delay: Double, interval: Double) = { (NSEvent.keyRepeatDelay, NSEvent.keyRepeatInterval) }
   var after: (Double, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
@@ -48,6 +53,10 @@ final class BrightnessKeys {
       guard let ctx else { return }
       Unmanaged<BrightnessKeys>.fromOpaque(ctx).takeUnretainedValue().value(value)
     }, Unmanaged.passUnretained(self).toOpaque())
+    IOHIDManagerRegisterDeviceRemovalCallback(m, { ctx, _, _, device in
+      guard let ctx else { return }
+      Unmanaged<BrightnessKeys>.fromOpaque(ctx).takeUnretainedValue().gone(device)
+    }, Unmanaged.passUnretained(self).toOpaque())
     IOHIDManagerScheduleWithRunLoop(m, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
     let r = IOHIDManagerOpen(m, IOOptionBits(kIOHIDOptionsTypeNone))
     guard r == kIOReturnSuccess else {
@@ -57,8 +66,25 @@ final class BrightnessKeys {
     }
     manager = m
     said = nil
-    log("brightness keys: reading them from the keyboard (they act only while an OmacVM VM is in front)")
+    log("brightness keys: reading them from the keyboard (they act only while an OmacVM VM is in front)\(Self.copiesNote(m))")
   }
+
+  /// Keyboards IOHIDManager gives more than once (each copy is read once, HIDCopies).
+  private static func copiesNote(_ m: IOHIDManager) -> String {
+    let devices = (IOHIDManagerCopyDevices(m) as? Set<IOHIDDevice>) ?? []
+    var seen: [UInt64: Int] = [:]
+    for d in devices { seen[registryID(IOHIDDeviceGetService(d)), default: 0] += 1 }
+    let twice = seen.values.filter { $0 > 1 }.count
+    return twice == 0 ? "" : "; \(twice) of \(seen.count) keyboards listed more than once by macOS: one copy read"
+  }
+
+  private static func registryID(_ service: io_service_t) -> UInt64 {
+    var id: UInt64 = 0
+    IORegistryEntryGetRegistryEntryID(service, &id)
+    return id
+  }
+
+  private static func copy(_ device: IOHIDDevice) -> Int { Int(bitPattern: Unmanaged.passUnretained(device).toOpaque()) }
 
   private func say(_ s: String) {
     guard s != said else { return }
@@ -72,21 +98,31 @@ final class BrightnessKeys {
     guard Self.wanted(usage) else { return }
     let device = IOHIDElementGetDevice(e)
     let service = IOHIDDeviceGetService(device)
-    var id: UInt64 = 0
-    IORegistryEntryGetRegistryEntryID(service, &id)
-    input(device: id, usage: usage, pressed: IOHIDValueGetIntegerValue(v) != 0, fnState: Self.fnState()) {
+    let id = Self.registryID(service)
+    let copy = Self.copy(device)
+    ids[copy] = id
+    input(device: id, copy: copy, usage: usage, pressed: IOHIDValueGetIntegerValue(v) != 0, fnState: Self.fnState()) {
       Self.fnMap(device, service)
     }
   }
 
-  /// Only these usages are looked at: F1-F12, fn, the brightness usages.
+  /// A keyboard went away (unplugged, Bluetooth off): nothing of it stays held.
+  private func gone(_ device: IOHIDDevice) {
+    guard let id = ids.removeValue(forKey: Self.copy(device)) else { return }
+    removed(device: id)
+  }
+
+  /// Only these usages are looked at: F1-F12, fn, Shift, Option, the brightness usages.
   static func wanted(_ usage: UInt32) -> Bool {
-    HIDUsage.fn.contains(usage) || HIDBrightness.key(usage) != nil || (0x0007_003A...0x0007_0045).contains(usage)
+    HIDUsage.fn.contains(usage) || HIDUsage.shift.contains(usage) || HIDUsage.option.contains(usage)
+      || HIDBrightness.key(usage) != nil || (0x0007_003A...0x0007_0045).contains(usage)
   }
 
   /// One key value of one keyboard (test-hid.sh drives this with made-up
-  /// keyboards); its map is read once per keyboard.
-  func input(device id: UInt64, usage: UInt32, pressed: Bool, fnState: Bool, map read: () -> [UInt32: UInt32]) {
+  /// keyboards); its map is read once per keyboard. `copy`: which IOHIDDevice
+  /// copy of the keyboard it came from (only the first one seen is read).
+  func input(device id: UInt64, copy: Int = 0, usage: UInt32, pressed: Bool, fnState: Bool, map read: () -> [UInt32: UInt32]) {
+    guard copies.take(device: id, copy: copy) else { return }
     let map = maps[id] ?? {
       let m = read()
       maps[id] = m
@@ -94,16 +130,27 @@ final class BrightnessKeys {
     }()
     if !pressed, let h = held, h.device == id, h.usage == usage { held = nil }
     guard let key = keyboards.value(device: id, usage: usage, pressed: pressed, map: map, fnState: fnState) else { return }
-    onKey?(key)
+    let mods = keyboards.mods
+    onKey?(key, mods)
     holdID += 1
-    held = (id, usage, key)
+    held = (id, usage, key, mods)
     let hold = holdID
     after(max(0.05, repeatTimes().delay)) { [weak self] in self?.repeatKey(hold, 0) }
   }
 
+  /// A keyboard went away: its copies, held keys and modifiers are forgotten.
+  func removed(device id: UInt64) {
+    copies.removed(device: id)
+    keyboards.removed(device: id)
+    maps[id] = nil
+    if held?.device == id { held = nil }
+  }
+
+  /// A held key's repeat: what its first press meant, whatever Shift and
+  /// Option do meanwhile (as KeyHold does for the tap's repeats).
   private func repeatKey(_ hold: Int, _ n: Int) {
     guard hold == holdID, let h = held, n < Self.maxRepeats else { return }
-    onKey?(h.key)
+    onKey?(h.key, h.mods)
     after(max(0.015, repeatTimes().interval)) { [weak self] in self?.repeatKey(hold, n + 1) }
   }
 

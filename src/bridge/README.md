@@ -479,12 +479,21 @@ Apple keyboards send F1/F2; the keyboard's own `FnFunctionUsageMap`
 (IORegistry) and macOS's "standard function keys" setting say when they
 are brightness; an Apple keyboard without that map (a Bluetooth Magic
 Keyboard: vendor 0x004C; USB: 0x05AC) gets Apple's usual F1 down, F2 up.
-Other keyboards' consumer-page brightness keys count too.
+Other keyboards' consumer-page brightness keys count too. Shift and Option
+for these keys are read from the keyboard as well (`HIDKeyboards`): while an
+OmacVM VM has the keyboard, QEMU's key tap takes the Shift key's events, so
+macOS's own modifier state misses Shift (it picks it up from the next
+trackpad move instead, and keeps it after Shift is let go). macOS 27 hands
+over a MacBook's keyboard twice (it is a keyboard and a consumer control);
+only the first copy is read, so a press steps once (`HIDCopies`).
 They act only while an OmacVM.app VM is in front, by the same rule; a press
 that also came through the tap acts once, and a display macOS already
 changed itself is not stepped again (unless the Bridge stepped it itself
 meanwhile: quick presses each step). HID sends no key repeat, so a held key
-repeats at macOS's key repeat speed until it is released. Tests: `mac/test-models.sh`,
+repeats at macOS's key repeat speed until it is released. A held key keeps
+what its first press meant: Shift let go (or pressed) during the hold does
+not move the rest of it between the keyboard light and the display
+(`KeyHold`; the same for macOS's own repeats through the tap). Tests: `mac/test-models.sh`,
 `mac/test-hid.sh` (made-up keyboards, and this Mac's own maps read only).
 
 Anything else, or any key while no VM is in front, passes through untouched.

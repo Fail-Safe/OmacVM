@@ -7,5 +7,5 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-swiftc -O -swift-version 5 -o "$T/hid-test" "$HERE/keys-model.swift" "$HERE/hid-keys.swift" "$HERE/tests/hid/main.swift" -framework IOKit
+swiftc -O -swift-version 5 -o "$T/hid-test" "$HERE/keys-model.swift" "$HERE/keylight.swift" "$HERE/hid-keys.swift" "$HERE/tests/hid/main.swift" -framework IOKit
 "$T/hid-test"

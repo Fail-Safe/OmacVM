@@ -5,6 +5,11 @@ in more words.
 
 ## Unreleased
 
+- **Shift and the brightness keys set the keyboard light reliably** (MacBooks, VM in front). Shift
+  was often missed, so Shift + brightness changed the display instead (from a dim screen down to
+  black) and the keyboard light could not be turned down again. The Bridge now reads Shift and
+  Option from the keyboard itself. On macOS 27 every brightness press also stepped twice; now it
+  steps once. A held key keeps going where it started when Shift is let go.
 - Chromium no longer says "Failed to load extension" at every start after an `omacvm apply` of only some features: the no-AV1 extension now lives outside the folder apply replaces (#406, thanks @fbalazsy).
 
 ## 3.1.6
