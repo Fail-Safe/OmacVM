@@ -20,10 +20,17 @@ I=$H/.config/hypr/input.lua
 # count given to something else stays so (Omarchy's example moves focus with
 # 3 fingers left and right; the swipe out follows what is set, #342).
 # Omarchy ships the 3-finger workspace line commented out as an example.
+# The daemon reads the gestures as the swipe out does (tables over several
+# lines too); "?" (a count it cannot tell): nothing added; without it, a
+# one-line check.
 missing=()
-for n in 3 4; do
-  grep -Eq "^[[:space:]]*hl\.gesture\(\{ *fingers *= *$n *, *direction *= *\"(horizontal|horiz|left|l|right|r|swipe)\"" "$H"/.config/hypr/*.lua 2>/dev/null || missing+=("$n")
-done
+if taken=$(python3 omacvm-gestures --sideways "$H" 2>/dev/null); then
+  [[ $taken == *"?"* ]] || for n in 3 4; do [[ " $taken " == *" $n "* ]] || missing+=("$n"); done
+else
+  for n in 3 4; do
+    grep -Eq "^[[:space:]]*hl\.gesture\(\{ *fingers *= *$n *, *direction *= *\"(horizontal|horiz|left|l|right|r|swipe)\"" "$H"/.config/hypr/*.lua 2>/dev/null || missing+=("$n")
+  done
+fi
 if (( ${#missing[@]} )); then
   {
     grep -q '^-- OmacVM trackpad:' "$I" 2>/dev/null || printf '\n%s\n%s\n' \

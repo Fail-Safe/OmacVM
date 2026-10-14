@@ -191,7 +191,9 @@ A Magic Mouse's swipe counts too. With *All monitors*, the other monitors that
 show the VM follow once you let go. Inside the VM, Hyprland's own workspace
 swipe is as before. The swipe out uses the fingers your VM switches workspaces
 with (its `hl.gesture` lines; OmacVM sets up 3 and 4): if you give 3 fingers
-to something else, such as moving focus, only 4 fingers swipe out.
+to something else, such as moving focus or snapping windows, only 4 fingers
+swipe out. Any other sideways gesture with 3 fingers counts, also one in a file
+of your own.
 
 A **Magic Mouse** in the full-screen VM: two fingers sideways swipe
 Omarchy's workspaces, as four fingers on a trackpad (macOS's own Space

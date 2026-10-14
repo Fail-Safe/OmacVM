@@ -744,6 +744,10 @@ def swipe_out_side(state, dx, dy, width):
 # fits (horizontal, left or right, any "swipe"). A swipe out only follows a
 # count and way that switch workspaces there: with 3 fingers given to moving
 # focus and 4 to workspaces, only 4 fingers swipe out (user, 2026-10-14).
+# A count and way that any other sideways gesture uses, even one Hyprland
+# would refuse, stays the VM's too: a config can wrap hl.gesture and drop
+# lines (one drops OmacVM's own 3-finger line so 3 fingers snap windows), and
+# taking a swipe the user gave to something else is the worse mistake.
 LUA_STRING = r'"(?:[^"\\]|\\.)*"|' + r"'(?:[^'\\]|\\.)*'"
 
 
@@ -855,6 +859,55 @@ def hypr_lua_files(home, omarchy):
     return order
 
 
+# Hyprland's names for a way (dirForString) and the axis each lies on.
+WAY_NAMES = {"swipe": "swipe", "left": "left", "l": "left", "right": "right", "r": "right", "up": "up", "u": "up",
+             "top": "up", "t": "up", "down": "down", "d": "down", "bottom": "down", "b": "down",
+             "horizontal": "horizontal", "horiz": "horizontal", "vertical": "vertical", "vert": "vertical",
+             "pinch": "pinch", "pinchin": "pinchin", "zoomin": "pinchin", "pinchout": "pinchout", "zoomout": "pinchout"}
+WAY_AXIS = {"left": "horizontal", "right": "horizontal", "horizontal": "horizontal", "up": "vertical",
+            "down": "vertical", "vertical": "vertical", "swipe": "swipe", "pinch": "pinch", "pinchin": "pinch",
+            "pinchout": "pinch"}
+
+
+def omarchy_dir(home):
+    """Omarchy's own files (omarchy-mac's or the package's), or None."""
+    return next((d for d in (f"{home}/.local/share/omarchy", "/usr/share/omarchy")
+                 if os.path.isfile(f"{d}/default/hypr/bootstrap.lua")), None)
+
+
+def hypr_gestures(parts):
+    """(fingers, way, action, mods) of each hl.gesture table in these parts."""
+    for _, code in parts:
+        for m in re.finditer(r"\bhl\s*\.\s*gesture\s*\(\s*(?=\{)", code):
+            table = table_at(code, m.end())
+            if table:
+                fingers, direction, action, mods = gesture_fields(table)
+                yield fingers, WAY_NAMES.get(direction), action, mods
+
+
+def sideways_counts(home):
+    """For install.sh: the finger counts a sideways gesture (any action, no
+    key held) already uses, in Hyprland's config or any file in
+    ~/.config/hypr; None when a count is not written out."""
+    parts = hypr_lua_files(home, omarchy_dir(home))
+    seen = {path for path, _ in parts}
+    for path in sorted(glob.glob(f"{home}/.config/hypr/*.lua")):
+        if os.path.realpath(path) not in seen:
+            try:
+                with open(path, errors="replace") as f:
+                    parts.append((path, lua_code(f.read())))
+            except OSError:
+                pass
+    counts = set()
+    for fingers, way, action, mods in hypr_gestures(parts):
+        if mods or action == "unset" or way not in ("horizontal", "left", "right", "swipe"):
+            continue
+        if fingers is None:
+            return None
+        counts.add(fingers)
+    return counts
+
+
 def workspace_swipes(home=None, omarchy=None):
     """Which swipes switch workspaces: {fingers: "l", "r" or "lr"} (fingers
     going left / right), {} for none, None when Hyprland's config cannot be
@@ -865,47 +918,37 @@ def workspace_swipes(home=None, omarchy=None):
         except KeyError:
             return None
     if omarchy is None:
-        omarchy = next((d for d in (f"{home}/.local/share/omarchy", "/usr/share/omarchy")
-                        if os.path.isfile(f"{d}/default/hypr/bootstrap.lua")), None)
+        omarchy = omarchy_dir(home)
     parts = hypr_lua_files(home, omarchy)
     if not parts:
         return None
-    # Hyprland's names for a way (dirForString) and the axis each lies on.
-    names = {"swipe": "swipe", "left": "left", "l": "left", "right": "right", "r": "right", "up": "up", "u": "up",
-             "top": "up", "t": "up", "down": "down", "d": "down", "bottom": "down", "b": "down",
-             "horizontal": "horizontal", "horiz": "horizontal", "vertical": "vertical", "vert": "vertical",
-             "pinch": "pinch", "pinchin": "pinchin", "zoomin": "pinchin", "pinchout": "pinchout", "zoomout": "pinchout"}
-    axis = {"left": "horizontal", "right": "horizontal", "horizontal": "horizontal", "up": "vertical",
-            "down": "vertical", "vertical": "vertical", "swipe": "swipe", "pinch": "pinch", "pinchin": "pinch",
-            "pinchout": "pinch"}
     gestures = []   # [fingers, direction, action, mods] as Hyprland keeps them
-    for _, code in parts:
-        for m in re.finditer(r"\bhl\s*\.\s*gesture\s*\(\s*(?=\{)", code):
-            table = table_at(code, m.end())
-            if not table:
-                continue
-            fingers, direction, action, mods = gesture_fields(table)
-            if fingers is None:
-                if action in ("workspace", None, "other"):
-                    return None   # a count that is not written out: cannot tell
-                continue
-            direction = names.get(direction)
-            if not direction:
-                continue
-            if action == "unset":
-                gestures = [g for g in gestures if not (g[0] == fingers and g[1] == direction and g[3] == mods)]
-                continue
-            a = axis[direction]
-            if any(g[0] == fingers and g[3] == mods and
-                   (g[1] == a or g[1] == direction or (a in ("horizontal", "vertical") and g[1] == "swipe"))
-                   for g in gestures):
-                continue   # shadowed: Hyprland refuses it
-            gestures.append([fingers, direction, action, mods])
+    others = []     # [fingers, direction, mods] of every gesture for something else
+    for fingers, direction, action, mods in hypr_gestures(parts):
+        if fingers is None:
+            if action in ("workspace", None, "other"):
+                return None   # a count that is not written out: cannot tell
+            continue
+        if not direction:
+            continue
+        if action == "unset":
+            gestures = [g for g in gestures if not (g[0] == fingers and g[1] == direction and g[3] == mods)]
+            others = [o for o in others if o != [fingers, direction, mods]]
+            continue
+        if action != "workspace":
+            others.append([fingers, direction, mods])
+        a = WAY_AXIS[direction]
+        if any(g[0] == fingers and g[3] == mods and
+               (g[1] == a or g[1] == direction or (a in ("horizontal", "vertical") and g[1] == "swipe"))
+               for g in gestures):
+            continue   # shadowed: Hyprland refuses it
+        gestures.append([fingers, direction, action, mods])
     ways = {}
     for n in sorted({g[0] for g in gestures}):
         for way, word in (("l", "left"), ("r", "right")):
             g = next((g for g in gestures if g[0] == n and not g[3] and g[1] in ("horizontal", word, "swipe")), None)
-            if g and g[2] == "workspace":
+            if g and g[2] == "workspace" and not any(
+                    o[0] == n and not o[2] and o[1] in ("horizontal", word, "swipe") for o in others):
                 ways[n] = ways.get(n, "") + way
     return ways
 
@@ -1323,4 +1366,9 @@ def serve(pad, keys, glide):
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:2] == ["--sideways"] and len(sys.argv) == 3:
+        # install.sh: which finger counts a sideways gesture already uses ("?": cannot tell).
+        counts = sideways_counts(sys.argv[2])
+        print("?" if counts is None else " ".join(map(str, sorted(counts))))
+    else:
+        main()

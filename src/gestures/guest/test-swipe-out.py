@@ -423,6 +423,48 @@ check(ways("", entry=ENTRY + 'hl.gesture({ fingers = 5, direction = "horizontal"
 check(ways("--[[ hl.gesture({ fingers = 3, direction = \"horizontal\", action = \"workspace\" }) ]]\n"
            'hl.gesture({ fingers = 4, direction = "horiz", action = "workspace" }) -- hl.gesture({ fingers = 3 })\n') == {4: "lr"},
       "gestures: block and line comments skipped, Hyprland's short name horiz")
+# A user's setup (2026-10-14): a guard wraps hl.gesture and drops OmacVM's
+# 3-finger line, then a Lua gesture over several lines snaps windows with 3
+# fingers any way; 4 fingers switch workspaces.
+GUARD = """local gesture = hl.gesture
+hl.gesture = function(spec)
+  if spec.fingers == 3 and spec.direction == "horizontal" and spec.action == "workspace" and not spec.mods then
+    return
+  end
+  return gesture(spec)
+end
+"""
+SNAP = """local acc = { x = 0, y = 0 }
+hl.gesture({
+  fingers = 3,
+  direction = "swipe",
+  action = {
+    start = function() acc.x, acc.y = 0, 0 end,
+    finish = function() snap(acc.x, acc.y) end,
+  },
+})
+hl.gesture({ fingers = 3, mods = "SUPER", direction = "swipe", action = "resize" })
+"""
+write(f"{HOME}/.config/hypr/omacvm_guard.lua", GUARD)
+write(f"{HOME}/.config/hypr/windowsnap.lua", SNAP)
+USER_ENTRY = ENTRY.replace('require("hypr.input")', 'require("hypr.omacvm_guard")\nrequire("hypr.input")\nrequire("hypr.windowsnap")')
+check(ways('hl.gesture({ fingers = 4, direction = "horizontal", action = "workspace" })\n' + OMACVM_LINES, USER_ENTRY) == {4: "lr"},
+      "gestures: 3 fingers snap windows (a later Lua gesture, OmacVM's 3-finger line dropped by a guard): only 4")
+check(ways(OMACVM_LINES + 'hl.gesture({ fingers = 3, direction = "left", action = "close" })\n') == {3: "r", 4: "lr"},
+      "gestures: a later 3-finger left for something else (Hyprland would refuse it): 3 fingers left stay the VM's")
+check(ways('hl.gesture({ fingers = 3, direction = "horizontal", action = "move" })\n'
+           'hl.gesture({ fingers = 3, direction = "horizontal", action = "unset" })\n' + OMACVM_LINES) == {3: "lr", 4: "lr"},
+      "gestures: 3 given to moving windows, then unset, then OmacVM's lines: 3 and 4")
+check(g.sideways_counts(HOME) == {3, 4}, "install: the counts a sideways gesture uses (any action, the guard's file too)")
+write(f"{HOME}/.config/hypr/windowsnap.lua", "")
+write(f"{HOME}/.config/hypr/input.lua", 'hl.gesture({ fingers = 3, direction = "up", action = "fullscreen" })\n'
+      'hl.gesture({ fingers = 4, mods = "SUPER", direction = "horizontal", action = "move" })\n')
+check(g.sideways_counts(HOME) == set(), "install: up, or with a key held: no sideways count")
+write(f"{HOME}/.config/hypr/unloaded.lua", 'hl.gesture({\n  direction = "left",\n  fingers = 4,\n  action = "close",\n})\n')
+check(g.sideways_counts(HOME) == {4}, "install: a file in ~/.config/hypr that nothing requires counts too")
+os.remove(f"{HOME}/.config/hypr/unloaded.lua")
+os.remove(f"{HOME}/.config/hypr/omacvm_guard.lua")
+os.remove(f"{HOME}/.config/hypr/windowsnap.lua")
 os.remove(f"{HOME}/.config/hypr/hyprland.lua")
 check(g.workspace_swipes(HOME, OMA) is None, "gestures: no hyprland.lua (not Omarchy 4's Lua config): None")
 check(g.swipes_line({3: "l", 4: "lr"}) == "G 3l 4lr\n", "gestures: the G line")

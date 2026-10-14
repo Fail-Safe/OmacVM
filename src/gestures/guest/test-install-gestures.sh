@@ -10,12 +10,17 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 fail=0
 check() { if eval "$1"; then echo "ok   $2"; else echo "FAIL $2" >&2; fail=1; fi; }
 mkdir -p "$T/src/gestures/guest" "$T/src/guest" "$T/bin" "$T/home/u/.config/hypr"
-cp "$HERE/install.sh" "$T/src/gestures/guest/"
+cp "$HERE/install.sh" "$HERE/omacvm-gestures" "$T/src/gestures/guest/"
+# python-evdev stands in for itself: the daemon reads the gestures (--sideways).
+mkdir -p "$T/py"
+printf '%s\n' 'import itertools' 'n = itertools.count(1)' 'class Any(int):' \
+  '    def __getattr__(self, name): return Any(next(n))' '    def __call__(self, *a, **k): return Any(next(n))' \
+  'def __getattr__(name): return Any(next(n))' > "$T/py/evdev.py"
 printf '#!/bin/sh\nexit 0\n' > "$T/src/guest/pkg-add"; chmod +x "$T/src/guest/pkg-add"
 for c in install systemctl chown; do printf '#!/bin/sh\nexit 0\n' > "$T/bin/$c"; chmod +x "$T/bin/$c"; done
 printf '#!/bin/sh\necho "u:x:1000:1000::%s:/bin/bash"\n' "$T/home/u" > "$T/bin/getent"; chmod +x "$T/bin/getent"
 I=$T/home/u/.config/hypr/input.lua
-run() { PATH="$T/bin:$PATH" bash "$T/src/gestures/guest/install.sh" u > /dev/null; }
+run() { PYTHONPATH=$T/py PATH="$T/bin:$PATH" bash "$T/src/gestures/guest/install.sh" u > /dev/null; }
 lines() { grep -Ec "^hl\.gesture\(\{ fingers = $1, direction = \"horizontal\", action = \"workspace\" \}\)" "$I" || true; }
 
 printf '%s\n' '-- Enable touchpad gestures for changing workspaces.' \
@@ -32,4 +37,14 @@ printf '%s\n' 'hl.gesture({ fingers = 4, direction = "swipe", action = "move" })
 printf '%s\n' 'hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })' > "$T/home/u/.config/hypr/gestures.lua"
 run
 check '[[ $(lines 3) == 0 && $(lines 4) == 0 ]]' "4 fingers to moving windows, 3 for workspaces in another file: nothing added"
+rm -f "$T/home/u/.config/hypr/gestures.lua"
+printf '%s\n' 'require("hypr.input")' 'require("hypr.windowsnap")' > "$T/home/u/.config/hypr/hyprland.lua"
+: > "$I"
+printf '%s\n' 'hl.gesture({' '  fingers = 3,' '  direction = "swipe",' '  action = { finish = function() snap() end },' '})' \
+  > "$T/home/u/.config/hypr/windowsnap.lua"
+run
+check '[[ $(lines 3) == 0 && $(lines 4) == 1 ]]' "3 fingers snap windows (a table over several lines, another file): only the 4-finger workspace swipe added"
+: > "$I"
+PATH="$T/bin:$PATH" bash "$T/src/gestures/guest/install.sh" u > /dev/null   # no python-evdev: the one-line check
+check '[[ $(lines 3) == 1 && $(lines 4) == 1 ]]' "... without the daemon's reader: the one-line check (misses that table)"
 exit $fail
