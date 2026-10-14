@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 30
+VERSION = 31
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -86,6 +86,7 @@ PIECES = [
     "            notchShown: moduleListRoot.notchShown\n",                     # 8. glide on after a rebuild
     "  function notchPeekActiveIn(area) {\n",                               # 1. their width at rest
     "    function notchSettle() {\n",                                         # 9. one glide per change
+    "    property bool notchHold: false\n",                                  # 8. a list made again
 ]
 
 
@@ -1213,6 +1214,14 @@ def main():
     // Where each module showed last on this bar: Omarchy makes the whole list
     // again when a module comes or goes, and the new items glide on from there.
     property var notchShown: ({})
+    // Making the list again takes a few rounds (the widgets come one by one),
+    // and the layout passes through places that are not the end. Meanwhile
+    // (until it has not changed for 150 ms) the items stay where they showed
+    // and new ones wait unseen; then each glides once to its place.
+    property bool notchHold: false
+    onEntriesChanged: if (notchShift && notchShift.animate) { notchHold = true; notchHoldEnd.restart() }
+    onNotchShiftChanged: if (notchHold) notchHoldEnd.restart()
+    Timer { id: notchHoldEnd; interval: 150; onTriggered: moduleListRoot.notchHold = false }
 ''')
     text = replace_once(text, '''      Row {
         spacing: 0
@@ -1254,6 +1263,7 @@ def main():
             notchSlotIndex: index
             notchShift: root.notchShiftAt(moduleListRoot.notchShift, index)
             notchShown: moduleListRoot.notchShown
+            notchHold: moduleListRoot.notchHold
           }
         }
       }
@@ -1318,8 +1328,17 @@ def main():
     property real notchShiftX: 0
     property bool notchPlaced: false
     property var notchShown: null
+    property bool notchHold: false
+    property bool notchNew: false
+    onNotchHoldChanged: if (!notchHold) {
+      if (notchNew) {
+        notchFade.enabled = true
+        notchNew = false
+      }
+      notchSettle()
+    }
     transform: Translate { x: slot.notchShift ? slot.notchShownX - slot.notchPlaceX : 0 }
-    opacity: slot.notchShiftGone ? 0 : 1
+    opacity: slot.notchShiftGone || slot.notchNew ? 0 : 1
     enabled: !slot.notchShiftGone
     Behavior on notchShownX {
       id: notchSlide
@@ -1345,8 +1364,8 @@ def main():
       var placed = notchPlaced
       notchPlaced = !!s
       notchFade.enabled = placed && animate
-      if (gone !== notchShiftGone) notchShiftGone = gone
       if (!s) {
+        if (notchShiftGone) notchShiftGone = false
         notchSlide.enabled = false
         notchShiftX = 0
         notchPlaceX = 0
@@ -1363,6 +1382,20 @@ def main():
       // bar's edge).
       // A glide on its way keeps going and takes the new end then.
       var was = !placed && notchShown ? notchShown[moduleName] : undefined
+      if (notchHold && animate) {
+        // Omarchy is making the list again: stay where this module showed
+        // (a new one waits unseen); onNotchHoldChanged moves it once.
+        notchSlide.enabled = notchSlideRun.running
+        if (!placed) {
+          notchShownX = was !== undefined ? was.x : s.n + s.x
+          notchNew = was === undefined
+        }
+        notchPlaceX = s.n
+        notchShiftX = s.x
+        notchPeekApply()
+        return
+      }
+      if (gone !== notchShiftGone) notchShiftGone = gone
       var ours = s.x !== 0 || (placed ? notchShiftX !== 0 : !!(was && was.ours))
       var glide = animate && ours && !peeked, running = notchSlideRun.running
       if (!running) notchSlide.enabled = false
@@ -1378,8 +1411,9 @@ def main():
     function notchSettle() {
       var s = notchShift
       if (!s) return
+      if (!!s.hidden !== notchShiftGone) notchShiftGone = !!s.hidden
       var to = s.n + s.x
-      if (notchShownX !== to) {
+      if (Math.abs(notchShownX - to) > 0.01) {
         notchSlide.enabled = !!s.animate
         notchShownX = to
       }

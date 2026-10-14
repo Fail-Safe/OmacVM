@@ -178,7 +178,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertEqual(V, 30)
+        self.assertEqual(V, 31)
         self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
@@ -1709,7 +1709,7 @@ function flush() { while (queue.length) queue.shift()() }
 function Slot(name, memory) {
   var self = this;
   this.moduleName = name; this.notchShown = memory; this.notchShift = null; this.notchShiftGone = false;
-  this.notchPlaced = false; this.notchPlaceX = 0; this.notchShiftX = 0;
+  this.notchPlaced = false; this.notchPlaceX = 0; this.notchShiftX = 0; this.notchHold = false; this.notchNew = false;
   this.width = 20; this.notchLastWidth = 20; this.notchPeekFull = 0;
   this.parent = { forceLayout: function () {} };
   this.notchSlideRun = { running: false };
@@ -1719,6 +1719,7 @@ function Slot(name, memory) {
   this.notchFade = { enabled: false };
   this.notchPeekApply = function () {};
   this.notchSettle = function () { with (self) { SETTLE } };
+  this.endHold = function () { self.notchHold = false; with (self) { HOLDEND } };
   var shown = 0;
   Object.defineProperty(this, "notchShownX", {
     get: function () { return shown },
@@ -1740,7 +1741,8 @@ class Glide(unittest.TestCase):
         text = patched()
         m = re.search(r"    onNotchShiftChanged: \{\n(.*?)\n    \}\n", text, re.S)
         settle = function(text, "notchSettle")
-        js = GLIDE.replace("BODY", m.group(1)).replace("SETTLE", settle).replace("STEPS", steps)
+        hold = re.search(r"    onNotchHoldChanged: if \(!notchHold\) \{\n(.*?)\n    \}\n", text, re.S).group(1)
+        js = GLIDE.replace("BODY", m.group(1)).replace("SETTLE", settle).replace("HOLDEND", hold).replace("STEPS", steps)
         return json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)
 
     def test_which_moves_glide(self):
@@ -1785,6 +1787,31 @@ out.push(u.moves.slice());
         same, rebuilt = out
         self.assertEqual(same, [])
         self.assertEqual(rebuilt, [[0, 445, False], [445, 455, True]])
+
+    def test_a_list_made_again_holds_then_glides_once(self):
+        # Omarchy makes the right list again over a few rounds: the new tray
+        # slot first sees a place that is not the end (in its own place far
+        # right), then the end. It stays where the tray showed, then glides
+        # once; the new weather waits unseen and shows at its place.
+        out = self.run_steps("""
+var mem = {tray: {x: 235.6, ours: true}};
+var t = new Slot("tray", mem); t.notchHold = true;
+t.set({x: 0, n: 970.8, hidden: false, animate: true}); flush();
+t.set({x: -760, n: 995.6, hidden: false, animate: true}); flush();
+out.push([t.moves.slice(), t.notchNew]); t.moves = [];
+t.endHold(); flush();
+out.push(t.moves.slice());
+var w = new Slot("weather", mem); w.notchHold = true;
+w.set({x: 0, n: 1234.3, hidden: false, animate: true}); flush();
+out.push([w.moves.slice(), w.notchNew]); w.moves = [];
+w.endHold(); flush();
+out.push([w.moves.slice(), w.notchNew]);
+""")
+        held, after, weather_held, weather_after = out
+        self.assertEqual(held, [[[0, 235.6, False]], False])        # where it showed, at once
+        self.assertEqual(after, [])                                 # it ended there: nothing moves
+        self.assertEqual(weather_held, [[[0, 1234.3, False]], True])  # unseen until the hold ends
+        self.assertEqual(weather_after, [[], False])
 
     def test_a_peek_glides_nothing(self):
         out = self.run_steps("""
