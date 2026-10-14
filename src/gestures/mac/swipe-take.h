@@ -37,7 +37,8 @@ enum { TK_FORWARD, TK_HOLD, TK_FLUSH, TK_BEGIN, TK_MOVE, TK_END, TK_DROP };
 
 typedef struct {
   int state;
-  int side[2];          // fingers going left [0], right [1]: -1 the Space on the left, +1 on the right, 0 the guest's
+  int side[2];          // fingers going left [0], right [1] with this many fingers: -1 the Space on the left,
+                        // +1 on the right, 0 the guest's
   int toward;           // taken: the macOS side
   int way;              // taken: the fingers' way (-1 left, +1 right)
   double t0;            // when the swipe began
@@ -75,22 +76,26 @@ static inline int takeCommit(double progress, double speed) {
 }
 
 // One frame: k fingers, moved by ddx, ddy (trackpad widths / heights) since
-// the last frame, at time now (s). sideL/sideR: where fingers going left /
-// right would go now (only read when a swipe begins), travel: trackpad widths
-// per Space. Returns what to do with the frame (TK_*).
-static inline int takeFrame(SwipeTake *s, int k, int sideL, int sideR, double ddx, double ddy, double travel, double now) {
+// the last frame, at time now (s). watchL/watchR: where fingers going left /
+// right could go out with any count (read when a swipe begins: is it worth
+// holding back); sideL/sideR: where they go out with this frame's count (the
+// guest's workspace swipes may use 4 fingers and give 3 to something else;
+// the count when the way is clear decides, as more fingers may still come
+// down). travel: trackpad widths per Space. Returns what to do (TK_*).
+static inline int takeFrame(SwipeTake *s, int k, int watchL, int watchR, int sideL, int sideR, double ddx, double ddy,
+                            double travel, double now) {
   switch (s->state) {
   case TAKE_IDLE:
     if (k < 3) return TK_FORWARD;
     takeReset(s);
     s->t0 = now; s->travel = travel > 0 ? travel : TAKE_TRAVEL;
-    s->side[0] = sideL; s->side[1] = sideR;
-    if (!sideL && !sideR) { s->state = TAKE_PASS; return TK_FORWARD; }
+    if (!watchL && !watchR) { s->state = TAKE_PASS; return TK_FORWARD; }
     s->state = TAKE_WATCH;
     // this frame's movement counts too (a Magic Mouse's swipe begins with its travel)
     __attribute__((fallthrough));
   case TAKE_WATCH: {
     if (k < 3) { s->state = TAKE_IDLE; return TK_FLUSH; }   // lifted first (a tap): all of it to the guest
+    s->side[0] = sideL; s->side[1] = sideR;
     s->dx += ddx; s->dy += ddy;
     double ax = fabs(s->dx), ay = fabs(s->dy);
     if (ax >= TAKE_MIN && ax >= TAKE_RATIO * ay) {

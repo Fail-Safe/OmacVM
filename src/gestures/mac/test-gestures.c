@@ -75,7 +75,8 @@ int main(int argc, char **argv) {
   for (int i = 0; i < MAX_CLIENTS; i++)
     if (clients[i].fd >= 0) printf("live %s %s\n", clients[i].name, clients[i].ip);
   for (int i = 0; i < MAX_CLIENTS; i++)   // what each guest said about its swipes ("E")
-    if (clients[i].fd >= 0 && clients[i].edgeKnown) printf("edges %s %d %d\n", clients[i].name, clients[i].edge[0], clients[i].edge[1]);
+    if (clients[i].fd >= 0 && clients[i].edgeKnown) printf("edges %s %d %d ways %x %x\n", clients[i].name, clients[i].edge[0], clients[i].edge[1],
+                                                            clients[i].ways[0], clients[i].ways[1]);
   for (int i = 0; i < MAX_CLIENTS; i++)
     if (clients[i].fd >= 0)
       printf("client %s: %s\n", clients[i].name, clients[i].net == NET_APP ? "app" : clients[i].net == NET_UTM ? "utm" : "other");

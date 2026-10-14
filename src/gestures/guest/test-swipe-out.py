@@ -358,6 +358,103 @@ check(g.edge_sides({"active": 2, "ids": [1, 2], "empty": True, "invert": True, "
       g.edge_sides({"active": 1, "ids": [1, 2], "empty": False, "invert": True, "create_new": False}) == ("-", "left"),
       "edges on their own: the empty last; in the middle; nothing known; the first")
 
+# ---- which swipes switch workspaces: Hyprland's hl.gesture lines (user, 2026-10-14: 3 fingers tile, 4 switch) ----
+cfg = tempfile.mkdtemp()
+HOME, OMA = os.path.join(cfg, "home"), os.path.join(cfg, "omarchy")
+
+
+def write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(text)
+
+
+ENTRY = """-- Learn how to configure Hyprland
+dofile((os.getenv("OMARCHY_PATH") or "/usr/share/omarchy") .. "/default/hypr/bootstrap.lua")
+require("default.hypr.omarchy")
+require("hypr.monitors")
+require("hypr.input")
+require("hypr.bindings")
+"""
+write(f"{OMA}/default/hypr/bootstrap.lua", "package.path = 'x'\n")
+write(f"{OMA}/default/hypr/omarchy.lua", 'require("default.hypr.input")\n')
+write(f"{OMA}/default/hypr/input.lua", "hl.config({ input = { touchpad = { natural_scroll = true } } })\n")
+write(f"{HOME}/.config/hypr/monitors.lua", "")
+write(f"{HOME}/.config/hypr/bindings.lua", "")
+OMACVM_LINES = """
+-- OmacVM trackpad: the Mac's multi-finger gestures arrive on a virtual
+hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
+hl.gesture({ fingers = 4, direction = "horizontal", action = "workspace" })
+"""
+EXAMPLES = """-- Enable touchpad gestures for changing workspaces.
+-- hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
+"""
+
+
+def ways(input_lua, entry=ENTRY):
+    write(f"{HOME}/.config/hypr/hyprland.lua", entry)
+    write(f"{HOME}/.config/hypr/input.lua", input_lua)
+    return g.workspace_swipes(HOME, OMA)
+
+
+check(ways(EXAMPLES + OMACVM_LINES) == {3: "lr", 4: "lr"}, "gestures: OmacVM's lines (3 and 4 horizontal): both counts, both ways")
+FOCUS3 = """hl.gesture({ fingers = 3, direction = "left", action = function() hl.dispatch(hl.dsp.focus({ direction = "l" })) end })
+hl.gesture({ fingers = 3, direction = "right", action = function() hl.dispatch(hl.dsp.focus({ direction = "r" })) end })
+"""
+check(ways(FOCUS3 + OMACVM_LINES) == {4: "lr"},
+      "gestures: 3 fingers left/right move focus (Omarchy's example) before OmacVM's lines: only 4 fingers switch workspaces")
+check(ways(EXAMPLES) == {} and g.swipes_line({}) == "G -\n", "gestures: only the commented example: none (G -)")
+check(ways('hl.gesture({\n  fingers = 4,\n  direction = "horizontal",\n  action = "workspace",\n})\n') == {4: "lr"},
+      "gestures: a table over several lines")
+check(ways(OMACVM_LINES + 'hl.gesture({ fingers = 3, direction = "horizontal", action = "unset" })\n'
+           'hl.gesture({ fingers = 3, direction = "horizontal", action = "move" })\n') == {4: "lr"},
+      "gestures: 3 unset, then 3 given to moving windows: only 4")
+check(ways('hl.gesture({ fingers = 3, direction = "swipe", action = "move" })\n' + OMACVM_LINES) == {4: "lr"},
+      "gestures: 3 fingers any way (swipe) to move windows first: OmacVM's 3-finger line is shadowed, only 4")
+check(ways('hl.gesture({ fingers = 4, direction = "horizontal", action = "workspace", mods = "SUPER" })\n') == {},
+      "gestures: a workspace swipe that needs a key held (mods): not a plain swipe")
+check(ways('hl.gesture({ fingers = 4, direction = "left", action = "workspace" })\n'
+           'hl.gesture({ fingers = 4, direction = "right", action = "close" })\n') == {4: "l"},
+      "gestures: 4 left switches, 4 right closes a window: only fingers going left")
+check(ways('for _, n in ipairs({ 3, 4 }) do hl.gesture({ fingers = n, direction = "horizontal", action = "workspace" }) end\n') is None,
+      "gestures: a count that is not written out (a loop): cannot tell (None: the Mac keeps any 3+)")
+check(ways("", entry=ENTRY + 'hl.gesture({ fingers = 5, direction = "horizontal", action = "workspace" })\n') == {5: "lr"},
+      "gestures: a line in hyprland.lua itself, after the requires")
+check(ways("--[[ hl.gesture({ fingers = 3, direction = \"horizontal\", action = \"workspace\" }) ]]\n"
+           'hl.gesture({ fingers = 4, direction = "horiz", action = "workspace" }) -- hl.gesture({ fingers = 3 })\n') == {4: "lr"},
+      "gestures: block and line comments skipped, Hyprland's short name horiz")
+os.remove(f"{HOME}/.config/hypr/hyprland.lua")
+check(g.workspace_swipes(HOME, OMA) is None, "gestures: no hyprland.lua (not Omarchy 4's Lua config): None")
+check(g.swipes_line({3: "l", 4: "lr"}) == "G 3l 4lr\n", "gestures: the G line")
+
+# ... sent to the Mac with E, again after a config reload, only when it changed.
+write(f"{HOME}/.config/hypr/hyprland.lua", ENTRY)
+write(f"{HOME}/.config/hypr/input.lua", OMACVM_LINES)
+real_ws = g.workspace_swipes
+g.workspace_swipes = lambda: real_ws(HOME, OMA)
+H.world(1, [1, 2], {1: 1, 2: 1})
+sent.clear()
+g.SWIPE.set(False)
+line("X on 2")
+first = told(1)
+check([s for s in sent if s.startswith("G ")] == ["G 3lr 4lr"] and first == ["E - left"] and sent.index("G 3lr 4lr") < sent.index("E - left"),
+      "X on 2: G 3lr 4lr (Hyprland's gestures) before E")
+sent.clear()
+write(f"{HOME}/.config/hypr/input.lua", FOCUS3 + OMACVM_LINES)
+event("configreloaded>>")
+time.sleep(0.6)
+check([s for s in sent if s.startswith("G ")] == ["G 4lr"], "config reloaded (3 fingers now move focus): G 4lr")
+sent.clear()
+event("configreloaded>>")
+time.sleep(0.6)
+check([s for s in sent if s.startswith("G ")] == [], "reloaded again, nothing changed: no G")
+# A Mac from 3.1.0-3.1.5 ("X on"): the lift follows the counts too.
+line("X on")
+H.world(1, [1, 2], {1: 1, 2: 1})
+check(swipe(0.3, fingers=3) == [] and swipe(0.3, fingers=4) == ["X left"],
+      "X on (old Mac): 3 fingers (focus here) no X; 4 fingers X left")
+g.workspace_swipes = real_ws
+
 # ---- the rule on its own ----
 st = {"active": 1, "ids": [1, 2], "empty": False, "special": False, "invert": True, "create_new": True}
 w = 15600
