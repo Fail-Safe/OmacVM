@@ -178,7 +178,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertEqual(V, 29)
+        self.assertEqual(V, 30)
         self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
@@ -1703,23 +1703,26 @@ class Matrix(unittest.TestCase):
 
 
 GLIDE = r"""
+var queue = [];
+var Qt = { callLater: function (f) { if (queue.indexOf(f) < 0) queue.push(f) } };
+function flush() { while (queue.length) queue.shift()() }
 function Slot(name, memory) {
   var self = this;
   this.moduleName = name; this.notchShown = memory; this.notchShift = null; this.notchShiftGone = false;
-  this.notchPlaced = false; this.notchShownX = 0; this.notchPlaceX = 0; this.notchShiftX = 0;
+  this.notchPlaced = false; this.notchPlaceX = 0; this.notchShiftX = 0;
   this.width = 20; this.notchLastWidth = 20; this.notchPeekFull = 0;
   this.parent = { forceLayout: function () {} };
   this.notchSlideRun = { running: false };
   this.moves = [];
-  var slide = { _e: false };
-  Object.defineProperty(slide, "enabled", { get: function () { return this._e }, set: function (v) { this._e = v } });
+  var slide = { enabled: false };
   this.notchSlide = slide;
   this.notchFade = { enabled: false };
   this.notchPeekApply = function () {};
+  this.notchSettle = function () { with (self) { SETTLE } };
   var shown = 0;
   Object.defineProperty(this, "notchShownX", {
     get: function () { return shown },
-    set: function (v) { if (v !== shown) self.moves.push([shown, v, slide._e]); shown = v } });
+    set: function (v) { if (v !== shown) self.moves.push([shown, v, slide.enabled]); shown = v } });
 }
 Slot.prototype.set = function (s) { this.notchShift = s; with (this) { BODY } };
 var out = [];
@@ -1730,27 +1733,30 @@ console.log(JSON.stringify(out));
 
 @unittest.skipUnless(shutil.which("node"), "node not installed")
 class Glide(unittest.TestCase):
-    """The slot's own moves (onNotchShiftChanged): which ones glide."""
+    """The slot's own moves (onNotchShiftChanged, notchSettle at the end of a
+    round of changes): which ones glide, and that a round glides once."""
 
     def run_steps(self, steps):
         text = patched()
         m = re.search(r"    onNotchShiftChanged: \{\n(.*?)\n    \}\n", text, re.S)
-        js = GLIDE.replace("BODY", m.group(1)).replace("STEPS", steps)
+        settle = function(text, "notchSettle")
+        js = GLIDE.replace("BODY", m.group(1)).replace("SETTLE", settle).replace("STEPS", steps)
         return json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)
 
     def test_which_moves_glide(self):
         out = self.run_steps("""
 var mem = {};
 var a = new Slot("tray", mem);
-a.set({x: 0, n: 850, hidden: false, animate: false}); out.push(a.moves.slice()); a.moves = [];   // setting on: at once
-a.set({x: 0, n: 745, hidden: false, animate: true}); out.push(a.moves.slice()); a.moves = [];    // Omarchy moved it
-a.set({x: -300, n: 745, hidden: false, animate: true}); out.push(a.moves.slice()); a.moves = []; // it jumped: glide
-var b = new Slot("tray", mem);                                                                  // Omarchy made the list again
-b.set({x: 0, n: 860, hidden: false, animate: true}); out.push(b.moves.slice()); b.moves = [];     // back on its side: glides on
+function round(slot, s) { slot.set(s); flush(); var m = slot.moves.slice(); slot.moves = []; return m }
+out.push(round(a, {x: 0, n: 850, hidden: false, animate: false}));     // setting on: at once
+out.push(round(a, {x: 0, n: 745, hidden: false, animate: true}));      // Omarchy moved it
+out.push(round(a, {x: -300, n: 745, hidden: false, animate: true}));   // it jumped: one glide
+var b = new Slot("tray", mem);                                         // Omarchy made the list again
+out.push(round(b, {x: 0, n: 860, hidden: false, animate: true}));      // back on its side: glides on
 var c = new Slot("clock", mem);
-c.set({x: 0, n: 1330, hidden: false, animate: true}); out.push(c.moves.slice());                 // new, never seen: at once
+out.push(round(c, {x: 0, n: 1330, hidden: false, animate: true}));     // new, never seen: at once
 var d = new Slot("clock", mem);
-d.set({x: 0, n: 1300, hidden: false, animate: true}); out.push(d.moves.slice());                 // in place before and after: at once
+out.push(round(d, {x: 0, n: 1300, hidden: false, animate: true}));     // in place before and after: at once
 """)
         setting_on, omarchy, jumped, rebuilt, new, inplace = out
         self.assertEqual(setting_on, [[0, 850, False]])
@@ -1760,15 +1766,35 @@ d.set({x: 0, n: 1300, hidden: false, animate: true}); out.push(d.moves.slice());
         self.assertEqual(new, [[0, 1330, False]])
         self.assertEqual(inplace, [[0, 1300, False]])
 
+    def test_a_round_of_changes_glides_once(self):
+        # Omarchy makes its list again: the layout passes through a place that
+        # is not the end (the tray in its own place far right) and ends where
+        # the tray showed. Nothing moves; a new end is one glide.
+        out = self.run_steps("""
+var mem = {};
+var t = new Slot("tray", mem);
+t.set({x: -300, n: 745, hidden: false, animate: false}); flush(); t.moves = [];
+t.set({x: 0, n: 970, hidden: false, animate: true});
+t.set({x: -510, n: 955, hidden: false, animate: true}); flush();
+out.push(t.moves.slice()); t.moves = [];
+var u = new Slot("tray", mem);
+u.set({x: 0, n: 970, hidden: false, animate: true});
+u.set({x: -500, n: 955, hidden: false, animate: true}); flush();
+out.push(u.moves.slice());
+""")
+        same, rebuilt = out
+        self.assertEqual(same, [])
+        self.assertEqual(rebuilt, [[0, 445, False], [445, 455, True]])
+
     def test_a_peek_glides_nothing(self):
         out = self.run_steps("""
 var mem = {};
 var ind = new Slot("indicators", mem); ind.notchPeekFull = 105;
-ind.set({x: 0, n: 932, hidden: false, animate: true}); ind.moves = [];
-ind.width = 125; ind.set({x: 105, n: 827, hidden: false, peekAt: 533, animate: true}); out.push(ind.moves.slice());
+ind.set({x: 0, n: 932, hidden: false, animate: true}); flush(); ind.moves = [];
+ind.width = 125; ind.set({x: 105, n: 827, hidden: false, peekAt: 533, animate: true}); flush(); out.push(ind.moves.slice());
 var tray = new Slot("tray", mem);
-tray.set({x: 0, n: 851, hidden: false, animate: true}); tray.moves = [];
-tray.set({x: 105, n: 746, hidden: false, animate: true}); out.push(tray.moves.slice());
+tray.set({x: 0, n: 851, hidden: false, animate: true}); flush(); tray.moves = [];
+tray.set({x: 105, n: 746, hidden: false, animate: true}); flush(); out.push(tray.moves.slice());
 """)
         ind, tray = out
         self.assertEqual(ind, [])        # its own place on the bar did not change

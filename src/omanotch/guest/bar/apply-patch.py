@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 29
+VERSION = 30
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -85,6 +85,7 @@ PIECES = [
     "        property var notchSkipPrev: null\n",                              # 4. decisions stick
     "            notchShown: moduleListRoot.notchShown\n",                     # 8. glide on after a rebuild
     "  function notchPeekActiveIn(area) {\n",                               # 1. their width at rest
+    "    function notchSettle() {\n",                                         # 9. one glide per change
 ]
 
 
@@ -1341,29 +1342,48 @@ def main():
       // moves inside them at once, so they do not slide either.
       var peeked = notchPeekFull > 0 && width !== notchLastWidth
       notchLastWidth = width
-      // Set before the values, so the change itself slides and fades or not.
-      // A slot's first place (Omarchy made the list again: a module came or
-      // went) glides on from where this module showed before, else it is
-      // taken at once (not from the bar's edge).
-      // Only our own moves glide: an item in Omarchy's place before and after
-      // moves as Omarchy moves it.
-      var placed = notchPlaced, was = s && notchShown ? notchShown[moduleName] : undefined
+      var placed = notchPlaced
       notchPlaced = !!s
-      var from = !placed && s && animate && was !== undefined && (was.ours || s.x !== 0) ? was.x : undefined
-      if (from !== undefined) {
-        notchSlide.enabled = false
-        notchPlaceX = s.n
-        notchShownX = from
-      }
-      notchSlide.enabled = animate && !peeked && (from !== undefined ? from !== s.n + s.x
-        : placed && (notchSlideRun.running || s.x !== notchShiftX))
       notchFade.enabled = placed && animate
-      notchShiftX = s ? s.x : 0
-      notchPlaceX = s ? s.n : 0
-      notchShownX = s ? s.n + s.x : 0
-      if (s && notchShown) notchShown[moduleName] = { x: s.n + s.x, ours: s.x !== 0 || s.hidden === true }
       if (gone !== notchShiftGone) notchShiftGone = gone
+      if (!s) {
+        notchSlide.enabled = false
+        notchShiftX = 0
+        notchPlaceX = 0
+        notchShownX = 0
+        notchPeekApply()
+        return
+      }
+      // Only our own moves glide (an item in Omarchy's place before and after
+      // moves as Omarchy moves it), and only once this round of changes is
+      // over: while Omarchy makes its list again (a module came or went) the
+      // layout passes through places that are not the end. Until then the
+      // item stays where it shows. A slot Omarchy made again starts where
+      // this module showed last (else at its place at once, not from the
+      // bar's edge).
+      // A glide on its way keeps going and takes the new end then.
+      var was = !placed && notchShown ? notchShown[moduleName] : undefined
+      var ours = s.x !== 0 || (placed ? notchShiftX !== 0 : !!(was && was.ours))
+      var glide = animate && ours && !peeked, running = notchSlideRun.running
+      if (!running) notchSlide.enabled = false
+      notchPlaceX = s.n
+      if (!placed) notchShownX = glide && was !== undefined ? was.x : s.n + s.x
+      notchShiftX = s.x
+      if (!glide && !running) notchShownX = s.n + s.x
+      Qt.callLater(notchSettle)
       notchPeekApply()
+    }
+    // The end of a round of changes: glide to the place the layout ended on
+    // (one move), and remember it for a slot Omarchy makes again.
+    function notchSettle() {
+      var s = notchShift
+      if (!s) return
+      var to = s.n + s.x
+      if (notchShownX !== to) {
+        notchSlide.enabled = !!s.animate
+        notchShownX = to
+      }
+      if (notchShown) notchShown[moduleName] = { x: to, ours: s.x !== 0 || s.hidden === true }
     }
 ''')
     text = replace_once(text, '''    z: modulePointer.dragging ? 100 : 0
