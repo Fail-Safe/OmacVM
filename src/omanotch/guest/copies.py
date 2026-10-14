@@ -55,6 +55,7 @@ PLUGINS = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, "
 STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "omanotch/copies")
 RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
 SHELL_COLORS = "/usr/local/lib/omacvm/shell-colors.py"
+QML_CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache"), "quickshell/qmlcache")
 PACMAN_LOCK = "/var/lib/pacman/db.lck"
 BACKUP = ".before-notchbar"
 MARK = "omarchy-notch-bar"
@@ -474,11 +475,22 @@ def log_entries(text):
 LATER = "later"
 
 
+def clear_qml_cache():
+    """Quickshell's compiled QML goes before each restart here. A file written
+    while the shell compiled the one before it can leave that older code under
+    the new file's time: on a VM set up with 3.1.11 the patch never loaded (the
+    clone's code from before it, "Required property ... was not initialized"),
+    also after restarts, until this cache went. The shell compiles again."""
+    time.sleep(2)   # a compile the change set off ends first
+    shutil.rmtree(QML_CACHE, ignore_errors=True)
+
+
 def restart_and_check(copies):
     """Restarts the shell. The copies that did not load -> why; None when the
     shell did not come back at all; LATER when it did not restart (the session
     got locked in the meantime: Omarchy refuses then)."""
     answered = any(c.ipc for c in copies) and bar_answers()
+    clear_qml_cache()
     before = shell_logs()
     t0 = time.time()
     run(["omarchy-restart-shell"], 90)
@@ -630,6 +642,13 @@ def follow(install=False):
         recolor(c)
         todo.append((c, p))
     if not todo:
+        bar = COPIES[0]
+        if install and os.path.isfile(os.path.join(bar.dir, bar.entry)) and shell_up() and not bar_answers():
+            # The copy is patched but the bar does not answer: the shell's
+            # compiled QML from before the patch (above).
+            restart_and_check([])
+            print(f"{bar.title}: did not load: the shell restarted without its old compiled QML"
+                  f" ({'it loads now' if bar_answers() else 'still not: another bar in use?'})")
         return rc
     bad = restart_and_check([c for c, _ in todo])
     if bad == LATER:
