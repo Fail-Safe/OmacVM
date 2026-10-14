@@ -92,7 +92,10 @@ OmacVM.app has a switch for it (off by default): on the bar beside the notch,
 items that no longer fit on their side jump over the camera housing and
 continue on its other side, in the same order. They only hide when that side
 is full too. The menu and the clock at the far right stay put, and bars on
-other displays are not touched. The bar patch does the layout
+other displays are not touched. Omarchy's hidden indicators (Dictate, Screen
+Recording and the others) open where they are when they fit right of the
+notch; when they don't, they open left of it, so the rest of the bar stays
+where it is and the notch looks untouched until you point at the bar. The bar patch does the layout
 (`notchSkipPlace`); the app tells the VM through `/run/omacvm/host.env`
 (`OMACVM_NOTCHSKIP=1`) and `/run/omacvm/notch-skip`.
 

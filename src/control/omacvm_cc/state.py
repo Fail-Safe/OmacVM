@@ -637,7 +637,9 @@ NOTCH_SKIP_FEATURE = Feature(
     title="Skip the notch",
     summary=("OmacVM.app only, on a MacBook with a notch, in either full screen. Off: bar items that "
              "do not fit beside the notch go behind it. On: they continue on its other side, in the "
-             "same order, and only hide when both sides are full. External displays keep their bar. "
+             "same order, and only hide when both sides are full. Omarchy's hidden icons (Dictate, "
+             "Screen Recording and the others) open right of the notch when they fit there, else "
+             "left of it. External displays keep their bar. "
              "The bar changes within a few seconds."))
 
 

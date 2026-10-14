@@ -25,8 +25,8 @@ private struct Sketch {
         ctx.fill(Path(ellipseIn: r(cx - radius, cy - radius, 2 * radius, 2 * radius)), with: .color(fill))
     }
 
-    func text(_ s: String, _ x: CGFloat, _ y: CGFloat, size: CGFloat, _ color: Color) {
-        ctx.draw(Text(s).font(.system(size: size * k)).foregroundStyle(color), at: CGPoint(x: x * k, y: y * k), anchor: .bottom)
+    func text(_ s: String, _ x: CGFloat, _ y: CGFloat, size: CGFloat, _ color: Color, anchor: UnitPoint = .bottom) {
+        ctx.draw(Text(s).font(.system(size: size * k)).foregroundStyle(color), at: CGPoint(x: x * k, y: y * k), anchor: anchor)
     }
 
     func clipped(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, radius: CGFloat, _ draw: (Sketch) -> Void) {
@@ -234,10 +234,12 @@ struct SwipeOutPicture: View {
     }
 }
 
-/// Skip the notch, in its (i): the top of the built-in display twice. Off:
-/// the tray's last icons go behind the notch. On: they continue left of it,
-/// in the same order.
+/// Skip the notch, in its (i): the top of the built-in display three times.
+/// Off: the tray's last icons go behind the notch. On: they continue left of
+/// it, in the same order. Pointing at the notch: Omarchy's hidden indicators
+/// open left of it when the right side has no room for them (the tray stays).
 struct NotchSkipPicture: View {
+    enum Row { case off, on, peek }
     /// The tray icons from the left, as Omarchy lays them out.
     private static let tray: [Color] = [Ink.iris, Ink.gold, Color(rgb: 0x56949F), Ink.rose, Ink.pine, Ink.gold,
                                         Color(rgb: 0xB4637A), Ink.iris, Ink.pine, Ink.rose, Color(rgb: 0x56949F), Ink.gold]
@@ -247,19 +249,21 @@ struct NotchSkipPicture: View {
     var body: some View {
         Canvas { ctx, size in
             let s = Sketch(ctx: ctx, k: size.width / 292)
-            s.rect(0, 0, 292, 118, radius: 8, fill: Look.panel)
-            s.text("Off", 14, 19, size: 8, .secondary)
-            strip(s, y: 24, on: false)
-            s.text("On", 14, 72, size: 8, .secondary)
-            strip(s, y: 77, on: true)
-            s.rect(0.5, 0.5, 291, 117, radius: 8, stroke: Look.pictureLine)
+            s.rect(0, 0, 292, 171, radius: 8, fill: Look.panel)
+            s.text("Off", 13, 19, size: 8, .secondary, anchor: .bottomLeading)
+            strip(s, y: 24, .off)
+            s.text("On", 13, 72, size: 8, .secondary, anchor: .bottomLeading)
+            strip(s, y: 77, .on)
+            s.text("On, pointing at the notch", 13, 125, size: 8, .secondary, anchor: .bottomLeading)
+            strip(s, y: 130, .peek)
+            s.rect(0.5, 0.5, 291, 170, radius: 8, stroke: Look.pictureLine)
         }
-        .frame(width: 292, height: 118)
+        .frame(width: 292, height: 171)
         .accessibilityHidden(true)
     }
 
     /// One display's top: the bar (18 tall) and a little of the desktop.
-    private func strip(_ s: Sketch, y: CGFloat, on: Bool) {
+    private func strip(_ s: Sketch, y: CGFloat, _ row: Row) {
         let left: CGFloat = 12, width: CGFloat = 268, notchL: CGFloat = 124, notchR: CGFloat = 168
         s.clipped(left, y, width, 30, radius: 4) { s in
             s.rect(left, y, width, 30, fill: Ink.base)
@@ -272,15 +276,26 @@ struct NotchSkipPicture: View {
             }
             // The clock at the far right, the tray before it, 9 apart.
             s.rect(250, y + 7.6, 24, 2.8, radius: 1.4, fill: Ink.text)
-            let n = Self.tray.count
-            for (i, c) in Self.tray.enumerated() {
-                var cx = 241 - CGFloat(n - 1 - i) * 9
-                if on && i < Self.over { cx = notchL - 7 - CGFloat(Self.over - 1 - i) * 9 }
-                s.circle(cx, y + 9, 3, c)
+            if row == .peek {
+                // A tray that fits right of the notch, Omarchy's active
+                // indicator before the clock, its hidden ones left of the notch.
+                for (i, c) in Self.tray.prefix(7).enumerated() { s.circle(178 + CGFloat(i) * 9, y + 9, 3, c) }
+                s.rect(237, y + 6.5, 5, 5, radius: 1.2, fill: Ink.subtle)
+                s.rect(notchL - 36, y + 3.5, 30, 11, radius: 5.5, fill: Ink.accent.opacity(0.18))
+                for i in 0..<3 {
+                    s.rect(notchL - 15.5 - CGFloat(i) * 9, y + 6.5, 5, 5, radius: 1.2, stroke: Ink.text, line: 1.1)
+                }
+            } else {
+                let n = Self.tray.count
+                for (i, c) in Self.tray.enumerated() {
+                    var cx = 241 - CGFloat(n - 1 - i) * 9
+                    if row == .on && i < Self.over { cx = notchL - 7 - CGFloat(Self.over - 1 - i) * 9 }
+                    s.circle(cx, y + 9, 3, c)
+                }
             }
             // The camera housing, over what is behind it.
             s.rect(notchL, y - 6, notchR - notchL, 19, radius: 4, fill: Ink.notch)
-            if on {
+            if row == .on {
                 // Under the notch, from where they were to where they are.
                 s.curve((notchR + 4, y + 21), (notchR - 8, y + 28.5), (notchL + 8, y + 28.5), (notchL - 3, y + 21),
                         Ink.accent, width: 1.4)
@@ -288,5 +303,20 @@ struct NotchSkipPicture: View {
             }
         }
         s.rect(left + 0.5, y + 0.5, width - 1, 29, radius: 4, stroke: Look.pictureLine)
+        if row == .peek { pointer(s, x: 144, y: y + 8) }
+    }
+
+    /// The Mac's pointer, on the notch.
+    private func pointer(_ s: Sketch, x: CGFloat, y: CGFloat) {
+        var p = Path()
+        let k = s.k
+        let pts: [(CGFloat, CGFloat)] = [(0, 0), (0, 9.2), (2.1, 7.2), (3.6, 10.4), (5.1, 9.7), (3.6, 6.5), (6.4, 6.3)]
+        for (i, q) in pts.enumerated() {
+            let pt = CGPoint(x: (x + q.0) * k, y: (y + q.1) * k)
+            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+        }
+        p.closeSubpath()
+        s.ctx.fill(p, with: .color(Color(rgb: 0x1D1D1F)))
+        s.ctx.stroke(p, with: .color(.white), lineWidth: 0.6 * k)
     }
 }

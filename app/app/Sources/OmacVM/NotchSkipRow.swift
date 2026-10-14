@@ -14,7 +14,7 @@ struct NotchSkipRow: View {
     @State private var error: String?
 
     static let subtitle = "Bar items that don’t fit continue on the other side of the notch."
-    static let info = "Off: items that don’t fit beside the notch go behind it. On: they continue on its other side, in the same order. They only hide when both sides are full. External displays keep their bar as it is."
+    static let info = "Off: items that don’t fit beside the notch go behind it. On: they continue on its other side, in the same order, and only hide when both sides are full. Omarchy’s hidden icons (Dictate, Screen Recording and the others) open right of the notch when they fit there, else left of it, while you point at the notch or the bar. External displays keep their bar as it is."
 
     private var folder: URL { state.config.folder }
 
