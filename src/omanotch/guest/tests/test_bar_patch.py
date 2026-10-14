@@ -178,7 +178,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertEqual(V, 28)
+        self.assertEqual(V, 29)
         self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
@@ -1108,6 +1108,18 @@ console.log(JSON.stringify([peek(mac, 0) === block, peek(upstream, 0) === block,
         out = subprocess.run(["node", "-e", js.replace("BODY", body)], check=True, capture_output=True, text=True)
         self.assertEqual(json.loads(out.stdout), [True, True, None, None, None])
 
+    def test_their_width_at_rest_is_found(self):
+        js = """
+function act(area) { BODY }
+var area = {}, active = { indicatorModel: [], implicitWidth: 21 }, row = { children: [area, active] };
+area.parent = row;
+var lone = {}; lone.parent = { children: [lone] };
+console.log(JSON.stringify([act(area) === active, act(lone), act(null)]));
+"""
+        body = function(patched(), "notchPeekActiveIn")
+        out = subprocess.run(["node", "-e", js.replace("BODY", body)], check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(out.stdout), [True, None, None])
+
     def test_omarchys_indicators_still_peek_this_way(self):
         # What the bar relies on, in Omarchy's own Indicators.qml of both
         # shells: a clipping item as wide as the hidden block only while they
@@ -1124,6 +1136,12 @@ console.log(JSON.stringify([peek(mac, 0) === block, peek(upstream, 0) === block,
                 self.assertIn('indicatorBlock: "inactive"', area.group(2))
                 self.assertIn("horizontal: true", area.group(2))
                 self.assertIn('property string indicatorBlock: "active"', ind)
+                # Their width at rest is the block of the ones that show, the
+                # area's sibling in the same row (notchPeekActiveIn).
+                self.assertRegex(ind, r": activeHorizontalBlock\.implicitWidth \+ inactiveHorizontalArea\.implicitWidth")
+                row = re.search(r"id: inactiveHorizontalArea\n.*?\n\s*ActiveIndicatorBlock \{\n\s*id: activeHorizontalBlock", ind, re.S)
+                self.assertIsNotNone(row)
+                self.assertIn("property var indicatorModel: null", ind)
 
     def test_no_housing_no_layout(self):
         self.assertEqual(self.place(([20], [150], [0, 0], None), ([20], [150], [900, 800], None),

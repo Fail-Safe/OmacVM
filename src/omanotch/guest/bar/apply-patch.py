@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 28
+VERSION = 29
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -84,6 +84,7 @@ PIECES = [
     "    z: modulePointer.dragging ? 100 : (slot.notchShift && slot.notchShift.peekAt !== undefined ? -1 : 0)\n",
     "        property var notchSkipPrev: null\n",                              # 4. decisions stick
     "            notchShown: moduleListRoot.notchShown\n",                     # 8. glide on after a rebuild
+    "  function notchPeekActiveIn(area) {\n",                               # 1. their width at rest
 ]
 
 
@@ -500,6 +501,14 @@ def main():
       var found = notchPeekBlockIn(kids[i], depth + 1)
       if (found) return found
     }
+    return null
+  }
+  // The indicators' block of the ones that show: the hidden ones' area's
+  // sibling in their row (Omarchy's ActiveIndicatorBlock), or null.
+  function notchPeekActiveIn(area) {
+    var kids = area && area.parent ? area.parent.children || [] : []
+    for (var i = 0; i < kids.length; i++)
+      if (kids[i] !== area && kids[i].indicatorModel !== undefined) return kids[i]
     return null
   }
   // One item's part of a list's layout ({items, animate}; null: none).
@@ -1227,7 +1236,7 @@ def main():
             var c = children[i]
             if (!c || !(c.notchSlotIndex >= 0)) continue
             out[c.notchSlotIndex] = moduleListRoot.region === "right" && c.notchPeekFull > 0
-              ? [c.width, c.width - c.notchPeekShown, c.notchPeekFull] : c.width
+              ? [c.width, c.notchPeekRest, c.notchPeekFull] : c.width
           }
           for (var j = 0; j < out.length; j++) if (out[j] === undefined) out[j] = 0
           return out
@@ -1277,6 +1286,13 @@ def main():
       ? root.notchPeekBlockIn(activeItem, 0) : null
     readonly property real notchPeekFull: notchPeekBlock ? notchPeekBlock.implicitWidth : 0
     readonly property real notchPeekShown: notchPeekBlock && notchPeekBlock.parent ? notchPeekBlock.parent.width : 0
+    // Their width at rest: the block of the ones that show (the other child of
+    // their row). It does not change on a peek, so every step of one sees the
+    // same decisions (the slot's width and the hidden ones' area change one
+    // after the other, which once moved the weather and glided it back).
+    readonly property var notchPeekActive: notchPeekBlock && notchPeekBlock.parent
+      ? root.notchPeekActiveIn(notchPeekBlock.parent) : null
+    readonly property real notchPeekRest: notchPeekActive ? notchPeekActive.implicitWidth : width - notchPeekShown
     property real notchPeekOffset: 0
     property real notchLastWidth: 0
     readonly property real notchPeekDx: notchShift && notchShift.peekAt !== undefined
