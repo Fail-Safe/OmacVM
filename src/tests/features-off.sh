@@ -104,6 +104,10 @@ file "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
 link "$H/.config/systemd/user/graphical-session.target.wants/notchcast.service" "$H/.config/systemd/user/notchcast.service"
 file "$H/.config/hypr/notchbar.lua"; file "$H/.local/state/omacvm/omanotch"; file "$H/.local/state/omanotch/expect"
 file /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook
+file /etc/pacman.d/hooks/zz-omacvm-omanotch-copies.hook; file /usr/local/lib/omacvm/omanotch-copies-hook
+file "$H/.config/systemd/user/omanotch-copies.service"; file "$H/.local/lib/omanotch/copies.py"
+link "$H/.config/systemd/user/graphical-session.target.wants/omanotch-copies.service" "$H/.config/systemd/user/omanotch-copies.service"
+file "$H/.local/state/omanotch/copies/bar/state.json" '{"result": "current"}'
 file "$H/.config/omarchy/plugins/omanotch.monitor/manifest.json" '{"id": "omanotch.monitor", "omarchy": {"clonedFrom": "omarchy.monitor"}}'
 file "$H/.config/omarchy/shell.json" '{"bar": {"layout": {"right": [{"id": "omanotch.monitor"}, {"id": "omarchy.clock"}]}}}'
 printf '%s\n' 'require("hypr.other")' '' '-- omarchy-notch-bar: hidden output for the macOS notch helper.' 'require("hypr.notchbar")' > "$ROOT$H/.config/hypr/hyprland.lua"
@@ -111,9 +115,14 @@ run_off omanotch_off 0
 expect "omanotch off, built: its uninstall tried in the session" yes "$(called "in_session bash /repo/omanotch/guest/uninstall.sh")"
 for p in "$H/.local/bin/notchcast" "$H/.local/bin/omanotch-display-panel" "$H/.config/systemd/user/notchcast.service" "$H/.config/systemd/user/notchcast.service.d" \
          "$H/.config/systemd/user/graphical-session.target.wants/notchcast.service" "$H/.config/hypr/notchbar.lua" \
-         "$H/.local/state/omanotch/expect" /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook "$H/.config/omarchy/plugins/omanotch.monitor"; do
+         "$H/.local/state/omanotch/expect" /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook "$H/.config/omarchy/plugins/omanotch.monitor" \
+         /etc/pacman.d/hooks/zz-omacvm-omanotch-copies.hook /usr/local/lib/omacvm/omanotch-copies-hook "$H/.local/lib/omanotch" \
+         "$H/.config/systemd/user/omanotch-copies.service" "$H/.config/systemd/user/graphical-session.target.wants/omanotch-copies.service"; do
   expect "omanotch off, built, no session: $p gone" no "$(has "$p")"
 done
+# What OmacVM wrote last stays: turned on again, the copies go on from there.
+expect "omanotch off: the copies' record kept" yes "$(has "$H/.local/state/omanotch/copies/bar/state.json")"
+expect "omanotch off: the copies' service disabled" yes "$(called "user_ctl disable --now omanotch-copies.service")"
 expect "omanotch off, no session: Omarchy's display panel back in the bar" "omarchy.monitor omarchy.clock" \
   "$(jq -r '[.bar.layout.right[].id] | join(" ")' "$ROOT$H/.config/omarchy/shell.json")"
 expect "omanotch off: hyprland.lua no longer loads notchbar" "$(printf '%s\n' 'require("hypr.other")' '')" "$(cat "$ROOT$H/.config/hypr/hyprland.lua")"

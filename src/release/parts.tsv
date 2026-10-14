@@ -9,7 +9,7 @@ gestures	gestures/**
 external-brightness	bridge/guest/omacvm-ddcutil
 bridge	bridge/**
 wallpaper	wallpaper/**
-omanotch	omanotch/** guest/omacvm-omanotch.service guest/omanotch-notifications.sh
+omanotch	omanotch/** guest/omacvm-omanotch.service guest/omanotch-notifications.sh guest/omanotch-copies-hook.sh
 mac-clock	clock/**
 camera	camera/**
 battery	battery/**

@@ -68,10 +68,13 @@ omanotch_off() {
   local n=$H/.local/bin/notchcast u=$H/.config/systemd/user/notchcast.service
   local q=/etc/systemd/user/omacvm-omanotch.service hook=/etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook
   local panel=$H/.config/omarchy/plugins/omanotch.monitor
-  off_any "$n" "$u" "$u.d" "$q" "$hook" "$H/.config/hypr/notchbar.lua" "$H/.local/state/omacvm/omanotch" "$panel" || return 0
+  local copies=$H/.config/systemd/user/omanotch-copies.service chook=/etc/pacman.d/hooks/zz-omacvm-omanotch-copies.hook
+  off_any "$n" "$u" "$u.d" "$q" "$hook" "$H/.config/hypr/notchbar.lua" "$H/.local/state/omacvm/omanotch" "$panel" \
+    "$copies" "$chook" "$H/.local/lib/omanotch" || return 0
   log "Omanotch: off"
-  user_units_off omacvm-omanotch.service
-  rm -f "$ROOT$q" "$ROOT$hook"
+  user_units_off omacvm-omanotch.service omanotch-copies.service
+  rm -f "$ROOT$q" "$ROOT$hook" "$ROOT$chook" "$ROOT/usr/local/lib/omacvm/omanotch-copies-hook" "$ROOT$copies"
+  rm -rf "$ROOT$H/.local/lib/omanotch"
   [[ -z $("$R/guest/omanotch-notifications.sh" off 2>/dev/null || true) ]] || restart_shell_later
   # Omanotch's own uninstall needs the session (Hyprland, the shell); the
   # files go here too, so it is off also without one.
