@@ -109,6 +109,8 @@ start() {   # window|full|fullpanel, on the virtual display
                env+=(--env "OMACVM_TEST_NOTCH_GEOMETRY=$NOTCH") ;;
   esac
   (source "$HERE/test-vms.sh" && e2e_vm_guard "$APPID" "$VM") >/dev/null || return 1
+  # A QEMU that crashed (an earlier round) left the run marker: the start would ask "Start Anyway".
+  [[ -z $(qemu_pid) ]] && rm -f "$VMD/running"
   open -n "${env[@]}" "$APP" --args --start --vm "$VM"
   for ((i = 0; i < 40; i++)); do [[ -n $(qemu_pid) ]] && break; sleep 1; done
   [[ -n $(qemu_pid) ]] || return 1
@@ -116,8 +118,9 @@ start() {   # window|full|fullpanel, on the virtual display
   for ((i = 0; i < 90; i++)); do gssh "test -d /run/user/\$(id -u \$(sed -n 's/^OMACVM_USER=//p' /etc/omacvm/env))/hypr" 2>/dev/null && { sleep 25; return 0; }; sleep 2; done
   return 1
 }
+launcher_stop() { local p; for p in $(pgrep -f "$APP/Contents/MacOS/OmacVM --start --vm $VM\$"); do kill "$p" 2>/dev/null; done; }
 stop() {
-  local p i; p=$(qemu_pid); [[ -n $p ]] || return 0
+  local p i; p=$(qemu_pid); [[ -n $p ]] || { launcher_stop; return 0; }
   gssh "systemctl poweroff" >/dev/null 2>&1
   for ((i = 0; i < 90; i++)); do kill -0 "$p" 2>/dev/null || break; sleep 1; done
   ! kill -0 "$p" 2>/dev/null
@@ -128,7 +131,14 @@ case_run() {   # NAME MODE ROUNDS
   plug || { res "$name" FAIL "no virtual display"; return; }
   start "$mode" || { res "$name" FAIL "the VM did not come up on the virtual display"; unplug; stop; return; }
   pid=$(qemu_pid)
-  [[ $mode == fullpanel ]] && res "$name-start" ok "$(grep -h 'OmacVM: notch area:' "$VMD/logs/qemu.log" | tail -1 | cut -c1-100)"
+  if [[ $mode == fullpanel ]]; then
+    local area; area=$(grep -h 'OmacVM: notch area:' "$VMD/logs/qemu.log" | tail -1)
+    if [[ $area != *"notch area: fullpanel"* ]]; then
+      res "$name" skip "the VM did not start in Full screen including notch (Omanotch on and Update VM give it): ${area:-no notch area line}"
+      unplug; stop; return
+    fi
+    res "$name-start" ok "$(cut -c1-100 <<<"$area")"
+  fi
   for ((r = 1; r <= rounds; r++)); do
     c0=$(crashes); l0=$(wc -l < "$VMD/logs/qemu.log")
     unplug
