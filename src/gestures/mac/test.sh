@@ -293,6 +293,9 @@ grep -E '^(ok|FAIL|skip) ' "$T/notice"
 # Swipe out to macOS in the guest, against a made-up Hyprland (#342).
 python3 "$HERE/../guest/test-swipe-out.py" "$HERE/../guest/omacvm-gestures" > "$T/swipe-out" 2>&1 || fail=1
 grep -E '^(ok|FAIL|skip) ' "$T/swipe-out"
+# ... and install.sh's gesture lines: only for a count with no sideways gesture yet.
+bash "$HERE/../guest/test-install-gestures.sh" > "$T/install-gestures" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/install-gestures"
 # 6. Which scrolling scroll momentum takes.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \

@@ -387,8 +387,8 @@ fi
 FEATURE=gestures
 if [[ $GESTURES == on ]]; then
   check "virtual trackpad" "Magic Trackpad (OmacVM)" ev_device "Apple Inc. Magic Trackpad (OmacVM)"
-  if grep -rqs '^hl.gesture({ fingers = 3' "$H/.config/hypr/"; then ok "workspace swipes" "3/4-finger gestures configured"
-  else bad "workspace swipes" "no hl.gesture lines in ~/.config/hypr"; fi
+  if grep -Erqs '^[[:space:]]*hl\.gesture\(.*action *= *"workspace"' "$H/.config/hypr/"; then ok "workspace swipes" "workspace gestures configured"
+  else bad "workspace swipes" "no hl.gesture line for workspaces in ~/.config/hypr"; fi
 else skip "trackpad gestures" "off (chosen at setup): macOS keeps its swipes"; fi
 FEATURE=scroll-momentum
 if [[ $GLIDE == on && $GESTURES == on ]]; then

@@ -15,12 +15,14 @@ systemctl enable omacvm-gestures >/dev/null 2>&1
 systemctl restart omacvm-gestures
 
 I=$H/.config/hypr/input.lua
-# Each swipe only when no active horizontal gesture with that many fingers is
-# there yet (Hyprland rejects a second one; Omarchy ships the 3-finger line
-# commented out as an example, and a hand-made one counts too).
+# Each swipe only when no active sideways gesture with that many fingers is
+# there yet: Hyprland refuses a second one (a config error on screen), and a
+# count given to something else stays so (Omarchy's example moves focus with
+# 3 fingers left and right; the swipe out follows what is set, #342).
+# Omarchy ships the 3-finger workspace line commented out as an example.
 missing=()
 for n in 3 4; do
-  grep -Eq "^[[:space:]]*hl\.gesture\(\{ *fingers *= *$n *, *direction *= *\"horizontal\"" "$I" 2>/dev/null || missing+=("$n")
+  grep -Eq "^[[:space:]]*hl\.gesture\(\{ *fingers *= *$n *, *direction *= *\"(horizontal|horiz|left|l|right|r|swipe)\"" "$H"/.config/hypr/*.lua 2>/dev/null || missing+=("$n")
 done
 if (( ${#missing[@]} )); then
   {
