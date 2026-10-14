@@ -3,7 +3,9 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.8 (unreleased)
+
+Unplugging a display no longer shuts the VM off.
 
 - **Unplugging a display no longer shuts the VM off** (OmacVM.app, Full screen including notch,
   with a second display). When the display the VM's window was on was unplugged, macOS took the
