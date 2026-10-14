@@ -55,7 +55,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 33
+VERSION = 34
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -1005,8 +1005,10 @@ def main():
         // inside the layout's own binding), so it settles after one more round.
         property var notchSkipPrev: null
         property string notchSkipPrevKey: ""
+        readonly property bool notchSkipPlaceOk: true
         onNotchSkipChanged: Qt.callLater(notchSkipKeep)
         function notchSkipKeep() {
+          if (typeof notchSkipPlaceOk === "undefined") return   // the bar went away meanwhile
           var st = notchSkip ? notchSkip.state : null
           var key = st ? JSON.stringify(st) : ""
           if (key === notchSkipPrevKey) return
@@ -1416,6 +1418,9 @@ def main():
     // The end of a round of changes: glide to the place the layout ended on
     // (one move), and remember it for a slot Omarchy makes again.
     function notchSettle() {
+      // Qt.callLater may run it after Omarchy took the slot away (its
+      // functions are gone then).
+      if (typeof notchEdge !== "function") return
       var s = notchShift
       if (!s) return
       if (!!s.hidden !== notchShiftGone) notchShiftGone = !!s.hidden

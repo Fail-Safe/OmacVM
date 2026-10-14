@@ -178,7 +178,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertEqual(V, 33)
+        self.assertEqual(V, 34)
         self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
@@ -1826,6 +1826,18 @@ t.width = 486; t.set({x: -735.2, n: 943.8, hidden: false, animate: true}); flush
 out.push(t.moves.slice());
 """)
         self.assertEqual(out[0], [])
+
+    def test_a_slot_taken_away_before_it_settles(self):
+        # Omarchy makes the list again: the old slot's pending notchSettle runs
+        # after it is gone (its functions are undefined then): nothing throws.
+        out = self.run_steps("""
+var mem = {};
+var t = new Slot("tray", mem);
+t.set({x: -300, n: 745, hidden: false, animate: true});
+t.notchEdge = undefined;
+try { flush(); out.push("ok") } catch (e) { out.push(String(e)) }
+""")
+        self.assertEqual(out, ["ok"])
 
     def test_a_peek_glides_nothing(self):
         out = self.run_steps("""
