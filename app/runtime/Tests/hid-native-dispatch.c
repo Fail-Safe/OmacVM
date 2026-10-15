@@ -109,6 +109,17 @@ int main(int argc,char **argv) {
     int bh;s->bh=&bh;s->live=s->configured=true;s->sizes[0][0]=60;
     s->busy=true;s->transfer_set=strncmp(mode,"get",3)!=0;s->transfer_len=60;
     memset(s->transfer,0x5a,60);entered=dispatch_semaphore_create(0);release_api=dispatch_semaphore_create(0);
+    bool overflow=!strcmp(mode,"overflow");
+    if(overflow||!strcmp(mode,"malformed")) {
+        /* Nobody reads (no hidraw open in the guest): the oldest goes, the device stays. */
+        uint8_t report[60];
+        for(unsigned i=0;i<(overflow?20:1);i++) { memset(report,i,sizeof(report)); host_hid_receive(s,0,report,overflow?60:59); }
+        if(overflow) assert(s->live && s->count==16 && s->dropped==4 &&
+                            s->queue[s->head].data[0]==4 && s->queue[(s->head+15)%16].data[0]==19);
+        else assert(s->live && s->count==0 && s->dropped==1);
+        printf("PASS mode=%s queued=%u dropped=%u live=%d\n",mode,s->count,s->dropped,s->live);
+        return 0;
+    }
     native_start(s);
     bool close_queued=!strcmp(mode,"close-queued"), close_running=!strcmp(mode,"close-running");
     bool stale=!strcmp(mode,"reset-queued"), removed=!strcmp(mode,"removed-queued");

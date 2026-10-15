@@ -10,18 +10,22 @@ QEMU checks the device again before it opens it: one HID interface, vendor
 usage page in the metadata and in the report descriptor, nothing else on it
 (no other driver or app), reports of at most 64 bytes, a descriptor of at most
 1 KB. Keyboards, mice, security keys and composite devices are refused.
+A full input queue (16 reports; Linux reads only while a program has the
+hidraw node open) drops the oldest report, and a report that does not match
+the descriptor is dropped; both are logged once. The guest loses the device
+only when the Mac does (unplugged, or macOS replaced its HID part).
 Why: libusb cannot take a device that macOS's HID driver holds without root
 or Apple's com.apple.vm.device-access entitlement. Vendor HID boards (ECU
 tools, bootloaders, programmers) are of no use to macOS but held by it.
 Upstream: not sent (macOS- and OmacVM-specific).
-Test: app/runtime/Tests/test-hid-native-dispatch.py (report dispatch, close;
-no hardware); usb-tests --qmp QEMU (an absent device is
+Test: app/runtime/Tests/test-hid-native-dispatch.py (report dispatch, close,
+the full queue; no hardware); usb-tests --qmp QEMU (an absent device is
 refused). Runs only when the VM's "Vendor HID devices" switch is on and the
 user connects such a device (docs/usb.md).
 
 --- /dev/null
 +++ b/hw/usb/dev-host-hid.c
-@@ -0,0 +1,706 @@
+@@ -0,0 +1,724 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + * usb-host-hid: one vendor HID interface of a Mac USB device, for the guest,
 + * through IOHIDDevice reports (no libusb, no root). QEMU makes the USB
@@ -34,6 +38,7 @@ user connects such a device (docs/usb.md).
 +#include "qemu/module.h"
 +#include "migration/vmstate.h"
 +#include "qemu/main-loop.h"
++#include "qemu/error-report.h"
 +#include <IOKit/IOKitLib.h>
 +#include <IOKit/hid/IOHIDDevice.h>
 +#include <dispatch/dispatch.h>
@@ -60,6 +65,8 @@ user connects such a device (docs/usb.md).
 +    uint8_t transfer[64];
 +    struct { uint8_t data[64]; unsigned len; } queue[16];
 +    unsigned head, count;
++    unsigned dropped;
++    bool dropped_logged;
 +    IOHIDDeviceRef hid;
 +    dispatch_queue_t dispatch;
 +    dispatch_semaphore_t cancelled;
@@ -80,15 +87,24 @@ user connects such a device (docs/usb.md).
 +static void host_hid_resume(HostHIDState *s);
 +static int native_report(HostHIDState *s, bool set, unsigned type,
 +                         unsigned id, uint8_t *data, unsigned len);
-+/* Callback side: never touches USB state and never takes the BQL. */
++/* Callback side: never touches USB state and never takes the BQL.
++ * A report that does not match the descriptor is dropped. A full queue (Linux
++ * polls the IN endpoint only while a program has the hidraw node open) drops
++ * the oldest report, as a real device's buffer would; the device stays with
++ * the guest. Both are logged once (host_hid_bh). */
 +static void host_hid_receive(HostHIDState *s, unsigned id, const uint8_t *data, size_t len)
 +{
 +    qemu_mutex_lock(&s->lock);
 +    if (!s->closing && s->live && s->configured) {
 +        if (id > 255 || !len || len > 64 || len != s->sizes[0][id] ||
-+            (!!id != s->numbered) || (id && data[0] != id) || s->count == 16) {
-+            s->live = false; /* Never silently lose a transaction. */
++            (!!id != s->numbered) || (id && data[0] != id)) {
++            s->dropped++;
 +        } else {
++            if (s->count == 16) {
++                s->head = (s->head + 1) % 16;
++                s->count--;
++                s->dropped++;
++            }
 +            unsigned slot = (s->head + s->count++) % 16;
 +            memcpy(s->queue[slot].data, data, len);
 +            s->queue[slot].len = len;
@@ -132,7 +148,13 @@ user connects such a device (docs/usb.md).
 +        }
 +    }
 +    bool wake = s->count != 0;
++    bool warn = s->dropped && !s->dropped_logged;
++    s->dropped_logged |= warn;
 +    qemu_mutex_unlock(&s->lock);
++    if (warn) {
++        warn_report("usb-host-hid: dropping input reports (the guest is not reading them, "
++                    "or they do not match the report descriptor)");
++    }
 +    if (!live && dev->attached) { host_hid_abort(s); usb_device_detach(dev); }
 +    else if (live) {
 +        host_hid_resume(s);

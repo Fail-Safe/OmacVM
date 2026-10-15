@@ -10,7 +10,7 @@ def main():
     ap.add_argument('--patch',type=Path,default=Path(__file__).resolve().parents[1]/'patches/qemu-usb-host-hid.patch')
     ap.add_argument('--output',type=Path,required=True)
     ap.add_argument('--variant',choices=['plain','ubsan','asan'],default='plain')
-    ap.add_argument('--cases',nargs='+',default=['collision','input-first','capacity-control','get-exact','get-short','get-long','set-error','get-error','close-queued','close-running','reset-queued','removed-queued'])
+    ap.add_argument('--cases',nargs='+',default=['collision','input-first','capacity-control','get-exact','get-short','get-long','set-error','get-error','close-queued','close-running','reset-queued','removed-queued','overflow','malformed'])
     a=ap.parse_args();a.output.mkdir(parents=True,exist_ok=False)
     text=a.patch.read_text();m=re.search(r'\+\+\+ b/hw/usb/dev-host-hid.c\n@@ -0,0 \+1,(\d+) @@\n',text)
     assert m
