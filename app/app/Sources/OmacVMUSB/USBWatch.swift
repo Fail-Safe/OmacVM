@@ -63,7 +63,7 @@ public final class USBWatch {
         arrived(added, initial: true)
         left(removed)
         // The HID parts there now came with their devices.
-        for it in [hidAdded, hidRemoved] {
+        for it in [hidAdded, hidRemoved] where it != 0 {
             while case let e = IOIteratorNext(it), e != 0 { IOObjectRelease(e) }
         }
     }
