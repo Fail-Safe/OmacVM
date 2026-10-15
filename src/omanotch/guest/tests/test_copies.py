@@ -351,50 +351,112 @@ class Copies(unittest.TestCase):
         self.assertIn("// newer patch", src)
         (self.lib / "bar/apply-patch.py").write_text(src)
 
-    def test_a_copy_from_before_this_is_taken_over(self):
-        # As install.sh made it before: clone, backup, patch in place.
+    def old_copy(self, which=MAC, version=None):
+        """A copy as install.sh made it before 3.1.12: clone, backup, patch in place, no record."""
         self.clone("omarchy.bar")
         shutil.copy(self.entry(), self.entry().with_name("Bar.qml.before-notchbar"))
-        self.entry().write_bytes(self.patched("bar", MAC))
+        text = self.patched("bar", which)
+        if version:
+            text = re.sub(rb"patch v\d+", b"patch v%d" % version, text, count=1)
+        self.entry().write_bytes(text)
+
+    @property
+    def backup(self):
+        return self.plugins / f".{USER}.bar.before-3.1.13"
+
+    def test_a_copy_from_before_this_as_omacvm_made_it_gets_its_record(self):
+        """Nothing to keep: no backup, no file written, no restart, no note."""
+        self.old_copy()
+        self.clone("omarchy.background")   # its copy as install.sh made it too
+        bg = self.entry("background")
+        shutil.copy(bg, bg.with_name("Background.qml.before-notchbar"))
+        bg.write_bytes(self.patched("background", MAC))
+        before, n = self.files(self.copy()), self.restarts
+        self.assertEqual(self.follow(install=True), 0)
+        self.assertEqual(self.files(self.copy()), before)
+        self.assertEqual(self.restarts, n)
+        self.assertFalse(self.backup.exists())
+        self.assertEqual((self.state()["result"], self.state().get("backup")), ("current", None))
+        self.assertEqual(self.check()["bar copy"][0], "ok")
+        # From now on Omarchy's updates merge.
+        self.shell("bar", UPSTREAM)
+        self.assertEqual(self.follow(), 0)
+        self.assertEqual(self.entry().read_bytes(), self.patched("bar", UPSTREAM))
+
+    def test_a_copy_from_before_this_with_edits_is_kept_aside_and_made_new(self):
+        self.old_copy()
         mine = self.quiet_line(self.patched("bar", MAC), self.patched("bar", UPSTREAM))
         self.edit(self.entry(), mine, mine + "  // mine\n")
-        self.assertEqual(self.check()["bar copy"][0], "ok")
-        self.assertEqual(self.follow(), 0)
-        self.assertEqual(self.state()["result"], "current")
-        self.assertEqual(self.state()["edits"], ["Bar.qml"])
-        self.shell("bar", UPSTREAM)
-        self.assertEqual(self.follow(), 0)
-        self.assertIn("  // mine\n", self.entry().read_text())
-        self.assertEqual(self.entry().read_text().replace(mine + "  // mine\n", mine), self.patched("bar", UPSTREAM).decode())
-
-    def test_an_older_patch_is_replaced_and_kept(self):
-        self.clone("omarchy.bar")
-        shutil.copy(self.entry(), self.entry().with_name("Bar.qml.before-notchbar"))
-        v = self.m.current_version(self.m.COPIES[0])
-        old = self.patched("bar", MAC).replace(b"patch v%d" % v, b"patch v%d" % (v - 1))
-        self.entry().write_bytes(old)
-        self.assertEqual(self.follow(), 0)
-        self.assertEqual(self.entry().read_bytes(), self.patched("bar", MAC))
-        self.assertEqual((self.home / ".local/state/omanotch/copies/bar/replaced/Bar.qml").read_bytes(), old)
-
-    def test_a_copy_of_an_older_omarchy_is_left_alone(self):
-        # Made from omarchy-mac's bar, Omarchy now upstream's, no record.
-        self.clone("omarchy.bar")
-        shutil.copy(self.entry(), self.entry().with_name("Bar.qml.before-notchbar"))
-        self.entry().write_bytes(self.patched("bar", MAC))
-        self.shell("bar", UPSTREAM)
+        (self.copy() / "widgets/Mine.qml").write_text("Item {}\n")
         before = self.files(self.copy())
-        self.assertEqual(self.follow(), 0)
-        self.assertEqual(self.files(self.copy()), before)
+        self.assertEqual(self.follow(install=True), 0)
+        # The whole folder as it was, hidden beside it; the copy is what OmacVM makes.
+        self.assertEqual(self.files(self.backup), before)
+        self.assertEqual(self.entry().read_bytes(), self.patched("bar", MAC))
+        self.assertFalse((self.copy() / "widgets/Mine.qml").exists())
+        s = self.state()
+        self.assertEqual((s["result"], s["edits"], s["backup"]), ("current", [], str(self.backup)))
         st, d = self.check()["bar copy"]
         self.assertEqual(st, "warn")
-        self.assertIn("made from an older Omarchy", d)
-        self.assertIn("move ~/.config/omarchy/plugins/tester.bar away, then repair Omanotch", d)
-        # Moved away and repaired: a new copy of Omarchy's newest.
-        shutil.rmtree(self.copy())
+        self.assertIn("made new from Omarchy's bar on ", d)
+        self.assertIn(f"in ~/.config/omarchy/plugins/.{USER}.bar.before-3.1.13, in case you had changed it", d)
+        # Once: the next run (Update VM again) changes nothing, no second backup.
+        n, copy_now = self.restarts, self.files(self.copy())
         self.assertEqual(self.follow(install=True), 0)
+        self.assertEqual((self.restarts, self.files(self.copy())), (n, copy_now))
+        self.assertEqual(sorted(p.name for p in self.plugins.iterdir() if p.name.startswith(".")), [self.backup.name])
+        # A later Omarchy update merges, and the note stays while the backup is there.
+        self.shell("bar", UPSTREAM)
+        self.assertEqual(self.follow(), 0)
         self.assertEqual(self.entry().read_bytes(), self.patched("bar", UPSTREAM))
+        self.assertEqual(self.check()["bar copy"][0], "warn")
+        # Deleted, or two weeks old: no more note.
+        shutil.rmtree(self.backup)
         self.assertEqual(self.check()["bar copy"][0], "ok")
+
+    def test_the_note_goes_after_two_weeks(self):
+        self.old_copy(version=1)
+        self.assertEqual(self.follow(install=True), 0)
+        self.assertEqual(self.check()["bar copy"][0], "warn")
+        f = self.home / ".local/state/omanotch/copies/bar/state.json"
+        s = json.loads(f.read_text())
+        s["backup_at"] = "2026-01-01 10:00"
+        f.write_text(json.dumps(s))
+        self.assertEqual(self.check()["bar copy"][0], "ok")
+        self.assertTrue(self.backup.exists(), "the backup itself stays")
+
+    def test_an_older_patch_and_omarchy_are_made_new(self):
+        """Made from omarchy-mac's bar with an older patch, Omarchy is upstream's now."""
+        self.old_copy(version=1)
+        self.shell("bar", UPSTREAM)
+        old = self.files(self.copy())
+        self.assertEqual(self.follow(install=True), 0)
+        self.assertEqual(self.files(self.backup), old)
+        self.assertEqual(self.entry().read_bytes(), self.patched("bar", UPSTREAM))
+        self.assertEqual(self.entry().with_name("Bar.qml.before-notchbar").read_bytes(),
+                         (SHELLS / UPSTREAM / "shell/plugins/bar/Bar.qml").read_bytes())
+
+    def test_a_copy_made_new_that_does_not_load_goes_back(self):
+        self.old_copy(version=1)
+        before = self.files(self.copy())
+        self.refuse = {"bar": "TypeError"}
+        self.assertEqual(self.follow(install=True), 1)
+        self.assertEqual(self.files(self.copy()), before)
+        self.assertFalse(self.backup.exists(), "the copy is that one again: no backup")
+        self.assertEqual(self.state()["result"], "rolled-back")
+
+    def test_a_copy_3_1_12_could_not_take_over_is_made_new(self):
+        """3.1.12 left such a copy as it was ("unknown"); now it is made new."""
+        self.old_copy()
+        self.shell("bar", UPSTREAM)
+        st = self.home / ".local/state/omanotch/copies/bar"
+        st.mkdir(parents=True)
+        (st / "state.json").write_text(json.dumps({"result": "unknown", "why": "made from an older Omarchy"}))
+        self.assertTrue(self.m.needs_work())
+        self.assertEqual(self.follow(), 0)
+        self.assertTrue(self.backup.exists())
+        self.assertEqual(self.entry().read_bytes(), self.patched("bar", UPSTREAM))
+        self.assertEqual(self.state()["result"], "current")
 
     def test_a_patch_that_does_not_fit_keeps_the_copy(self):
         self.follow(install=True)

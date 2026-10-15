@@ -38,6 +38,8 @@ shell() {  # a made-up Omarchy shell and plugin clones under $T/s
   printf 'import QtQuick\nimport qs.Commons\nItem { property color fg: Color.bar.text }\n' > "$T/s/plugins/me.bar/Bar.qml"
   cp "$T/s/plugins/me.bar/Bar.qml" "$T/s/plugins/me.bar/Bar.qml.before-notchbar"
   printf 'Color.bar.text\nimport QtQuick\n' > "$T/s/plugins/me.bar/notes.txt"
+  # Omanotch's backup of a copy (a dot folder, no plugin for Omarchy): left as it is.
+  mkdir -p "$T/s/plugins/.me.bar.before-3.1.13"; cp "$T/s/plugins/me.bar/Bar.qml" "$T/s/plugins/.me.bar.before-3.1.13/Bar.qml"
   chmod 640 "$T/s/shell/plugins/bar/Bar.qml"
 }
 run() { python3 "$FIX" "$@" "$T/s/shell" "$T/s/plugins"; }
@@ -57,6 +59,7 @@ t "640" "$(stat -c %a "$T/s/shell/plugins/bar/Bar.qml" 2>/dev/null || stat -f %L
 t "0 0 0 0 0 0" "$(for f in Commons/Color.qml plugins/bar/NoColor.qml plugins/bar/Versioned.qml plugins/bar/Qualified.qml plugins/bar/QtColor.qml plugins/bar/OtherName.qml; do grep -cF "$MARK" "$T/s/shell/$f"; done | tr '\n' ' ' | sed 's/ $//')" \
   "left alone: Color.qml, no Color, already versioned, qualified, QtQuick's Color, other names"
 t "0" "$(grep -cF "$MARK" "$T/s/plugins/me.bar/notes.txt")" "not a QML file: left alone"
+t "0" "$(grep -cF "$MARK" "$T/s/plugins/.me.bar.before-3.1.13/Bar.qml")" "a dot folder (Omanotch's backup of a copy): left alone"
 t "nothing to do (QtQuick 6.11 already where needed)" "$(run --qmltypes "$T/qt612.qmltypes")" "6.12 again: nothing to do (idempotent)"
 t "qtquick-color yes, patched 4, to patch 0, to restore 0" "$(run --qmltypes "$T/qt612.qmltypes" --status)" "6.12 status after: 4 patched"
 

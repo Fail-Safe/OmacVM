@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.13
+
+- **Omanotch's bar from before 3.1.12 is made new once.** A bar copy without a saved original
+  (set up with OmacVM 3.1.11 or older) could not follow Omarchy's updates and needed a step by
+  hand. Update VM now makes it new from the installed Omarchy with OmacVM's patch, and from then
+  on Omarchy's updates merge into it. If the old copy differed (your own edits, an older Omarchy),
+  it is kept whole in `~/.config/omarchy/plugins/.<you>.bar.before-3.1.13`, and `omacvm check`
+  and the control centre say where for two weeks or until you delete it. The same for the
+  background copy.
+
 ## 3.1.12
 
 - **Omanotch's bar follows Omarchy's updates and keeps your edits.** Omanotch runs its own copy of

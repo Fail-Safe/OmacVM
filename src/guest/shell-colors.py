@@ -88,7 +88,9 @@ def files(paths):
             yield p
         elif os.path.isdir(p):
             for root, dirs, names in os.walk(p):
-                dirs.sort()
+                # Hidden folders are no plugins (Omarchy skips them): Omanotch's
+                # backup of a copy (.NAME.before-3.1.13) stays as it was.
+                dirs[:] = sorted(d for d in dirs if not d.startswith("."))
                 for n in sorted(names):
                     if n.endswith(".qml") or n.endswith(".qml.before-notchbar"):
                         yield os.path.join(root, n)
