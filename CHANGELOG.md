@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.14 (unreleased)
+## 3.1.14
 
 - **Vendor HID devices (experimental, off by default).** Boards that talk to their tools in HID
   reports of their own (ECU interfaces, bootloaders, programmers) are held by macOS's HID driver, so
