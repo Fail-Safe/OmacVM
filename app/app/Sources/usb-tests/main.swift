@@ -7,8 +7,10 @@
 import Foundation
 import OmacVMUSB
 
+// --list: this Mac's devices as the app sees them; --list --hid: with the
+// "Vendor HID devices" switch on (each device's HID part; nothing opened).
 if CommandLine.arguments.contains("--list") {
-    for d in USBScan.devices() {
+    for d in USBScan.devices(hid: CommandLine.arguments.contains("--hid")) {
         let a: String
         switch d.availability {
         case .free: a = "free: a VM can have it"
@@ -16,7 +18,8 @@ if CommandLine.arguments.contains("--list") {
         case .notOffered(let why): a = "not offered: \(why)"
         }
         let ifs = d.interfaces.map { "\($0.number):\(String(format: "%02x", $0.interfaceClass))\($0.users.isEmpty ? "" : "[\($0.users.joined(separator: ","))]")" }
-        print("\(d.id) \(d.name) (class \(String(format: "%02x", d.deviceClass))) -> \(a)")
+        print("\(d.id) \(d.name) (class \(String(format: "%02x", d.deviceClass))) -> \(a)"
+              + (d.hid.map { " [vendor HID, registry id \(String($0.registryID, radix: 16))]" } ?? ""))
         print("    interfaces \(ifs.joined(separator: " "))\(d.drivers.isEmpty ? "" : "; device drivers \(d.drivers.joined(separator: ","))")")
     }
     exit(0)
@@ -530,6 +533,7 @@ do {
     expect(rows.remembered.count == 1 && rows.plugged.count == 1 && rows.plugged[0].plan == .omarchy,
            "10: two boards without a serial: the second shows the choice they share")
 }
+vendorHIDTests()
 try? FileManager.default.removeItem(at: tmp)
 
 if let i = CommandLine.arguments.firstIndex(of: "--qmp"), i + 1 < CommandLine.arguments.count {
