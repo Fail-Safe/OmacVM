@@ -1,0 +1,765 @@
+From: František Balázsy (@fbalazsy, OmacVM #424), trimmed for OmacVM
+Subject: [PATCH] usb-host-hid: a vendor HID device for the guest, without root
+
+What: a new USB device, usb-host-hid (hw/usb/dev-host-hid.c, macOS only). It
+gives the guest one vendor-page HID interface of a Mac USB device through
+IOHIDDevice reports: input, output and feature reports, with USB descriptors
+QEMU makes itself. No libusb, no seize, no root. The app adds it with
+device_add by the IOHIDDevice's registry id, vendor, product and serial, and
+QEMU checks the device again before it opens it: one HID interface, vendor
+usage page in the metadata and in the report descriptor, nothing else on it
+(no other driver or app), reports of at most 64 bytes, a descriptor of at most
+1 KB. Keyboards, mice, security keys and composite devices are refused.
+A full input queue (16 reports; Linux reads only while a program has the
+hidraw node open) drops the oldest report, and a report that does not match
+the descriptor is dropped; both are logged once. The guest loses the device
+only when the Mac does (unplugged, or macOS replaced its HID part).
+Why: libusb cannot take a device that macOS's HID driver holds without root
+or Apple's com.apple.vm.device-access entitlement. Vendor HID boards (ECU
+tools, bootloaders, programmers) are of no use to macOS but held by it.
+Upstream: not sent (macOS- and OmacVM-specific).
+Test: app/runtime/Tests/test-hid-native-dispatch.py (report dispatch, close,
+the full queue; no hardware); usb-tests --qmp QEMU (an absent device is
+refused). Runs only when the VM's "Vendor HID devices" switch is on and the
+user connects such a device (docs/usb.md).
+
+--- /dev/null
++++ b/hw/usb/dev-host-hid.c
+@@ -0,0 +1,724 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * usb-host-hid: one vendor HID interface of a Mac USB device, for the guest,
++ * through IOHIDDevice reports (no libusb, no root). QEMU makes the USB
++ * descriptors itself. By @fbalazsy (OmacVM #424). */
++#include "qemu/osdep.h"
++#include "hw/usb/usb.h"
++#include "hw/usb/desc.h"
++#include "hw/core/qdev-properties.h"
++#include "qapi/error.h"
++#include "qemu/module.h"
++#include "migration/vmstate.h"
++#include "qemu/main-loop.h"
++#include "qemu/error-report.h"
++#include <IOKit/IOKitLib.h>
++#include <IOKit/hid/IOHIDDevice.h>
++#include <dispatch/dispatch.h>
++#define TYPE_HOST_HID "usb-host-hid"
++OBJECT_DECLARE_SIMPLE_TYPE(HostHIDState, HOST_HID)
++struct HostHIDState {
++    USBDevice parent_obj;
++    uint64_t registry_id;
++    uint16_t vendorid, productid;
++    char *product;
++    uint8_t report_desc[1024];
++    size_t report_desc_len;
++    uint16_t sizes[3][256];
++    bool numbered;
++    QemuMutex lock;
++    QEMUBH *bh;
++    bool live, busy, done, closing;
++    bool configured, halted[2];
++    unsigned epoch, transfer_epoch;
++    int result;
++    USBPacket *pending, *waiting;
++    bool transfer_set;
++    unsigned transfer_id, transfer_len, guest_len;
++    uint8_t transfer[64];
++    struct { uint8_t data[64]; unsigned len; } queue[16];
++    unsigned head, count;
++    unsigned dropped;
++    bool dropped_logged;
++    IOHIDDeviceRef hid;
++    dispatch_queue_t dispatch;
++    dispatch_semaphore_t cancelled;
++    uint8_t input[64];
++    USBDesc desc;
++    USBDescDevice device;
++    USBDescConfig config;
++    USBDescIface iface;
++    USBDescOther other;
++    USBDescEndpoint eps[2];
++    const char *strings[256];
++    uint8_t hid_desc[9];
++};
++static bool native_open(HostHIDState *s, Error **errp);
++static void native_close(HostHIDState *s);
++static void native_start(HostHIDState *s);
++static void host_hid_abort(HostHIDState *s);
++static void host_hid_resume(HostHIDState *s);
++static int native_report(HostHIDState *s, bool set, unsigned type,
++                         unsigned id, uint8_t *data, unsigned len);
++/* Callback side: never touches USB state and never takes the BQL.
++ * A report that does not match the descriptor is dropped. A full queue (Linux
++ * polls the IN endpoint only while a program has the hidraw node open) drops
++ * the oldest report, as a real device's buffer would; the device stays with
++ * the guest. Both are logged once (host_hid_bh). */
++static void host_hid_receive(HostHIDState *s, unsigned id, const uint8_t *data, size_t len)
++{
++    qemu_mutex_lock(&s->lock);
++    if (!s->closing && s->live && s->configured) {
++        if (id > 255 || !len || len > 64 || len != s->sizes[0][id] ||
++            (!!id != s->numbered) || (id && data[0] != id)) {
++            s->dropped++;
++        } else {
++            if (s->count == 16) {
++                s->head = (s->head + 1) % 16;
++                s->count--;
++                s->dropped++;
++            }
++            unsigned slot = (s->head + s->count++) % 16;
++            memcpy(s->queue[slot].data, data, len);
++            s->queue[slot].len = len;
++        }
++        qemu_bh_schedule(s->bh);
++    }
++    qemu_mutex_unlock(&s->lock);
++}
++static void host_hid_complete(HostHIDState *s, int result)
++{
++    qemu_mutex_lock(&s->lock);
++    if (!s->closing) {
++        s->result = result;
++        s->done = true;
++        qemu_bh_schedule(s->bh);
++    }
++    qemu_mutex_unlock(&s->lock);
++}
++static void host_hid_bh(void *opaque)
++{
++    HostHIDState *s = opaque;
++    USBDevice *dev = USB_DEVICE(s);
++    qemu_mutex_lock(&s->lock);
++    bool live = s->live;
++    if (s->done) {
++        USBPacket *p = s->pending;
++        s->pending = NULL;
++        s->done = s->busy = false;
++        if (p) {
++            bool ok = live && s->transfer_epoch == s->epoch && s->result == s->transfer_len &&
++                (!s->transfer_id || s->transfer[0] == s->transfer_id);
++            p->status = ok ? USB_RET_SUCCESS : USB_RET_STALL;
++            p->actual_length = ok ? MIN(s->guest_len, s->transfer_len) : 0;
++            if (!s->transfer_set && ok) {
++                memcpy(dev->data_buf, s->transfer, p->actual_length);
++            }
++            qemu_mutex_unlock(&s->lock);
++            if (p->ep->nr == 0) { usb_generic_async_ctrl_complete(dev, p); }
++            else { usb_packet_complete(dev, p); }
++            qemu_mutex_lock(&s->lock);
++        }
++    }
++    bool wake = s->count != 0;
++    bool warn = s->dropped && !s->dropped_logged;
++    s->dropped_logged |= warn;
++    qemu_mutex_unlock(&s->lock);
++    if (warn) {
++        warn_report("usb-host-hid: dropping input reports (the guest is not reading them, "
++                    "or they do not match the report descriptor)");
++    }
++    if (!live && dev->attached) { host_hid_abort(s); usb_device_detach(dev); }
++    else if (live) {
++        host_hid_resume(s);
++        if (wake) { usb_wakeup(usb_ep_get(dev, USB_TOKEN_IN, 1), 0); }
++    }
++}
++/* Bounded grammar and layout; optional top-level usage is page << 16 | usage. */
++static bool host_hid_parse(HostHIDState *s, uint32_t *application)
++{
++    unsigned page = 0, size = 0, count = 0, id = 0, depth = 0, apps = 0;
++    uint32_t local_usage = 0;
++    bool zero = false;
++    memset(s->sizes, 0, sizeof(s->sizes));
++    s->numbered = false;
++    for (size_t p = 0; p < s->report_desc_len;) {
++        uint8_t tag = s->report_desc[p++];
++        unsigned n = (tag & 3) == 3 ? 4 : tag & 3, v = 0;
++        if (tag == 0xfe || n > s->report_desc_len - p) { return false; }
++        for (unsigned i = 0; i < n; i++) { v |= (uint32_t)s->report_desc[p++] << (8 * i); }
++        switch (tag & 0xfc) {
++        case 0x04: page = v; if (page < 0xff00 || page > 0xffff) { return false; } break;
++        case 0x74: size = v; break;
++        case 0x94: count = v; break;
++        case 0x84:
++            if (!v || v > 255 || zero) { return false; }
++            id = v; s->numbered = true; break;
++        case 0xa0:
++            if (page < 0xff00 || (!depth && (v != 1 || ++apps != 1)) ||
++                depth >= 8) { return false; }
++            if (!depth && application) { *application = local_usage; }
++            depth++; break;
++        case 0xc0: if (!depth || n) { return false; } depth--; break;
++        case 0x80: case 0x90: case 0xb0: {
++            unsigned t = (tag & 0xfc) == 0x80 ? 0 : (tag & 0xfc) == 0x90 ? 1 : 2;
++            if (!depth || !size || size > 32 || !count || count > 512 ||
++                size * count > 512 || s->sizes[t][id] + size * count > (id ? 504 : 512)) { return false; }
++            if (!id) { zero = true; if (s->numbered) { return false; } }
++            s->sizes[t][id] += size * count;
++            break;
++        }
++        case 0x08: case 0x18: case 0x28:
++            if (n == 4 && (v >> 16) < 0xff00) { return false; }
++            if ((tag & 0xfc) == 0x08) { local_usage = n == 4 ? v : (page << 16) | (v & 0xffff); }
++            break;
++        case 0x14: case 0x24: case 0x34: case 0x44: case 0x54: case 0x64:
++            break;
++        default: return false;
++        }
++    }
++    bool input = false;
++    for (unsigned t = 0; t < 3; t++) {
++        for (unsigned r = 0; r < 256; r++) {
++            if (s->sizes[t][r]) {
++                s->sizes[t][r] = (s->sizes[t][r] + 7) / 8 + !!r;
++                input |= t == 0;
++            }
++        }
++    }
++    return input && apps == 1 && depth == 0;
++}
++static int host_hid_report(HostHIDState *s, USBPacket *p, bool set, unsigned type,
++                           unsigned id, uint8_t *data, unsigned len)
++{
++    if (type < 1 || type > 3 || id > 255 || !s->sizes[type - 1][id] ||
++        (set && (type == 1 || len != s->sizes[type - 1][id] ||
++                 (id && data[0] != id)))) { return USB_RET_STALL; }
++    qemu_mutex_lock(&s->lock);
++    if (!s->live || s->busy) {
++        int r = s->live ? USB_RET_NAK : USB_RET_NODEV;
++        /* EP0 NAK loses ACK/parameter state in the generic core/controllers.
++         * Keep its core-owned setup/data buffers until the native slot drains. */
++        if (s->live && p->ep->nr == 0) { s->waiting = p; r = USB_RET_ASYNC; }
++        qemu_mutex_unlock(&s->lock);
++        return r;
++    }
++    s->busy = true;
++    s->pending = p;
++    s->transfer_set = set;
++    s->transfer_id = id;
++    s->transfer_epoch = s->epoch;
++    s->transfer_len = s->sizes[type - 1][id];
++    s->guest_len = len;
++    memset(s->transfer, 0, sizeof(s->transfer));
++    s->transfer[0] = id;
++    if (set) { memcpy(s->transfer, data, len); }
++    qemu_mutex_unlock(&s->lock);
++    int r = native_report(s, set, type - 1, id, s->transfer, s->transfer_len);
++    if (r != USB_RET_ASYNC) {
++        qemu_mutex_lock(&s->lock);
++        s->busy = false; s->pending = NULL;
++        qemu_mutex_unlock(&s->lock);
++    }
++    return r;
++}
++static void host_hid_resume(HostHIDState *s)
++{
++    USBDevice *dev = USB_DEVICE(s);
++    qemu_mutex_lock(&s->lock);
++    USBPacket *p = !s->busy && s->live ? s->waiting : NULL;
++    if (p) { s->waiting = NULL; }
++    qemu_mutex_unlock(&s->lock);
++    if (p) {
++        int value = dev->setup_buf[2] | dev->setup_buf[3] << 8;
++        p->status = host_hid_report(s, p, !(dev->setup_buf[0] & USB_DIR_IN),
++                                    value >> 8, value & 255, dev->data_buf, dev->setup_len);
++        if (p->status != USB_RET_ASYNC) {
++            p->actual_length = 0;
++            usb_generic_async_ctrl_complete(dev, p);
++        }
++    }
++}
++static void host_hid_cancel(USBDevice *dev, USBPacket *p)
++{
++    HostHIDState *s = HOST_HID(dev);
++    qemu_mutex_lock(&s->lock);
++    if (s->pending == p) { s->pending = NULL; }
++    if (s->waiting == p) { s->waiting = NULL; }
++    qemu_mutex_unlock(&s->lock);
++    /* The native operation owns its buffer until its bounded completion. */
++}
++static void host_hid_data(USBDevice *dev, USBPacket *p)
++{
++    HostHIDState *s = HOST_HID(dev);
++    uint8_t data[64];
++    if (!dev->config || p->ep->nr != 1 || s->halted[p->pid == USB_TOKEN_IN]) {
++        p->status = USB_RET_STALL; return;
++    }
++    if (p->pid == USB_TOKEN_IN) {
++        qemu_mutex_lock(&s->lock);
++        p->status = !s->live ? USB_RET_NODEV : !s->count ? USB_RET_NAK : USB_RET_SUCCESS;
++        if (p->status == USB_RET_SUCCESS) {
++            unsigned len = s->queue[s->head].len;
++            if (p->iov.size < len) { p->status = USB_RET_BABBLE; }
++            else {
++                usb_packet_copy(p, s->queue[s->head].data, len);
++                s->head = (s->head + 1) % 16; s->count--;
++            }
++        }
++        qemu_mutex_unlock(&s->lock);
++        return;
++    }
++    if (p->iov.size > sizeof(data) || p->pid != USB_TOKEN_OUT || !p->iov.size) {
++        p->status = USB_RET_STALL; return;
++    }
++    usb_packet_copy(p, data, p->iov.size);
++    int r = host_hid_report(s, p, true, 2, s->numbered ? data[0] : 0, data, p->iov.size);
++    if (r == USB_RET_NAK) { p->actual_length = 0; } /* EHCI retries this packet. */
++    if (r < 0) { p->status = r; }
++}
++static void host_hid_abort(HostHIDState *s)
++{
++    qemu_mutex_lock(&s->lock);
++    USBPacket *p = s->pending;
++    USBPacket *waiting = s->waiting;
++    s->pending = s->waiting = NULL;
++    qemu_mutex_unlock(&s->lock);
++    if (waiting) {
++        waiting->status = USB_RET_STALL; waiting->actual_length = 0;
++        usb_generic_async_ctrl_complete(USB_DEVICE(s), waiting);
++    }
++    if (p) {
++        p->status = USB_RET_STALL; p->actual_length = 0;
++        if (p->ep->nr == 0) { usb_generic_async_ctrl_complete(USB_DEVICE(s), p); }
++        else { usb_packet_complete(USB_DEVICE(s), p); }
++    }
++}
++static void host_hid_control(USBDevice *dev, USBPacket *p, int request,
++                             int value, int index, int length, uint8_t *data)
++{
++    HostHIDState *s = HOST_HID(dev);
++    bool valid = true;
++    switch (request) {
++    case 0x0005: valid = !index && !length && value <= 127; break;
++    case 0x0009: valid = !index && !length && value <= 1; break;
++    case 0x8008: valid = !index && !value && length == 1; break;
++    case 0x8000: valid = !index && !value && length == 2; break;
++    case 0x810a: valid = !index && !value && length == 1 && dev->config; break;
++    case 0x010b: valid = !index && !value && !length && dev->config; break;
++    case 0x8006:
++        valid = (value >> 8) == USB_DT_STRING ? (index == 0 || index == 0x409) : !index;
++        break;
++    case 0x0001: case 0x0003: valid = false; break; /* No remote-wake capability. */
++    case 0x8100:
++        if (index || value || length != 2 || !dev->config) { valid = false; break; }
++        data[0] = data[1] = 0; p->actual_length = 2; return;
++    case 0xa102: case 0x210a:
++        /* This bounded report transport supports indefinite (zero) idle only. */
++        if (index || !dev->config || (value >> 8) ||
++            ((value & 255) && !s->sizes[0][value & 255]) ||
++            length != (request == 0xa102 ? 1 : 0)) { valid = false; break; }
++        if (request == 0xa102) { data[0] = 0; p->actual_length = 1; }
++        return;
++    }
++    if (!valid) { p->status = USB_RET_STALL; return; }
++    if (request == 0x8006 && (value == 0x301 || value == 0x302)) {
++        glong units = 0;
++        g_autofree gunichar2 *text = g_utf8_to_utf16(value == 0x301 ? s->product : dev->serial,
++                                                   -1, NULL, &units, NULL);
++        if (!text || units > 126) { p->status = USB_RET_STALL; return; }
++        uint8_t desc[254] = {units * 2 + 2, USB_DT_STRING};
++        for (glong i = 0; i < units; i++) { desc[2 + i * 2] = text[i]; desc[3 + i * 2] = text[i] >> 8; }
++        p->actual_length = MIN(length, units * 2 + 2);
++        memcpy(data, desc, p->actual_length);
++        return;
++    }
++    if (request == 0x8200 && (index == 0 || index == 0x80) && !value && length == 2) {
++        data[0] = data[1] = 0; p->actual_length = 2; return;
++    }
++    if (request == 0x8200 || request == 0x0201 || request == 0x0203) {
++        if (!dev->config || value || (index != 0x81 && index != 1) ||
++            length != (request == 0x8200 ? 2 : 0)) { p->status = USB_RET_STALL; return; }
++        unsigned ep = index == 0x81;
++        if (request == 0x8200) { data[0] = s->halted[ep]; data[1] = 0; p->actual_length = 2; }
++        else { s->halted[ep] = request == 0x0203; }
++        return;
++    }
++    if (request == 0xa101 || request == 0x2109) {
++        int r = index == 0 && dev->config ?
++            host_hid_report(s, p, request == 0x2109, value >> 8, value & 255, data, length) : USB_RET_STALL;
++        if (r < 0) { p->status = r; } else { p->actual_length = r; }
++        return;
++    }
++    if (request == (InterfaceRequest | USB_REQ_GET_DESCRIPTOR) &&
++        index == 0 && (value == 0x2200 || value == 0x2100)) {
++        size_t n = value == 0x2200 ? s->report_desc_len : sizeof(s->hid_desc);
++        p->actual_length = MIN(length, n);
++        memcpy(data, value == 0x2200 ? s->report_desc : s->hid_desc,
++               p->actual_length);
++        return;
++    }
++    if (request == 0x0009 || request == 0x010b) { host_hid_abort(s); }
++    if (usb_desc_handle_control(dev, p, request, value, index, length, data) < 0) {
++        p->status = USB_RET_STALL;
++    } else if (request == (DeviceOutRequest | USB_REQ_SET_CONFIGURATION) ||
++               request == (InterfaceOutRequest | USB_REQ_SET_INTERFACE)) {
++        qemu_mutex_lock(&s->lock);
++        s->configured = dev->config != NULL;
++        s->epoch++; s->head = s->count = 0;
++        s->halted[0] = s->halted[1] = false;
++        qemu_mutex_unlock(&s->lock);
++    }
++}
++static void host_hid_reset(USBDevice *dev)
++{
++    HostHIDState *s = HOST_HID(dev);
++    host_hid_abort(s);
++    qemu_mutex_lock(&s->lock);
++    s->epoch++; s->head = s->count = 0; s->configured = false;
++    s->halted[0] = s->halted[1] = false;
++    qemu_mutex_unlock(&s->lock);
++    usb_desc_init(dev);
++}
++static void host_hid_realize(USBDevice *dev, Error **errp)
++{
++    HostHIDState *s = HOST_HID(dev);
++    if (!s->registry_id || !s->vendorid || !s->productid || !dev->serial) {
++        error_setg(errp, "usb-host-hid requires exact registry-id, vendorid, productid and serial");
++        return;
++    }
++    if (!native_open(s, errp)) {
++        return;
++    }
++    if (!host_hid_parse(s, NULL)) {
++        native_close(s);
++        g_clear_pointer(&s->product, g_free);
++        error_setg(errp, "unsupported or protected HID report descriptor");
++        return;
++    }
++    s->hid_desc[0] = 9; s->hid_desc[1] = 0x21;
++    s->hid_desc[2] = 0x11; s->hid_desc[3] = 1;
++    s->hid_desc[5] = 1; s->hid_desc[6] = 0x22;
++    s->hid_desc[7] = s->report_desc_len;
++    s->hid_desc[8] = s->report_desc_len >> 8;
++    s->other = (USBDescOther){.length=9,.data=s->hid_desc};
++    s->eps[0] = (USBDescEndpoint){.bEndpointAddress=0x81,.bmAttributes=3,.wMaxPacketSize=64,.bInterval=1};
++    s->eps[1] = (USBDescEndpoint){.bEndpointAddress=0x01,.bmAttributes=3,.wMaxPacketSize=64,.bInterval=1};
++    s->iface = (USBDescIface){.bNumEndpoints=2,.bInterfaceClass=3,.ndesc=1,.descs=&s->other,.eps=s->eps};
++    s->config = (USBDescConfig){.bNumInterfaces=1,.bConfigurationValue=1,.bmAttributes=0x80,.bMaxPower=50,.nif=1,.ifs=&s->iface};
++    s->device = (USBDescDevice){.bcdUSB=0x110,.bMaxPacketSize0=64,.bNumConfigurations=1,.confs=&s->config};
++    s->strings[1] = s->product; s->strings[2] = dev->serial;
++    s->desc = (USBDesc){.id={.idVendor=s->vendorid,.idProduct=s->productid,.bcdDevice=0x100,.iProduct=1,.iSerialNumber=2},.full=&s->device,.str=s->strings};
++    dev->usb_desc = &s->desc;
++    usb_desc_init(dev);
++    s->bh = qemu_bh_new(host_hid_bh, s);
++    s->live = true;
++    native_start(s);
++}
++static void host_hid_unrealize(USBDevice *dev)
++{
++    HostHIDState *s = HOST_HID(dev);
++    qemu_mutex_lock(&s->lock);
++    s->closing = true; s->live = false; s->pending = s->waiting = NULL;
++    qemu_mutex_unlock(&s->lock);
++    native_close(s);
++    qemu_bh_delete(s->bh); s->bh = NULL;
++    g_clear_pointer(&s->product, g_free);
++}
++static void host_hid_init(Object *obj)
++{
++    qemu_mutex_init(&HOST_HID(obj)->lock);
++    USB_DEVICE(obj)->flags |= 1 << USB_DEV_FLAG_IS_HOST;
++}
++static void host_hid_finalize(Object *obj)
++{
++    qemu_mutex_destroy(&HOST_HID(obj)->lock);
++}
++static const Property host_hid_properties[] = {
++    DEFINE_PROP_UINT64("registry-id", HostHIDState, registry_id, 0),
++    DEFINE_PROP_UINT16("vendorid", HostHIDState, vendorid, 0),
++    DEFINE_PROP_UINT16("productid", HostHIDState, productid, 0),
++
++};
++static const VMStateDescription host_hid_vmstate = {
++    .name = TYPE_HOST_HID, .unmigratable = 1,
++};
++static void host_hid_class_init(ObjectClass *klass, const void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
++    uc->realize = host_hid_realize;
++    uc->unrealize = host_hid_unrealize;
++    uc->handle_attach = usb_desc_attach;
++    uc->handle_control = host_hid_control;
++    uc->handle_data = host_hid_data;
++    uc->handle_reset = host_hid_reset;
++    uc->cancel_packet = host_hid_cancel;
++    uc->product_desc = "Native vendor HID report device";
++    dc->vmsd = &host_hid_vmstate;
++    device_class_set_props(dc, host_hid_properties);
++    set_bit(DEVICE_CATEGORY_USB, dc->categories);
++}
++static const TypeInfo host_hid_type = {
++    .name=TYPE_HOST_HID,.parent=TYPE_USB_DEVICE,.instance_size=sizeof(HostHIDState),
++    .class_init=host_hid_class_init,
++    .instance_init=host_hid_init, .instance_finalize=host_hid_finalize,
++};
++static void host_hid_register(void) { type_register_static(&host_hid_type); }
++type_init(host_hid_register)
++static uint64_t native_number(CFTypeRef value)
++{
++    int64_t n;
++    return value && CFGetTypeID(value) == CFNumberGetTypeID() && !CFNumberIsFloatType(value) &&
++        CFNumberGetValue(value, kCFNumberSInt64Type, &n) && n >= 0 ? n : UINT64_MAX;
++}
++static char *native_string(CFTypeRef value)
++{
++    char text[512];
++    if (!value || CFGetTypeID(value) != CFStringGetTypeID() ||
++        !CFStringGetCString(value, text, sizeof(text), kCFStringEncodingUTF8)) { return NULL; }
++    glong n;
++    g_autofree gunichar2 *utf16 = g_utf8_to_utf16(text, -1, NULL, &n, NULL);
++    return utf16 && n <= 126 && n == CFStringGetLength(value) ? g_strdup(text) : NULL;
++}
++/* Admission: reads only the selected device's part of the IORegistry, before
++ * QEMU opens it. It checks what is there now; it does not keep others out. */
++static bool native_unsigned(CFTypeRef value, uint64_t *n)
++{
++    if (!value || CFGetTypeID(value) != CFNumberGetTypeID() ||
++        CFNumberIsFloatType(value)) { return false; }
++    *n = native_number(value);
++    return *n != UINT64_MAX;
++}
++static bool native_metadata(io_registry_entry_t entry, bool required,
++                            uint64_t *page, uint64_t *usage)
++{
++    CFMutableDictionaryRef props = NULL;
++    if (IORegistryEntryCreateCFProperties(entry, &props, kCFAllocatorDefault, 0)
++        != KERN_SUCCESS || !props) { return false; }
++    CFTypeRef built = CFDictionaryGetValue(props, CFSTR(kIOHIDBuiltInKey));
++    uint64_t n;
++    bool ok = !built || built == kCFBooleanFalse ||
++        (native_unsigned(built, &n) && n == 0);
++    CFTypeRef p = CFDictionaryGetValue(props, CFSTR(kIOHIDPrimaryUsagePageKey));
++    CFTypeRef u = CFDictionaryGetValue(props, CFSTR(kIOHIDPrimaryUsageKey));
++    *page = *usage = UINT64_MAX;
++    if (required || p || u) {
++        ok &= native_unsigned(p, page) && *page >= 0xff00 && *page <= 0xffff &&
++              native_unsigned(u, usage) && *usage <= 0xffff;
++    }
++    CFTypeRef pairs = CFDictionaryGetValue(props, CFSTR(kIOHIDDeviceUsagePairsKey));
++    if (required || pairs) {
++        bool matched = false;
++        ok &= pairs && CFGetTypeID(pairs) == CFArrayGetTypeID();
++        CFIndex count = ok ? CFArrayGetCount(pairs) : 0;
++        ok &= count > 0 && count <= 16;
++        for (CFIndex i = 0; ok && i < count; i++) {
++            CFTypeRef pair = CFArrayGetValueAtIndex(pairs, i);
++            uint64_t pp, uu;
++            ok = pair && CFGetTypeID(pair) == CFDictionaryGetTypeID() &&
++                native_unsigned(CFDictionaryGetValue(pair, CFSTR(kIOHIDDeviceUsagePageKey)), &pp) &&
++                pp >= 0xff00 && pp <= 0xffff &&
++                native_unsigned(CFDictionaryGetValue(pair, CFSTR(kIOHIDDeviceUsageKey)), &uu) && uu <= 0xffff;
++            if (ok && p) {
++                /* The accepted descriptor has one application collection. */
++                ok = pp == *page && uu == *usage;
++                matched |= ok;
++            }
++        }
++        if (p) { ok &= matched; }
++    }
++    CFRelease(props);
++    return ok;
++}
++static bool native_tree(io_registry_entry_t entry, uint64_t selected,
++                        unsigned role, unsigned depth, unsigned *budget,
++                        unsigned counts[3], uint64_t page, uint64_t usage)
++{
++    io_name_t cls;
++    uint64_t p, u, id;
++    if (depth > 8 || !*budget || IOObjectGetClass(entry, cls) != KERN_SUCCESS) { return false; }
++    --*budget;
++    bool hid = !strcmp(cls, "AppleUserHIDDevice") || !strcmp(cls, "IOHIDDevice");
++    unsigned next;
++    if (role == 0 && !strcmp(cls, "IOUSBHostDevice")) { next = 1; }
++    else if (role == 1 && !strcmp(cls, "IOUSBHostInterface")) { next = 2; counts[0]++; }
++    else if (role == 2 && hid) {
++        if (IORegistryEntryGetRegistryEntryID(entry, &id) != KERN_SUCCESS || id != selected) { return false; }
++        next = 3; counts[1]++;
++    } else if (role == 3 && !strcmp(cls, "IOHIDInterface")) { next = 4; counts[2]++; }
++    else if (role == 1 && !strcmp(cls, "AppleUSBHostCompositeDevice")) { next = 4; }
++    else { return false; } /* Includes every user client, event/security driver and unknown subclass. */
++    bool required = next == 3 || (role == 3 && next == 4);
++    if (!native_metadata(entry, required, &p, &u) ||
++        (required && (p != page || u != usage))) { return false; }
++    if (next == 2) {
++        const CFStringRef keys[] = {CFSTR("bInterfaceClass"), CFSTR("bInterfaceSubClass"), CFSTR("bInterfaceProtocol")};
++        for (unsigned i = 0; i < 3; i++) {
++            CFTypeRef v = IORegistryEntryCreateCFProperty(entry, keys[i], kCFAllocatorDefault, 0);
++            bool ok = native_unsigned(v, &p) && p == (i == 0 ? 3 : 0);
++            if (v) { CFRelease(v); }
++            if (!ok) { return false; }
++        }
++    }
++    io_iterator_t it = 0;
++    if (IORegistryEntryGetChildIterator(entry, kIOServicePlane, &it) != KERN_SUCCESS || !it) { return false; }
++    io_object_t child;
++    bool ok = true;
++    while (ok && (child = IOIteratorNext(it))) {
++        ok = next != 4 && native_tree(child, selected, next, depth + 1, budget, counts, page, usage);
++        IOObjectRelease(child);
++    }
++    ok &= IOIteratorIsValid(it);
++    IOObjectRelease(it);
++    return ok && counts[0] <= 1 && counts[1] <= 1 && counts[2] <= 1;
++}
++static bool native_root(HostHIDState *s, io_registry_entry_t root)
++{
++    CFMutableDictionaryRef props = NULL;
++    if (IORegistryEntryCreateCFProperties(root, &props, kCFAllocatorDefault, 0)
++        != KERN_SUCCESS || !props) { return false; }
++    uint64_t vendor, product, cls;
++    CFTypeRef value = CFDictionaryGetValue(props, CFSTR("bDeviceClass"));
++    bool ok = native_unsigned(CFDictionaryGetValue(props, CFSTR("idVendor")), &vendor) &&
++        native_unsigned(CFDictionaryGetValue(props, CFSTR("idProduct")), &product) &&
++        vendor == s->vendorid && product == s->productid && vendor && product &&
++        (!value || (native_unsigned(value, &cls) && cls <= 255 && cls != 9 && cls != 17));
++    CFRelease(props);
++    return ok;
++}
++static bool native_single_interface(HostHIDState *s, io_service_t service)
++{
++    uint64_t page, usage;
++    if (!native_metadata(service, true, &page, &usage)) { return false; }
++    /* Match the metadata to the descriptor's one top-level application usage.
++     * The existing parser remains the authority for the complete bounded grammar. */
++    CFTypeRef desc = IORegistryEntryCreateCFProperty(service, CFSTR(kIOHIDReportDescriptorKey), kCFAllocatorDefault, 0);
++    bool ok = desc && CFGetTypeID(desc) == CFDataGetTypeID() &&
++        CFDataGetLength(desc) > 0 && CFDataGetLength(desc) <= sizeof(s->report_desc);
++    if (ok) {
++        s->report_desc_len = CFDataGetLength(desc);
++        memcpy(s->report_desc, CFDataGetBytePtr(desc), s->report_desc_len);
++        uint32_t application = 0;
++        ok = host_hid_parse(s, &application) && application == ((page << 16) | usage);
++    }
++    if (desc) { CFRelease(desc); }
++    if (!ok) { return false; }
++    io_registry_entry_t current = service, parent;
++    IOObjectRetain(current);
++    bool found = false;
++    for (unsigned depth = 0; depth < 16; depth++) {
++        if (IOObjectConformsTo(current, "IOUSBHostDevice")) { found = true; break; }
++        if (IORegistryEntryGetParentEntry(current, kIOServicePlane, &parent) != KERN_SUCCESS) { break; }
++        IOObjectRelease(current); current = parent;
++    }
++    unsigned budget = 64, counts[3] = {0};
++    ok = found && native_root(s, current) &&
++        native_tree(current, s->registry_id, 0, 0, &budget, counts, page, usage);
++    IOObjectRelease(current);
++    return ok && counts[0] == 1 && counts[1] == 1;
++}
++static bool native_open(HostHIDState *s, Error **errp)
++{
++    io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault,
++                                IORegistryEntryIDMatching(s->registry_id));
++    uint64_t actual = 0;
++    if (!service) { error_setg(errp, "failed to find the HID device (unplugged)"); return false; }
++    bool eligible = IORegistryEntryGetRegistryEntryID(service, &actual) == KERN_SUCCESS &&
++        actual == s->registry_id && IOObjectConformsTo(service, "IOHIDDevice") &&
++        native_single_interface(s, service);
++    if (eligible) { s->hid = IOHIDDeviceCreate(kCFAllocatorDefault, service); }
++    IOObjectRelease(service);
++    if (!s->hid) { error_setg(errp, "not a vendor HID device (one vendor-page HID interface, nothing else on it)"); return false; }
++    g_autofree char *serial = native_string(IOHIDDeviceGetProperty(s->hid, CFSTR(kIOHIDSerialNumberKey)));
++    g_autofree char *transport = native_string(IOHIDDeviceGetProperty(s->hid, CFSTR(kIOHIDTransportKey)));
++    s->product = native_string(IOHIDDeviceGetProperty(s->hid, CFSTR(kIOHIDProductKey)));
++    CFTypeRef desc = IOHIDDeviceGetProperty(s->hid, CFSTR(kIOHIDReportDescriptorKey));
++    eligible = serial && *serial && transport && s->product && !strcmp(transport, "USB") &&
++        !strcmp(serial, USB_DEVICE(s)->serial) &&
++        native_number(IOHIDDeviceGetProperty(s->hid, CFSTR(kIOHIDVendorIDKey))) == s->vendorid &&
++        native_number(IOHIDDeviceGetProperty(s->hid, CFSTR(kIOHIDProductIDKey))) == s->productid &&
++        desc && CFGetTypeID(desc) == CFDataGetTypeID() &&
++        /* Use only the exact descriptor admitted with the registry metadata. */
++        CFDataGetLength(desc) == s->report_desc_len &&
++        !memcmp(s->report_desc, CFDataGetBytePtr(desc), s->report_desc_len);
++    if (!eligible) {
++        error_setg(errp, "HID identity mismatch or unsupported/protected report shape");
++        CFRelease(s->hid); s->hid = NULL;
++        g_clear_pointer(&s->product, g_free);
++        return false;
++    }
++    IOReturn r = IOHIDDeviceOpen(s->hid, kIOHIDOptionsTypeNone);
++    if (r != kIOReturnSuccess) {
++        error_setg(errp, "failed to open the HID device (in use or not allowed): 0x%x", r);
++        CFRelease(s->hid); s->hid = NULL;
++        g_clear_pointer(&s->product, g_free);
++        return false;
++    }
++    return true;
++}
++static void native_input(void *context, IOReturn result, void *sender,
++                         IOHIDReportType type, uint32_t id, uint8_t *data, CFIndex len)
++{
++    HostHIDState *s = context;
++    if (result == kIOReturnSuccess && type == kIOHIDReportTypeInput && len > 0) {
++        host_hid_receive(s, id, data, len);
++    }
++}
++static void native_removed(void *context, IOReturn result, void *sender)
++{
++    HostHIDState *s = context;
++    qemu_mutex_lock(&s->lock);
++    if (!s->closing) { s->live = false; qemu_bh_schedule(s->bh); }
++    qemu_mutex_unlock(&s->lock);
++}
++static void native_done(void *context, IOReturn result, void *sender,
++                        IOHIDReportType type, uint32_t id, uint8_t *data, CFIndex len)
++{
++    HostHIDState *s = context;
++    /* SET reports completion status, not bytes written; GET reports a size. */
++    bool ok = result == kIOReturnSuccess &&
++        (s->transfer_set || len == s->transfer_len);
++    host_hid_complete(s, ok ? s->transfer_len : USB_RET_STALL);
++}
++static void native_start(HostHIDState *s)
++{
++    s->dispatch = dispatch_queue_create("org.qemu.usb-host-hid", DISPATCH_QUEUE_SERIAL);
++    s->cancelled = dispatch_semaphore_create(0);
++    IOHIDDeviceSetDispatchQueue(s->hid, s->dispatch);
++    IOHIDDeviceRegisterInputReportCallback(s->hid, s->input, sizeof(s->input), native_input, s);
++    IOHIDDeviceRegisterRemovalCallback(s->hid, native_removed, s);
++    IOHIDDeviceSetCancelHandler(s->hid, ^{ dispatch_semaphore_signal(s->cancelled); });
++    IOHIDDeviceActivate(s->hid);
++}
++static void native_close(HostHIDState *s)
++{
++    if (!s->hid) { return; }
++    if (s->dispatch) {
++        IOHIDDeviceCancel(s->hid);
++        dispatch_semaphore_wait(s->cancelled, DISPATCH_TIME_FOREVER);
++        dispatch_sync(s->dispatch, ^{});
++        /* Cancel handler establishes no callback can still access this state. */
++        dispatch_release(s->cancelled);
++        dispatch_release(s->dispatch);
++        s->cancelled = NULL; s->dispatch = NULL;
++    }
++    IOHIDDeviceClose(s->hid, kIOHIDOptionsTypeNone);
++    CFRelease(s->hid); s->hid = NULL;
++}
++static int native_report(HostHIDState *s, bool set, unsigned type,
++                         unsigned id, uint8_t *data, unsigned len)
++{
++    /* Async report completions share IOHID's input notification port and can
++     * consume its only slot. Keep QEMU asynchronous, not the IOHID request. */
++    dispatch_async(s->dispatch, ^{
++        qemu_mutex_lock(&s->lock);
++        bool active = !s->closing && s->live && s->transfer_epoch == s->epoch;
++        qemu_mutex_unlock(&s->lock);
++        if (!active) { host_hid_complete(s, USB_RET_STALL); return; }
++        CFIndex length = len;
++        IOReturn r = set ? IOHIDDeviceSetReport(s->hid, type, id, data, len) :
++            IOHIDDeviceGetReport(s->hid, type, id, data, &length);
++        native_done(s, r, s->hid, type, id, data, length);
++    });
++    return USB_RET_ASYNC;
++}
+--- a/hw/usb/meson.build
++++ b/hw/usb/meson.build
+@@ -81,6 +81,10 @@
+ endif
+ 
+ # usb pass-through
++if host_os == 'darwin' and iokit.found()
++  system_ss.add(when: 'CONFIG_USB', if_true: [files('dev-host-hid.c'),
++    iokit, coref, declare_dependency(compile_args: ['-fblocks'])])
++endif
+ if libusb.found()
+   usbhost_ss = ss.source_set()
+   usbhost_ss.add(when: ['CONFIG_USB', libusb],

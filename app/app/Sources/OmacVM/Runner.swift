@@ -159,7 +159,10 @@ final class Runner {
         // user says so (USBRun). After everything else, so no other device moves.
         let usbMemory = USBMemory.load(folder: c.folder)
         usbOn = USBSwitch.isOn(folder: c.folder)
-        usbRecord = usbOn ? "on (asks" + (usbMemory.devices.isEmpty ? ")" : "; remembered: \(usbMemory.record))") : "off"
+        // Vendor HID devices (experimental, off by default): only with USB on.
+        usbVendorHID = usbOn && USBVendorHID.isOn(folder: c.folder)
+        usbRecord = usbOn ? "on (asks" + (usbVendorHID ? ", vendor HID devices too" : "")
+            + (usbMemory.devices.isEmpty ? ")" : "; remembered: \(usbMemory.record))") : "off"
         a += USBSwitch.arguments(on: usbOn)
         // The Mac folder (off by default): last, so turning it on or off
         // moves no other device (the VM finds it by its tag, wherever it is).
@@ -171,6 +174,7 @@ final class Runner {
 
     /// The USB switch at this start (USBSwitch), and its qemu.log record.
     private(set) var usbOn = false
+    private var usbVendorHID = false
     private var usbRecord = "off"
     /// The devices while the VM runs (switch on only).
     private var usb: USBRun?
@@ -534,7 +538,7 @@ final class Runner {
         process = p
         mark(pid: p.processIdentifier)
         if usbOn {
-            usb = USBRun(config: c, qemuPID: p.processIdentifier) { [weak self] line in self?.appendLog(line) }
+            usb = USBRun(config: c, qemuPID: p.processIdentifier, vendorHID: usbVendorHID) { [weak self] line in self?.appendLog(line) }
         }
         driveWatch = DriveWatch(folder: c.folder) { [weak self] name in
             MainActor.assumeIsolated { self?.driveLost(name) }

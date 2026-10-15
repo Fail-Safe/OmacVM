@@ -120,6 +120,12 @@ func qmpIntegration(qemu: String, expect: (Bool, String) -> Void) {
                           location: 0xff00_0000, address: 127)
     let r = USBQMP.attach(ghost, over: q)
     expect(r == .gone, "qmp: usb-host by bus and address for a device that is not there: refused at once (\(r))")
+    // A vendor HID device that is not there (no such registry id): QEMU's usb-host-hid refuses it, opens nothing.
+    var ghostHID = ghost
+    ghostHID.hid = USBHID(registryID: 0x7fff_ffff_fff0, serial: "ghost")
+    let rh = USBQMP.attach(ghostHID, over: q)
+    expect(rh == .gone && ((try? USBQMP.attached(over: q)) ?? ["?"]).isEmpty,
+           "qmp: usb-host-hid for a HID part that is not there: refused at once (\(rh))")
     q.emulate = true
     let d = USBDevice(id: USBDeviceID(vendor: 0x0627, product: 0x0001), name: "QEMU USB Tablet", deviceClass: 0,
                       interfaces: [.init(number: 0, interfaceClass: 3, users: [])], location: 0x0110_0000, address: 5)

@@ -6,9 +6,11 @@ import SwiftUI
 /// default (the VM folder's usb-enabled file). On: the VM gets a USB
 /// controller at its start, and while it runs the app asks for each device
 /// plugged in (USBSession). Devices… opens the list of remembered devices.
+/// While it is on, a second switch under it: Vendor HID devices (USBVendorHID).
 struct USBRow: View {
     @ObservedObject var state: AppState
     @State private var on = false
+    @State private var vendorHID = false
     @State private var memory = USBMemory()
     @State private var error: String?
     @State private var showDevices = false
@@ -16,6 +18,8 @@ struct USBRow: View {
     private var folder: URL { state.config.folder }
 
     static let explanation = "When it’s on and you plug in a device while the VM runs, OmacVM asks whether to connect it to the VM or keep it on the Mac. Your answer counts for that plug-in only, unless you check “Always do this for this device”. Devices… lists the remembered ones, to change or forget. macOS lets a VM have only devices it doesn’t use itself: debug probes, SDR sticks, logic analysers, phones in fastboot. Keyboards, security keys, USB disks, serial adapters, audio and cameras stay with the Mac and are never asked about."
+
+    static let vendorHIDExplanation = "Boards that talk to their tools in HID reports of their own: ECU interfaces, bootloaders, programmers. macOS holds them as HID devices, so without this switch they stay with the Mac. With it on, OmacVM offers them like other USB devices, and the VM gets their reports. Only a device with one HID interface and its maker’s own reports: keyboards, mice, game controllers and security keys always stay with the Mac. A Mac app that uses the device at the same time gets the same reports; quit it first."
 
     var body: some View {
         SettingRow(title: "USB devices", badge: "experimental",
@@ -33,6 +37,23 @@ struct USBRow: View {
         .onAppear(perform: refresh)
         .onChange(of: state.config.folder) { _, _ in error = nil; refresh() }
         .onChange(of: state.tick) { _, _ in refresh() }
+        if on {
+            SettingRow(title: "Vendor HID devices", badge: "experimental",
+                       subtitle: "ECU tools, bootloaders and other boards macOS holds as HID. Never keyboards or mice.",
+                       info: Self.vendorHIDExplanation, probe: "usb-hid") {
+                RowSwitch(title: "Vendor HID devices", isOn: Binding(get: { vendorHID }, set: { setVendorHID($0) }))
+            }
+        }
+    }
+
+    private func setVendorHID(_ value: Bool) {
+        do {
+            try USBVendorHID.set(value, folder: folder)
+            error = nil
+        } catch {
+            self.error = "Could not save: \(error.localizedDescription)"
+        }
+        refresh()
     }
 
     private func setOn(_ value: Bool) {
@@ -49,6 +70,7 @@ struct USBRow: View {
         // Moves a 3.0.1-3.0.3 `usb` file in first (it decides the switch).
         memory = USBMemory.load(folder: folder)
         on = USBSwitch.isOn(folder: folder)
+        vendorHID = USBVendorHID.isOn(folder: folder)
     }
 }
 
@@ -61,7 +83,7 @@ final class USBListBefore: ObservableObject {
     @Published private(set) var rows = USBListRows()
     private var memory = USBMemory()
     private var devices: [UInt32: USBDevice] = [:]
-    private let watch = USBWatch()
+    private let watch: USBWatch
     private let preview: [USBDevice]?
     @Published var error: String?
 
@@ -70,6 +92,7 @@ final class USBListBefore: ObservableObject {
         self.folder = folder
         self.vmName = vmName
         self.preview = preview
+        watch = USBWatch(hid: USBVendorHID.isOn(folder: folder))
     }
 
     func start() {

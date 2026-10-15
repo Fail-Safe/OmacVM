@@ -473,6 +473,7 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 | Swipe out to macOS | Gestures `SwipeOut` (bool); hidden `SwipeOutTravel` (trackpad widths per Space, 0.15-1.5) | `false`; 0.5 | app |
 | Mac folder | `mac-folder` (the folder's path) | off (no file) | VM |
 | USB devices | `usb-enabled`, remembered devices `usb.json` | off | VM |
+| Vendor HID devices (under USB devices while it is on; experimental) | `usb-vendor-hid` (QEMU's `usb-host-hid`, docs/usb.md) | off | VM |
 | Fast network | `fast-network` + `features` `fast-network=on` | off | VM |
 | Disk | `disk.img`'s length, `vm.env` `DISK_GB`; `disk-jobs`, `disk-resize` | 64 GB at setup | VM |
 | VMs folder | `vmsRoot`, `otherVMsRoots` | `~/OmacVM` | app |

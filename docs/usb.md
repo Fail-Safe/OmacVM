@@ -54,9 +54,34 @@ without a serial number has one entry for all of them.
 - If a Mac app has the device open, it stays on the Mac and OmacVM says so.
   Quit the app, then unplug the device and plug it in again.
 
+## Vendor HID devices (experimental, off by default)
+
+Some boards talk to their tools in HID reports of their own: ECU
+interfaces, bootloaders, programmers. macOS's HID driver holds them, so the
+rule above keeps them on the Mac. **Vendor HID devices**, a second switch
+under USB devices, lets the VM have them anyway. By @fbalazsy (#424).
+
+- Switch it on, then start the VM. Such a device is then asked about,
+  listed and remembered like any other device.
+- Only a device with one HID interface that uses its maker's own reports
+  (a vendor usage page) and has a serial number. Keyboards, mice, game
+  controllers, security keys and devices with more parts stay with the Mac.
+- macOS keeps the device: the VM gets its reports through macOS, not the
+  USB device itself. Linux sees a USB HID device with the same vendor,
+  product, serial number and report descriptor (reports of at most 64
+  bytes), as `/dev/hidraw*`.
+- A Mac app that uses the device at the same time gets the same input
+  reports. Quit it first.
+- While no program in Linux reads the device, QEMU keeps its newest 16
+  input reports and drops older ones. The device stays connected.
+- No root and no helper.
+- With the switch off, none of this runs: the app reads no HID part and
+  QEMU never gets such a device. USB works as before.
+
 ## Files and logs
 
-- `usb-enabled` in the VM's folder is the switch (`on` or `off`). `usb.json`
+- `usb-enabled` in the VM's folder is the switch (`on` or `off`),
+  `usb-vendor-hid` the Vendor HID devices switch. `usb.json`
   holds the remembered devices (yours only, 0600). An answer for one plug-in
   is never written down.
 - From 3.0.1 to 3.0.3 a device switched on in the window went to the VM by
@@ -64,7 +89,8 @@ without a serial number has one entry for all of them.
   the list, the switch stays on, and the old `usb` file is renamed
   `usb.before-3.0.4`. Set them to Ask Each Time or forget them in the list.
 - `logs/qemu.log` says what happened: `OmacVM: USB devices: on (asks;
-  remembered: ...)` at the start, then a line per device (`OmacVM: USB:
+  remembered: ...)` at the start (`on (asks, vendor HID devices too; ...)`
+  with the second switch on), then a line per device (`OmacVM: USB:
   0483:3748 ST-Link V2 connected (asked, this time)`, `... disconnected
   (unplugged)`, `... not connected: in use on the Mac`). `omacvm check` shows
   the devices the VM has now.
@@ -82,6 +108,7 @@ for your user).
 | SDR sticks (RTL-SDR, HackRF, Airspy), logic analysers (Saleae, fx2lafw) | yes | No macOS driver |
 | Phones in fastboot or ADB-only mode, boards in DFU mode | yes | No macOS driver. A board that switches to DFU mode often gets another product id there: OmacVM asks about it again in that mode (check "Always" for both) |
 | USB Wi-Fi sticks with no Mac driver | yes | No macOS driver (Linux needs one) |
+| Vendor HID boards (ECU interfaces, bootloaders, programmers) with one HID interface | with Vendor HID devices on | Their reports go through macOS (above) |
 | Security keys (YubiKey, SoloKey, Titan) | no | macOS's HID driver has them |
 | Keyboards, mice, game controllers | no | macOS's HID driver has them |
 | USB sticks and disks | no | macOS's storage driver has them (and mounts them) |
@@ -120,7 +147,13 @@ Until then, other ways work for some of these:
   would plug into that Linux machine.
 - The app reads macOS's device list to see what is plugged in; it opens no
   device itself.
-- Only a device nothing on the Mac uses can be connected.
+- Only a device nothing on the Mac uses can be connected, or, with Vendor
+  HID devices on, a vendor HID device (shared with macOS, as above).
+- Vendor HID devices: QEMU opens one only when you connect it, by the
+  registry id of its HID part, and checks it again first (one HID
+  interface, vendor reports only, nothing else using it). It opens the
+  device through macOS's HID framework without seizing it and never resets
+  it (patch `qemu-usb-host-hid.patch`).
 - If macOS or a Mac app has a device, QEMU leaves it alone: no reset (on
   macOS a reset reconnects the device, which would pull a mounted disk)
   (patch `qemu-usb-host-busy-device.patch`).
@@ -144,7 +177,17 @@ Until then, other ways work for some of these:
   QEMU's emulated tablet in place of a Mac device (2026-10-07, 3.0.3
   runtime: all pass).
 - `swift run usb-tests --list` prints this Mac's devices and what the app
-  would offer. Reads the IORegistry only.
+  would offer (`--list --hid`: with Vendor HID devices on). Reads the
+  IORegistry only.
+- Vendor HID devices: `usb-tests` checks the switch off (the board stays
+  with the Mac, QEMU never gets `usb-host-hid`), which devices count (a
+  vendor bootloader yes; a keyboard page, a boot interface, two interfaces,
+  an app using it, no serial number no) and the plug-in flow when macOS
+  adds, replaces or removes a device's HID part. `--qmp` refuses a HID part
+  that isn't there. `app/runtime/Tests/test-hid-native-dispatch.py` (CI)
+  runs QEMU's report code without a device: reports, closing, the full
+  queue. On the Mac mini the display's HID controls stay with the Mac with
+  the switch on, and QEMU refuses them when asked directly.
 - On a Mac mini M4 (macOS 27) with the patched QEMU, 2026-10-06:
   `usb-tests --list` put all 16 devices right (10 hubs not offered; iPhone,
   two webcams, two audio devices, the display's HID controls kept by macOS).
@@ -153,6 +196,7 @@ Until then, other ways work for some of these:
   same (no re-enumeration).
 - Not tested yet: a real free device end to end, and the question over a
   full-screen VM on a Mac (none of the test Macs has a free device plugged in).
+  The same for a real vendor HID board.
 
 ## Known limits
 

@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.14
+
+- **Vendor HID devices (experimental, off by default).** Boards that talk to their tools in HID
+  reports of their own (ECU interfaces, bootloaders, programmers) are held by macOS's HID driver, so
+  USB devices kept them on the Mac. A second switch under USB devices in the VM's window, **Vendor
+  HID devices**, lets the VM have them: they are asked about, listed and remembered like other
+  devices, and the VM gets their reports through macOS, without root. Only a device with one HID
+  interface and its maker's own reports; keyboards, mice, game controllers and security keys stay
+  with the Mac. With the switch off none of it runs. By @fbalazsy (#424).
+
 ## 3.1.13
 
 - **Omanotch's bar from before 3.1.12 is made new once.** A bar copy without a saved original
