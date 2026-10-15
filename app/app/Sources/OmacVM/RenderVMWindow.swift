@@ -95,6 +95,7 @@ enum RenderVMWindow {
         // custom resources, "including notch" chosen, keyboard not allowed.
         try? Data("on\n".utf8).write(to: folder.appendingPathComponent("fast-network"))
         try? USBSwitch.set(true, folder: folder)
+        try? USBVendorHID.set(true, folder: folder)
         try? USBMemory(devices: [.init(vendor: "0483", product: "3748", name: "STM32 STLink", maker: "STMicroelectronics",
                                        choice: .omarchy, since: "2026-10-07")]).save(folder: folder)
         try? MacFolder.set(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents"), for: config)
@@ -109,6 +110,9 @@ enum RenderVMWindow {
         allOn.keyNote = .needsUser
         allOn.magicMouse = true
         page("page-3-all-on", state, allOn)
+        // USB devices on, Vendor HID devices on under it.
+        allOn.section = "sharing"
+        window("window-19-usb-vendor-hid", state, allOn)
         allOn.section = "general"
         window("window-6-custom-resources", state, allOn)
         // Including notch, ready, Keep the Dock away off, and macOS keeping
