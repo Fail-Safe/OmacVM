@@ -1,21 +1,63 @@
 import Foundation
 import IOKit
 
-/// Read-only discovery identity, not permission: QEMU revalidates before opening.
+// Vendor HID devices (docs/usb.md; by @fbalazsy, #424): boards that talk to
+// their tools in HID reports of their own (ECU interfaces, bootloaders,
+// programmers). macOS's HID driver holds them, so usb-host (libusb) cannot
+// take them; QEMU's usb-host-hid (patch qemu-usb-host-hid.patch) passes their
+// reports through IOHIDDevice instead, without root. Only while the VM's
+// switch is on: then the app also reads a device's HID part (here, from the
+// IORegistry, nothing opened) and USBQMP adds usb-host-hid for it.
+
+/// The VM's "Vendor HID devices" switch (experimental, off by default): the
+/// file `usb-vendor-hid` in the VM's folder says "on" or "off". Read at each
+/// start, with the USB switch (it does nothing while that one is off). Off:
+/// no HID part is read, no HID publication is watched, usb-host-hid is never
+/// added; USB devices work as before.
+public enum USBVendorHID {
+    public static let fileName = "usb-vendor-hid"
+
+    public static func isOn(fileText: String?) -> Bool {
+        fileText?.trimmingCharacters(in: .whitespacesAndNewlines) == "on"
+    }
+
+    public static func isOn(folder: URL) -> Bool {
+        isOn(fileText: try? String(contentsOf: folder.appendingPathComponent(fileName), encoding: .utf8))
+    }
+
+    public static func set(_ on: Bool, folder: URL) throws {
+        try Data((on ? "on" : "off").appending("\n").utf8).write(to: folder.appendingPathComponent(fileName), options: .atomic)
+    }
+}
+
+/// A device's HID part, as QEMU's usb-host-hid takes it: the IOHIDDevice's
+/// registry id (a new one each time macOS publishes it) and the serial
+/// number. Only a hint: QEMU checks the device again before it opens it.
 public struct USBHID: Equatable, Sendable {
     public let registryID: UInt64
     public let serial: String
 
-    // String equality normalizes Unicode; native strcmp and QMP identity do not.
-    // Reversible ASCII keeps keys/sets exact without changing the saved raw string.
-    static func serialKey(_ serial: String) -> String { Data(serial.utf8).base64EncodedString() }
-    var serialKey: String { Self.serialKey(serial) }
-
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.registryID == rhs.registryID && lhs.serialKey == rhs.serialKey
+    public init(registryID: UInt64, serial: String) {
+        self.registryID = registryID
+        self.serial = serial
     }
 
-    static func resolve(_ root: USBScan.Entry) -> USBHID? {
+    /// Worth reading the HID part of: one interface, a HID one.
+    public static func candidate(_ d: USBDevice) -> Bool {
+        d.interfaces.count == 1 && d.interfaces[0].interfaceClass == 3
+    }
+
+    // Byte for byte, as QEMU compares it (Swift's == folds Unicode forms).
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.registryID == rhs.registryID && Array(lhs.serial.utf8) == Array(rhs.serial.utf8)
+    }
+
+    /// The device's HID part when QEMU's usb-host-hid would take it (the same
+    /// checks, from the IORegistry): one HID interface without boot protocol,
+    /// one IOHIDDevice on it with nothing but its IOHIDInterface, a vendor
+    /// usage page in the metadata and in the report descriptor (keyboards,
+    /// mice, game controllers, security keys never), a serial number.
+    public static func resolve(_ root: USBScan.Entry) -> USBHID? {
         let nodes = root.descendants
         let interfaces = root.children.filter { $0.className == "IOUSBHostInterface" }
         guard nodes.count <= 64, nodes.allSatisfy(\.complete), root.className == "IOUSBHostDevice",
@@ -139,21 +181,31 @@ public struct USBHID: Equatable, Sendable {
 }
 
 extension USBScan {
-    /// Only the selected physical USB subtree is read. No IOHID open or manager.
+    /// The device as `device(_:)` reads it and, with `hid` (the switch on),
+    /// its HID part when it is a vendor HID device. Without `hid` exactly
+    /// `device(_:)`.
+    public static func device(_ dev: io_registry_entry_t, hid: Bool) -> USBDevice? {
+        guard var d = device(dev) else { return nil }
+        if hid, USBHID.candidate(d) {
+            var budget = 128
+            d.hid = USBHID.resolve(readEntry(dev, depth: 0, budget: &budget))
+        }
+        return d
+    }
+
+    /// One device's part of the IORegistry, as a tree (properties only).
     public struct Entry {
         public var registryID: UInt64
         public var className: String
-        public var name: String
         public var conforms: Set<String>
         public var properties: [String: Any]
         public var children: [Entry]
         public var complete: Bool
 
-        public init(registryID: UInt64, className: String, name: String = "", conforms: Set<String> = [],
+        public init(registryID: UInt64, className: String, conforms: Set<String> = [],
                     properties: [String: Any] = [:], children: [Entry] = [], complete: Bool = true) {
             self.registryID = registryID
             self.className = className
-            self.name = name
             self.conforms = conforms
             self.properties = properties
             self.children = children
@@ -161,15 +213,8 @@ extension USBScan {
         }
 
         func isA(_ cls: String) -> Bool { className == cls || conforms.contains(cls) }
-        func number(_ key: String) -> Int? { (properties[key] as? NSNumber)?.intValue }
         func string(_ key: String) -> String? { properties[key] as? String }
         var descendants: [Entry] { [self] + children.flatMap(\.descendants) }
-        var user: String {
-            if className.contains("UserClient") || className.contains("FrameworkInterfaceClient") {
-                return name.split(separator: "@").first.map(String.init) ?? name
-            }
-            return className
-        }
     }
 
     static func readEntry(_ e: io_registry_entry_t, depth: Int, budget: inout Int) -> Entry {
