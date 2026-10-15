@@ -16,7 +16,7 @@ def main():
     assert m
     lines=text[m.end():].splitlines(keepends=True)[:int(m[1])];assert all(x.startswith('+') for x in lines)
     c=''.join(x[1:] for x in lines)
-    fragments=[c[c.index('struct HostHIDState {'):c.index('static bool native_open')],c[c.index('static void host_hid_receive('):c.index('static void host_hid_bh(')],c[c.index('static void native_input('):c.rindex('#endif')]]
+    fragments=[c[c.index('struct HostHIDState {'):c.index('static bool native_open')],c[c.index('static void host_hid_receive('):c.index('static void host_hid_bh(')],c[c.index('static void native_input('):]]
     (a.output/'native.inc').write_text('\n'.join(fragments))
     env={'PATH':'/usr/bin:/bin:/usr/sbin:/sbin','HOME':os.environ['HOME'],'TMPDIR':os.environ['TMPDIR'],'LANG':'C','PYTHONDONTWRITEBYTECODE':'1'}
     logs=[]

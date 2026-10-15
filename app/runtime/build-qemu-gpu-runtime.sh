@@ -201,7 +201,7 @@ virgl_framebuffer_no_attachments_patch_sha256=21d98c69877901238db0f50cc610e7156d
 virgl_caps_sampler_limit_patch_sha256=ec779a77aab1384dd5f2c046e9d3238ee11c840dd19577bb6f96fb7e85ff2169
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
-usb_hid_patch_sha256=b7f417bfbaea4c7b3fcf0477396f4a88536ceee06fb295c342a588f02ac400f5
+usb_hid_patch_sha256=5d38b04e13f4f8052372101deb0b45212edf846aa2a7ff81fcfe7c94a74d5238
 udp_patch_sha256=95e8ee890be78cdce70b3ee54a8adac27be02421be08b986ae987c74ef8cec8c
 slirp_patch_sha256=20f3d424c79929fb82d240d0ee06b99e9f93ecfb9460579dc414303820d59f90
 slirp_source_root=libslirp-v4.9.4
@@ -334,7 +334,7 @@ macos_major=$(sw_vers -productVersion | awk -F. '{ print $1 }')
 [[ -f $usb_exact_bus_patch && ! -L $usb_exact_bus_patch ]] || \
   die "missing USB exact-bus patch: $usb_exact_bus_patch"
 [[ -f $usb_hid_patch && ! -L $usb_hid_patch ]] || \
-  die "missing rootless USB HID patch: $usb_hid_patch"
+  die "missing USB vendor HID patch: $usb_hid_patch"
 [[ -x $prepare_runtime && ! -L $prepare_runtime ]] || \
   die "missing runtime preparation script: $prepare_runtime"
 if [[ -n $archive_cache ]]; then
@@ -626,8 +626,9 @@ patch -d "$source_dir" -p1 -f -i "$precise_scroll_patch"
 patch -d "$source_dir" -p1 -f -i "$iso_swap_patch"
 patch -d "$source_dir" -p1 -f -i "$injected_text_patch"
 patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
-# Report-level vendor HID via IOHID, without a privileged helper or new library.
-verify_file_sha "Rootless USB HID patch" "$usb_hid_patch" "$usb_hid_patch_sha256"
+# OmacVM: usb-host-hid, a vendor HID device for the guest without root (the
+# VM's "Vendor HID devices" switch; docs/usb.md).
+verify_file_sha "USB vendor HID patch" "$usb_hid_patch" "$usb_hid_patch_sha256"
 patch -d "$source_dir" -p1 -f -i "$usb_hid_patch"
 # OmacVM: usb-host leaves a device the Mac uses alone (no reset: on macOS that
 # re-enumerates it); the app's USB devices (docs/usb.md).
