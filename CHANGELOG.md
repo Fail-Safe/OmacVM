@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.15 (unreleased)
+## 3.1.15
 
 - **No more full-screen Spaces in a loop when a display goes while the Mac is locked.** With the
   VM in full screen on two displays, unplugging one while the Mac was locked (or a display waking
