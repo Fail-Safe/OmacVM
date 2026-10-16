@@ -230,6 +230,22 @@ def read_client(c):
             b"Connection: close\r\n\r\nretry: 3000\n\n" + b"".join(cache.values()))
 
 
+def next_wait(now, waiting):
+    """Seconds until the loop has something to do by itself: the Mac stream's
+    silence limit, its linger after the last client, a new stream's retry, a
+    client that never asked. None: nothing, wait for the next event (the Mac
+    pings every 15 s). It woke every second before."""
+    due = []
+    if upstream is not None:
+        due.append(up_last + SILENCE)
+        if not waiting and idle_since is not None:
+            due.append(idle_since + LINGER)
+    elif waiting:
+        due.append(up_started + RETRY)
+    due += [c.since + 5 for c in clients.values() if not c.streaming]
+    return max(0.05, min(due) - now) if due else None
+
+
 def main():
     global idle_since
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
@@ -256,7 +272,7 @@ def main():
                 stop_upstream("silent for 20 s", True)
         for c in [c for c in clients.values() if not c.streaming and now - c.since > 5]:
             drop(c, "no request")
-        for key, mask in sel.select(timeout=1.0):
+        for key, mask in sel.select(timeout=next_wait(time.monotonic(), streaming())):
             kind, c = key.data
             if kind == "listen":
                 try:
