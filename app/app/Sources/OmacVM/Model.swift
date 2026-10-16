@@ -506,9 +506,10 @@ enum Settings {
     /// Hidden: defaults write org.omacvm.app audioClassic -bool true
     static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
     /// The sound card's DMA and the mixer on a real-time thread of their own
-    /// (3.1.16), not in QEMU's main loop with the VM's GPU. The switch back to
-    /// 3.1.14's sound path: defaults write org.omacvm.app audioMainLoop -bool true
-    /// (audioClassic, 2.9.1's timing, implies it).
+    /// (3.1.16), not in QEMU's main loop with the VM's GPU; AudioPath says
+    /// whether by default. Hidden: defaults write org.omacvm.app audioThread
+    /// -bool true (or false); audioMainLoop -bool true keeps 3.1.14's path
+    /// whatever the default, and audioClassic (2.9.1's timing) implies it.
     static var audioThread: Bool {
         let d = UserDefaults.standard
         if audioClassic || d.bool(forKey: "audioMainLoop") { return false }

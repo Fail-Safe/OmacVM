@@ -4,7 +4,9 @@ import Foundation
 /// with the VM's GPU (up to 3.1.14), or on a real-time thread of its own
 /// (qemu-audio-own-thread.patch, OMACVM_AUDIO_THREAD=1).
 public enum AudioPath {
-    /// The sound's own thread unless the person switched back.
+    /// Off for now (3.1.16: lower latency and no breaks from the main loop,
+    /// but not clearly fewer breaks in every case measured): turned on with
+    /// defaults write org.omacvm.app audioThread -bool true.
     public static let threadByDefault = false
     /// The sound backend's options on the sound's own thread. The ring no
     /// longer covers the main loop's stalls, only the thread's own jitter:
