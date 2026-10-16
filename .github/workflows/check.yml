@@ -618,6 +618,7 @@ jobs:
 
       - name: Guest agents tests on Linux (inotify, pidfd, idle waits)
         run: |
+          sudo apt-get install -y -qq socat >/dev/null   # Omarchy's base packages have it (the Bridge's event readers)
           python3 src/app/guest/tests/test_omacvm_displays.py -v
           python3 src/app/guest/tests/test_idle_waits.py -v
           python3 src/app/guest/tests/test_monitor_widget.py -v

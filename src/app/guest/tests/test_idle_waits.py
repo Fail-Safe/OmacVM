@@ -127,6 +127,55 @@ class BridgeEvents(unittest.TestCase):
                 svc.terminate()
                 svc.wait(5)
 
+    def test_reader_waits_without_a_timer(self):
+        """`omacvm-bridge events` on the session socket: with socat (Omarchy's
+        base packages) it gets the events, stays connected and hardly wakes
+        (curl woke every second). Linux with socat only."""
+        import shutil
+        import socket
+        import tempfile
+        import time
+        if not os.path.exists("/proc/self/status") or not shutil.which("socat"):
+            self.skipTest("Linux with socat only (the guest)")
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "client")
+            with open(stub, "w") as f:
+                f.write('#!/bin/sh\nprintf "event: wifi\\ndata: {}\\n\\n"\nexec sleep 60\n')
+            os.chmod(stub, 0o755)
+            sock = os.path.join(d, "s")
+            env = dict(os.environ, OMACVM_BRIDGE_EVENTS_SOCKET=sock, OMACVM_BRIDGE_CLIENT=stub)
+            svc = subprocess.Popen([sys.executable, str(ROOT / "src/bridge/guest/omacvm-bridge-events")],
+                                   env=env, stderr=subprocess.DEVNULL)
+            reader = None
+            try:
+                for _ in range(50):
+                    if os.path.exists(sock):
+                        break
+                    time.sleep(0.1)
+                reader = subprocess.Popen(["bash", str(ROOT / "src/bridge/guest/omacvm-bridge"), "events"], env=env,
+                                          stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+                got = b""
+                while b"data: {}" not in got:
+                    got += reader.stdout.read1(4096)
+                time.sleep(0.5)
+                socat = subprocess.run(["pgrep", "-P", str(reader.pid), "-x", "socat"], capture_output=True, text=True).stdout.split()
+                self.assertEqual(len(socat), 1, "the reader is socat")
+
+                def switches():
+                    with open(f"/proc/{socat[0]}/status") as f:
+                        return sum(int(line.split()[1]) for line in f if "ctxt_switches" in line)
+                before = switches()
+                time.sleep(3)
+                self.assertIsNone(reader.poll(), "the reader stays connected")
+                self.assertLessEqual(switches() - before, 1)
+            finally:
+                if reader:
+                    reader.kill()
+                    reader.wait(5)
+                    reader.stdout.close()
+                svc.terminate()
+                svc.wait(5)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -107,8 +107,20 @@ case ${1:-} in
     # there (curl's 7): straight to the Mac, as before.
     SOCK=${OMACVM_BRIDGE_EVENTS_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omacvm-bridge-events.sock}
     if (( ! direct )) && [[ -S $SOCK ]]; then
-      rc=0; curl -sN --fail --unix-socket "$SOCK" "http://omacvm-bridge/events$q" || rc=$?
-      (( rc == 7 )) || exit "$rc"
+      if command -v socat >/dev/null; then
+        # socat (in Omarchy's base packages) waits for the stream without a
+        # timer of its own; curl's transfer loop wakes every second, five
+        # readers in every session. The response's header lines pass through:
+        # the readers take only SSE lines. shut-none: the request's end is no
+        # end of the connection (the stream would close). Exit 1: nobody listening.
+        rc=0
+        printf 'GET /events%s HTTP/1.1\r\nHost: omacvm-bridge\r\nConnection: close\r\n\r\n' "$q" |
+          socat -t 2000000000 - "UNIX-CONNECT:$SOCK,shut-none" 2>/dev/null || rc=$?
+        (( rc == 1 )) || exit "$rc"
+      else
+        rc=0; curl -sN --fail --unix-socket "$SOCK" "http://omacvm-bridge/events$q" || rc=$?
+        (( rc == 7 )) || exit "$rc"
+      fi
     fi
     req -N "$URL/events$q" ;;
   volume) check_percent volume "${2:-}"; post /audio/volume "$(level_json volume "$2")" ;;
