@@ -37,6 +37,37 @@ them (`out.buffer-count=8`, 93 ms).
   fix (`qemu-sdl-audio-playback-thread.patch`, troubleshooting finding 26):
   the VM must boot and play to nobody instead of hanging.
 
+- `freeze.py SECONDS OUT.json`: in the guest at `chrt -f 50`, a 1 ms sleeper
+  that records how late it woke: a gap is the VM not running (its vCPUs
+  waiting for the BQL, or getting no Mac time), not guest scheduling.
+- `scroll.html`, `video.html`, `mkvideo.sh`: the realistic cases of the
+  audio lane (2026-10-16): a heavy page in Chromium that scrolls itself,
+  and a 1080p H.264 video whose sound is the tone (FLAC, so it stays a pure
+  sine). The lane's harness (`work/audio-rt/kit` on the mini: run.sh,
+  cfg.sh) adds a terminal every 8 s and a new Chromium every 20 s for
+  "browsing", and records the probe's stream, QEMU's mixer, guest xruns,
+  freeze.py and how long vCPUs wait for the BQL apart.
+
+## The sound's own thread (3.1.16, `audioThread`, Mac mini M4, 8 vCPUs, 4 minutes each)
+
+Breaks in what SDL got, QEMU's main loop (3.1.14) vs the own thread
+(`qemu-audio-own-thread.patch`, ring 6 x 256 frames at 48 kHz):
+
+| Case | Main loop | Own thread |
+|---|---|---|
+| tone (pacat) + browsing in Chromium | 5, 14, 0, 0 | 0, 0, 0, 0, 2 |
+| tone + 8 busy Mac threads | 12, 0, 0 | 0, 0, 0, 0 |
+| the tone as a video's sound in Chromium + scrolling | 0, 44, 0, 0 | 2, 0, 2, 2, 2, 2, 17 |
+| tone + glmark2 | 7, 4, 18 | 6, 2, 6, 8, 0, 4, 13 |
+| tone + glmark2 + stress-ng + 8 Mac threads | 4 | 13 |
+| tone + stress-ng / idle | 0 / 0 | 0 / 0 |
+
+Round trip (jack_iodelay, loopback probe): 271.5-273.4 ms → 208.4-210.2 ms.
+On the main loop most breaks were on the Mac's side (SDL got less than the
+mixer played); on the own thread they are all guest side (vCPUs waiting for
+the BQL while virgl holds it, or no Mac time). Full log: the audio-crackle
+track notes.
+
 ## Results (MacBook Pro M4 Max, 8 vCPUs, 10 minutes each, bench lock held)
 
 glmark2's terrain scene (a new scene every 10 s) and 8 busy `yes` loops on
