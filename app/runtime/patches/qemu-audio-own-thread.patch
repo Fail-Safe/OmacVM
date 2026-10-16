@@ -11,18 +11,12 @@ the HDA codec's streams and the HDA controller's stream registers (its
 MMIO handlers take it). Lock order: BQL, audio lock, a backend's own lock.
 On the thread the controller's DMA goes straight to guest RAM under RCU
 (anything that is not RAM fails the transfer instead of taking the BQL),
-and its buffer-completion interrupt is raised from a bottom half. While
-the main loop holds the BQL for more than 10 ms (virgl compiling shaders),
-a vCPU that leaves the guest waits for it and the guest's PipeWire may not
-run: then the stream's clock pauses for that tick (as with a stalled main
-loop before) and QEMU's own buffer plays on; afterwards it refills 1/8
-faster than real time (1/32 before). main_loop_bql_busy_ns() (util/
-main-loop.c, from the stall watchdog's timestamps) says how long the main
-loop has held the BQL. The thread sleeps while no stream runs or the VM
-is stopped. qemu.log: "OmacVM: sound: own audio thread, <policy>, every
-1000 us". Without the variable nothing changes (the lock is a no-op).
-OMACVM_AUDIO_BQL_PAUSE_MS, OMACVM_AUDIO_REFILL_DIV and
-OMACVM_AUDIO_THREAD_PERIOD_US are for measurements.
+and its buffer-completion interrupt is raised from a bottom half. The
+thread sleeps while no stream runs or the VM is stopped. qemu.log:
+"OmacVM: sound path: own audio thread" (or "QEMU's main loop") at the
+start, "OmacVM: sound: own audio thread, <policy>, every 1000 us" when it
+starts. Without the variable nothing changes (the lock is a no-op).
+OMACVM_AUDIO_THREAD_PERIOD_US (250-10000) is for measurements.
 
 Why: the main loop also runs the VM's GPU (virgl) and competes with every
 vCPU for the Mac's cores. Each time it ran late, the sound card's DMA and
@@ -30,8 +24,12 @@ the mixer stopped, QEMU's 93 ms ring drained, and refilled at 1/32 of real
 time: stalls in a row (an app opening, a page scrolling) added up to a
 break. On its own thread the sound no longer waits for the GPU.
 
-Applies after qemu-hda-no-catch-up.patch, qemu-main-loop-stall-watchdog.patch
-and the SDL audio patches.
+With the main loop out of the way QEMU's ring only has to cover the
+thread's own jitter: the app uses a 32 ms ring at 48 kHz instead of 93 ms.
+While the main loop holds the BQL, vCPUs that leave the guest still wait
+for it; the guest's own buffers cover that, as before.
+
+Applies after qemu-hda-no-catch-up.patch and the SDL audio patches.
 Upstream: not sent (OmacVM only for now; the env switch is ours).
 Test: app/runtime/Tests/audio (measure.sh, glitches.py), the audio lane's
 notes (work/tracks/audio-crackle.md, 2026-10-16) have the runs;
@@ -63,42 +61,6 @@ src/tests/audio-timing.sh checks the wiring.
 +int64_t audio_rt_period(void);
 +
  #endif /* QEMU_AUDIO_H */
---- a/include/qemu/main-loop.h
-+++ b/include/qemu/main-loop.h
-@@ -91,6 +91,13 @@
-  */
- void main_loop_wait(int nonblocking);
- 
-+/*
-+ * OmacVM: how long the main loop has been out of its poll with the BQL held
-+ * (its current stretch), 0 while it polls or when the stall watchdog is off
-+ * (OMACVM_STALL_WATCHDOG=0). Any thread; racy by design (a hint).
-+ */
-+int64_t main_loop_bql_busy_ns(void);
-+
- /**
-  * qemu_get_aio_context: Return the main loop's AioContext
-  */
---- a/util/main-loop.c
-+++ b/util/main-loop.c
-@@ -443,6 +443,17 @@
-     stall_watchdog_state = 1;
- }
- 
-+int64_t main_loop_bql_busy_ns(void)
-+{
-+    int64_t since;
-+
-+    if (!qatomic_read(&main_loop_has_bql)) {
-+        return 0;
-+    }
-+    since = qatomic_read(&main_loop_busy_since);
-+    return since ? get_clock() - since : 0;
-+}
-+
- /* Called by the main loop thread just before it polls again. */
- static void stall_watchdog_poll(void)
- {
 --- a/audio/meson.build
 +++ b/audio/meson.build
 @@ -3,6 +3,7 @@
@@ -408,37 +370,18 @@ src/tests/audio-timing.sh checks the wiring.
  }
  
  static bool vmstate_audio_needed(void *opaque)
---- a/hw/audio/trace-events
-+++ b/hw/audio/trace-events
-@@ -24,6 +24,7 @@
- hda_audio_overrun(const char *stream) "st %s"
- hda_audio_full_recovery(const char *stream, int64_t virtual_ns, int64_t queued, int avail) "st %s virtual_ns %" PRId64 " queued %" PRId64 " avail %d"
- hda_audio_pace_forgive(const char *stream, int64_t bytes) "st %s forgiven %" PRId64 " bytes"
-+hda_audio_bql_pause(const char *stream, int64_t ns) "st %s paused %" PRId64 " ns (main loop holds the BQL)"
- 
- # pcspk.c
- pcspk_io_read(uint16_t addr, uint8_t val) "[0x%"PRIx16"] -> 0x%"PRIx8
 --- a/hw/audio/hda-codec.c
 +++ b/hw/audio/hda-codec.c
-@@ -19,6 +19,7 @@
- 
- #include "qemu/osdep.h"
- #include "qemu/error-report.h"
-+#include "qemu/main-loop.h"
- #include "hw/pci/pci.h"
- #include "hw/core/qdev-properties.h"
- #include "intel-hda.h"
-@@ -178,6 +179,9 @@
+@@ -178,6 +178,8 @@
      int64_t run_ns;
      int64_t pace_ns;
      int64_t budget;
 +    /* OmacVM: the timer as a tick on the sound's own thread (audio-rt.c) */
 +    AudioRtTick rt_tick;
-+    int64_t rt_last_ns;
  };
  
  struct HDAAudioState {
-@@ -264,7 +268,7 @@
+@@ -264,7 +266,7 @@
  
  out_timer:
  
@@ -447,83 +390,7 @@ src/tests/audio-timing.sh checks the wiring.
          timer_mod_anticipate_ns(st->buft, now + HDA_TIMER_TICKS);
      }
  }
-@@ -315,6 +319,45 @@
- #define HDA_PACE_BURST (B_SIZE / 8)
- #define HDA_PACE_PRIME (250 * SCALE_MS)
- 
-+/*
-+ * OmacVM, the sound's own thread (audio-rt.c): the DMA no longer waits for
-+ * the main loop. But while the main loop holds the BQL (virgl compiling
-+ * shaders: 50-200 ms), a vCPU that leaves the guest waits for it, and the
-+ * guest's PipeWire may not run: then the guest's sound clock pauses
-+ * (as with a stalled main loop before) and QEMU's own buffer plays on.
-+ * Afterwards the buffer refills 1/8 faster than real time (1/32 on the main
-+ * loop), so stalls in a row (an app opening) do not add up.
-+ * OMACVM_AUDIO_BQL_PAUSE_MS (default 10, 0 = never pause) and
-+ * OMACVM_AUDIO_REFILL_DIV (default 8) are for measurements.
-+ */
-+static int64_t hda_bql_pause_ns(void)
-+{
-+    static int64_t v = -1;
-+
-+    if (v < 0) {
-+        const char *e = g_getenv("OMACVM_AUDIO_BQL_PAUSE_MS");
-+        v = (e ? g_ascii_strtoll(e, NULL, 10) : 10) * SCALE_MS;
-+        if (v < 0) {
-+            v = 0;
-+        }
-+    }
-+    return v;
-+}
-+
-+static int64_t hda_pace_div(void)
-+{
-+    static int64_t v = -1;
-+
-+    if (v < 0) {
-+        const char *e = g_getenv("OMACVM_AUDIO_REFILL_DIV");
-+        v = audio_rt_enabled() ? 8 : 32;
-+        if (e && g_ascii_strtoll(e, NULL, 10) >= 2) {
-+            v = g_ascii_strtoll(e, NULL, 10);
-+        }
-+    }
-+    return v;
-+}
-+
- static int64_t hda_audio_output_pace(HDAAudioStream *st, int64_t now,
-                                      int64_t wanted, int64_t to_transfer)
- {
-@@ -332,7 +375,7 @@
-         st->budget = HDA_PACE_BURST;
-     }
-     if (st->pace_ns && now > st->pace_ns) {
--        st->budget += muldiv64(now - st->pace_ns, bps + bps / 32,
-+        st->budget += muldiv64(now - st->pace_ns, bps + bps / hda_pace_div(),
-                                NANOSECONDS_PER_SECOND);
-     }
-     st->pace_ns = now;
-@@ -352,6 +395,20 @@
- 
-     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
- 
-+    if (audio_rt_enabled()) {
-+        int64_t last = st->rt_last_ns;
-+
-+        st->rt_last_ns = now;
-+        if (st->state->pace && last && now > last && hda_bql_pause_ns() &&
-+            main_loop_bql_busy_ns() > hda_bql_pause_ns()) {
-+            /* The guest's clock pauses: nothing is due for this tick. */
-+            st->buft_start += now - last;
-+            st->pace_ns = now;
-+            trace_hda_audio_bql_pause(st->node->name, now - last);
-+            return;
-+        }
-+    }
-+
-     int64_t uptime = now - st->buft_start;
-     int64_t wpos = st->wpos;
-     int64_t rpos = st->rpos;
-@@ -389,7 +446,7 @@
+@@ -389,7 +391,7 @@
  
  out_timer:
  
@@ -532,12 +399,11 @@ src/tests/audio-timing.sh checks the wiring.
          timer_mod_anticipate_ns(st->buft, now + HDA_TIMER_TICKS);
      }
  }
-@@ -447,9 +504,18 @@
+@@ -447,9 +449,17 @@
          st->run_ns = now;
          st->pace_ns = 0;
          st->budget = 0;
 -        timer_mod_anticipate_ns(st->buft, now + HDA_TIMER_TICKS);
-+        st->rt_last_ns = 0;
 +        if (audio_rt_enabled()) {
 +            /* OmacVM: the guest's DMA moves on the sound's own thread. */
 +            audio_rt_tick_add(&st->rt_tick, st->output ? hda_audio_output_timer
@@ -552,7 +418,7 @@ src/tests/audio-timing.sh checks the wiring.
      }
      if (st->output) {
          audio_be_set_active_out(st->state->audio_be, st->voice.out, st->running);
-@@ -500,11 +566,13 @@
+@@ -500,11 +510,13 @@
      if (st->output) {
          cb = hda_audio_output_cb;
          timer_del(st->buft);
@@ -566,7 +432,7 @@ src/tests/audio-timing.sh checks the wiring.
          st->voice.in = audio_be_open_in(st->state->audio_be, st->voice.in,
                                     st->node->name, st, cb, &st->as);
      }
-@@ -754,11 +822,13 @@
+@@ -754,11 +766,13 @@
      int i;
  
      dprint(a, 1, "%s\n", __func__);
@@ -580,7 +446,7 @@ src/tests/audio-timing.sh checks the wiring.
          timer_free(st->buft);
          if (st->output) {
              audio_be_close_out(a->audio_be, st->voice.out);
-@@ -766,6 +836,7 @@
+@@ -766,6 +780,7 @@
              audio_be_close_in(a->audio_be, st->voice.in);
          }
      }
@@ -588,7 +454,7 @@ src/tests/audio-timing.sh checks the wiring.
  }
  
  static int hda_audio_post_load(void *opaque, int version)
-@@ -781,6 +852,7 @@
+@@ -781,6 +796,7 @@
              a->running_real[16 + i] = a->running_compat[i];
      }
  
@@ -596,7 +462,7 @@ src/tests/audio-timing.sh checks the wiring.
      for (i = 0; i < ARRAY_SIZE(a->st); i++) {
          st = a->st + i;
          if (st->node == NULL)
-@@ -790,6 +862,7 @@
+@@ -790,6 +806,7 @@
          hda_audio_set_amp(st);
          hda_audio_set_running(st, a->running_real[st->output * 16 + st->stream]);
      }
@@ -604,7 +470,7 @@ src/tests/audio-timing.sh checks the wiring.
      return 0;
  }
  
-@@ -800,12 +873,14 @@
+@@ -800,12 +817,14 @@
      int i;
  
      dprint(a, 1, "%s\n", __func__);
