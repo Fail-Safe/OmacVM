@@ -158,11 +158,17 @@ extern bool MTDeviceIsRunning(MTDeviceRef);
 extern int MTDeviceGetFamilyID(MTDeviceRef, int *);
 extern io_service_t MTDeviceGetService(MTDeviceRef);
 
+// The test identity's port and Bridge folder (and settings domain, below) come
+// with its bundle id at run time, as the Bridge's do, so a release copy
+// relabeled as org.omacvm.test.gestures (src/tests/e2e/relabel.sh) never
+// meets the installed Gestures. A build may still name them (build.sh with
+// OMACVM_HELPER_TEST=1).
+static int testIdentity(void);
 #ifndef PORT
-#define PORT 47830
+#define PORT (testIdentity() ? 47930 : 47830)
 #endif
 #ifndef BRIDGE_DIR
-#define BRIDGE_DIR "omacvm-bridge"   // the Bridge's token is in ~/Library/Application Support/BRIDGE_DIR
+#define BRIDGE_DIR (testIdentity() ? "omacvm-test-bridge" : "omacvm-bridge")   // the Bridge's token is in ~/Library/Application Support/BRIDGE_DIR
 #endif
 // The Mac's address on each VM network: Parallels' shared network, UTM's
 // shared network (vmnet), VMware Fusion's NAT network (vmnet8: Fusion picks
@@ -2177,11 +2183,11 @@ static pid_t topAppOn(CGRect b, pid_t skip, CGWindowID *win) {
   return found;
 }
 
-// The test identity (build.sh with OMACVM_HELPER_TEST=1) builds with its own
-// domain, port and Bridge folder, so it never meets the installed Gestures,
-// and takes only OmacVM Test.app's VMs (GESTURES_TEST_IDENTITY).
+// The test identity has its own domain, port and Bridge folder (from its
+// bundle id at run time, or built so: build.sh with OMACVM_HELPER_TEST=1), so
+// it never meets the installed Gestures, and takes only OmacVM Test.app's VMs.
 #ifndef GESTURES_DOMAIN
-#define GESTURES_DOMAIN CFSTR("org.omacvm.gestures")
+#define GESTURES_DOMAIN (testIdentity() ? CFSTR("org.omacvm.test.gestures") : CFSTR("org.omacvm.gestures"))
 #endif
 
 // "EscapeSwipe": "all" moves every display that shows the VM, anything else
@@ -3380,7 +3386,7 @@ static void base64Name(const char *in, char *out, size_t cap) {
 static size_t readToken(char tok[160]) {
   char path[1024];
   tok[0] = 0;
-  snprintf(path, sizeof path, "%s/Library/Application Support/" BRIDGE_DIR "/token", getenv("HOME"));
+  snprintf(path, sizeof path, "%s/Library/Application Support/%s/token", getenv("HOME"), BRIDGE_DIR);
   FILE *f = fopen(path, "r");
   if (!f) return 0;
   if (!fgets(tok, 160, f)) tok[0] = 0;

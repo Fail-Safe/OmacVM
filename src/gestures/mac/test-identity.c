@@ -69,6 +69,17 @@ int main(int argc, char **argv) {
   check(vmOursRule(NULL, 0) && vmOursRule(NULL, 1) && vmOursRule("qemu-system-aarch64-5555", 0) &&
         vmOursRule("qemu-system-aarch64-5555", 1), "no OmacVM signature (a development build): every Gestures'");
 
+  // Port, settings domain and Bridge folder follow the identity at run time
+  // (a release copy relabeled as the test identity is a whole test identity).
+  identityTest = 0;
+  check(PORT == 47830 && !strcmp(BRIDGE_DIR, "omacvm-bridge") &&
+        CFStringCompare(GESTURES_DOMAIN, CFSTR("org.omacvm.gestures"), 0) == kCFCompareEqualTo,
+        "normal Gestures: port 47830, org.omacvm.gestures, the Bridge's own folder");
+  identityTest = 1;
+  check(PORT == 47930 && !strcmp(BRIDGE_DIR, "omacvm-test-bridge") &&
+        CFStringCompare(GESTURES_DOMAIN, CFSTR("org.omacvm.test.gestures"), 0) == kCFCompareEqualTo,
+        "test Gestures (also a relabeled release): port 47930, org.omacvm.test.gestures, the test Bridge's folder");
+
   int foreign;
   identityTest = 0;   // the normal Gestures
   check(vmNetOf("OmacVM", PROD_QEMU, "org.omacvm.app.qemu", &foreign) == NET_APP && !foreign &&
