@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import Foundation
 import OmacVMFeatures
+import OmacVMAudio
 import OmacVMAuth
 import OmacVMNet
 import OmacVMUpdate
@@ -74,7 +75,7 @@ final class Runner {
             // No recording without the microphone permission: QEMU's recording
             // would wait minutes for an answer (silence, and a sound that
             // starts meanwhile waits too).
-            "-audiodev", "sdl,id=snd0,timer-period=1000,out.buffer-count=8\(Runner.micAllowed ? "" : ",in.voices=0")",
+            "-audiodev", Runner.audiodev(thread: Settings.audioThread, mic: Runner.micAllowed),
             "-device", "intel-hda,id=hda0,romfile=",
             // The codec paces the guest's sound (no catch-up after a stalled
             // main loop); audioClassic keeps QEMU's own timing.
@@ -456,6 +457,12 @@ final class Runner {
         if Settings.audioClassic {
             env["OMACVM_MAIN_LOOP_QOS"] = "default"
         }
+        // The sound card's DMA and the mixer on a real-time thread of their
+        // own (qemu-audio-own-thread.patch); audioMainLoop keeps them in the
+        // main loop, as up to 3.1.14.
+        if Settings.audioThread {
+            env["OMACVM_AUDIO_THREAD"] = "1"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"
@@ -770,6 +777,15 @@ final class Runner {
             if let colon = l.firstIndex(of: ":"), l[colon...].hasPrefix(": index=") { names.insert(String(l[..<colon])) }
         }
         return names
+    }
+
+    /// The sound backend's options. In the main loop (up to 3.1.14) QEMU's
+    /// ring holds 8 blocks of 512 frames (93 ms) to cover the main loop's
+    /// stalls; on the sound's own thread (audio-rt) it needs only AUDIO_RING.
+    /// No recording without the microphone permission (in.voices=0).
+    static func audiodev(thread: Bool, mic: Bool) -> String {
+        let ring = thread ? AudioPath.threadRing : "out.buffer-count=8"
+        return "sdl,id=snd0,timer-period=1000,\(ring)\(mic ? "" : ",in.voices=0")"
     }
 
     static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
