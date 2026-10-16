@@ -253,16 +253,17 @@ case_head() {   # #428's layout, one VM start for every head case
     done
   fi
   if want head-tiny; then
-    st=$(vd_signal HUP)
-    if [[ $st != state=tiny* || $st != *size=1x1* ]]; then
-      res head-tiny skip "the virtual display does not go to 1 x 1: ${st:-no answer}"
+    st=$(vd_signal HUP); sleep 1
+    a=$("$CENSUS" | grep "^display $VD_ID ")   # the tool's own view of its size can lag
+    if [[ $st != state=tiny* || $a != *" 1x1" ]]; then
+      res head-tiny skip "the virtual display does not go to 1 x 1: ${st:-no answer}; ${a:-not listed}"
       [[ $st == state=tiny* ]] && vd_signal HUP >/dev/null
     else
       vd_signal HUP >/dev/null; sleep 12
       for ((r = 1; r <= FLAPS; r++)); do
         l0=$(wc -l < "$VMD/logs/qemu.log"); st=$(vd_signal HUP); sleep 2; vd_signal HUP >/dev/null; sleep 12
         head_check "head-tiny-$r" 1 "$l0" || break
-        (( r == 1 )) && res head-tiny-mode ok "1 x 1: $st"
+        (( r == 1 )) && res head-tiny-mode ok "1 x 1 for 2-3 s each round: $a"
       done
     fi
   fi
