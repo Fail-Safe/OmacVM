@@ -3,6 +3,10 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- Vendor HID devices: disconnecting one no longer freezes the VM for a moment while a request is still running (thanks @fbalazsy, from #427).
+
 ## 3.1.14
 
 - **Vendor HID devices (experimental, off by default).** Boards that talk to their tools in HID
