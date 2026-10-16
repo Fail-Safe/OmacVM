@@ -602,13 +602,23 @@ final class Runner {
 
     /// Skip the notch switched while the VM runs (the window, `omacvm notch
     /// --skip`, the control centre: all write the folder's file): the VM's bar
-    /// gets it within a few seconds (NotchSkipLive). A file read every 2 s.
+    /// gets it at once (NotchSkipLive). The file is read when the folder's
+    /// entries change (a kqueue watch: the file comes, goes or is replaced),
+    /// and every 10 s in case a change slipped by; it was read every 2 s.
     nonisolated static func watchNotchSkip(folder: URL, atStart: Bool, agentPath: String, running: @escaping @Sendable () -> Bool,
                                            log: @escaping @Sendable (String) -> Void) {
         Thread.detachNewThread {
             var live = NotchSkipLive(atStart: atStart)
+            let changed = DispatchSemaphore(value: 0)
+            let fd = open(folder.path, O_EVTONLY)
+            let watch = fd >= 0 ? DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .global(qos: .utility)) : nil
+            watch?.setEventHandler { changed.signal() }
+            watch?.setCancelHandler { close(fd) }
+            watch?.resume()
+            defer { watch?.cancel() }
             while running() {
-                Thread.sleep(forTimeInterval: 2)
+                _ = changed.wait(timeout: .now() + 10)
                 let on = NotchSkip.read(folder: folder)
                 guard live.due(on, at: Date()), running() else { continue }
                 let cmd = NotchSkip.guestCommand(on)

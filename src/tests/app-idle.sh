@@ -250,7 +250,7 @@ do {
     Thread.sleep(forTimeInterval: 0.2)
     var start = pb.reads
     Thread.sleep(forTimeInterval: 1.1)
-    expect("clipboard: active VM, 4 polls a second (got \(pb.reads - start) in 1.1 s)", pb.reads - start >= 3)
+    expect("clipboard: active VM, 2 polls a second (got \(pb.reads - start) in 1.1 s)", (2...3).contains(pb.reads - start))
     bridge.setVMActive(false)
     Thread.sleep(forTimeInterval: 0.3)
     start = pb.reads

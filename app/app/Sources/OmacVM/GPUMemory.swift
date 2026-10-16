@@ -61,9 +61,13 @@ final class GPUMemoryWatch {
             forName: Notification.Name(restart.requestName), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.restartChosen() }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        // Every 5 s, a second either way so macOS can wake the app once for
+        // this and its other timers (lost contexts are rare; pressure also
+        // comes from the source below).
+        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }
+        timer?.tolerance = 1
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         source.setEventHandler { [weak self] in
             let event = source.data

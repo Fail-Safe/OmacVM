@@ -270,8 +270,9 @@ final class NativeClipboardBridge {
         return stopped
     }
 
-    /// NSPasteboard has no change notification; a quarter-second poll of the
-    /// integer change count is the documented approach. Only while the VM's
+    /// NSPasteboard has no change notification; a half-second poll of the
+    /// integer change count is the documented approach (a quarter second
+    /// until 3.1.15). Only while the VM's
     /// window is the active app: then the Mac clipboard can be pasted in the
     /// VM. Otherwise every 5 seconds (in case an activation was missed), and
     /// once right away when the VM becomes active (setVMActive), so a copy
@@ -294,7 +295,7 @@ final class NativeClipboardBridge {
     /// On stateQueue.
     private func schedule(_ timer: DispatchSourceTimer) {
         if vmActive {
-            timer.schedule(deadline: .now() + 0.25, repeating: 0.25, leeway: .milliseconds(50))
+            timer.schedule(deadline: .now() + 0.5, repeating: 0.5, leeway: .milliseconds(100))
         } else {
             timer.schedule(deadline: .now() + 5, repeating: 5, leeway: .seconds(1))
         }
