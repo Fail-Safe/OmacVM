@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.16 (unreleased)
+## 3.1.16
 
 - **The sound on its own real-time thread (experimental, off by default).** OmacVM.app moved the
   VM's sound in QEMU's main loop, next to the VM's graphics: when an app opened or a page
