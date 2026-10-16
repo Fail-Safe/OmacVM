@@ -22,6 +22,15 @@ public enum AudioDelay {
     /// (sound at most 15 ms early, 45 ms late): -9 ... +36 ms.
     public static let qemuMs = 115
 
+    /// QEMU's part on the sound's own thread (AudioPath, 3.1.16): QEMU's ring
+    /// 6 x 256 frames at 48 kHz (about 29 ms full) instead of 8 x 512 at
+    /// 44.1 kHz (about 87 ms), and SDL's AudioQueue 6 x 256 frames (32 ms)
+    /// instead of 4 x 512 (46 ms): 72 ms less than qemuMs.
+    public static let qemuThreadMs = 43
+
+    /// QEMU's part for the sound path this VM runs.
+    public static func qemuPart(thread: Bool) -> Int { thread ? qemuThreadMs : qemuMs }
+
     /// The QEMU delays measured on the Mac mini (2026-10-06, ms after the
     /// picture without the fix, minus the device), for the tests.
     public static let measuredQemuMs: [Double] = [106, 112, 114, 125, 126, 136, 138, 143, 145, 147, 151]
@@ -57,8 +66,8 @@ public enum AudioDelay {
     /// The delay the VM is told, in whole ms: QEMU's part, the device's
     /// (none when unknown) and the user's correction (audioDelayExtraMs),
     /// kept within 0 ... 1000 ms.
-    public static func total(deviceMs: Double?, extraMs: Int = 0) -> Int {
-        let ms = Double(qemuMs) + (deviceMs ?? 0) + Double(extraMs)
+    public static func total(deviceMs: Double?, extraMs: Int = 0, thread: Bool = false) -> Int {
+        let ms = Double(qemuPart(thread: thread)) + (deviceMs ?? 0) + Double(extraMs)
         return Int(min(max(ms, 0), 1000).rounded())
     }
 }

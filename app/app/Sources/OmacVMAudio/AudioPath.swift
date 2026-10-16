@@ -6,7 +6,11 @@ import Foundation
 public enum AudioPath {
     /// The sound's own thread unless the person switched back.
     public static let threadByDefault = false
-    /// QEMU's ring on the sound's own thread: it covers the guest's stalls
-    /// only, not the main loop's.
-    public static let threadRing = "out.buffer-count=8"
+    /// The sound backend's options on the sound's own thread. The ring no
+    /// longer covers the main loop's stalls, only the thread's own jitter:
+    /// 6 blocks of 256 frames at 48 kHz (32 ms, the Mac's and the guest's
+    /// rate, so nothing is resampled), instead of 8 x 512 at 44.1 kHz (93 ms).
+    public static let threadOptions = "out.frequency=48000,in.frequency=48000,out.buffer-length=5334,out.buffer-count=6,in.buffer-length=10667"
+    /// The main loop's (up to 3.1.14, and audioMainLoop).
+    public static let mainLoopOptions = "out.buffer-count=8"
 }
