@@ -923,6 +923,14 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-modifier-stat
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-modifier-state.patch"
 "$native_dir/Tests/keys/test-modifier-state.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the modifier keys are not set from the flags as tested (test-modifier-state.sh)"
+# The VM's windows follow the Mac's displays once they settle: one update at a
+# time from a timer, none while locked or asleep, inactive or 1 x 1 displays
+# absent, full-screen tries per display (#428: a display gone while the Mac
+# was locked made full-screen Spaces in a loop). Its rules' test, then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-display-settle-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-display-settle.patch"
+"$native_dir/Tests/display/test-display-settle.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: display changes are not settled as tested (test-display-settle.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"

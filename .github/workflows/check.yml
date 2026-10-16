@@ -438,6 +438,9 @@ jobs:
       - name: FullPanel's state lets go of a freed window (display unplugged, issue 402; the checks catch the old code)
         run: app/runtime/Tests/display/test-fullpanel-window-gone.sh --self-test
 
+      - name: Display changes settle before the VM's windows follow (locked unplug, issue 428; the old rules fail it)
+        run: app/runtime/Tests/display/test-display-settle.sh
+
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 
