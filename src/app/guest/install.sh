@@ -72,6 +72,12 @@ systemctl enable omacvm-mac-folder.service >/dev/null 2>&1 || true
 install -Dm644 90-omacvm-app.conf /etc/environment.d/90-omacvm-app.conf
 # Omarchy ignores the power key; here it comes only from the Mac's Quit.
 install -Dm644 90-omacvm-app-power.conf /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
+# Idle power: the display's vblank timer stops 100 ms after the last frame
+# instead of DRM's 5 s: now, at each boot (tmpfiles) and for a drm module
+# loaded later (modprobe.d).
+install -Dm644 90-omacvm-vblank.tmpfiles /etc/tmpfiles.d/90-omacvm-vblank.conf
+install -Dm644 omacvm-vblank.modprobe /etc/modprobe.d/omacvm-vblank.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/90-omacvm-vblank.conf 2>/dev/null || true
 # Only when it changed: Hyprland reloads its config on every write, and a
 # reload moves the displays (a flicker on each apply).
 if ! cmp -s omacvm_app.lua "$H/.config/hypr/omacvm_app.lua"; then

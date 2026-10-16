@@ -1,0 +1,5 @@
+# OmacVM.app: virtio-gpu's vblank is a kernel timer at the display's rate,
+# and DRM keeps it running 5 s after every frame (300-600 wakeups of an idle
+# VM per frame). 100 ms is plenty for a timer. The same value for a drm
+# module loaded later is in /etc/modprobe.d/omacvm-vblank.conf.
+w /sys/module/drm/parameters/vblankoffdelay - - - - 100

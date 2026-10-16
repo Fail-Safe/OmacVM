@@ -1,0 +1,3 @@
+# OmacVM.app: the vblank timer stops 100 ms after the last frame (DRM's
+# default keeps it 5 s); see /etc/tmpfiles.d/90-omacvm-vblank.conf.
+options drm vblankoffdelay=100

@@ -455,6 +455,11 @@ app)
     skip "fast network" "not this start: QEMU's user network (omacvm check on the Mac says why)"
   else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
   check "power key" "Quit on the Mac shuts down" test -f /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
+  # Idle power: virtio-gpu's vblank timer stops 100 ms after a frame (DRM's default: 5 s).
+  vb=$(cat /sys/module/drm/parameters/vblankoffdelay 2>/dev/null)
+  if [[ $vb == 100 ]]; then ok "display vblank" "stops 100 ms after a frame"
+  elif [[ -z $vb ]]; then skip "display vblank" "no DRM vblank setting in this kernel"
+  else warn "display vblank" "runs ${vb} ms after each frame (omacvm apply sets 100 ms)"; fi
   FEATURE=vulkan
   if [[ ${OMACVM_FEATURE_vulkan:-off} == on && ! -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
     bad "Vulkan (OmacVM's Mesa)" "on, but OmacVM's Mesa is not installed: omacvm apply (its log says why)"
