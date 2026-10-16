@@ -219,9 +219,9 @@ head_check() {
   elif (( fb != want_f )); then res "$name" FAIL "full-screen Spaces $fb, want $want_f (start $F0; the display $where)"
   elif (( $(on_display "$b" "$OTHER_ID") < 1 )); then res "$name" FAIL "no VM window shown on the remaining display $OTHER_ID"
   elif (( back )) && (( $(on_display "$b" "$VD_ID") < 1 )); then res "$name" FAIL "the display's window is not back on it"
-  elif [[ $want_t == 0-1 ]] && (( t > 1 )) || [[ $want_t != 0-1 ]] && (( t != want_t )); then
+  elif (( LOGS_TRIES )) && { [[ $want_t == 0-1 ]] && (( t > 1 )) || [[ $want_t != 0-1 ]] && (( t != want_t )); }; then
     res "$name" FAIL "$t full-screen tries for the display's window (want $want_t)"
-  else res "$name" ok "full-screen Spaces $fb (start $F0), windows $nb (start $N0), tries $t"; return 0; fi
+  else res "$name" ok "full-screen Spaces $fb (start $F0), windows $nb (start $N0), tries $( (( LOGS_TRIES )) && echo "$t" || echo "not logged (before 3.1.15)")"; return 0; fi
   return 1
 }
 case_head() {   # #428's layout, one VM start for every head case
@@ -230,6 +230,8 @@ case_head() {   # #428's layout, one VM start for every head case
   plug || { res head FAIL "no virtual display"; return; }
   start head || { res head FAIL "the VM did not come up"; unplug; stop; return; }
   HPID=$(qemu_pid); C0=$(crashes); sleep 10
+  # 3.1.15 and newer log each full-screen try and have the test lock hook.
+  LOGS_TRIES=0; grep -q 'omacvm: displays: test lock hook on' "$VMD/logs/qemu.log" && LOGS_TRIES=1
   a=$(census); F0=$(fullspaces "$a"); N0=$(qwindows "$a"); echo "$a" > "$OUT/head-start.census"
   if (( F0 != FBASE + 2 )) || (( $(on_display "$a" "$VD_ID") < 1 )); then
     res head-start FAIL "not both in full screen: full-screen Spaces $F0 (before the VM $FBASE)"; unplug; stop; return
@@ -245,25 +247,28 @@ case_head() {   # #428's layout, one VM start for every head case
   fi
   if want head-flap; then
     for ((r = 1; r <= FLAPS; r++)); do
-      l0=$(wc -l < "$VMD/logs/qemu.log"); vd_signal USR1 >/dev/null; sleep 2.5
+      l0=$(wc -l < "$VMD/logs/qemu.log"); vd_signal USR1 >/dev/null; sleep 1.5
       st=$(vd_signal USR2); VD_ID=$(sed -n 's/.* id=\([0-9]*\).*/\1/p' <<<"$st"); sleep 12
       head_check "head-flap-$r" 1 "$l0" || break
     done
   fi
   if want head-tiny; then
     st=$(vd_signal HUP)
-    if [[ $st != state=tiny* ]]; then
-      res head-tiny skip "the virtual display does not take a 1 x 1 mode: ${st:-no answer}"
+    if [[ $st != state=tiny* || $st != *size=1x1* ]]; then
+      res head-tiny skip "the virtual display does not go to 1 x 1: ${st:-no answer}"
+      [[ $st == state=tiny* ]] && vd_signal HUP >/dev/null
     else
       vd_signal HUP >/dev/null; sleep 12
       for ((r = 1; r <= FLAPS; r++)); do
-        l0=$(wc -l < "$VMD/logs/qemu.log"); st=$(vd_signal HUP); sleep 3; vd_signal HUP >/dev/null; sleep 12
+        l0=$(wc -l < "$VMD/logs/qemu.log"); st=$(vd_signal HUP); sleep 2; vd_signal HUP >/dev/null; sleep 12
         head_check "head-tiny-$r" 1 "$l0" || break
         (( r == 1 )) && res head-tiny-mode ok "1 x 1: $st"
       done
     fi
   fi
-  if want head-locked; then
+  if want head-locked && (( ! LOGS_TRIES )); then
+    res head-locked skip "this build has no test lock hook (before 3.1.15)"
+  elif want head-locked; then
     for ((r = 1; r <= 3; r++)); do
       l0=$(wc -l < "$VMD/logs/qemu.log"); lockhook lock; sleep 1; vd_signal USR1 >/dev/null; sleep 8
       a=$(census)
@@ -275,7 +280,7 @@ case_head() {   # #428's layout, one VM start for every head case
       l0=$(wc -l < "$VMD/logs/qemu.log"); st=$(vd_signal USR2); VD_ID=$(sed -n 's/.* id=\([0-9]*\).*/\1/p' <<<"$st"); sleep 12
       head_check "head-locked-$r-back" 1 "$l0" || break
       # gone and back while locked: nothing moves until the unlock
-      l0=$(wc -l < "$VMD/logs/qemu.log"); lockhook lock; sleep 1; vd_signal USR1 >/dev/null; sleep 2.5
+      l0=$(wc -l < "$VMD/logs/qemu.log"); lockhook lock; sleep 1; vd_signal USR1 >/dev/null; sleep 1.5
       st=$(vd_signal USR2); VD_ID=$(sed -n 's/.* id=\([0-9]*\).*/\1/p' <<<"$st"); sleep 6
       a=$(census)
       if (( $(fullspaces "$a") > F0 || $(tries "$l0") > 0 )); then

@@ -73,7 +73,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* VM state callbacks hold the BQL; this method only touches input state. */
  static void cocoa_pinch_vm_change(void *opaque, bool running, RunState state)
  {
-@@ -1700,15 +1720,70 @@ - (void) omacvmCheckGuestTop
+@@ -1700,13 +1720,68 @@ - (void) omacvmCheckGuestTop
          !([[self window] styleMask] & NSWindowStyleMaskFullScreen)) {
          return;
      }
@@ -114,9 +114,9 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        } else {
 +            refused = 0;
 +        }
-     }
- }
- 
++    }
++}
++
 +/* OmacVM (#428): the window's display counts (not inactive, asleep or 1 x 1). */
 +- (bool) omacvmScreenCounts
 +{
@@ -133,17 +133,15 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +    if (queued) {
 +        return;
-+    }
+     }
 +    queued = true;
 +    dispatch_async(dispatch_get_main_queue(), ^{
 +        queued = false;
 +        [self omacvmCheckGuestTop];
 +    });
-+}
-+
+ }
+ 
  /*
-  * OmacVM: where the window sits in full screen. Filling the area (also with
-  * the guest at its top) or as wide as it: at the top, right below the menu
 @@ -1732,7 +1807,25 @@ - (void) placeFullScreen
      [w setFrameOrigin:frame.origin];
  }
@@ -204,11 +202,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  }
  
  /*
-@@ -8028,10 +8132,24 @@ static bool cocoa_gl_is_compatible_dcl(DisplayGLCtx *dgc,
+@@ -8028,10 +8132,31 @@ static bool cocoa_gl_is_compatible_dcl(DisplayGLCtx *dgc,
      NSView *view;
      bool want_full;                 /* waiting for macOS full screen */
      bool full;                      /* in macOS full screen */
 -    int full_tries;
++    uint32_t key;                   /* the display's key (omacvm_ds_key) */
  } OmacVMHead;
  
  static OmacVMHead omacvm_heads[OMACVM_MAX_OUTPUTS];   /* [0] = the main window */
@@ -227,10 +226,16 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +{
 +    return (double)clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1e9;
 +}
++
++static uint32_t omacvm_display_key(CGDirectDisplayID id)
++{
++    return omacvm_ds_key(CGDisplayVendorNumber(id), CGDisplayModelNumber(id),
++                         CGDisplaySerialNumber(id), id);
++}
  static int omacvm_outputs = 1;                         /* graphic consoles */
  static bool omacvm_external_enabled = true;
  
-@@ -9113,11 +9231,16 @@ static void omacvm_heads_moved(void)
+@@ -9113,11 +9238,16 @@ static void omacvm_heads_moved(void)
  @interface OmacVMHeadDelegate : NSObject <NSWindowDelegate>
  @end
  
@@ -242,12 +247,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      OmacVMHead *hd = omacvm_head_for_window([note object]);
 +    omacvm_head_left([note object]);
      if (hd) {
-+        omacvm_ds_full(omacvm_ds_display(&omacvm_ds_known, hd->display, omacvm_ds_clock()),
++        omacvm_ds_full(omacvm_ds_display(&omacvm_ds_known, hd->key, omacvm_ds_clock()),
 +                       true, omacvm_ds_clock());
          hd->full = true;
          hd->want_full = false;
          [[note object] setAlphaValue:1.0];
-@@ -9139,6 +9262,7 @@ - (void)windowDidResize:(NSNotification *)note
+@@ -9139,6 +9269,7 @@ - (void)windowDidResize:(NSNotification *)note
  
  - (void)windowDidFailToEnterFullScreen:(NSWindow *)window
  {
@@ -255,18 +260,26 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      omacvm_full_busy = false;
      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2),
                     dispatch_get_main_queue(), ^{ omacvm_full_next(); });
-@@ -9147,7 +9271,10 @@ - (void)windowDidFailToEnterFullScreen:(NSWindow *)window
+@@ -9147,7 +9278,10 @@ - (void)windowDidFailToEnterFullScreen:(NSWindow *)window
  - (void)windowDidExitFullScreen:(NSNotification *)note
  {
      OmacVMHead *hd = omacvm_head_for_window([note object]);
 +    omacvm_head_left([note object]);
      if (hd) {
-+        omacvm_ds_full(omacvm_ds_display(&omacvm_ds_known, hd->display, omacvm_ds_clock()),
++        omacvm_ds_full(omacvm_ds_display(&omacvm_ds_known, hd->key, omacvm_ds_clock()),
 +                       false, omacvm_ds_clock());
          hd->full = false;
          omacvm_heads_moved();
      }
-@@ -9291,24 +9418,64 @@ static void omacvm_head_on(OmacVMHead *hd, NSScreen *s)
+@@ -9254,6 +9388,7 @@ static void omacvm_head_on(OmacVMHead *hd, NSScreen *s)
+                        omacvm_product_name(), hd->output + 1];
+ 
+     hd->display = omacvm_screen_id(s);
++    hd->key = omacvm_display_key(hd->display);
+     if (!hd->window) {
+         NSRect content = NSMakeRect(0, 0, 640, 400);
+         hd->view = [[OmacVMHeadView alloc] initWithFrame:content output:hd->output];
+@@ -9291,24 +9426,64 @@ static void omacvm_head_on(OmacVMHead *hd, NSScreen *s)
          [hd->window setFrame:NSInsetRect([s visibleFrame], 60, 60) display:NO];
          [hd->window orderFront:nil];
          hd->want_full = true;
@@ -318,7 +331,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          omacvm_full_busy = false;   /* its window goes: do not wait for it */
      }
 +    if (hd->display) {
-+        omacvm_ds_full(omacvm_ds_display(&omacvm_ds_known, hd->display, omacvm_ds_clock()),
++        omacvm_ds_full(omacvm_ds_display(&omacvm_ds_known, hd->key, omacvm_ds_clock()),
 +                       false, omacvm_ds_clock());
 +    }
      hd->display = 0;
@@ -336,7 +349,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          [hd->window release];
          hd->window = nil;
          [hd->view release];
-@@ -9316,10 +9483,29 @@ static void omacvm_head_off(OmacVMHead *hd)
+@@ -9316,10 +9491,29 @@ static void omacvm_head_off(OmacVMHead *hd)
      }
  }
  
@@ -367,7 +380,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          return;
      }
      for (int i = 1; i < omacvm_outputs; i++) {
-@@ -9333,12 +9519,24 @@ static void omacvm_full_next(void)
+@@ -9333,12 +9527,24 @@ static void omacvm_full_next(void)
              [hd->window setAlphaValue:1.0];
              continue;
          }
@@ -376,7 +389,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 -            hd->want_full = false;
 -            [hd->window setAlphaValue:1.0];
 +        /* Tries per display, also when its window is made again (#428). */
-+        OmacVMDsDisplay *d = omacvm_ds_display(&omacvm_ds_known, hd->display, now);
++        OmacVMDsDisplay *d = omacvm_ds_display(&omacvm_ds_known, hd->key, now);
 +        double wait;
 +        if (!omacvm_ds_may_try(d, now, &wait)) {
 +            if (wait < 0) {
@@ -396,7 +409,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          omacvm_full_busy = true;
          omacvm_full_busy_output = i;
          [hd->window toggleFullScreen:nil];
-@@ -9353,14 +9551,21 @@ static void omacvm_full_next(void)
+@@ -9353,14 +9559,21 @@ static void omacvm_full_next(void)
          });
          return;
      }
@@ -419,7 +432,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  {
      NSWindow *mw = [cocoaView window];
      NSScreen *ms = [mw screen];
-@@ -9368,11 +9573,32 @@ static void omacvm_displays_update(void)
+@@ -9368,11 +9581,33 @@ static void omacvm_displays_update(void)
      bool want = omacvm_outputs > 1 && omacvm_guest_ready &&
                  omacvm_external_enabled && omacvm_main_full_screen() && ms;
      NSMutableArray *screens = [NSMutableArray array];
@@ -434,7 +447,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        int n = 0;
 +        for (NSScreen *s in [NSScreen screens]) {
 +            if (n < OMACVM_DS_MAX) {
-+                listed[n++] = omacvm_screen_id(s);
++                listed[n++] = omacvm_display_key(omacvm_screen_id(s));
 +            }
 +        }
 +        omacvm_ds_listed(&omacvm_ds_known, listed, n);
@@ -444,7 +457,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +            if (id == main_id || !omacvm_test_allows(id)) {
 +                continue;
 +            }
-+            double left = omacvm_ds_look(omacvm_ds_display(&omacvm_ds_known, id, now),
++            double left = omacvm_ds_look(omacvm_ds_display(&omacvm_ds_known,
++                                                            omacvm_display_key(id), now),
 +                                         omacvm_screen_counts(s), now);
 +            if (left > 0) {
 +                /* Not settled yet: no window for it until then. */
@@ -453,7 +467,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
                  [screens addObject:s];
              }
          }
-@@ -9393,6 +9619,16 @@ static void omacvm_displays_update(void)
+@@ -9393,6 +9628,16 @@ static void omacvm_displays_update(void)
          for (NSScreen *s in screens) {
              keep |= hd->display && omacvm_screen_id(s) == hd->display;
          }
@@ -470,7 +484,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          if (hd->display && !keep) {
              omacvm_head_off(hd);
              changed = true;
-@@ -9422,6 +9658,192 @@ static void omacvm_displays_update(void)
+@@ -9422,6 +9667,192 @@ static void omacvm_displays_update(void)
      omacvm_update_mac_layout();
      omacvm_send_layout();
      omacvm_full_next();
@@ -663,7 +677,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  }
  
  /* The guest channel: org.omacvm.display (JSON lines). */
-@@ -10745,6 +11167,7 @@ static void omacvm_displays_init(void)
+@@ -10745,6 +11176,7 @@ static void omacvm_displays_init(void)
      }
  #endif
      omacvm_head_delegate = [[OmacVMHeadDelegate alloc] init];
@@ -671,7 +685,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      /* Another Space: the detached cursor must move there (see omacvm_guard_corners). */
      [[[NSWorkspace sharedWorkspace] notificationCenter]
          addObserverForName:NSWorkspaceActiveSpaceDidChangeNotification
-@@ -10758,9 +11181,8 @@ static void omacvm_displays_init(void)
+@@ -10758,9 +11190,8 @@ static void omacvm_displays_init(void)
                      object:nil
                       queue:[NSOperationQueue mainQueue]
                  usingBlock:^(NSNotification *note) {

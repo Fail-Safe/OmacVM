@@ -265,6 +265,17 @@ static void test_tries(void)
     CHECK(e->tries == 0, "a new display starts with %d tries", e->tries);
 }
 
+static void test_key(void)
+{
+    uint32_t lg = omacvm_ds_key(0x1e6d, 0x5b11, 0x1234, 2);
+
+    CHECK(lg == omacvm_ds_key(0x1e6d, 0x5b11, 0x1234, 3), "a new display id is another monitor");
+    CHECK(lg != omacvm_ds_key(0x1e6d, 0x5b11, 0x1235, 2), "another serial number is the same monitor");
+    CHECK(lg != omacvm_ds_key(0x1e6d, 0x5b12, 0x1234, 2), "another model is the same monitor");
+    CHECK(omacvm_ds_key(0, 0, 0, 7) == 7, "a display without a vendor is not known by its id");
+    CHECK(lg != 0, "a key of 0 (a free entry)");
+}
+
 static void test_table(void)
 {
     OmacVMDsDisplays all = { 0 };
@@ -288,6 +299,7 @@ int main(void)
     test_locked();
     test_counts();
     test_tries();
+    test_key();
     test_table();
     if (failures) {
         printf("test-display-settle: %d failed\n", failures);

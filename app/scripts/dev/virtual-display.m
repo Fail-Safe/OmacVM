@@ -126,6 +126,8 @@ static CGDirectDisplayID plug(void)
 static void state(const char *what)
 {
     CGDirectDisplayID id = display ? display.displayID : 0;
+    // macOS takes a moment to show the change.
+    [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:1.0]];
     CGRect b = id ? CGDisplayBounds(id) : CGRectZero;
     printf("state=%s id=%u active=%d size=%.0fx%.0f\n", what, id,
            id ? (int)CGDisplayIsActive(id) : 0, b.size.width, b.size.height);

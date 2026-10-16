@@ -46,8 +46,11 @@ problems() {
   ! grep -q 'dispatch_get_main_queue(), ^{ omacvm_displays_update(); });' "$m" ||
     echo "a change waits on its own instead of the timer"
   # Displays that do not count are absent; a new one waits until it settles.
-  grep -q 'omacvm_ds_look(omacvm_ds_display(&omacvm_ds_known, id, now),' <<<"$apply" &&
+  grep -q 'double left = omacvm_ds_look(omacvm_ds_display(&omacvm_ds_known,' <<<"$apply" &&
+    grep -q 'omacvm_display_key(id), now),' <<<"$apply" &&
     grep -q 'omacvm_screen_counts(s), now);' <<<"$apply" || echo "inactive or 1 x 1 displays get windows"
+  grep -q 'omacvm_ds_listed(&omacvm_ds_known, listed, n);' <<<"$apply" || echo "an unplugged display keeps counting"
+  grep -q 'hd->key = omacvm_display_key(hd->display);' <<<"$headon" || echo "tries are kept per display id, not per monitor"
   grep -q 'if (want && !omacvm_screen_counts(ms)) {' <<<"$apply" ||
     echo "windows move while the main window's display does not count"
   # Tries per display, never reset by a new window; none while locked.
