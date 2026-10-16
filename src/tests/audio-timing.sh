@@ -5,6 +5,7 @@
 #    (OMACVM_MAIN_LOOP_QOS=default, hda-micro pace=off; "main loop QoS: ...", "HDA sound pacing on|off")
 #  - a Mac audio device that does not answer: the playback-thread patch is built in, its
 #    log lines match omacvm check's "sound" line, the test stub builds
+#  - the sound's own thread: patch pinned and placed, launcher switch, log lines and check.sh agree
 #  - the guest: RTKit's drop-in without the canary is installed, and omacvm check tells a
 #    real-time PipeWire from a demoted one
 # Exit 0 when every check passes.
@@ -46,6 +47,38 @@ check "check.sh: QoS + pacing on is ok" grep -q "^ok:QEMU's main loop at user-in
 check "check.sh: audioClassic is ok" grep -q "^ok:QEMU's own sound timing" <<<"$(verdict 'main loop QoS: default' 'HDA sound pacing off')"
 check "check.sh: refused QoS warns" grep -q "^warn:" <<<"$(verdict 'main loop QoS: default (user-interactive refused)' 'HDA sound pacing on')"
 check "check.sh: an old runtime prints nothing" test -z "$(verdict '' '')"
+# The sound on its own real-time thread (qemu-audio-own-thread.patch, OMACVM_AUDIO_THREAD=1).
+TP=$R/app/runtime/patches/qemu-audio-own-thread.patch
+MODEL=$R/app/app/Sources/OmacVM/Model.swift
+check "own-thread patch is pinned in SHA256SUMS" grep -q " qemu-audio-own-thread.patch$" "$R/app/runtime/patches/SHA256SUMS"
+own_line=$(grep -n 'patches/qemu-audio-own-thread.patch"' "$R/app/runtime/build-qemu-gpu-runtime.sh" | cut -d: -f1)
+nap_line=$(grep -n 'patches/omacvm-cocoa-no-app-nap.patch"' "$R/app/runtime/build-qemu-gpu-runtime.sh" | cut -d: -f1)
+pace_line=$(grep -n 'patches/qemu-hda-no-catch-up.patch"' "$R/app/runtime/build-qemu-gpu-runtime.sh" | cut -d: -f1)
+wd_line=$(grep -n 'patches/qemu-main-loop-stall-watchdog.patch"' "$R/app/runtime/build-qemu-gpu-runtime.sh" | cut -d: -f1)
+check "runtime build applies it after pacing and the stall watchdog, before the App Nap patch" \
+  test -n "$own_line" -a "${own_line:-0}" -gt "${pace_line:-0}" -a "${own_line:-0}" -gt "${wd_line:-0}" -a "${own_line:-0}" -lt "${nap_line:-0}"
+check "own-thread patch reads OMACVM_AUDIO_THREAD" grep -qF 'g_getenv("OMACVM_AUDIO_THREAD")' "$TP"
+check "launcher sets OMACVM_AUDIO_THREAD=1 for the own thread" grep -qF 'env["OMACVM_AUDIO_THREAD"] = "1"' "$RUNNER"
+check "audioMainLoop and audioClassic switch the own thread off" grep -qF 'if audioClassic || d.bool(forKey: "audioMainLoop") { return false }' "$MODEL"
+for line in 'sound path: %s' 'sound: own audio thread, %s'; do
+  check "own-thread patch logs '$line'" grep -qF "\"OmacVM: $line" "$TP"
+done
+check "the thread never takes the BQL: DMA to RAM only off the BQL" grep -qF 'bool rt = !bql_locked();' "$TP"
+path_verdict() {   # PATH_LINE THREAD_LINE PACING_LINE -> the status check.sh prints
+  local miclog TYPE=app out
+  miclog=$(mktemp); printf 'OmacVM: %s\n' "$@" | grep -v 'OmacVM: $' > "$miclog"
+  ok() { echo "ok:$2"; }; warn() { echo "warn:$2"; }
+  out=$(eval "$(sed -n '/^# Sound on a busy Mac/,/^fi$/p' "$CHECK")")
+  rm -f "$miclog"; echo "$out"
+}
+check "check.sh: own thread at time-constraint is ok" grep -q "^ok:sound card and mixer on their own real-time thread (time-constraint)" \
+  <<<"$(path_verdict 'sound path: own audio thread' 'main loop QoS: user-interactive' 'sound: own audio thread, time-constraint, every 1000 us' 'HDA sound pacing on')"
+check "check.sh: own thread before any sound is ok" grep -q "^ok:.*no sound yet this start" \
+  <<<"$(path_verdict 'sound path: own audio thread' 'main loop QoS: user-interactive' 'HDA sound pacing on')"
+check "check.sh: own thread without real-time priority warns" grep -q "^warn:" \
+  <<<"$(path_verdict 'sound path: own audio thread' 'sound: own audio thread, default priority, every 1000 us' 'HDA sound pacing on')"
+check "check.sh: the main loop path (audioMainLoop) stays as before" grep -q "^ok:QEMU's main loop at user-interactive QoS, sound card paced" \
+  <<<"$(path_verdict "sound path: QEMU's main loop" 'main loop QoS: user-interactive' 'HDA sound pacing on')"
 # A Mac audio device that does not answer (qemu-sdl-audio-playback-thread.patch).
 PP=$R/app/runtime/patches/qemu-sdl-audio-playback-thread.patch
 BUILD=$R/app/runtime/build-qemu-gpu-runtime.sh

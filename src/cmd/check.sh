@@ -500,13 +500,21 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     ok "globe key" "goes to the VM while it has the keyboard (Omarchy's emoji picker)"
   fi
 fi
-# Sound on a busy Mac: QEMU's main loop (the sound card's timers) at
-# user-interactive QoS, and the sound card paced (no catch-up after a stall);
-# the hidden audioClassic setting keeps QEMU's own timing for both.
+# Sound on a busy Mac: the sound card's DMA and the mixer on their own
+# real-time thread (3.1.16; audioMainLoop: in QEMU's main loop as before), the
+# main loop at user-interactive QoS, and the sound card paced (no catch-up
+# after a stall); the hidden audioClassic setting keeps QEMU's own timing.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   q=$(grep -o 'main loop QoS: .*' "$miclog" | tail -1)
   p=$(grep -o 'HDA sound pacing [a-z]*' "$miclog" | tail -1)
+  sp=$(grep -o 'OmacVM: sound path: .*' "$miclog" | tail -1)
+  pr=$(grep -o 'OmacVM: sound: own audio thread, [^,]*' "$miclog" | tail -1)
+  pr=${pr#OmacVM: sound: own audio thread, }
+  [[ $sp == *"own audio thread" ]] && q="own thread|$pr"
   case "$q|$p" in
+    "own thread|default priority|"*) warn "sound timing" "macOS gave the sound's own thread no real-time priority: sound may crackle while the Mac is busy" ;;
+    "own thread||"*) ok "sound timing" "sound card and mixer on their own real-time thread (no sound yet this start), sound card paced" ;;
+    "own thread|"*) ok "sound timing" "sound card and mixer on their own real-time thread (${q#own thread|}), sound card paced" ;;
     "|") ;;   # a runtime before 3.0.0 says nothing
     *refused*) warn "sound timing" "macOS refused user-interactive QoS: sound may crackle while the Mac is busy" ;;
     *user-interactive"|HDA sound pacing on") ok "sound timing" "QEMU's main loop at user-interactive QoS, sound card paced" ;;
