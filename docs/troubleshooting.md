@@ -926,3 +926,36 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `src/guest/check.sh` ("shell colours"); test `src/tests/shell-colors.sh`.
   OmacVM's own panels (Wi-Fi, sound, Bluetooth) use `Commons.Color`.
   Issue [#376](https://github.com/gillesgoetsch/OmacVM/issues/376).
+
+## 36. app: black full-screen Spaces pile up after a display goes while the Mac is locked
+
+- **Symptom:** the VM in full screen on two displays; the Mac locked, then
+  one display unplugged (or, after the displays slept, one wakes up
+  inactive for a few seconds). The Mac clicks fast, and after unlocking
+  Mission Control shows a growing row of black full-screen Spaces until the
+  VM quits. Up to 3.1.14.
+- **Cause:** macOS reports such a change in steps (an unplugged or waking
+  display shows up for a few seconds as inactive at 1 x 1) and moves the
+  main window's full-screen Space while the displays settle. Each step went
+  straight to the display update, inside AppKit's own window and screen
+  notifications: the second display's window was made again, each new one
+  asked for full screen in a new Space (the five tries were counted per
+  window), and the old one was closed while macOS still moved it, so AppKit
+  kept it and its Space.
+- **Fix (3.1.15):** the VM's windows follow the displays from one timer once
+  they settle (0.5 s after the last change), never inside the notification
+  that asked, never while the screen is locked or the displays sleep (1 s
+  after unlock or wake). A display that is inactive, asleep or under
+  100 x 100 points counts as gone; one that comes back gets its window after
+  2 s. Full screen is tried at most 4 times per monitor (also when its
+  window is made again; a full screen that held 10 s starts over). QEMU's
+  log says "display N: full screen for its window (try k of 4)" for each
+  try, and "displays: no window changes while locked or asleep" while it
+  waits. Before: quit the VM to stop it.
+- **Where:** `app/runtime/patches/omacvm-cocoa-display-settle-logic.patch`
+  (the rules, `ui/omacvm-display-settle.h`) and
+  `omacvm-cocoa-display-settle.patch`; tests
+  `app/runtime/Tests/display/test-display-settle.sh` and
+  `src/tests/e2e/display-unplug.sh` (the head cases; `OMACVM_TEST_LOCK_HOOK=1`
+  with `app/scripts/dev/test-lock.m` stands in for the lock).
+  Issue [#428](https://github.com/gillesgoetsch/OmacVM/issues/428).
