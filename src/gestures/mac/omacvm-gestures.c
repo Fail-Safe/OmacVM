@@ -3973,6 +3973,17 @@ int main(int argc, char **argv) {
 #if GESTURES_TEST_IDENTITY
   const char *rd = getenv("OMACVM_TEST_REPLAY_DIR");
   if (rd && rd[0] == '/') { snprintf(replayDir, sizeof replayDir, "%s", rd); logf_("test identity: frames from %s/next.tsv", replayDir); }
+  // SIGUSR2: the rest tap as macOS turns a tap off (a timeout), for the
+  // end-to-end test of re-arming it. Test identity only.
+  signal(SIGUSR2, SIG_IGN);
+  static dispatch_source_t usr2;
+  usr2 = dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL, SIGUSR2, 0, dispatch_get_main_queue());
+  dispatch_source_set_event_handler(usr2, ^{
+    logf_("test identity: the rest tap turned off as by a timeout (%s)", restArmed ? "armed" : "not armed");
+    if (restTap) CGEventTapEnable(restTap, false);
+    restTapCb(NULL, kCGEventTapDisabledByTimeout, NULL, NULL);
+  });
+  dispatch_resume(usr2);
 #endif
 
   tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
