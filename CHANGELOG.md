@@ -3,9 +3,17 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.15 (unreleased)
 
-- Vendor HID devices: disconnecting one no longer freezes the VM for a moment while a request is still running (thanks @fbalazsy, from #427).
+- **No more full-screen Spaces in a loop when a display goes while the Mac is locked.** With the
+  VM in full screen on two displays, unplugging one while the Mac was locked (or a display waking
+  up inactive for a few seconds) made OmacVM put the second display's window into full screen
+  again and again: dozens of black full-screen Spaces and a clicking Mac until the VM quit. Now
+  the VM's windows follow the displays only once they settle and the Mac is unlocked, a display
+  that shows up inactive or at 1 x 1 counts as gone, full screen is tried at most four times per
+  display, and a window that goes takes its Space with it. Reported by @ylorn (#428).
+- Vendor HID devices: disconnecting one no longer freezes the VM for a moment while a request is
+  still running (thanks @fbalazsy, from #427).
 
 ## 3.1.14
 
