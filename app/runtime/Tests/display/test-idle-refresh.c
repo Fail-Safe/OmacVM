@@ -103,34 +103,34 @@ int main(int argc, char **argv)
     ticks(now_ms + 900, 8, false);
     expect("under a second without work: still fast", 8, 16);
     ticks(now_ms + 200, 8, false);
-    expect("a second without work: 500 ms", 500, 500);
-    ticks(now_ms + 3000, 500, false);
-    expect("stays slow while idle", 500, 500);
+    expect("a second without work: slow", COCOA_REFRESH_SLOW_MS, COCOA_REFRESH_SLOW_MS);
+    ticks(now_ms + 3 * COCOA_REFRESH_SLOW_MS, COCOA_REFRESH_SLOW_MS, false);
+    expect("stays slow while idle", COCOA_REFRESH_SLOW_MS, COCOA_REFRESH_SLOW_MS);
 
     cocoa_refresh_activity();                       /* a 2D update, say */
     expect("work: the display's rate at once", 8, 16);
     ticks(now_ms + 900, 8, false);
     expect("under a second after the work: fast", 8, 16);
     ticks(now_ms + 200, 8, false);
-    expect("a second after the work: slow again", 500, 500);
+    expect("a second after the work: slow again", COCOA_REFRESH_SLOW_MS, COCOA_REFRESH_SLOW_MS);
 
-    ticks(now_ms + 500, 500, true);
+    ticks(now_ms + COCOA_REFRESH_SLOW_MS, COCOA_REFRESH_SLOW_MS, true);
     expect("a frame not shown yet: fast", 8, 16);
     ticks(now_ms + 3000, 8, true);
     expect("still fast while it is pending", 8, 16);
     ticks(now_ms + 900, 8, false);
     expect("shown: fast for under a second", 8, 16);
     ticks(now_ms + 200, 8, false);
-    expect("then slow", 500, 500);
+    expect("then slow", COCOA_REFRESH_SLOW_MS, COCOA_REFRESH_SLOW_MS);
 
     cocoa_refresh_set(&dcl, 0, 16);                 /* window moved to a 60 Hz display */
-    expect("a new display rate while slow stays slow", 500, 500);
+    expect("a new display rate while slow stays slow", COCOA_REFRESH_SLOW_MS, COCOA_REFRESH_SLOW_MS);
     cocoa_refresh_activity();
     expect("then the new rate", 16, 16);
 
     cocoa_refresh_set(&dcl, 0, 0);                  /* rate unknown: QEMU's default */
     ticks(now_ms + 1200, 30, false);
-    expect("QEMU's default rate slows too", 500, 500);
+    expect("QEMU's default rate slows too", COCOA_REFRESH_SLOW_MS, COCOA_REFRESH_SLOW_MS);
     cocoa_refresh_activity();
     expect("and comes back as the default (0)", 0, 16);
 

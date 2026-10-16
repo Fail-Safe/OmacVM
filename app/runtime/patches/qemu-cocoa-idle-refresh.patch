@@ -2,7 +2,7 @@ From: OmacVM
 Subject: [PATCH] cocoa: the refresh tick slows down while it has nothing to do
 
 What: QEMU's display refresh timer (gui_update) runs at the Mac display's
-rate for every listener (8 ms on a 120 Hz panel). It now slows to 500 ms
+rate for every listener (8 ms on a 120 Hz panel). It now slows to 2 s
 after a second without work for it: a 2D update or a new scanout (boot,
 consoles), an update of an extra output's window (those draw on the tick),
 a main-window frame not shown yet, or OMACVM_GL_PRESENT_ON_TICK. The next
@@ -17,6 +17,8 @@ Why: with virtio-gpu the tick has nothing to do while the screen does not
 change (the device's gfx_update does nothing). It only checked the
 pasteboard and woke QEMU's main loop 60-120 times a second on an idle
 Omarchy desktop, also with the window minimised or hidden.
+The slow tick was 500 ms at first; 2 s since idle-power round 4 (nothing
+it still does at idle is needed sooner: two more wakeups a second saved).
 
 Upstream: not sent (QEMU's VNC server slows its own refresh the same way;
 the Cocoa GL present path and OmacVM's extra outputs are OmacVM patches).
@@ -112,13 +114,13 @@ show at once. Applies after qemu-cocoa-gl-present-color.patch.
 + * tick: 2D updates and new scanouts (boot, consoles), the extra outputs'
 + * windows (drawn on the tick), a frame that could not be shown yet, and
 + * OMACVM_GL_PRESENT_ON_TICK. After a second without any of these the
-+ * listeners tick every 500 ms; the next one brings the display's rate back
++ * listeners tick every 2 s; the next one brings the display's rate back
 + * at once (re-arming the timer). A blinking cursor or a clock on the main
 + * output keeps the slow tick. OMACVM_IDLE_REFRESH=0 keeps the display's
 + * rate. Only in GL mode: other devices may need the tick to see changes.
 + * All of it with the BQL.
 + */
-+#define COCOA_REFRESH_SLOW_MS  500
++#define COCOA_REFRESH_SLOW_MS  2000
 +#define COCOA_REFRESH_QUIET_MS 1000
 +static uint64_t cocoa_refresh_fast[OMACVM_MAX_OUTPUTS];   /* 0: QEMU's default */
 +static bool cocoa_refresh_slow;
@@ -133,7 +135,7 @@ show at once. Applies after qemu-cocoa-gl-present-color.patch.
 +        const char *e = getenv("OMACVM_IDLE_REFRESH");
 +        on = display_opengl && !(e && !strcmp(e, "0"));
 +        info_report("cocoa: refresh tick %s", on
-+                    ? "every 500 ms while nothing changes on screen"
++                    ? "every 2 s while nothing changes on screen"
 +                    : "at the display's rate (OMACVM_IDLE_REFRESH=0)");
 +    }
 +    return on;
