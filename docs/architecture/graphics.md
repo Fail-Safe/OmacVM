@@ -877,6 +877,13 @@ bench lock and are indications only):
   on the tick) and a frame not shown yet do. A second without those and it
   slows to 2 s; the next one re-arms it at once
   (`qemu-cocoa-idle-refresh.patch`, `OMACVM_IDLE_REFRESH=0` to keep it).
+  A frame kept for a window out of sight (`omacvm-cocoa-present-unseen.patch`)
+  is no tick work: it is drawn when the window shows again
+  (`omacvm-cocoa-idle-refresh-unseen.patch`; before, any frame that came while
+  the window was away kept the tick at the display's rate). In the guest,
+  virtio-gpu's vblank (a kernel timer at the mode's rate) stops 100 ms after
+  the last frame instead of DRM's 5 s (`drm.vblankoffdelay`, app VMs:
+  `src/app/guest/90-omacvm-vblank.tmpfiles`).
 - **Latency**: Core Animation shows a commit at the next vsync if it lands
   about 3 ms before it; committing earlier does not show it sooner. So the
   delay from a finished guest frame to the glass is set by the guest's vblank
