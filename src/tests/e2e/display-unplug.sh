@@ -109,7 +109,11 @@ vd_signal() {   # USR1 (gone) | USR2 (back) | HUP (1 x 1 and back): waits for th
   for ((i = 0; i < 20; i++)); do (( $(grep -c '^state=' "$VD_OUT") > n )) && break; sleep 0.25; done
   grep '^state=' "$VD_OUT" | tail -1
 }
-lockhook() { osascript -l JavaScript -e "ObjC.import('Foundation'); \$.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately('org.omacvm.test.$1', null, null, true)" >/dev/null; }
+# The locked path without locking the test Mac (app/scripts/dev/test-lock.m).
+LOCKTOOL="$OUT/test-lock"
+clang -fobjc-arc -framework Foundation "$R/app/scripts/dev/test-lock.m" -o "$LOCKTOOL" >> "$OUT/build-tool.log" 2>&1 ||
+  { echo "display-unplug: could not build the lock tool ($OUT/build-tool.log)" >&2; exit 3; }
+lockhook() { "$LOCKTOOL" "$1"; }
 
 # Put back what this changes, also on Ctrl-C.
 FS_BEFORE=$(defaults read "$APPID" startFullScreen 2>/dev/null || echo unset)
@@ -262,7 +266,8 @@ case_head() {   # #428's layout, one VM start for every head case
       vd_signal HUP >/dev/null; sleep 12
       for ((r = 1; r <= FLAPS; r++)); do
         l0=$(wc -l < "$VMD/logs/qemu.log"); st=$(vd_signal HUP); sleep 2; vd_signal HUP >/dev/null; sleep 12
-        head_check "head-tiny-$r" 1 "$l0" || break
+        # macOS may not tell QEMU about a 1 x 1 mode this short (then nothing moves): 0 or 1 tries
+        head_check "head-tiny-$r" 1 "$l0" 0-1 || break
         (( r == 1 )) && res head-tiny-mode ok "1 x 1 for 2-3 s each round: $a"
       done
     fi
@@ -271,7 +276,11 @@ case_head() {   # #428's layout, one VM start for every head case
     res head-locked skip "this build has no test lock hook (before 3.1.15)"
   elif want head-locked; then
     for ((r = 1; r <= 3; r++)); do
-      l0=$(wc -l < "$VMD/logs/qemu.log"); lockhook lock; sleep 1; vd_signal USR1 >/dev/null; sleep 8
+      l0=$(wc -l < "$VMD/logs/qemu.log"); lockhook lock; sleep 1
+      if ! tail -n +$((l0 + 1)) "$VMD/logs/qemu.log" | grep -q 'no window changes while locked or asleep (test: locked)'; then
+        res "head-locked-$r" FAIL "QEMU did not see the test lock"; lockhook unlock; break
+      fi
+      vd_signal USR1 >/dev/null; sleep 8
       a=$(census)
       if (( $(fullspaces "$a") > F0 || $(tries "$l0") > 0 )); then
         res "head-locked-$r" FAIL "while locked: full-screen Spaces $(fullspaces "$a") (start $F0), $(tries "$l0") full-screen tries"; lockhook unlock; break
