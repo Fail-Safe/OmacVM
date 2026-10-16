@@ -23,7 +23,8 @@ RestartSec=2
 RestartPreventExitStatus=3 127
 # A daemon stuck as a whole (the GPU, VA-API) stops pinging: killed and
 # restarted, the module fails the open videos and apps decode on the CPU.
-WatchdogSec=5
+# It pings every third of this (5 s woke an idle VM every 1.7 s).
+WatchdogSec=10
 WatchdogSignal=SIGKILL
 NotifyAccess=main
 User=omacvm-vdec
