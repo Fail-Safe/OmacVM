@@ -808,8 +808,8 @@ step_keys() {
 # The VM's display unplugged under it, its window there (#402; display-unplug.sh, the VM stopped).
 step_unplug() {
   if (( HIDDEN )); then res unplug skip "needs windows on this Mac's displays (--hidden)"; return; fi
-  log "unplug: the display the VM's window is on unplugged (limit 25 min)"
-  perl -e 'alarm 1500; exec @ARGV' "$HERE/display-unplug.sh" --vm "$VM" --out "$OUT/unplug" > "$OUT/unplug.log" 2>&1
+  log "unplug: the display the VM's window is on unplugged, flapping, locked (limit 45 min)"
+  perl -e 'alarm 2700; exec @ARGV' "$HERE/display-unplug.sh" --vm "$VM" --out "$OUT/unplug" > "$OUT/unplug.log" 2>&1
   local rc=$?
   while IFS=$'\t' read -r st r d; do res "$st" "$r" "$d"; done < "$OUT/unplug/summary.tsv" 2>/dev/null
   (( rc == 0 )) || grep -q FAIL "$OUT/unplug/summary.tsv" 2>/dev/null ||

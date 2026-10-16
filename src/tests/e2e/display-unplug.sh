@@ -9,11 +9,27 @@
 #   fullpanel  "Full screen including notch" (a made-up notch,
 #              OMACVM_TEST_NOTCH_GEOMETRY): 2 rounds; QEMU crashed here (3.1.7)
 #   window     a window on it: 1 round
+#   head-*     #428's layout: the main window in full screen on the other
+#              display, the window for the VM's second display in full screen
+#              on the virtual one (the menu bar's display). One VM start for:
+#              head-unplug  unplugged and plugged in again, --rounds rounds
+#              head-flap    gone and back within 2.5 s, --flap-rounds rounds
+#              head-tiny    at 1 x 1 for 3 s and back (a waking display),
+#                           --flap-rounds rounds
+#              head-locked  the locked path (OMACVM_TEST_LOCK_HOOK=1: the
+#                           test Mac is never locked): unplugged while
+#                           "locked", "unlocked", plugged in again; and gone
+#                           and back while "locked"; 3 rounds each
+#              Each round counts QEMU's windows and the full-screen Spaces
+#              (app/scripts/dev/window-census.m) twice, 4 s apart: no more
+#              than at the start, the main window on the remaining display,
+#              the display's window back in full screen with one try once
+#              the display is back.
 # After each unplug: the same QEMU still runs 8 s later, the VM answers over
 # SSH, and no new crash report of the app's QEMU.
 #
-#   src/tests/e2e/display-unplug.sh --vm NAME [--rounds N] [--only LIST] [--out DIR]
-#     --only LIST   cases (comma list): full,fullpanel,window (default: all)
+#   src/tests/e2e/display-unplug.sh --vm NAME [--rounds N] [--flap-rounds N] [--only LIST] [--out DIR]
+#     --only LIST   cases (comma list): full,fullpanel,window,head (default: all)
 #     --out DIR     summary.tsv and the logs (default ~/omacvm-e2e/unplug-<time>)
 # Needs: ~/Applications/"OmacVM Test.app" (org.omacvm.app.test), NAME stopped in
 # its VMs folder, clang (builds the display tool), and the test Mac to itself:
@@ -25,18 +41,19 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 R=$(cd "$HERE/../../.." && pwd)
 
-VM=""; ROUNDS=3; ONLY=""; OUT=""
+VM=""; ROUNDS=3; FLAPS=10; ONLY=""; OUT=""
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
     --rounds) ROUNDS=$2; shift 2 ;;
+    --flap-rounds) FLAPS=$2; shift 2 ;;
     --only) ONLY=",$2,"; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
-    *) echo "usage: display-unplug.sh --vm NAME [--rounds N] [--only full,fullpanel,window] [--out DIR]" >&2; exit 2 ;;
+    *) echo "usage: display-unplug.sh --vm NAME [--rounds N] [--flap-rounds N] [--only full,fullpanel,window,head] [--out DIR]" >&2; exit 2 ;;
   esac
 done
 [[ -n $VM ]] || { echo "display-unplug: --vm NAME (a test VM)" >&2; exit 2; }
-[[ $ROUNDS =~ ^[1-9][0-9]?$ ]] || { echo "display-unplug: --rounds 1-99" >&2; exit 2; }
+[[ $ROUNDS =~ ^[1-9][0-9]?$ && $FLAPS =~ ^[1-9][0-9]?$ ]] || { echo "display-unplug: --rounds and --flap-rounds 1-99" >&2; exit 2; }
 want() { [[ -z $ONLY || $ONLY == *",$1,"* ]]; }
 
 export OMACVM_TEST_IDENTITY=1
@@ -72,16 +89,27 @@ crashes() { ls "$HOME/Library/Logs/DiagnosticReports" 2>/dev/null | grep -c '^Om
 VD="$OUT/virtual-display"
 clang -fobjc-arc -framework Foundation -framework CoreGraphics "$R/app/scripts/dev/virtual-display.m" -o "$VD" \
   > "$OUT/build-tool.log" 2>&1 || { echo "display-unplug: could not build the display tool ($OUT/build-tool.log)" >&2; exit 3; }
-VD_PID=""; VD_ID=""
+# Windows and Spaces, counted (#428).
+CENSUS="$OUT/window-census"
+clang -fobjc-arc -framework Foundation -framework CoreGraphics -F/System/Library/PrivateFrameworks -framework SkyLight \
+  "$R/app/scripts/dev/window-census.m" -o "$CENSUS" >> "$OUT/build-tool.log" 2>&1 ||
+  { echo "display-unplug: could not build the census tool ($OUT/build-tool.log)" >&2; exit 3; }
+VD_PID=""; VD_ID=""; VD_OUT="$OUT/vd.out"
 plug() {   # the virtual display, with the menu bar on it
-  local f="$OUT/vd.out" i
-  "$VD" 3008x1692 --hidpi --main --name "OmacVM Unplug Test $RANDOM" > "$f" 2>&1 &
+  local i
+  "$VD" 3008x1692 --hidpi --main --name "OmacVM Unplug Test $RANDOM" --serial $((0x4280000 + RANDOM)) > "$VD_OUT" 2>&1 &
   VD_PID=$!
-  for ((i = 0; i < 30; i++)); do VD_ID=$(sed -n 's/^id=//p' "$f"); [[ -n $VD_ID ]] && break; sleep 0.5; done
+  for ((i = 0; i < 30; i++)); do VD_ID=$(sed -n 's/^id=//p' "$VD_OUT"); [[ -n $VD_ID ]] && break; sleep 0.5; done
   [[ -n $VD_ID ]] || { kill "$VD_PID" 2>/dev/null; VD_PID=""; return 1; }
   sleep 3
 }
 unplug() { [[ -n $VD_PID ]] && { kill "$VD_PID" 2>/dev/null; wait "$VD_PID" 2>/dev/null; }; VD_PID=""; VD_ID=""; }
+vd_signal() {   # USR1 (gone) | USR2 (back) | HUP (1 x 1 and back): waits for the tool's state line
+  local n i; n=$(grep -c '^state=' "$VD_OUT"); kill -"$1" "$VD_PID" 2>/dev/null || return 1
+  for ((i = 0; i < 20; i++)); do (( $(grep -c '^state=' "$VD_OUT") > n )) && break; sleep 0.25; done
+  grep '^state=' "$VD_OUT" | tail -1
+}
+lockhook() { osascript -l JavaScript -e "ObjC.import('Foundation'); \$.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately('org.omacvm.test.$1', null, null, true)" >/dev/null; }
 
 # Put back what this changes, also on Ctrl-C.
 FS_BEFORE=$(defaults read "$APPID" startFullScreen 2>/dev/null || echo unset)
@@ -99,12 +127,15 @@ restore() {
 }
 trap restore EXIT
 
-start() {   # window|full|fullpanel, on the virtual display
+start() {   # window|full|fullpanel, on the virtual display; head: full on the other one
   local mode=$1 i env=(--env "OMACVM_TEST_MAIN_DISPLAY=$VD_ID" --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.e2e)
   rm -f "$VMD/notch-mode"
   case $mode in
     window) defaults write "$APPID" startFullScreen -bool false ;;
     full) defaults write "$APPID" startFullScreen -bool true ;;
+    head) defaults write "$APPID" startFullScreen -bool true
+          env=(--env "OMACVM_TEST_MAIN_DISPLAY=$OTHER_ID" --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.e2e
+               --env OMACVM_TEST_LOCK_HOOK=1) ;;
     fullpanel) defaults write "$APPID" startFullScreen -bool true; echo fullpanel > "$VMD/notch-mode"
                env+=(--env "OMACVM_TEST_NOTCH_GEOMETRY=$NOTCH") ;;
   esac
@@ -163,8 +194,111 @@ case_run() {   # NAME MODE ROUNDS
   sleep 3
 }
 
+# #428: count QEMU's windows and the full-screen Spaces; the main window on the other display.
+census() { "$CENSUS" "$(qemu_pid)"; }
+fullspaces() { sed -n 's/^spaces [0-9]* fullscreen //p' <<<"$1"; }
+qwindows() { sed -n 's/^windows \([0-9]*\) .*/\1/p' <<<"$1"; }
+on_display() { grep -c "^window .* alpha 1.00 .* display $2\$" <<<"$1"; }
+tries() { tail -n +$(($1 + 1)) "$VMD/logs/qemu.log" | grep -c 'full screen for its window (try'; }
+# NAME BACK L0 [TRIES]: alive, no growth over 4 s, as at the start; BACK=1: the display is back
+# and its window in full screen after TRIES full-screen tries since qemu.log line L0 (default 1;
+# "0-1": either), BACK=0: none.
+head_check() {
+  local name=$1 back=$2 l0=$3 want_t=${4:-1} a b fa fb na nb t want_f where
+  if ! kill -0 "$HPID" 2>/dev/null; then res "$name" FAIL "QEMU ended"; return 1; fi
+  gssh true || { res "$name" FAIL "QEMU runs, but the VM does not answer over SSH"; return 1; }
+  (( $(crashes) > C0 )) && { res "$name" FAIL "a new crash report"; return 1; }
+  a=$(census); sleep 4; b=$(census)
+  printf '%s\n--\n%s\n' "$a" "$b" > "$OUT/$name.census"
+  fa=$(fullspaces "$a"); fb=$(fullspaces "$b"); na=$(qwindows "$a"); nb=$(qwindows "$b")
+  t=$(tries "$l0"); want_f=$(( back ? F0 : F0 - 1 )); where=gone
+  (( back )) && where=back || want_t=0
+  tail -n +$((l0 + 1)) "$VMD/logs/qemu.log" | grep -i 'omacvm: display\|full screen' > "$OUT/$name.qemu.log"
+  if (( fb > fa || nb > na )); then res "$name" FAIL "growing: full-screen Spaces $fa -> $fb, windows $na -> $nb in 4 s"
+  elif (( fb > F0 || nb > N0 + 2 )); then res "$name" FAIL "more than at the start: full-screen Spaces $fb (start $F0), windows $nb (start $N0)"
+  elif (( fb != want_f )); then res "$name" FAIL "full-screen Spaces $fb, want $want_f (start $F0; the display $where)"
+  elif (( $(on_display "$b" "$OTHER_ID") < 1 )); then res "$name" FAIL "no VM window shown on the remaining display $OTHER_ID"
+  elif (( back )) && (( $(on_display "$b" "$VD_ID") < 1 )); then res "$name" FAIL "the display's window is not back on it"
+  elif [[ $want_t == 0-1 ]] && (( t > 1 )) || [[ $want_t != 0-1 ]] && (( t != want_t )); then
+    res "$name" FAIL "$t full-screen tries for the display's window (want $want_t)"
+  else res "$name" ok "full-screen Spaces $fb (start $F0), windows $nb (start $N0), tries $t"; return 0; fi
+  return 1
+}
+case_head() {   # #428's layout, one VM start for every head case
+  local r l0 st a
+  log "head: main window in full screen on display $OTHER_ID, the second display's window on a virtual one"
+  plug || { res head FAIL "no virtual display"; return; }
+  start head || { res head FAIL "the VM did not come up"; unplug; stop; return; }
+  HPID=$(qemu_pid); C0=$(crashes); sleep 10
+  a=$(census); F0=$(fullspaces "$a"); N0=$(qwindows "$a"); echo "$a" > "$OUT/head-start.census"
+  if (( F0 != FBASE + 2 )) || (( $(on_display "$a" "$VD_ID") < 1 )); then
+    res head-start FAIL "not both in full screen: full-screen Spaces $F0 (before the VM $FBASE)"; unplug; stop; return
+  fi
+  res head-start ok "both in full screen: full-screen Spaces $F0, QEMU windows $N0"
+  if want head-unplug; then
+    for ((r = 1; r <= ROUNDS; r++)); do
+      l0=$(wc -l < "$VMD/logs/qemu.log"); st=$(vd_signal USR1); sleep 6
+      head_check "head-unplug-$r" 0 "$l0" || break
+      l0=$(wc -l < "$VMD/logs/qemu.log"); st=$(vd_signal USR2); VD_ID=$(sed -n 's/.* id=\([0-9]*\).*/\1/p' <<<"$st"); sleep 12
+      head_check "head-unplug-$r-back" 1 "$l0" || break
+    done
+  fi
+  if want head-flap; then
+    for ((r = 1; r <= FLAPS; r++)); do
+      l0=$(wc -l < "$VMD/logs/qemu.log"); vd_signal USR1 >/dev/null; sleep 2.5
+      st=$(vd_signal USR2); VD_ID=$(sed -n 's/.* id=\([0-9]*\).*/\1/p' <<<"$st"); sleep 12
+      head_check "head-flap-$r" 1 "$l0" || break
+    done
+  fi
+  if want head-tiny; then
+    st=$(vd_signal HUP)
+    if [[ $st != state=tiny* ]]; then
+      res head-tiny skip "the virtual display does not take a 1 x 1 mode: ${st:-no answer}"
+    else
+      vd_signal HUP >/dev/null; sleep 12
+      for ((r = 1; r <= FLAPS; r++)); do
+        l0=$(wc -l < "$VMD/logs/qemu.log"); st=$(vd_signal HUP); sleep 3; vd_signal HUP >/dev/null; sleep 12
+        head_check "head-tiny-$r" 1 "$l0" || break
+        (( r == 1 )) && res head-tiny-mode ok "1 x 1: $st"
+      done
+    fi
+  fi
+  if want head-locked; then
+    for ((r = 1; r <= 3; r++)); do
+      l0=$(wc -l < "$VMD/logs/qemu.log"); lockhook lock; sleep 1; vd_signal USR1 >/dev/null; sleep 8
+      a=$(census)
+      if (( $(fullspaces "$a") > F0 || $(tries "$l0") > 0 )); then
+        res "head-locked-$r" FAIL "while locked: full-screen Spaces $(fullspaces "$a") (start $F0), $(tries "$l0") full-screen tries"; lockhook unlock; break
+      fi
+      lockhook unlock; sleep 4
+      head_check "head-locked-$r-unlocked" 0 "$l0" || break
+      l0=$(wc -l < "$VMD/logs/qemu.log"); st=$(vd_signal USR2); VD_ID=$(sed -n 's/.* id=\([0-9]*\).*/\1/p' <<<"$st"); sleep 12
+      head_check "head-locked-$r-back" 1 "$l0" || break
+      # gone and back while locked: nothing moves until the unlock
+      l0=$(wc -l < "$VMD/logs/qemu.log"); lockhook lock; sleep 1; vd_signal USR1 >/dev/null; sleep 2.5
+      st=$(vd_signal USR2); VD_ID=$(sed -n 's/.* id=\([0-9]*\).*/\1/p' <<<"$st"); sleep 6
+      a=$(census)
+      if (( $(fullspaces "$a") > F0 || $(tries "$l0") > 0 )); then
+        res "head-locked-flap-$r" FAIL "while locked: full-screen Spaces $(fullspaces "$a"), $(tries "$l0") tries"; lockhook unlock; break
+      fi
+      # macOS may have moved its window's Space away and back (nothing to do) or not (made again: 1 try)
+      lockhook unlock; sleep 12
+      head_check "head-locked-flap-$r" 1 "$l0" 0-1 || break
+    done
+  fi
+  unplug
+  stop || res head-stop FAIL "the VM did not shut down"
+  sleep 3
+}
+
 want full && case_run full full "$ROUNDS"
 want fullpanel && case_run fullpanel fullpanel 2
 want window && case_run window window 1
+if want head || want head-unplug || want head-flap || want head-tiny || want head-locked; then
+  [[ -n $ONLY && $ONLY != *",head,"* ]] || ONLY=",head-unplug,head-flap,head-tiny,head-locked,"
+  OTHER_ID=$("$CENSUS" | awk '$1 == "display" && $4 == "active" {print $2; exit}')
+  FBASE=$(fullspaces "$("$CENSUS")")
+  if [[ -z $OTHER_ID ]]; then res head skip "no display of this Mac to keep (head cases)"; else case_head; fi
+fi
 log "done: $n_fail failed ($OUT/summary.tsv)"
 (( n_fail == 0 ))
