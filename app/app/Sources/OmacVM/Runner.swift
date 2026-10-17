@@ -470,6 +470,11 @@ final class Runner {
         if audioThread {
             env["OMACVM_AUDIO_THREAD"] = "1"
         }
+        // virgl's GPU-only commands without the BQL (gpuOffMainLoop, ADR 0046;
+        // qemu-virtio-gpu-virgl-unlocked.patch); safe mode keeps the BQL.
+        if Settings.gpuOffMainLoop {
+            env["OMACVM_GPU_UNLOCKED"] = "1"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"

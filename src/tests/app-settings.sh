@@ -66,6 +66,7 @@ expect "fresh: the dump names the test domain's VMs folder" "$V" "$(val app.vmsR
 expect "fresh: Start in full screen" true "$(val app.startFullScreen)"
 expect "fresh: Keep the Dock and hot corners away on" true "$(val app.keepDockAway)"
 expect "fresh: Sound on its own thread on" true "$(val app.audioThread)"
+expect "fresh: GPU work keeps QEMU's big lock (gpuOffMainLoop off)" false "$(val app.gpuOffMainLoop)"
 expect "fresh: Closing the window shuts down" shutdown "$(val app.closeAction)"
 expect "fresh: OmacVM's own icon" default "$(val app.appIconTheme)"
 expect "fresh: escape combo: focused monitor" pointer "$(val app.escapeSwipe)"
