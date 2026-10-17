@@ -239,5 +239,20 @@ if let d = UserDefaults(suiteName: "org.omacvm.test.features-menubar.\(getpid())
 
 shareKeyboardTests()
 
+// WebGPU and GPU compute (gpu-compute): on by default, also for a record without the word.
+expect(GPUCompute.isOn(features: nil) && GPUCompute.isOn(features: "bridge=on vulkan=off\n"), "gpu-compute: on without the word")
+expect(!GPUCompute.isOn(features: "bridge=on gpu-compute=off vulkan=off") && GPUCompute.isOn(features: "gpu-compute=on"),
+       "gpu-compute: the record's word")
+expect(GPUCompute.isOn(features: "gpu-compute=off gpu-compute=on") && GPUCompute.isOn(features: "xgpu-compute=off"),
+       "gpu-compute: the last word counts, only its own")
+let gcStopped = GPUCompute.row(record: "gpu-compute=on", running: false, vulkan: true, busy: false, cli: true)
+expect(gcStopped.on && !gcStopped.enabled && gcStopped.note != nil, "gpu-compute row: stopped VM: shown, not switched")
+let gcOn = GPUCompute.row(record: nil, running: true, vulkan: true, busy: false, cli: true)
+expect(gcOn == GPUCompute.Row(on: true, enabled: true, note: nil), "gpu-compute row: running with Vulkan: on, switchable")
+let gcGL = GPUCompute.row(record: "gpu-compute=off", running: true, vulkan: false, busy: false, cli: true)
+expect(!gcGL.on && gcGL.enabled && gcGL.note?.contains("OpenGL") == true, "gpu-compute row: OpenGL says it needs Vulkan")
+expect(!GPUCompute.row(record: nil, running: true, vulkan: true, busy: true, cli: true).enabled &&
+       !GPUCompute.row(record: nil, running: true, vulkan: true, busy: false, cli: false).enabled, "gpu-compute row: busy or no CLI: not switchable")
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
