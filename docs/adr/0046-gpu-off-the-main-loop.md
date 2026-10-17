@@ -59,6 +59,9 @@ Option 1's rules:
   the virgl texture draws of extra displays and the layer fallback.
 - The BH's re-entrancy guard is off during an unlocked run (a vCPU's queue
   kick would be refused otherwise); nothing there maps guest memory.
+- virgl's GL context callback no longer reads the window's 2D surface (which
+  the console replaces with the BQL held); it takes the pixel depth from an
+  atomic set with the surface.
 - A device reset waits for a run in progress; the present BH runs only on the
   main thread (iohandler context).
 - `gpuOffMainLoop` turns it on, `gpuMainLoop` keeps today's path whatever the
@@ -86,3 +89,11 @@ Option 1's rules:
 - Extra displays and the layer fallback wait for the GPU lock during a long
   batch, as they wait for the BQL today.
 - One BQL drop/take and at most one extra queue notification per run.
+- The guest may rewrite a command while QEMU reads it twice; the type (and a
+  blob's kind) a run picked a command for is checked again where it runs, so
+  a command that needs the BQL is refused instead of run without it.
+- Carry-over: upstream QEMU reworked scanout handling in virtio-gpu after our
+  pin (September 2026: virtio_gpu_disable_scanout_for_resource, dmabuf release
+  on unref). The next QEMU update has to carry this change's hunks in
+  virtio-gpu.c, virtio-gpu-gl.c and virtio-gpu-virgl.c over by hand;
+  src/tests/gpu-unlocked.sh checks what must stay true.

@@ -165,8 +165,18 @@ Rules:
 - Head windows (one per extra display) share the main view's GL context
   (`gl_view_ctx`); all their drawing happens under the same rules.
 
+With `gpuOffMainLoop` (ADR 0046, experimental, off by default;
+`OMACVM_GPU_UNLOCKED=1`) the main loop still makes every vrend call, but runs
+the commands that touch only virglrenderer (SUBMIT_3D, resource create,
+transfers, contexts, capsets) without the BQL, holding the GPU lock
+(`qemu_console_gl_render_lock`) instead; display, DMA mapping, memory
+regions, unref and reset keep the BQL. The main loop never holds both locks;
+the AppKit thread's own virgl draws (heads, the layer fallback) take the GPU
+lock, then the BQL. vCPUs and input no longer wait while a long command runs.
+
 Rule for new code: where both are needed, take the BQL first, then any
-virglrenderer internal mutex. Never wait for the BQL from a Core Animation
+virglrenderer internal mutex (the GPU lock is the exception: never taken
+with the BQL held on the main loop). Never wait for the BQL from a Core Animation
 callback in a new path (the shipped `drawInCGLContext` does, and that is
 why the main thread and QEMU waited on each other every frame).
 
