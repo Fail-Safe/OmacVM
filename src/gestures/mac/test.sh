@@ -86,6 +86,9 @@ echo "$TOKEN" > "$T/vm/token"
 # the test's listener on 127.0.0.1). once: one run(); loop: serve(), main()'s loop.
 cat > "$T/guest.py" <<'PY'
 import importlib.machinery, importlib.util, itertools, socket, sys, threading, types
+# Apple's python3 (3.9) on macOS has no name for TCP_KEEPALIVE (netinet/tcp.h: 0x10).
+if sys.platform == "darwin" and not hasattr(socket, "TCP_KEEPALIVE"):
+    socket.TCP_KEEPALIVE = 0x10
 n = itertools.count(1)
 class Any(int):
     def __getattr__(self, name): return Any(next(n))
