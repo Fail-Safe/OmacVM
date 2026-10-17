@@ -69,7 +69,7 @@ defaults write "$D" EscapeSwipe -int 1
 expect "something else: the pointer's" pointer "$("$T/t" escape "$D")"
 # Gestures reads the same key in the same domain.
 grep -q 'CFSTR("EscapeSwipe"), GESTURES_DOMAIN' "$R/src/gestures/mac/omacvm-gestures.c" &&
-  grep -q 'define GESTURES_DOMAIN CFSTR("org.omacvm.gestures")' "$R/src/gestures/mac/omacvm-gestures.c" &&
+  grep -qF 'define GESTURES_DOMAIN (testIdentity() ? CFSTR("org.omacvm.test.gestures") : CFSTR("org.omacvm.gestures"))' "$R/src/gestures/mac/omacvm-gestures.c" &&
   grep -q 'static let domain = "org.omacvm.gestures"' "$R/app/app/Sources/OmacVM/EscapeSetting.swift" &&
   grep -q 'static let key = "EscapeSwipe"' "$R/app/app/Sources/OmacVM/EscapeSetting.swift" &&
   echo "ok   the app and Gestures use the same domain and key" || { echo "FAIL the app and Gestures use another domain or key"; fail=1; }
