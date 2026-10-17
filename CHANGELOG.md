@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **The VM's graphics without QEMU's big lock (experimental, off by default).** While an app
+  opened or a page drew new things, the VM's graphics held QEMU's lock for up to 100-350 ms,
+  and the VM's CPUs stopped with it: the VM froze for that long, and its sound and typing
+  waited. With `defaults write org.omacvm.app gpuOffMainLoop -bool true` the graphics work runs
+  without that lock (counts from the next start of the VM). Measured on the Mac mini while new
+  Chromium windows opened: the longest stop of the VM 107 ms -> 1 ms. Typing shows up as fast
+  as before or faster (60 Hz with a page scrolling beside: half of the keys within 34.8 ms,
+  95 % within 45.5 ms; before 37.3 and 69.2). `defaults delete org.omacvm.app gpuOffMainLoop`
+  goes back. GPU safe mode always takes the old way.
+
 ## 3.1.17
 
 - **The sound on its own thread is on for everyone.** 3.1.16 brought it as an experiment; with it
