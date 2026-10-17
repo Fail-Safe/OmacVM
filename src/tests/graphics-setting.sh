@@ -129,6 +129,12 @@ expect "fallback: why (omacvm)" "the firmware found no devices in 25 s" "$(graph
 "$T/graphics" write vulkan "$fd"
 expect "fallback: choosing again removes it (app)" no "$([[ -e $fd/graphics-fallback ]] && echo yes || echo no)"
 expect "fallback text: same" "$("$T/graphics" didnotstart)" "$GRAPHICS_DID_NOT_START"
+# The plan line names the Vulkan driver QEMU loads (OMACVM_VULKAN_DRIVER and the loader's lists win).
+expect "driver: KosmicKrisp on 27"          "macOS 27, KosmicKrisp" "$("$T/graphics" driver 27 1)"
+expect "driver: forced MoltenVK"            "macOS 27, MoltenVK (OMACVM_VULKAN_DRIVER)" "$("$T/graphics" driver 27 1 OMACVM_VULKAN_DRIVER=moltenvk)"
+expect "driver: forced KosmicKrisp"         "macOS 27, KosmicKrisp (OMACVM_VULKAN_DRIVER)" "$("$T/graphics" driver 27 1 OMACVM_VULKAN_DRIVER=kosmickrisp)"
+expect "driver: an unknown value: the rule" "macOS 27, KosmicKrisp" "$("$T/graphics" driver 27 1 OMACVM_VULKAN_DRIVER=metal)"
+expect "driver: the loader's own list"      "macOS 27, the Vulkan driver VK_DRIVER_FILES names" "$("$T/graphics" driver 27 1 VK_DRIVER_FILES=/x.json OMACVM_VULKAN_DRIVER=moltenvk)"
 s_bits=$(sed -n 's/.*static let highPCIWindowBits = \([0-9]*\).*/\1/p' "$R/app/app/Sources/OmacVM/Graphics.swift")
 s_low=$(sed -n 's/.*static let lowWindowHostmemMB = \([0-9]*\).*/\1/p' "$R/app/app/Sources/OmacVM/Graphics.swift")
 expect "high PCI window bits: same" "$s_bits" "$GRAPHICS_HIGH_PCI_WINDOW_BITS"

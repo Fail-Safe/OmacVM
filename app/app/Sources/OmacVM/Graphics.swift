@@ -223,12 +223,15 @@ enum Graphics {
     /// it keeps this start on OpenGL. `fallbackOnce`: why this start's
     /// Vulkan try just fell back; OpenGL for this start only.
     /// `smallHighWindow`: the app's QEMU takes a small high PCI window.
+    /// `environment`: the app's, which QEMU gets: OMACVM_VULKAN_DRIVER (or a
+    /// Vulkan loader list) changes the driver the runtime loads.
     static func plan(choice: GraphicsChoice, macOSMajor: Int, kosmicKrisp: Bool, driverReady: Bool,
                      forced: Bool, macMemoryGB: Int, vmMemoryGB: Int, ipaBits: Int? = nil,
-                     smallHighWindow: Bool = true, fallback: String? = nil, fallbackOnce: String? = nil) -> GraphicsPlan {
+                     smallHighWindow: Bool = true, fallback: String? = nil, fallbackOnce: String? = nil,
+                     environment: [String: String] = [:]) -> GraphicsPlan {
         let mem = hostmemMB(macMemoryGB: macMemoryGB, vmMemoryGB: vmMemoryGB, ipaBits: ipaBits, smallHighWindow: smallHighWindow)
         let window = smallHighWindow ? highWindowGB(vmMemoryGB: vmMemoryGB, ipaBits: ipaBits) : nil
-        let driver = macOSMajor >= 26 && kosmicKrisp ? "KosmicKrisp" : "MoltenVK"
+        let driver = vulkanDriver(macOSMajor: macOSMajor, kosmicKrisp: kosmicKrisp, environment: environment)
         func p(_ venus: Bool, _ why: String) -> GraphicsPlan {
             if venus, let f = fallback ?? fallbackOnce {
                 let next = "\(f); " + (fallback != nil ? "choose Vulkan again to try once more" : "the next start tries Vulkan again")
@@ -253,6 +256,22 @@ enum Graphics {
             }
             guard driverReady else { return p(false, "the VM has no Venus driver for 16 KiB pages yet: omacvm apply") }
             return p(true, "macOS \(macOSMajor), \(driver)")
+        }
+    }
+}
+
+extension Graphics {
+    /// The Vulkan driver the runtime loads, in words (virgl-darwin-vulkan-beside.patch:
+    /// VK_DRIVER_FILES / VK_ICD_FILENAMES win, then OMACVM_VULKAN_DRIVER=moltenvk|kosmickrisp,
+    /// else KosmicKrisp on macOS 26+ when the app has it, MoltenVK otherwise).
+    static func vulkanDriver(macOSMajor: Int, kosmicKrisp: Bool, environment: [String: String] = [:]) -> String {
+        if environment["VK_DRIVER_FILES"] != nil || environment["VK_ICD_FILENAMES"] != nil {
+            return "the Vulkan driver VK_DRIVER_FILES names"
+        }
+        switch environment["OMACVM_VULKAN_DRIVER"] {
+        case "moltenvk": return "MoltenVK (OMACVM_VULKAN_DRIVER)"
+        case "kosmickrisp" where kosmicKrisp: return "KosmicKrisp (OMACVM_VULKAN_DRIVER)"
+        default: return macOSMajor >= 26 && kosmicKrisp ? "KosmicKrisp" : "MoltenVK"
         }
     }
 }
