@@ -19,6 +19,7 @@ enum SettingsDump {
         [
             "startFullScreen": Settings.startFullScreen,
             "keepDockAway": Settings.keepDockAway,
+            "audioThread": Settings.audioThread,
             "closeAction": Settings.closeAction.rawValue,
             "appIconTheme": IconTheme.choice(stored: UserDefaults.standard.object(forKey: IconTheme.key)).id,
             "escapeSwipe": EscapeSetting.current().rawValue,

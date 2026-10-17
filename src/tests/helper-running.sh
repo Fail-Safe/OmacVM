@@ -15,8 +15,10 @@ pass() { echo "ok   $1"; }
 failed() { echo "FAIL $1"; fails=$((fails + 1)); }
 
 # A stand-in Bridge, started outside launchd as macOS would (not its LaunchAgent).
+# exec -a keeps its path in its arguments: a plain exec made it "sleep 60", and
+# the test passed only on a Mac whose own Bridge ran.
 mkdir -p "$T/OmacVMBridge.app/Contents/MacOS"
-printf '#!/bin/bash\nexec sleep 60\n' > "$T/OmacVMBridge.app/Contents/MacOS/omacvm-bridge"
+printf '#!/bin/bash\nexec -a "$0" sleep 60\n' > "$T/OmacVMBridge.app/Contents/MacOS/omacvm-bridge"
 chmod +x "$T/OmacVMBridge.app/Contents/MacOS/omacvm-bridge"
 /bin/bash "$T/OmacVMBridge.app/Contents/MacOS/omacvm-bridge" &
 FAKE=$!; PIDS="$PIDS $FAKE"; disown "$FAKE" 2>/dev/null || true

@@ -446,6 +446,8 @@ guest's gateway is `.2`.
 
 ### OmacVM.app's VM window (`SettingsView.swift`, docs/design/settings-3.1)
 
+Sections in order: General, Display, Input, Output (the sound, from 3.1.17), Sharing & Devices, Storage & Updates.
+
 Every setting in the window, where it is kept, its default and whether it is
 per VM or for the app (every VM). The window reads them again when it comes to
 the front, so `omacvm` and the control centre changes show; 3.1 kept 3.0's keys,
@@ -471,6 +473,7 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 | Keyboard access | macOS: Accessibility ("control the computer") for the app | asked | Mac |
 | Mac input | `features` `mac-ime=on` (+ `mac-ime-pending` while stopped) | off | VM |
 | Swipe out to macOS | Gestures `SwipeOut` (bool); hidden `SwipeOutTravel` (trackpad widths per Space, 0.15-1.5) | `false`; 0.5 | app |
+| Sound on its own thread | `audioThread` (bool; hidden `audioMainLoop`, `audioClassic` force it off; read at each start) | `true` (from 3.1.17; 3.1.16 `false`) | app |
 | Mac folder | `mac-folder` (the folder's path) | off (no file) | VM |
 | USB devices | `usb-enabled`, remembered devices `usb.json` | off | VM |
 | Vendor HID devices (under USB devices while it is on; experimental) | `usb-vendor-hid` (QEMU's `usb-host-hid`, docs/usb.md) | off | VM |

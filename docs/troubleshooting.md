@@ -616,11 +616,12 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   RTKit's other limits stay), and `omacvm check` shows "sound priority".
   By hand: `systemctl --user restart pipewire pipewire-pulse wireplumber`
   makes PipeWire real-time again until the next stop.
-- **3.1.16, experimental (off by default):** the sound card's DMA and the
-  mixer on a thread of their own at real-time priority (macOS's
-  time-constraint policy), not in QEMU's main loop:
-  `defaults write org.omacvm.app audioThread -bool true`, then restart the
-  VM (`defaults delete org.omacvm.app audioThread` goes back). Measured on
+- **3.1.16 (experimental), on by default from 3.1.17:** the sound card's
+  DMA and the mixer on a thread of their own at real-time priority (macOS's
+  time-constraint policy), not in QEMU's main loop. The VM window's
+  Output › Sound on its own thread switches it (3.1.17), or
+  `defaults write org.omacvm.app audioThread -bool false` (or `true`), then
+  restart the VM. Measured on
   the Mac mini M4 (VM with 8 CPUs, a 30 Hz tone, 4 minutes each), the
   main loop's path stopped the sound card whenever the VM's graphics held
   that loop (100-350 ms while Chromium opened a window or scrolled), and

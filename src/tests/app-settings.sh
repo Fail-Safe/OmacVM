@@ -65,6 +65,7 @@ dump
 expect "fresh: the dump names the test domain's VMs folder" "$V" "$(val app.vmsRoot)"
 expect "fresh: Start in full screen" true "$(val app.startFullScreen)"
 expect "fresh: Keep the Dock and hot corners away on" true "$(val app.keepDockAway)"
+expect "fresh: Sound on its own thread on" true "$(val app.audioThread)"
 expect "fresh: Closing the window shuts down" shutdown "$(val app.closeAction)"
 expect "fresh: OmacVM's own icon" default "$(val app.appIconTheme)"
 expect "fresh: escape combo: focused monitor" pointer "$(val app.escapeSwipe)"
@@ -86,7 +87,7 @@ done
 
 # (b) Changes as the window makes them, read by the next launches; (c) per VM.
 mkdir -p "$H/Shared"
-for kv in "startFullScreen false" "keepDockAway false" "closeAction ask" "appIconTheme flexoki-light" \
+for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "closeAction ask" "appIconTheme flexoki-light" \
           "escapeSwipe all" "mouseSwipeFingers 3" "swipeOut true" "updateChecks false"; do
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
@@ -98,6 +99,7 @@ for launch in 1 2; do
   dump
   expect "launch $launch: Start in a window" false "$(val app.startFullScreen)"
   expect "launch $launch: Keep the Dock away off" false "$(val app.keepDockAway)"
+  expect "launch $launch: Sound on its own thread off" false "$(val app.audioThread)"
   expect "launch $launch: Closing the window asks" ask "$(val app.closeAction)"
   expect "launch $launch: icon Flexoki Light" flexoki-light "$(val app.appIconTheme)"
   expect "launch $launch: escape combo: all monitors" all "$(val app.escapeSwipe)"
@@ -119,6 +121,7 @@ expect "the switches went where Gestures reads them" "all 3 1" \
   "$(defaults read "$G" EscapeSwipe) $(defaults read "$G" MouseSwipeFingers) $(defaults read "$G" SwipeOut)"
 expect "closeAction and appIconTheme in the app's domain" "ask flexoki-light" \
   "$(defaults read "$D" closeAction) $(defaults read "$D" appIconTheme)"
+expect "the sound switch is 3.1.16's key in the app's domain" 0 "$(defaults read "$D" audioThread)"
 expect "update checks in the file the control centre shares" "false" \
   "$(plutil -extract update_checks raw -o - "$T/settings/settings.json")"
 

@@ -4,10 +4,11 @@ import Foundation
 /// with the VM's GPU (up to 3.1.14), or on a real-time thread of its own
 /// (qemu-audio-own-thread.patch, OMACVM_AUDIO_THREAD=1).
 public enum AudioPath {
-    /// Off for now (3.1.16: lower latency and no breaks from the main loop,
-    /// but not clearly fewer breaks in every case measured): turned on with
-    /// defaults write org.omacvm.app audioThread -bool true.
-    public static let threadByDefault = false
+    /// On from 3.1.17 (3.1.16 shipped it off: lower latency and no breaks
+    /// from the main loop, a draw with a busy GPU; the user's listening test
+    /// on a MacBook Air was much better). Off: the VM window's Output switch,
+    /// or defaults write org.omacvm.app audioThread -bool false.
+    public static let threadByDefault = true
     /// The sound backend's options on the sound's own thread. The ring no
     /// longer covers the main loop's stalls, only the thread's own jitter:
     /// 6 blocks of 256 frames at 48 kHz (32 ms, the Mac's and the guest's
