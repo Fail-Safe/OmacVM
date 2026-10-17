@@ -131,28 +131,42 @@ VM runs, and goes back by itself when a new version does not start
   VM `omacvm-venus-driver.timer` checks again 90 s after boot, after the
   desktop, never in the boot's critical chain. Automatic is OpenGL on every
   Mac in 3.0.0 (CHANGELOG).
-  OpenCL comes with it: apply installs Arch's `opencl-mesa` (rusticl) and
-  `clinfo` and turns rusticl's Zink on (`RUSTICL_ENABLE=zink` in
+  WebGPU and GPU compute come with it (feature `gpu-compute`, on by default;
+  [`venus/compute.sh`](../../src/app/guest/venus/compute.sh); its switch is
+  the VM window's General › WebGPU and GPU compute while the VM runs, the
+  control centre or `omacvm disable gpu-compute`; off removes the parts
+  below, Vulkan stays as Graphics says). OpenCL: apply installs Arch's
+  `opencl-mesa` (rusticl) and `clinfo` and turns rusticl's Zink on
+  (`RUSTICL_ENABLE=zink` and `ZINK_DEBUG=quiet`, which drops Zink's
+  "Some incorrect rendering might occur" line, in
   `/etc/environment.d/90-omacvm-opencl.conf`, for apps started after the
   next login), so OpenCL apps (Geekbench, darktable, ffmpeg) run on the
   Mac's GPU through Zink on Venus ([`venus/opencl.sh`](../../src/app/guest/venus/opencl.sh);
   OpenGL turns the switch off again). That works on KosmicKrisp (macOS 26
   and newer). On MoltenVK Zink refuses the device (no `nullDescriptor`):
-  there OpenCL needs the vulkan feature below. `omacvm check` has an
-  "OpenCL (rusticl on Zink)" row. WebGPU in Chromium comes with it too: a
+  `opencl.sh` checks Zink's device at apply and after each start and leaves
+  OpenCL off there (apps use the CPU instead of a platform without a
+  device); `omacvm check` says why, and OpenCL there needs the vulkan
+  feature below. rusticl still prints one note at each OpenCL start
+  ("Patched Mesa libclc not detected"; Mesa has no switch for it).
+  `omacvm check` has an "OpenCL (rusticl on Zink)" row. WebGPU: a
   "Chromium (WebGPU)" menu entry ([`venus/webgpu.sh`](../../src/app/guest/venus/webgpu.sh))
   starts Chromium (`omacvm-chrome-webgpu`: Google Chrome) with its
   compositor on Vulkan, which Chrome needs before it gives pages the Mac's
   GPU for WebGPU; the normal Chromium entry stays as it is (that mode costs
-  WebGL about a fifth). `omacvm check` has a "WebGPU in Chromium" row.
+  WebGL about a fifth, and Chrome's other route, ANGLE on Vulkan, has no
+  WebGL 2 on Venus); Firefox gets WebGPU on (`dom.webgpu.enabled`; Omarchy
+  has no Firefox, it counts once you add it). `omacvm check` has a "WebGPU
+  in Chromium" row.
   Vulkan's host memory window (Venus' `hostmem`) comes from the VM's memory
   plan: what the Mac has beyond the VM's memory and macOS's reserve (4 GB up
   to 16 GB of memory, 6 GB up to 36 GB, 8 GB above), 1 to 32 GB; what Vulkan
   allocates counts against the VM's GPU memory budget.
   The hidden `venus` switch of 2.9 is gone: the app's first 3.0.0 launch
   moves it into the setting (Vulkan for each VM without its own choice).
-- WebGPU and GPU compute (experimental, off by default):
-  `omacvm enable vulkan --vm NAME`, then shut the VM down and start it again.
+- OmacVM's own Mesa for WebGPU and GPU compute, for macOS 15 (feature `vulkan`,
+  experimental, off by default; on macOS 26 and newer the Graphics path above
+  has them): `omacvm enable vulkan --vm NAME`, then shut the VM down and start it again.
   The VM gets OpenCL (rusticl on Zink), WebGPU in Firefox, and a
   "Chromium (WebGPU)" menu entry that starts Chromium with WebGPU on the
   Mac's GPU (the normal Chromium keeps its software WebGPU: its Vulkan mode
@@ -162,7 +176,10 @@ VM runs, and goes back by itself when a new version does not start
   Max and a 140 MB download (Mesa's source and Rust; Omarchy has LLVM and
   Clang already). The build tools it adds (Rust, meson, ninja, bindgen) are
   removed after the build. If the build fails, the feature stays off and
-  apply says so (log: `/var/log/omacvm-mesa-build.log` in the VM).
+  apply says so (log: `/var/log/omacvm-mesa-build.log` in the VM). With it,
+  the session's OpenCL loader reads only OmacVM's ICD (`OCL_ICD_VENDORS`),
+  so Arch's rusticl adds no second platform and no "Zink requires the
+  nullDescriptor feature" error. Off: Vulkan follows the Graphics setting.
   `omacvm disable vulkan` removes it. Numbers:
   [benchmarks](../benchmarks/README.md#gpu-compute-with-venus-2026-10-04),
   how it works: [ADR 0022](../adr/0022-webgpu-and-opencl-on-venus.md).

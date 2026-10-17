@@ -3,6 +3,27 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **WebGPU and GPU compute have a switch.** On macOS 26 and newer, where Graphics Automatic gives
+  the VM Vulkan, OpenCL and WebGPU have run on the Mac's GPU since 3.0.13. Now they can be
+  switched off and on again: General › WebGPU and GPU compute in the VM window (while the VM
+  runs), the control centre, or `omacvm disable gpu-compute`. Off removes OpenCL's switch, the
+  "Chromium (WebGPU)" menu entry and Firefox's WebGPU; Vulkan stays as Graphics says. On by
+  default, as before; a VM gets the switch at its next Update VM, with nothing to rebuild.
+- **OpenCL only where it works.** With Graphics on Vulkan on a Mac whose driver Zink cannot use
+  (MoltenVK, macOS 15), OpenCL listed a platform without a device. Now the VM checks Zink's device
+  at Update VM and after each start, leaves OpenCL off there (apps use the CPU), and
+  `omacvm check` says why.
+- **Quieter OpenCL.** Zink's "Some incorrect rendering might occur" line is gone from every OpenCL
+  start (Mesa's `ZINK_DEBUG=quiet`); rusticl's note about libclc stays (Mesa has no switch for it).
+  With OmacVM's own Mesa (the vulkan feature, for macOS 15), Arch's OpenCL no longer adds a second
+  platform with "Zink requires the nullDescriptor feature" at every start.
+- Firefox gets WebGPU with Vulkan too (before only with the vulkan feature). The vulkan feature is
+  now called "OmacVM's own Mesa (macOS 15)", and switching it off says that Vulkan follows Graphics
+  instead of "Vulkan: off". qemu.log's graphics line names the Vulkan driver QEMU loads, also when
+  `OMACVM_VULKAN_DRIVER` picks one.
+
 ## 3.1.19
 
 - **Update VM no longer builds a new kernel by itself.** With the memory-optimized kernel on
