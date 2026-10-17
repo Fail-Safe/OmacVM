@@ -940,6 +940,24 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-display-settl
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-audio-own-thread.patch"
 grep -q 'getenv("OMACVM_AUDIO_THREAD")' "$source_dir/audio/audio-rt.c" || \
   die "audio/audio-rt.c: the sound's own thread is missing (audio-own-thread patch)"
+# OmacVM: the VM's GPU work without the BQL (OMACVM_GPU_UNLOCKED=1, ADR 0046):
+# the present BH on the main thread only, a GPU lock for the AppKit thread's
+# own virgl draws, then the unlocked runs in virtio-gpu.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-bh-main-thread.patch"
+grep -q 'aio_bh_new(iohandler_get_aio_context(),' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the present BH must run on the main loop thread (present-bh-main-thread patch)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-trim.patch"
+grep -q 'present_trim_quarter = present_vsync' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the present's quarter-second trim is missing (present-trim patch)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-console-gl-render-lock.patch"
+[[ $(grep -c 'qemu_console_gl_render_lock();' "$source_dir/ui/cocoa.m") == 2 ]] || \
+  die "ui/cocoa.m: both AppKit draws of virgl textures must take the GPU lock (console-gl-render-lock patch)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-context-depth.patch"
+grep -q 'bpp = qatomic_read(&gl_ctx_bpp);' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: virgl's GL contexts must not read the 2D surface (gl-context-depth patch)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-virgl-unlocked.patch"
+grep -q 'getenv("OMACVM_GPU_UNLOCKED")' "$source_dir/hw/display/virtio-gpu-virgl.c" || \
+  die "hw/display/virtio-gpu-virgl.c: the unlocked runs are missing (virtio-gpu-virgl-unlocked patch)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"

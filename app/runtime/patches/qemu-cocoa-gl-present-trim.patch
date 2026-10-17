@@ -1,0 +1,121 @@
+From: OmacVM
+Subject: [PATCH] cocoa: skip a frame left over for a quarter second (OMACVM_GL_TRIM=quarter)
+
+What: with OMACVM_GL_TRIM=quarter the IOSurface present's jitter buffer
+(qemu-cocoa-gl-present-vsync.patch, ADR 0020) skips the oldest waiting
+frame when a frame was left over after every display refresh for a quarter
+second (15 refreshes at 60 Hz, 30 at 120 Hz); an empty refresh starts the
+count again. qemu.log says so once. Without the variable nothing changes:
+the queue trims one frame a second, only after a second without a late
+refresh, as before.
+
+Why: the guest's display clock runs a little faster than the Mac's (on the
+Mac mini's 60 Hz virtual display about one frame a second), so the
+once-a-second trim only held the queue where it was. A queue that once
+grew (an app starting, a hiccup) kept its extra frames, 16.7 ms of latency
+each at 60 Hz, until the next late refresh. With virgl's BQL holds the
+guest lost frames often enough to drain it; without them (OMACVM_GPU_UNLOCKED,
+ADR 0046) its frames come steadily and the queue stayed one or two frames
+deep: key to screen p50 36-62 ms instead of 33-34 at 60 Hz with Chromium
+scrolling. With this trim: p50 34.8 ms, p95 45.5 ms over three runs
+(today's path in the same session: 37.3 and 69.2). The app turns it on
+together with gpuOffMainLoop.
+
+Upstream: OmacVM only (the present code is ours).
+Test: work/tracks/gpu-thread.md (60 Hz investigation); src/tests/gpu-unlocked.sh.
+
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+index 9f4df1e..75064c3 100644
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -6974,6 +6974,7 @@ the one before (slowed link) */
+     double win_start;                   /* one-second window: start, */
+     int win_ticks;                      /* ticks, */
+     int win_min;                        /* fewest frames left after a tick, */
++    int left_run;                       /* ticks in a row that left a frame */
+     int win_late;                       /* refreshes that had no frame, */
+     int win_frames;                     /* frames that came, */
+     int win_extra;                      /* extra flushes that replaced one, */
+@@ -6990,6 +6991,7 @@ the one before (slowed link) */
+ static bool present_vsync;
+ static bool present_fixed;              /* OMACVM_GL_REFRESH=fixed */
+ static bool present_input_first;        /* OMACVM_GL_INPUT_FIRST=1 */
++static bool present_trim_quarter;       /* OMACVM_GL_TRIM=quarter */
+ static QEMUBH *present_bh;
+ 
+ /* Main thread: the window is in sight again: its newest frame now, not at the guest's next flush. */
+@@ -7075,6 +7077,8 @@ static bool cocoa_gl_present_init(void)
+     present_fixed = r && !strcmp(r, "fixed");
+     const char *in = getenv("OMACVM_GL_INPUT_FIRST");
+     present_input_first = present_vsync && in && !strcmp(in, "1");
++    const char *tr = getenv("OMACVM_GL_TRIM");
++    present_trim_quarter = present_vsync && tr && !strcmp(tr, "quarter");
+     present_nsurf = present_vsync ? PRESENT_SURFACES : 3;
+     if (present_vsync) {
+         present_bh = qemu_bh_new(cocoa_gl_present_bh, NULL);
+@@ -7087,6 +7091,10 @@ static bool cocoa_gl_present_init(void)
+         info_report("cocoa: while input comes, the newest frame goes on screen "
+                     "(OMACVM_GL_INPUT_FIRST=1)");
+     }
++    if (present_trim_quarter) {
++        info_report("cocoa: a frame left over for a quarter second is skipped "
++                    "(OMACVM_GL_TRIM=quarter)");
++    }
+     return true;
+ }
+ 
+@@ -7807,7 +7815,8 @@ static double present_wanted_hz(void)
+ static bool cocoa_gl_present_vsync(double T)
+ {
+     PresentFrame show = { 0 }, drop = { 0 }, stale[PRESENT_QUEUE] = { { 0 } };
+-    int nstale = 0;
++    PresentFrame trimmed[PRESENT_QUEUE] = { { 0 } };
++    int nstale = 0, ntrimmed = 0;
+     bool input = present_input_first &&
+                  qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - qemu_input_last_event_ns() <
+                  PRESENT_INPUT_NS;
+@@ -7841,7 +7850,34 @@ static bool cocoa_gl_present_vsync(double T)
+         present_sync.wait_sum += now - show.flushed;
+         present_sync.win_min = MIN(present_sync.win_min, present_sync.queued);
+         present_sync.missed = false;
++        /*
++         * OmacVM: a frame left over after every tick for a quarter second is
++         * a refresh of delay the guest's timing does not need: skip it. A
++         * guest a little faster than the display (its clock against the
++         * Mac's) adds about a frame a second, and the once-a-second trim
++         * below, which waits for a second without a late tick, only held
++         * the queue where it was: a queue that once grew (an app starting,
++         * a hiccup) kept its extra frames, 16.7 ms each at 60 Hz, for good.
++         * The VM's frames come that steadily once virgl no longer stops the
++         * vCPUs (OMACVM_GPU_UNLOCKED=1, ADR 0046); the app asks for this
++         * with it (OMACVM_GL_TRIM=quarter). Without it: as before.
++         */
++        if (present_trim_quarter && present_sync.queued) {
++            int quarter = present_sync.period > 0 ?
++                          MAX(4, (int)lround(0.25 / present_sync.period)) : 15;
++            if (++present_sync.left_run >= quarter) {
++                trimmed[ntrimmed++] = present_sync.queue[0];
++                present_sync.queued--;
++                memmove(&present_sync.queue[0], &present_sync.queue[1],
++                        sizeof(PresentFrame) * present_sync.queued);
++                present_sync.dropped++;
++                present_sync.left_run = 0;
++            }
++        } else {
++            present_sync.left_run = 0;
++        }
+     } else {
++        present_sync.left_run = 0;
+         if (!present_sync.missed) {
+             /* A refresh without a new frame right after one with. */
+             present_sync.repeats++;
+@@ -7924,6 +7960,9 @@ static bool cocoa_gl_present_vsync(double T)
+     for (int i = 0; i < nstale; i++) {
+         surface_put(stale[i].surf);
+     }
++    for (int i = 0; i < ntrimmed; i++) {
++        surface_put(trimmed[i].surf);
++    }
+     if (show.surf) {
+         cocoa_gl_present_show(show.surf, show.filter, show.flushed);
+         surface_put(show.surf);
