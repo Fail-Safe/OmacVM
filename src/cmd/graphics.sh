@@ -77,6 +77,9 @@ if [[ -n $SET && $(graphics_wants "$d") == vulkan ]] && { $CHANGED || [[ ! -e $d
       gssh "$ip" "d=/usr/local/share/omacvm/app/guest/venus; if [ -x \$d/compute.sh ]; then \$d/compute.sh;
                   else { [ ! -x \$d/opencl.sh ] || \$d/opencl.sh; } && { [ ! -x \$d/webgpu.sh ] || \$d/webgpu.sh; }; fi" < /dev/null >&2 ||
         NOTE="${NOTE:+$NOTE; }WebGPU and GPU compute are not set up (see above)"
+      # mpv with OpenGL (on Vulkan it shows no video; an older guest side has no mpv.sh).
+      gssh "$ip" "f=/usr/local/share/omacvm/app/guest/venus/mpv.sh; [ ! -x \$f ] || \$f" < /dev/null >&2 ||
+        NOTE="${NOTE:+$NOTE; }mpv's OpenGL default is not set"
     else
       rm -f "$d/venus-ready"
       case $rc in

@@ -273,6 +273,32 @@ wg --nonsense; [[ $? == 2 ]] && pass "webgpu.sh: unknown option: usage" || fail 
 wg; has && [[ ! -e $W/usr/share/applications/omacvm-chromium-webgpu.desktop ]] &&
   pass "webgpu.sh without Chromium: launcher, no menu entry" || fail "webgpu.sh without Chromium"
 
+# mpv on that Vulkan (venus/mpv.sh): OpenGL by default while the VM has Venus, in a marked block of
+# the system mpv.conf that keeps the rest of the file; --off removes it once no Vulkan is left.
+grep -q 'venus/mpv.sh ||' src/app/guest/install.sh && grep -q 'venus/mpv.sh --off' src/app/guest/install.sh &&
+  pass "app install sets mpv's OpenGL default with Vulkan" || fail "app install does not run venus/mpv.sh"
+grep -q 'app/guest/venus/mpv.sh' src/cmd/graphics.sh && pass "omacvm graphics sets mpv's default" || fail "omacvm graphics skips mpv"
+grep -q '"mpv" "draws with OpenGL' src/guest/check.sh && pass "check has the mpv row" || fail "no mpv check row"
+M=$T/mpvroot; MC=$M/etc/mpv/mpv.conf; mkdir -p "$M/etc/omacvm"
+mp() { OMACVM_MPV_ROOT=$M "$D/mpv.sh" "$@" >/dev/null 2>&1; }
+blocks() { grep -c '^# OmacVM: begin' "$MC" 2>/dev/null || true; }
+mp && [[ $(blocks) == 1 ]] && grep -qx 'gpu-api=opengl' "$MC" && pass "mpv.sh: gpu-api=opengl in its block" || fail "mpv.sh did not write its block"
+mp && [[ $(blocks) == 1 ]] && pass "mpv.sh twice: one block" || fail "mpv.sh twice: $(blocks) blocks"
+echo OMACVM_GRAPHICS=opengl > "$M/etc/omacvm/env"
+mp --off; [[ ! -e $MC ]] && pass "mpv.sh --off: a file of only its block goes" || fail "mpv.sh --off left $(cat "$MC" 2>/dev/null | head -2)"
+printf 'volume=70\nsub-auto=fuzzy\n' > "$MC"; mp
+[[ $(blocks) == 1 && $(head -1 "$MC") == volume=70 ]] && pass "mpv.sh keeps the file's own lines" || fail "mpv.sh changed the file's own lines"
+mp --off; [[ $(cat "$MC") == $'volume=70\nsub-auto=fuzzy' ]] && pass "mpv.sh --off removes only its block" || fail "mpv.sh --off left: $(cat "$MC")"
+mp; echo OMACVM_GRAPHICS=vulkan > "$M/etc/omacvm/env"; mp --off; [[ $(blocks) == 1 ]] &&
+  pass "mpv.sh --off keeps it with Graphics Vulkan" || fail "mpv.sh --off removed it with Graphics Vulkan"
+printf 'OMACVM_GRAPHICS=opengl\nOMACVM_FEATURE_vulkan=on\n' > "$M/etc/omacvm/env"; mp --off; [[ $(blocks) == 1 ]] &&
+  pass "mpv.sh --off keeps it with the vulkan feature" || fail "mpv.sh --off removed it with the vulkan feature"
+OMACVM_MPV_ROOT=$M "$D/mpv.sh" --nonsense >/dev/null 2>&1; [[ $? == 2 ]] && pass "mpv.sh: unknown option: usage" || fail "mpv.sh: unknown option accepted"
+if (( EUID != 0 )); then
+  out=$("$D/mpv.sh" 2>&1); rc=$?
+  [[ $rc == 1 && $out == *"run as root"* ]] && pass "mpv.sh writes /etc as root only" || fail "mpv.sh as a user: rc $rc, said '$out'"
+fi
+
 # Vulkan windows: Mesa's normal WSI when the app says it shows them (omacvm.vkwindows=1),
 # else the software WSI (an older app ended Hyprland's GPU context on the import).
 G=src/app/guest/omacvm-vulkan-present
