@@ -189,6 +189,8 @@ grep -q 'want gpu-compute && \[\[ $TYPE == app \]\]' src/guest/install.sh &&
 ! grep -q 'venus/opencl.sh\|venus/webgpu.sh' src/app/guest/install.sh && pass "app install leaves OpenCL and WebGPU to gpu-compute" ||
   fail "app install still sets up OpenCL/WebGPU itself"
 grep -q 'compute.sh' src/cmd/graphics.sh && pass "omacvm graphics runs compute.sh" || fail "omacvm graphics skips compute.sh"
+grep -q 'app/guest/venus/timer.sh' src/cmd/graphics.sh && pass "omacvm graphics turns the boot check on with Vulkan" ||
+  fail "omacvm graphics leaves the boot check (and OpenCL's device check) off"
 grep -q '90-omacvm-opencl.conf' src/guest/check.sh && grep -q 'FEATURE=gpu-compute' src/guest/check.sh &&
   pass "check has the OpenCL row, under gpu-compute" || fail "no OpenCL check row under gpu-compute"
 for f in compute.sh opencl.sh webgpu.sh; do [[ -x $D/$f ]] && pass "$f is executable (install.sh runs it)" || fail "$f is not executable"; done

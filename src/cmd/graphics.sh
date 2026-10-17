@@ -70,6 +70,8 @@ if [[ -n $SET && $(graphics_wants "$d") == vulkan ]] && { $CHANGED || [[ ! -e $d
     fi
     if (( rc == 0 )); then
       : > "$d/venus-ready"
+      # The driver check after each boot (it also checks OpenCL's device) follows the switch.
+      gssh "$ip" "f=/usr/local/share/omacvm/app/guest/venus/timer.sh; [ ! -x \$f ] || \$f" < /dev/null >&2 || true
       # WebGPU and GPU compute on it, as the VM's gpu-compute feature says
       # (compute.sh; an older guest side has only opencl.sh and webgpu.sh).
       gssh "$ip" "d=/usr/local/share/omacvm/app/guest/venus; if [ -x \$d/compute.sh ]; then \$d/compute.sh;
