@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.17
 
 - **The sound on its own thread is on for everyone.** 3.1.16 brought it as an experiment; with it
   the VM's sound crackles much less while apps open, pages scroll or the Mac is busy, and reaches
@@ -18,6 +18,21 @@ in more words.
   USB-C/DisplayPort for its brightness. A display that goes away right after DDC/CI on any other
   port gets none again, and a display that does not answer is asked at most three times instead
   of every minute.
+- **Less battery at idle.** A VM sitting on its desktop wakes the Mac less often:
+  - With its window minimised, hidden, covered or on another Space, QEMU kept its screen tick at
+    the display's rate after any frame, 60 or 120 times a second for nothing. It now stays slow
+    until the window shows again, and the newest picture is there at once.
+  - In the VM, the display's vblank timer stops 100 ms after the last frame. It ran for 5 s after
+    every frame, 300 to 600 wakeups each time, and all the time next to a blinking cursor.
+  - OmacVM Gestures no longer looks at a resting pointer 20 times a second while a VM is full
+    screen: the pointer's first move wakes it. `defaults write org.omacvm.gestures PointerRestTap
+    -bool false` goes back to the old way.
+  - The app, QEMU and the VM's own helpers wake less: the Mac clipboard is looked at twice a second
+    while the VM is in front (four times before), the Bridge's event readers in the VM wait without
+    a timer, video decoding's watchdog pings less, and the VM's Gestures client stops writing a log
+    line every 2 s while OmacVM Gestures is not running.
+
+  The watts get checked on a MacBook next; on the Mac mini this was measured in wakeups and CPU.
 
 ## 3.1.16
 

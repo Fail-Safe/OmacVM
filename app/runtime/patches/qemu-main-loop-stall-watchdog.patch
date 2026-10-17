@@ -12,7 +12,8 @@ suspended for a moment (registers and its own stack only, no locks), then
 symbolised with dladdr(). Elsewhere it logs the time without a stack.
 Nothing is changed or aborted. OMACVM_STALL_WATCHDOG=0 turns it off (no
 thread, no clock reads). Cost when on: two clock reads and a few atomic
-stores per main loop iteration, one thread waking every 250 ms.
+stores per main loop iteration, one thread that sleeps until a stall could
+be due: every 2 s at most while the loop polls (it woke every 250 ms before).
 
 Why: on 2026-10-05 an OmacVM VM froze three times (13:59, ~14:05, 14:21) on
 a Mac mini; only the third left a trace, a sample(1) taken by hand (main
@@ -26,7 +27,7 @@ stall forced past the libslirp fix; qemu.log must name sosendto.
 
 --- a/util/main-loop.c
 +++ b/util/main-loop.c
-@@ -294,7 +294,171 @@
+@@ -294,7 +294,183 @@
  }
  
  #define MAX_MAIN_LOOP_SPIN (1000)
@@ -132,15 +133,27 @@ stall forced past the libslirp fix; qemu.log must name sosendto.
 +
 +static void *stall_watchdog(void *opaque)
 +{
++    int64_t wait = MAIN_LOOP_STALL_NS;
++
 +    for (;;) {
 +        g_autoptr(GString) where = NULL;
-+        int64_t since;
++        int64_t since, left;
 +        bool has_bql;
 +
-+        g_usleep(250 * 1000);
++        /*
++         * Asleep until the loop could be 2 s out of its poll: 2 s while it
++         * polls, else until 2 s after it left. Every stall of 2 s or more is
++         * still caught, and an idle VM's QEMU is woken every 2 s at most.
++         */
++        g_usleep(MAX(wait, 10 * SCALE_MS) / SCALE_US);
++        wait = MAIN_LOOP_STALL_NS;
 +        since = qatomic_read(&main_loop_busy_since);
-+        if (!since || since == qatomic_read(&stall_reported) ||
-+            get_clock() - since < MAIN_LOOP_STALL_NS) {
++        if (!since || since == qatomic_read(&stall_reported)) {
++            continue;
++        }
++        left = since + MAIN_LOOP_STALL_NS - get_clock();
++        if (left > 0) {
++            wait = left;
 +            continue;
 +        }
 +        has_bql = qatomic_read(&main_loop_has_bql);
@@ -198,7 +211,7 @@ stall forced past the libslirp fix; qemu.log must name sosendto.
  static int os_host_main_loop_wait(int64_t timeout)
  {
      GMainContext *context = g_main_context_default();
-@@ -304,13 +468,22 @@
+@@ -304,13 +480,22 @@
  
      glib_pollfds_fill(&timeout);
  

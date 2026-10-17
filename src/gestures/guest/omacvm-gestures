@@ -1208,6 +1208,12 @@ def mac_host():
 # way to the Mac changed (a new default gateway) and connects again at once.
 KEEPALIVE = (5, 2, 3)   # idle seconds, seconds between probes, probes
 RECHECK = 2.0
+# Without the Mac's helper (not running yet, waiting for its permissions, an
+# update): a try every 2 s for the first 30 s, so a restart or a grant is
+# picked up at once, then every 10 s, and one log line per outage.
+RETRY_FIRST = 2.0
+RETRY_SLOW = 10.0
+RETRY_FAST_FOR = 30.0
 
 
 class Moved(ConnectionError):
@@ -1265,6 +1271,7 @@ def run(pad, keys, glide):
             with lock:
                 s.sendall(data)
         SWIPE.send = send
+        CONNECTED.set()
         print(f"omacvm-gestures: connected to {host}:{PORT} (gestures {'on' if GESTURES else 'off'}, "
               f"scroll momentum {'on' if GLIDE_ON else 'off'})", flush=True)
         tick = -1          # forces the first settimeout (create_connection left 5 s)
@@ -1350,19 +1357,39 @@ def main():
     serve(pad, keys, glide)
 
 
-def serve(pad, keys, glide):
+# Set by run() once the Mac's helper took the connection: an outage then
+# starts again from the first, quick tries.
+CONNECTED = threading.Event()
+
+
+def retry_wait(outage):
+    """Seconds before the next try, `outage` seconds into an outage."""
+    return RETRY_FIRST if outage < RETRY_FAST_FOR else RETRY_SLOW
+
+
+def serve(pad, keys, glide, run=run, sleep=time.sleep, clock=time.monotonic):
     """run() for good: after a lost connection let go of what is held and
-    connect again, at once when the way to the Mac changed, else after 2 s."""
+    connect again, at once when the way to the Mac changed, else after
+    retry_wait(). One log line per outage (the next comes with "connected")."""
+    since = None
     while True:
+        CONNECTED.clear()
         try:
             run(pad, keys, glide)
         except (OSError, ConnectionError) as err:
             glide.release()
             pad.release()
             keys.release()
-            print(f"omacvm-gestures: {err}; retrying", file=sys.stderr, flush=True)
-            if not isinstance(err, Moved):
-                time.sleep(2)
+            if CONNECTED.is_set():
+                since = None
+            if isinstance(err, Moved):
+                print(f"omacvm-gestures: {err}", file=sys.stderr, flush=True)
+                continue
+            if since is None:
+                since = clock()
+                print(f"omacvm-gestures: {err}; trying again (every {RETRY_FIRST:g} s, "
+                      f"after {RETRY_FAST_FOR:g} s every {RETRY_SLOW:g} s)", file=sys.stderr, flush=True)
+            sleep(retry_wait(clock() - since))
 
 
 if __name__ == "__main__":

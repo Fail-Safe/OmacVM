@@ -14,7 +14,10 @@ command -v zstd >/dev/null || { echo "zstd is missing (brew install zstd)"; exit
 fail=0
 T=$(mktemp -d)
 T=$(cd "$T" && pwd -P)
-trap 'chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"' EXIT
+# The Ctrl-C stand-ins below run in their own session: a test killed from
+# outside (a cancelled CI job) must not leave them writing files for days.
+standins_kill() { local f; for f in "$T"/*.pgid; do [[ -f $f ]] && kill -KILL -- "-$(cat "$f")" 2>/dev/null; done; return 0; }
+trap 'standins_kill; chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"' EXIT
 export OMACVM_PREBUILT_SOURCE=$T/src
 source "$R/src/tests/release-test-keys.sh"
 VERSION=$(cat "$R/src/VERSION")
@@ -341,12 +344,13 @@ expect "printable: long lines cut at 240" 240 "$(head -c 400 /dev/zero | tr '\0'
 # folder goes, or it writes the folder again. (A pipeline that keeps making
 # folders and files, like zstd | tar; Ctrl-C = SIGINT to the process group.)
 cat > "$T/ctrlc.sh" <<'EOF'
-R=$1 PB_WORK=$2 FANCY=$3
+R=$1 PB_WORK=$2 FANCY=$3 DRIVER=$4
 source "$R/src/lib/ui.sh"; source "$R/src/prebuilt/lib.sh"; source "$R/src/prebuilt/vm.sh"
 UI_FANCY=$FANCY TTY=/dev/null TYPE=fusion VM=x
 trap 'prebuilt_exit' EXIT
 writer() {
-  while :; do echo x; sleep 0.05; done |
+  # Only while the test's driver lives: a killed test leaves nothing behind.
+  while kill -0 "$DRIVER" 2>/dev/null; do echo x; sleep 0.05; done |
     while read -r _; do mkdir -p "$PB_WORK/Omarchy.vmwarevm"; : > "$PB_WORK/Omarchy.vmwarevm/f$RANDOM"; done
 }
 ui_spin "Unpacking and checking" writer
@@ -355,20 +359,28 @@ for fancy in 0 1; do
   got=$(python3 - "$T/ctrlc.sh" "$R" "$T/ctrlc-work" "$fancy" <<'PY2'
 import os, shutil, signal, subprocess, sys, time
 script, r, w, fancy = sys.argv[1:5]
-p = subprocess.Popen(["/bin/bash", script, r, w, fancy], start_new_session=True,
+p = subprocess.Popen(["/bin/bash", script, r, w, fancy, str(os.getpid())], start_new_session=True,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-for _ in range(200):
-    if os.path.isdir(w + "/Omarchy.vmwarevm"): break
-    time.sleep(0.05)
-os.killpg(p.pid, signal.SIGINT)
-p.wait(timeout=30)
-time.sleep(1)
-left = os.path.exists(w)
-alive = subprocess.run(["pgrep", "-g", str(p.pid)], capture_output=True, text=True).stdout.split()
-try: os.killpg(p.pid, signal.SIGKILL)
-except ProcessLookupError: pass
-shutil.rmtree(w, ignore_errors=True)
-print("rc %d, folder %s, %s" % (p.returncode, "left" if left else "gone", "still running" if alive else "stopped"))
+# Its group for the test's exit trap, should this driver itself be killed.
+pgid = w + ".%s.pgid" % fancy
+with open(pgid, "w") as f: f.write(str(p.pid))
+try:
+    for _ in range(200):
+        if os.path.isdir(w + "/Omarchy.vmwarevm"): break
+        time.sleep(0.05)
+    os.killpg(p.pid, signal.SIGINT)
+    try: p.wait(timeout=30)
+    except subprocess.TimeoutExpired: pass
+    time.sleep(1)
+    left = os.path.exists(w)
+    alive = subprocess.run(["pgrep", "-g", str(p.pid)], capture_output=True, text=True).stdout.split()
+    print("rc %s, folder %s, %s" % (p.returncode, "left" if left else "gone", "still running" if alive else "stopped"))
+finally:
+    # Whatever happened above: nothing of the stand-in goes on.
+    try: os.killpg(p.pid, signal.SIGKILL)
+    except ProcessLookupError: pass
+    os.unlink(pgid)   # gone: the exit trap must not kill a group that reused its number
+    shutil.rmtree(w, ignore_errors=True)
 PY2
 )
   expect "Ctrl-C during the unpack (spinner $fancy): stopped, folder gone" "rc 130, folder gone, stopped" "$got"

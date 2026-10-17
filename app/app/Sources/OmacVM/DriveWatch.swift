@@ -6,7 +6,7 @@ import Foundation
 /// with it: QEMU's open files then fail and nothing it writes lands
 /// anywhere. Three signals, whichever comes first: the folder's vnode is
 /// revoked (kqueue NOTE_REVOKE: its file system was unmounted), macOS says
-/// the volume unmounted, or a poll every 2 s finds its file system no longer
+/// the volume unmounted, or a poll every 5 s finds its file system no longer
 /// mounted (DriveWatch.mounted). The folder only moving on its drive (Finder)
 /// or the drive being renamed (its mount point moves) is no signal. `gone`
 /// runs once, on the main queue, with the drive's name.
@@ -17,7 +17,9 @@ final class DriveWatch: @unchecked Sendable {
     let mount: URL
     private let device: dev_t
     private let queue = DispatchQueue(label: "org.omacvm.drive-watch")
-    /// The 2 s poll's own queue.
+    /// The poll's interval: the last of the three signals.
+    static let pollSeconds = 5.0
+    /// The poll's own queue.
     private let pollQueue = DispatchQueue(label: "org.omacvm.drive-watch.poll")
     private let lock = NSLock()
     // Under `lock`: signals and the watch can end on any thread.
@@ -45,7 +47,9 @@ final class DriveWatch: @unchecked Sendable {
             s.resume()
         }
         let t = DispatchSource.makeTimerSource(queue: pollQueue)
-        t.schedule(deadline: .now() + 2, repeating: 2)
+        // The last of the three signals (the other two come at once), so a
+        // VM's app is woken for it only every 5 s.
+        t.schedule(deadline: .now() + Self.pollSeconds, repeating: Self.pollSeconds, leeway: .seconds(1))
         t.setEventHandler { [weak self] in
             guard let self, !Self.mounted(self.device) else { return }
             self.fire()

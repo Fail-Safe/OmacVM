@@ -80,7 +80,7 @@ try fm.moveItem(at: moved, to: vm)
 // file on it is open.
 let imageDevice = Storage.device(mount)!
 expect("detach -force", hdiutil(["detach", "-force", mount.path]) == 0)
-// The 2 s poll's check sees it too (when no other signal came).
+// The poll's check sees it too (when no other signal came).
 expect("drop: no longer mounted", !DriveWatch.mounted(imageDevice))
 // The callback waits for the main queue, which hdiutil held until now.
 let t0 = Date()
@@ -135,7 +135,7 @@ if args.count > 5 {
     expect("rename: the mount point moved", p.terminationStatus == 0
            && fm.fileExists(atPath: moved.appendingPathComponent("VMs/Ren").path)
            && !fm.fileExists(atPath: ren.path), moved.path)
-    wait(4.5) { !calls.isEmpty }
+    wait(DriveWatch.pollSeconds * 2 + 0.5) { !calls.isEmpty }
     expect("rename: no signal (two polls)", calls.isEmpty, "\(calls)")
     expect("rename: detach -force", hdiutil(["detach", "-force", moved.path]) == 0)
     wait(5) { !calls.isEmpty }

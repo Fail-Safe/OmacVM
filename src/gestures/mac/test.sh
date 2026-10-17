@@ -293,9 +293,15 @@ grep -E '^(ok|FAIL|skip) ' "$T/notice"
 # Swipe out to macOS in the guest, against a made-up Hyprland (#342).
 python3 "$HERE/../guest/test-swipe-out.py" "$HERE/../guest/omacvm-gestures" > "$T/swipe-out" 2>&1 || fail=1
 grep -E '^(ok|FAIL|skip) ' "$T/swipe-out"
+# The guest's reconnects without the Mac's helper: 2 s, then 10 s, one log line per outage.
+python3 "$HERE/../guest/test-retry.py" "$HERE/../guest/omacvm-gestures" > "$T/retry" 2>&1 || fail=1
+grep -E '^(ok|FAIL|skip) ' "$T/retry"
 # ... and install.sh's gesture lines: only for a count with no sideways gesture yet.
 bash "$HERE/../guest/test-install-gestures.sh" > "$T/install-gestures" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/install-gestures"
+# The pointer at rest over a full-screen VM: 0.5 s looks with the rest tap, else 20 Hz (cursor-rest.h).
+clang -O1 -Wall -o "$T/test-cursor-rest" "$HERE/test-cursor-rest.c" && "$T/test-cursor-rest" > "$T/cursor-rest" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/cursor-rest"
 # 6. Which scrolling scroll momentum takes.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \

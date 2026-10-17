@@ -435,6 +435,9 @@ jobs:
       - name: No frames drawn for a VM window out of sight (the checks catch the old code)
         run: app/runtime/Tests/display/test-present-unseen.sh --self-test
 
+      - name: A VM window out of sight keeps the slow refresh tick (the checks catch the old code)
+        run: app/runtime/Tests/display/test-idle-refresh-unseen.sh --self-test
+
       - name: FullPanel's state lets go of a freed window (display unplugged, issue 402; the checks catch the old code)
         run: app/runtime/Tests/display/test-fullpanel-window-gone.sh --self-test
 
@@ -615,6 +618,7 @@ jobs:
 
       - name: Guest agents tests on Linux (inotify, pidfd, idle waits)
         run: |
+          sudo apt-get install -y -qq socat >/dev/null   # Omarchy's base packages have it (the Bridge's event readers)
           python3 src/app/guest/tests/test_omacvm_displays.py -v
           python3 src/app/guest/tests/test_idle_waits.py -v
           python3 src/app/guest/tests/test_monitor_widget.py -v

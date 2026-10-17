@@ -55,5 +55,127 @@ class Clipboard(unittest.TestCase):
             os.close(fd)
 
 
+class BridgeEvents(unittest.TestCase):
+    """The session's event stream service (bridge/guest/omacvm-bridge-events)
+    sleeps until it has something to do, not every second."""
+
+    def setUp(self):
+        self.ev = load("omacvm_bridge_events", "src/bridge/guest/omacvm-bridge-events")
+
+    def test_nothing_to_do_no_timeout(self):
+        self.ev.upstream, self.ev.clients = None, {}
+        self.assertIsNone(self.ev.next_wait(100.0, []))
+
+    def test_mac_stream_silence_limit(self):
+        self.ev.upstream, self.ev.clients, self.ev.up_last = object(), {}, 100.0
+        self.assertAlmostEqual(self.ev.next_wait(101.0, [object()]), self.ev.SILENCE - 1.0)
+
+    def test_linger_after_the_last_client(self):
+        self.ev.upstream, self.ev.clients = object(), {}
+        self.ev.up_last, self.ev.idle_since = 100.0, 110.0
+        self.assertAlmostEqual(self.ev.next_wait(111.0, []), min(self.ev.SILENCE - 11.0, self.ev.LINGER - 1.0))
+
+    def test_retry_a_new_stream(self):
+        self.ev.upstream, self.ev.clients, self.ev.up_started = None, {}, 100.0
+        self.assertAlmostEqual(self.ev.next_wait(101.0, [object()]), self.ev.RETRY - 1.0)
+
+    def test_client_that_never_asks(self):
+        c = self.ev.Client.__new__(self.ev.Client)
+        c.streaming, c.since = False, 100.0
+        self.ev.upstream, self.ev.clients = None, {3: c}
+        self.assertAlmostEqual(self.ev.next_wait(102.0, []), 3.0)
+        self.assertEqual(self.ev.next_wait(110.0, []), 0.05)   # overdue: at once, not a spin
+
+    def test_idle_service_hardly_wakes(self):
+        """The live service with a client and a silent Mac stream: about no
+        wakeups in 3 s (it woke every second). Linux only (/proc)."""
+        import socket
+        import tempfile
+        import time
+        if not os.path.exists("/proc/self/status"):
+            self.skipTest("no /proc here (Linux: the guest)")
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "client")
+            with open(stub, "w") as f:
+                f.write('#!/bin/sh\nprintf "event: wifi\\ndata: {}\\n\\n"\nexec sleep 60\n')
+            os.chmod(stub, 0o755)
+            env = dict(os.environ, OMACVM_BRIDGE_EVENTS_SOCKET=os.path.join(d, "s"), OMACVM_BRIDGE_CLIENT=stub)
+            svc = subprocess.Popen([sys.executable, str(ROOT / "src/bridge/guest/omacvm-bridge-events")],
+                                   env=env, stderr=subprocess.DEVNULL)
+            try:
+                for _ in range(50):
+                    if os.path.exists(env["OMACVM_BRIDGE_EVENTS_SOCKET"]):
+                        break
+                    time.sleep(0.1)
+                c = socket.socket(socket.AF_UNIX)
+                c.connect(env["OMACVM_BRIDGE_EVENTS_SOCKET"])
+                c.sendall(b"GET /events HTTP/1.1\r\nHost: omacvm-bridge\r\n\r\n")
+                c.settimeout(5)
+                got = b""
+                while b"data: {}" not in got:
+                    got += c.recv(4096)
+                time.sleep(0.5)
+
+                def switches():
+                    with open(f"/proc/{svc.pid}/status") as f:
+                        return sum(int(line.split()[1]) for line in f if "ctxt_switches" in line)
+                before = switches()
+                time.sleep(3)
+                self.assertLessEqual(switches() - before, 1)
+                c.close()
+            finally:
+                svc.terminate()
+                svc.wait(5)
+
+    def test_reader_waits_without_a_timer(self):
+        """`omacvm-bridge events` on the session socket: with socat (Omarchy's
+        base packages) it gets the events, stays connected and hardly wakes
+        (curl woke every second). Linux with socat only."""
+        import shutil
+        import socket
+        import tempfile
+        import time
+        if not os.path.exists("/proc/self/status") or not shutil.which("socat"):
+            self.skipTest("Linux with socat only (the guest)")
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "client")
+            with open(stub, "w") as f:
+                f.write('#!/bin/sh\nprintf "event: wifi\\ndata: {}\\n\\n"\nexec sleep 60\n')
+            os.chmod(stub, 0o755)
+            sock = os.path.join(d, "s")
+            env = dict(os.environ, OMACVM_BRIDGE_EVENTS_SOCKET=sock, OMACVM_BRIDGE_CLIENT=stub)
+            svc = subprocess.Popen([sys.executable, str(ROOT / "src/bridge/guest/omacvm-bridge-events")],
+                                   env=env, stderr=subprocess.DEVNULL)
+            reader = None
+            try:
+                for _ in range(50):
+                    if os.path.exists(sock):
+                        break
+                    time.sleep(0.1)
+                reader = subprocess.Popen(["bash", str(ROOT / "src/bridge/guest/omacvm-bridge"), "events"], env=env,
+                                          stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+                got = b""
+                while b"data: {}" not in got:
+                    got += reader.stdout.read1(4096)
+                time.sleep(0.5)
+                socat = subprocess.run(["pgrep", "-P", str(reader.pid), "-x", "socat"], capture_output=True, text=True).stdout.split()
+                self.assertEqual(len(socat), 1, "the reader is socat")
+
+                def switches():
+                    with open(f"/proc/{socat[0]}/status") as f:
+                        return sum(int(line.split()[1]) for line in f if "ctxt_switches" in line)
+                before = switches()
+                time.sleep(3)
+                self.assertIsNone(reader.poll(), "the reader stays connected")
+                self.assertLessEqual(switches() - before, 1)
+            finally:
+                if reader:
+                    reader.kill()
+                    reader.wait(5)
+                    reader.stdout.close()
+                svc.terminate()
+                svc.wait(5)
+
+
 if __name__ == "__main__":
     unittest.main()

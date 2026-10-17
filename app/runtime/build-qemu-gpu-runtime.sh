@@ -916,6 +916,10 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-close.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-unseen.patch"
 "$native_dir/Tests/display/test-present-unseen.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: frames are drawn for a window out of sight (test-present-unseen.sh)"
+# A window out of sight keeps the slow refresh tick: its kept frame is no tick work.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-idle-refresh-unseen.patch"
+"$native_dir/Tests/display/test-idle-refresh-unseen.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a frame kept for an unseen window keeps the tick fast (test-idle-refresh-unseen.sh)"
 # The guest's modifier keys follow each event's flags, never flipped (#412:
 # another Mac's keyboard through Universal Control got Shift pressed and
 # released at once). Its rules' test, then the wiring.

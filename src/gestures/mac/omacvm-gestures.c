@@ -114,6 +114,7 @@
 #include "scroll-model.h"
 #include "mouse-model.h"
 #include "swipe-take.h"
+#include "cursor-rest.h"
 #include <IOKit/IOKitLib.h>
 #include <fcntl.h>
 #include <mach-o/dyld.h>
@@ -157,11 +158,17 @@ extern bool MTDeviceIsRunning(MTDeviceRef);
 extern int MTDeviceGetFamilyID(MTDeviceRef, int *);
 extern io_service_t MTDeviceGetService(MTDeviceRef);
 
+// The test identity's port and Bridge folder (and settings domain, below) come
+// with its bundle id at run time, as the Bridge's do, so a release copy
+// relabeled as org.omacvm.test.gestures (src/tests/e2e/relabel.sh) never
+// meets the installed Gestures. A build may still name them (build.sh with
+// OMACVM_HELPER_TEST=1).
+static int testIdentity(void);
 #ifndef PORT
-#define PORT 47830
+#define PORT (testIdentity() ? 47930 : 47830)
 #endif
 #ifndef BRIDGE_DIR
-#define BRIDGE_DIR "omacvm-bridge"   // the Bridge's token is in ~/Library/Application Support/BRIDGE_DIR
+#define BRIDGE_DIR (testIdentity() ? "omacvm-test-bridge" : "omacvm-bridge")   // the Bridge's token is in ~/Library/Application Support/BRIDGE_DIR
 #endif
 // The Mac's address on each VM network: Parallels' shared network, UTM's
 // shared network (vmnet), VMware Fusion's NAT network (vmnet8: Fusion picks
@@ -650,19 +657,93 @@ static CGWindowID frontWindow(pid_t pid) {
 // The capture check runs every 0.2 s while a VM app is in front (to see its
 // window go full screen), else every 2 s plus on every app switch. The pointer
 // check runs only while a full-screen VM is in front: at 120 Hz while the
-// pointer moves, at 20 Hz once it has rested a second (an idle desktop then
-// costs 20 wake-ups a second here, not 120).
-#define CURSOR_REST_AFTER 1.0
-#define CURSOR_REST_EVERY 0.05
+// pointer moves; once it has rested a second, every 0.5 s with the rest tap
+// armed (its first move wakes the check at once), else at 20 Hz
+// (cursor-rest.h).
 static CFRunLoopTimerRef captureTimer, cursorTimer;
 static void updateCursor(CFRunLoopTimerRef t, void *info);
+static void restTapDisarm(void);
 
 static void cursorTimerOn(int on) {
   static int running = -1;
   if (!cursorTimer || on == running) return;
   running = on;
-  if (!on) updateCursor(NULL, NULL);   // shows the pointer again
+  if (!on) { restTapDisarm(); updateCursor(NULL, NULL); }   // shows the pointer again
   CFRunLoopTimerSetNextFireDate(cursorTimer, CFAbsoluteTimeGetCurrent() + (on ? 0 : 1e9));
+}
+
+// ---- the pointer at rest: a tap for its first move instead of a look 20 times a second ----
+// Listen-only (it never holds an event), at the session level, only the
+// pointer's moves and drags, armed only while the pointer rests over a
+// full-screen VM in front: its first event disarms it and wakes the pointer
+// check at once. macOS disabling it (a timeout, user input) arms it again.
+// It cannot be made (no Input Monitoring) or PointerRestTap is off: the check
+// looks 20 times a second at rest, as before. Main thread.
+static CFMachPortRef restTap;
+static CFRunLoopSourceRef restSource;
+static int restArmed, restFailed;
+static int restTapSetting(void);
+
+static CGEventRef restTapCb(CGEventTapProxy proxy, CGEventType type, CGEventRef e, void *info) {
+  (void)proxy; (void)info;
+  if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+    if (restArmed && restTap) CGEventTapEnable(restTap, true);
+    return e;
+  }
+  if (restArmed) {
+    restArmed = 0;
+    CGEventTapEnable(restTap, false);
+    if (cursorTimer) CFRunLoopTimerSetNextFireDate(cursorTimer, CFAbsoluteTimeGetCurrent());
+  }
+  return e;
+}
+
+static void restTapRemove(void) {
+  restArmed = 0;
+  if (!restTap) return;
+  CGEventTapEnable(restTap, false);
+  CFRunLoopRemoveSource(CFRunLoopGetMain(), restSource, kCFRunLoopCommonModes);
+  CFRunLoopSourceInvalidate(restSource);
+  CFRelease(restSource);
+  CFMachPortInvalidate(restTap);
+  CFRelease(restTap);
+  restTap = NULL;
+  restSource = NULL;
+}
+
+static void restTapDisarm(void) {
+  if (!restArmed) return;
+  restArmed = 0;
+  if (restTap) CGEventTapEnable(restTap, false);
+}
+
+// Armed now (1), or the 20 Hz look (0).
+static int restTapArm(void) {
+  if (restArmed && restTap && CGEventTapIsEnabled(restTap)) return 1;
+  if (!restTapSetting()) { restTapRemove(); return 0; }
+  if (!restTap) {
+    CGEventMask m = CGEventMaskBit(kCGEventMouseMoved) | CGEventMaskBit(kCGEventLeftMouseDragged) |
+                    CGEventMaskBit(kCGEventRightMouseDragged) | CGEventMaskBit(kCGEventOtherMouseDragged);
+    restTap = CGEventTapCreate(kCGSessionEventTap, kCGTailAppendEventTap, kCGEventTapOptionListenOnly, m, restTapCb, NULL);
+    restSource = restTap ? CFMachPortCreateRunLoopSource(NULL, restTap, 0) : NULL;
+    if (!restSource) {
+      if (restTap) { CFMachPortInvalidate(restTap); CFRelease(restTap); restTap = NULL; }
+      if (!restFailed) logf_("pointer at rest: no tap for its moves (Input Monitoring?): looking 20 times a second");
+      restFailed = 1;
+      return 0;
+    }
+    CFRunLoopAddSource(CFRunLoopGetMain(), restSource, kCFRunLoopCommonModes);
+    if (restFailed) logf_("pointer at rest: the tap for its moves works again");
+    restFailed = 0;
+  }
+  restArmed = 1;
+  CGEventTapEnable(restTap, true);
+  if (CGEventTapIsEnabled(restTap)) return 1;
+  // Made, but macOS does not let it run (the permission went): as before.
+  restTapRemove();
+  if (!restFailed) logf_("pointer at rest: the tap for its moves was turned off: looking 20 times a second");
+  restFailed = 1;
+  return 0;
 }
 
 // The title of the VM app's focused window (its main window when none has
@@ -822,6 +903,7 @@ static void pauseInput(void) {
   stopTrackpads();
   if (capturing) { capturing = 0; logf_("capture off"); sendState("off"); }
   cursorTimerOn(0);   // the macOS pointer shows again
+  restTapRemove();
 }
 
 // ---- the tap must never hold the Mac's input (#290, the Bridge's rule) ----
@@ -1364,13 +1446,15 @@ static void updateCursor(CFRunLoopTimerRef t, void *info) {
   CFRelease(e);
   CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
   int moved = p.x != last.x || p.y != last.y;
-  if (moved) lastMove = now;
-  // At rest: the next look in 50 ms instead of 8 (the timer goes back to
-  // 120 Hz by itself after the first look that sees it move).
-  if (t && now - lastMove > CURSOR_REST_AFTER) CFRunLoopTimerSetNextFireDate(t, now + CURSOR_REST_EVERY);
+  if (moved) { lastMove = now; restTapDisarm(); }
+  // At rest: the next look in 0.5 s with the rest tap armed, else in 50 ms
+  // (the timer goes back to 120 Hz by itself after the first look that sees
+  // it move; the tap's first event brings that look at once).
+  double next = cursorNextLook(now - lastMove, now - lastMove > CURSOR_REST_AFTER && t ? restTapArm() : 0);
+  if (t && next > 0) CFRunLoopTimerSetNextFireDate(t, now + next);
   // The window list only when the pointer moved, and every half second for
   // windows that appear under a pointer at rest (the Dock, a notification).
-  if (!moved && now - lastCheck < 0.5) return;
+  if (!moved && now - lastCheck < CURSOR_WINDOWS_EVERY) return;
   last = p; lastCheck = now;
   int h = vmWindowAt(p, pid);
   if (verbose && h != cursorHidden)
@@ -2099,11 +2183,11 @@ static pid_t topAppOn(CGRect b, pid_t skip, CGWindowID *win) {
   return found;
 }
 
-// The test identity (build.sh with OMACVM_HELPER_TEST=1) builds with its own
-// domain, port and Bridge folder, so it never meets the installed Gestures,
-// and takes only OmacVM Test.app's VMs (GESTURES_TEST_IDENTITY).
+// The test identity has its own domain, port and Bridge folder (from its
+// bundle id at run time, or built so: build.sh with OMACVM_HELPER_TEST=1), so
+// it never meets the installed Gestures, and takes only OmacVM Test.app's VMs.
 #ifndef GESTURES_DOMAIN
-#define GESTURES_DOMAIN CFSTR("org.omacvm.gestures")
+#define GESTURES_DOMAIN (testIdentity() ? CFSTR("org.omacvm.test.gestures") : CFSTR("org.omacvm.gestures"))
 #endif
 
 // "EscapeSwipe": "all" moves every display that shows the VM, anything else
@@ -2139,6 +2223,17 @@ static int mouseSwipeFingers(void) {
 // write org.omacvm.gestures SwipeOut -bool true): a swipe past the VM's first
 // or last workspace goes on to the macOS Space beside the VM's (#342). A
 // bool, a number or "yes"/"true", as CFPreferences reads a bool.
+// "PointerRestTap" (hidden, on by default; defaults write org.omacvm.gestures
+// PointerRestTap -bool false goes back): the pointer at rest wakes the
+// pointer check through a tap for its moves instead of a look 20 times a
+// second (cursor-rest.h). Read when the pointer comes to rest.
+static int restTapSetting(void) {
+  CFPreferencesAppSynchronize(GESTURES_DOMAIN);
+  Boolean valid = false;
+  int on = CFPreferencesGetAppBooleanValue(CFSTR("PointerRestTap"), GESTURES_DOMAIN, &valid);
+  return !valid || on;
+}
+
 static int swipeOutSetting(void) {
   CFPreferencesAppSynchronize(GESTURES_DOMAIN);
   Boolean valid = false;
@@ -3291,7 +3386,7 @@ static void base64Name(const char *in, char *out, size_t cap) {
 static size_t readToken(char tok[160]) {
   char path[1024];
   tok[0] = 0;
-  snprintf(path, sizeof path, "%s/Library/Application Support/" BRIDGE_DIR "/token", getenv("HOME"));
+  snprintf(path, sizeof path, "%s/Library/Application Support/%s/token", getenv("HOME"), BRIDGE_DIR);
   FILE *f = fopen(path, "r");
   if (!f) return 0;
   if (!fgets(tok, 160, f)) tok[0] = 0;
@@ -3878,6 +3973,17 @@ int main(int argc, char **argv) {
 #if GESTURES_TEST_IDENTITY
   const char *rd = getenv("OMACVM_TEST_REPLAY_DIR");
   if (rd && rd[0] == '/') { snprintf(replayDir, sizeof replayDir, "%s", rd); logf_("test identity: frames from %s/next.tsv", replayDir); }
+  // SIGUSR2: the rest tap as macOS turns a tap off (a timeout), for the
+  // end-to-end test of re-arming it. Test identity only.
+  signal(SIGUSR2, SIG_IGN);
+  static dispatch_source_t usr2;
+  usr2 = dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL, SIGUSR2, 0, dispatch_get_main_queue());
+  dispatch_source_set_event_handler(usr2, ^{
+    logf_("test identity: the rest tap turned off as by a timeout (%s)", restArmed ? "armed" : "not armed");
+    if (restTap) CGEventTapEnable(restTap, false);
+    restTapCb(NULL, kCGEventTapDisabledByTimeout, NULL, NULL);
+  });
+  dispatch_resume(usr2);
 #endif
 
   tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);

@@ -3,7 +3,12 @@
 # cc-switches.sh: "OmacVM Test.app" (org.omacvm.app.test, helpers
 # org.omacvm.test.bridge and org.omacvm.test.gestures), signed again with the
 # Developer ID in OMACVM_SIGN_ID. Only the bundle ids and the signatures
-# change; QEMU's runtime and everything else stay as released.
+# change; QEMU's runtime and everything else stay as released. QEMU is signed
+# as the test app's ("org.omacvm.app.test.qemu"): the installed Gestures tells
+# its own VMs by that, and would take a relabeled VM as the user's. Gestures
+# picks the test port (47930) from its relabeled bundle id from 3.1.16 on; an
+# older release's Gestures listens on 47830, beside the installed one, and
+# cannot (the gate's VM then has no Gestures; nothing else changes).
 #   src/tests/e2e/relabel.sh ZIP OUT_DIR      -> OUT_DIR/OmacVM Test.app
 set -euo pipefail
 ZIP=${1:?usage: relabel.sh ZIP OUT_DIR}; O=${2:?usage: relabel.sh ZIP OUT_DIR}
@@ -36,6 +41,11 @@ $PB -c "Set :CFBundleName OmacVM Test" "$A/Contents/Info.plist" 2>/dev/null || t
 # relabeled copy would read the installed Gestures' org.omacvm.gestures.
 $PB -c "Delete :OmacVMGesturesDomain" "$A/Contents/Info.plist" 2>/dev/null || true
 $PB -c "Add :OmacVMGesturesDomain string org.omacvm.test.gestures" "$A/Contents/Info.plist"
+for q in "$A/Contents/MacOS/OmacVM-VM" "$A/Contents/Resources/runtime/bin/OmacVM"; do
+  [[ -f $q ]] || continue
+  codesign --force --options runtime --timestamp=none --preserve-metadata=entitlements -s "$SIGN" -i org.omacvm.app.test.qemu "$q"
+  [[ $(codesign -dv "$q" 2>&1 | sed -n 's/^Identifier=//p') == org.omacvm.app.test.qemu ]] || { echo "relabel.sh: $q is not signed as the test app's QEMU" >&2; exit 1; }
+done
 codesign --force --options runtime --timestamp=none --preserve-metadata=entitlements -s "$SIGN" -i org.omacvm.app.test "$A"
 codesign --verify --deep --strict "$A"
 [[ $($PB -c "Print :OmacVMGesturesDomain" "$A/Contents/Info.plist") == org.omacvm.test.gestures ]] || { echo "relabel.sh: no test Gestures domain" >&2; exit 1; }
