@@ -38,6 +38,30 @@ final class Creator: ObservableObject {
     private var reader: FileHandle?
     private var exitStatus: Int32?
     private var logURL: URL?
+    /// An update's stdin: the answer to its question goes there.
+    private var answers: FileHandle?
+
+    /// Update VM's question (update-vm.sh's "ASK kernel HAVE LATEST CPUS LOW
+    /// HIGH"): Arch Linux ARM has a newer kernel than the VM's memory-optimized
+    /// one, and building it takes LOW-HIGH minutes on the VM's CPUS.
+    struct KernelQuestion: Equatable {
+        let have: String, latest: String, cpus: Int, low: Int, high: Int
+
+        static func parse(_ line: String) -> KernelQuestion? {
+            let f = line.split(separator: " ").map(String.init)
+            guard f.count == 7, f[0] == "ASK", f[1] == "kernel",
+                  let c = Int(f[4]), let lo = Int(f[5]), let hi = Int(f[6]) else { return nil }
+            return KernelQuestion(have: f[2], latest: f[3], cpus: c, low: lo, high: hi)
+        }
+    }
+    @Published private(set) var kernelQuestion: KernelQuestion?
+
+    /// Build Now (true) or Later: the update goes on.
+    func answerKernel(build: Bool) {
+        guard kernelQuestion != nil else { return }
+        kernelQuestion = nil
+        try? answers?.write(contentsOf: Data((build ? "build\n" : "later\n").utf8))
+    }
 
     /// What runs: a new VM (create-vm.sh, prebuilt-vm.sh) or an existing VM's
     /// OmacVM brought up to this app's (update-vm.sh).
@@ -82,6 +106,7 @@ final class Creator: ObservableObject {
         logsDir = folder.appendingPathComponent("logs")
         reader?.readabilityHandler = nil
         reader = nil; run += 1; buffer = ""; exitStatus = nil
+        try? answers?.close(); answers = nil; kernelQuestion = nil
         title = "Preparing"
     }
 
@@ -128,8 +153,15 @@ final class Creator: ObservableObject {
         }
         do {
             try p.run()
-            if let text { input.fileHandleForWriting.write(Data(text.utf8)) }
-            try? input.fileHandleForWriting.close()
+            if let text {
+                input.fileHandleForWriting.write(Data(text.utf8))
+                try? input.fileHandleForWriting.close()
+            } else {
+                // Kept open for a question; a write after the script ended
+                // fails instead of stopping the app (SIGPIPE).
+                _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+                answers = input.fileHandleForWriting
+            }
             process = p
             startTicker()
         } catch {
@@ -147,6 +179,7 @@ final class Creator: ObservableObject {
     private func exited(_ id: Int, _ status: Int32) {
         guard id == run else { return }
         exitStatus = status
+        try? answers?.close(); answers = nil; kernelQuestion = nil
         settle()
     }
 
@@ -188,6 +221,8 @@ final class Creator: ObservableObject {
         if !line.isEmpty { lastOutput = Date() }
         if let u = ProgressUpdate.parse(line) {
             progress(u)
+        } else if let q = KernelQuestion.parse(line) {
+            kernelQuestion = q
         } else if line.hasPrefix("STEP ") {
             // STEP n/N title
             endStep()
@@ -203,6 +238,7 @@ final class Creator: ObservableObject {
             stepStarted = Date()
             clearActivity()
         } else if line.hasPrefix("==>") {
+            kernelQuestion = nil   // answered, or the script's 10 minutes are over
             detail = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 .replacingOccurrences(of: "\u{1B}[1;32m", with: "")
                 .replacingOccurrences(of: "\u{1B}[0m", with: "")

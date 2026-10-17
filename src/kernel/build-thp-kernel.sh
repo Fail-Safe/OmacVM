@@ -6,13 +6,16 @@
 # entry in GRUB's advanced menu; GRUB boots the THP kernel by default.
 # Re-run it to follow a new ALARM kernel release; when the installed one is
 # already ALARM's current release it does nothing (OMACVM_REBUILD_KERNEL=1
-# builds anyway).
+# builds anyway). OMACVM_KERNEL_NEW=keep (guest/install.sh, unless the Mac's
+# user said build): a VM that has the kernel keeps it, a newer release is only
+# named; it is built only when there is none yet.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 U=${1:?usage: build-thp-kernel.sh <desktop-user>}
-ALARM=https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/core/linux-aarch64
+source "$here/alarm.sh"
+ALARM=$ALARM_KERNEL
 
-G=/etc/default/grub
+G=${OMACVM_TEST_GRUB:-/etc/default/grub}   # tests: a scratch copy
 # GRUB boots the THP kernel by default (also after a disable that only
 # pointed GRUB back at the stock kernel).
 grub_default_thp() {
@@ -24,7 +27,7 @@ grub_default_thp() {
   grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tail -2
 }
 
-latest=$(curl -fsSL "$ALARM/PKGBUILD" | sed -n 's/^pkgver=//p; s/^pkgrel=//p' | paste -sd- -) || latest=""
+latest=$(alarm_kernel_latest) || latest=""
 have=$(pacman -Q linux-aarch64-thp 2>/dev/null | awk '{ print $2 }' || true)   # none yet: build
 if [[ -z $latest && -n $have ]]; then
   echo "could not reach GitHub to check for a newer kernel: keeping linux-aarch64-thp $have"
@@ -37,6 +40,14 @@ if [[ $have == "$latest" && -z ${OMACVM_REBUILD_KERNEL:-} ]]; then
   grub_default_thp
   exit 0
 fi
+if [[ -n $have && ${OMACVM_KERNEL_NEW:-build} == keep && -z ${OMACVM_REBUILD_KERNEL:-} ]]; then
+  read -r lo hi <<<"$(kernel_build_minutes "$(nproc)")"
+  echo "linux-aarch64-thp $have stays: Arch Linux ARM has $latest, a kernel build of about $lo-$hi minutes on $(nproc) CPUs (on the Mac: omacvm update --kernel builds it)"
+  grub_default_thp
+  exit 0
+fi
+read -r lo hi <<<"$(kernel_build_minutes "$(nproc)")"
+echo "a kernel build on $(nproc) CPUs: about $lo-$hi minutes"
 "$here/../guest/pkg-add" xmlto docbook-xsl kmod inetutils bc git dtc python pahole cpio base-devel
 # Built in fresh folders of root's (root never follows a link the user put
 # there), under /home: root's snapshots (subvolume @) leave it out, so the

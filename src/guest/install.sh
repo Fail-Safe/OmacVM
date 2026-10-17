@@ -5,7 +5,7 @@
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
 #                    [--display WxH@Hz] [--display-scale N] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 #                    [--vm-name-b64 NAME] [--only F,...] [--strict F,...|all]
-#                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
+#                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app) [--kernel-new build|keep]
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, no-idle-lock, autologin, thp-kernel, battery, external-brightness,
 # control-centre, fast-network, chromium-video, vulkan, x86-apps, touch-id, mac-ime) with its defaults; a feature
@@ -24,10 +24,14 @@
 # --graphics (OmacVM.app): what the VM's Graphics setting gives it on this Mac
 # (the Mac decides Automatic); vulkan builds its Venus driver ahead of the
 # start that gets Vulkan. Kept in /etc/omacvm/env.
+# --kernel-new: a memory-optimized kernel the VM has already, and Arch Linux
+# ARM has a newer one: build it, or keep the one the VM has (the default; the
+# Mac asks first: omacvm apply/update, OmacVM.app's Update VM). A VM without
+# it yet builds it when the feature goes on.
 # Needs, for the bridge, the token from the Mac in ~/.config/omacvm-bridge/token.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-U=""; KB="us"; TYPE=""; MODE=""; DSCALE=""; CLOCK_FMT=""; NAME64=""; ONLY=""; STRICT=""; SOFT=(); GRAPHICS=""
+U=""; KB="us"; TYPE=""; MODE=""; DSCALE=""; CLOCK_FMT=""; NAME64=""; ONLY=""; STRICT=""; SOFT=(); GRAPHICS=""; KERNEL_NEW=keep
 FEATURES=(); declare -A F=() NEEDS=() SET=()
 while IFS=$'\t' read -r name def _ _ needs _; do
   [[ -z $name || $name == \#* ]] && continue
@@ -53,6 +57,8 @@ while (( $# )); do
     --graphics) [[ $2 == opengl || $2 == vulkan ]] || { echo "guest/install.sh: --graphics opengl|vulkan" >&2; exit 2; }
                 GRAPHICS=$2; shift 2 ;;
     --strict) STRICT=",$2,"; shift 2 ;;
+    --kernel-new) [[ $2 == build || $2 == keep ]] || { echo "guest/install.sh: --kernel-new build|keep" >&2; exit 2; }
+                  KERNEL_NEW=$2; shift 2 ;;
     *) sed -n '5,7s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
@@ -597,8 +603,8 @@ if ! want thp-kernel; then
   :
 elif [[ ${F[thp-kernel]} == on ]]; then
   if command -v grub-mkconfig >/dev/null; then
-    log "memory-optimized kernel: a kernel build on $(nproc) CPUs (about 10 minutes with 16, over an hour with 4)"
-    "$R/kernel/build-thp-kernel.sh" "$U" || not_set_up thp-kernel "memory-optimized kernel"
+    log "memory-optimized kernel"
+    OMACVM_KERNEL_NEW=$KERNEL_NEW "$R/kernel/build-thp-kernel.sh" "$U" || not_set_up thp-kernel "memory-optimized kernel"
   else
     log "memory-optimized kernel skipped: this VM does not boot with GRUB"
   fi

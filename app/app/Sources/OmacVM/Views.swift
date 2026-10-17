@@ -476,7 +476,9 @@ struct BuildView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
                         ProgressView(value: Double(max(creator.step - 1, 0)), total: Double(creator.steps))
-                        if creator.failed == nil {
+                        if let q = creator.kernelQuestion, creator.failed == nil {
+                            KernelQuestionView(question: q, vm: state.config.name, creator: creator)
+                        } else if creator.failed == nil {
                             BuildNowView(creator: creator)
                         } else {
                             Text(creator.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
@@ -511,6 +513,32 @@ struct BuildView: View {
                 state.tell("OmacVM in \(state.config.name) is now \(v).")
             } else {
                 state.message = nil
+            }
+        }
+    }
+}
+
+/// Update VM's question before a kernel build: Arch Linux ARM has a newer
+/// kernel than the VM's memory-optimized one. Later (the default) keeps it.
+struct KernelQuestionView: View {
+    let question: Creator.KernelQuestion
+    let vm: String
+    @ObservedObject var creator: Creator
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Build the new memory-optimized kernel?").font(.headline)
+            Text("Arch Linux ARM has kernel \(question.latest), \(vm) has \(question.have). Building it takes about \(question.low)-\(question.high) minutes on the VM's \(question.cpus) CPUs. Later keeps the current kernel; the next Update VM asks again, and omacvm update --kernel builds it any time.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Build Now") { creator.answerKernel(build: true) }
+                    .layoutProbe("kernel-build")
+                Button("Later") { creator.answerKernel(build: false) }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .layoutProbe("kernel-later")
             }
         }
     }

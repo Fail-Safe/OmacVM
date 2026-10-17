@@ -360,8 +360,11 @@ jobs:
       - name: A VM not shut down cleanly, or copied while it ran, warns before a start
         run: src/tests/app-run-marker.sh
 
-      - name: Update VM never waits forever (disk errors, a read-only VM, a hang)
+      - name: Update VM never waits forever (disk errors, a read-only VM, a hang), asks before a kernel build
         run: src/tests/update-vm-watch.sh
+
+      - name: A newer memory-optimized kernel is built only when asked for
+        run: src/tests/kernel-ask.sh
 
       - name: An app VM folder's own SSH key is made, found and offered first (a VM copied to another Mac)
         run: src/tests/vm-ssh-key.sh

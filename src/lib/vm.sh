@@ -143,6 +143,9 @@ vm_probe() {
     grep -q "^OMACVM_FEATURE_omanotch=" /etc/omacvm/env 2>/dev/null || { [ -x "$H/.local/bin/notchcast" ] && echo OMACVM_FEATURE_omanotch=on; }
     grep -q "^OMACVM_FEATURE_autologin=" /etc/omacvm/env 2>/dev/null || { [ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ] && echo OMACVM_FEATURE_autologin=on; }
     grep -q "^OMACVM_FEATURE_thp_kernel=" /etc/omacvm/env 2>/dev/null || { pacman -Q linux-aarch64-thp >/dev/null 2>&1 && echo OMACVM_FEATURE_thp_kernel=on; }
+    # The memory-optimized kernel it has (apply asks before a newer one is built).
+    echo "OMACVM_THP_KERNEL=$(pacman -Q linux-aarch64-thp 2>/dev/null | cut -d" " -f2)"
+    echo "OMACVM_NPROC=$(nproc 2>/dev/null)"
     # Autologin as SDDM does it, whoever wrote the file (src/guest/autologin.sh: the same rule).
     if [ -d /etc/sddm.conf.d ] || [ -f /etc/sddm.conf ]; then
       u=$(cat /usr/lib/sddm/sddm.conf.d/*.conf /etc/sddm.conf.d/*.conf /etc/sddm.conf 2>/dev/null |
