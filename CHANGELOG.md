@@ -5,10 +5,12 @@ in more words.
 
 ## Unreleased
 
-- **Sound on its own thread** is now a switch in the VM window, in a new Output section after Input
-  (experimental). Its (i) says what it does: fewer audio crackles while apps open or the Mac is
-  busy. It is the same setting as `defaults write org.omacvm.app audioThread` and counts from
-  the next start of the VM.
+- **The sound on its own thread is on for everyone.** 3.1.16 brought it as an experiment; with it
+  the VM's sound crackles much less while apps open, pages scroll or the Mac is busy, and reaches
+  the Mac about 60 ms sooner. It has a switch in a new Output section of the VM window (after
+  Input), with an (i) saying what it does. Off there (or `defaults write org.omacvm.app
+  audioThread -bool false`) goes back to the sound as in 3.1.16 and before. Counts from the next
+  start of the VM.
 
 ## 3.1.16
 
