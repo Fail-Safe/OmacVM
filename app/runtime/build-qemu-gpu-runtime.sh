@@ -946,6 +946,9 @@ grep -q 'getenv("OMACVM_AUDIO_THREAD")' "$source_dir/audio/audio-rt.c" || \
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-bh-main-thread.patch"
 grep -q 'aio_bh_new(iohandler_get_aio_context(),' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the present BH must run on the main loop thread (present-bh-main-thread patch)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-trim.patch"
+grep -q 'present_trim_quarter = present_vsync' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the present's quarter-second trim is missing (present-trim patch)"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-console-gl-render-lock.patch"
 [[ $(grep -c 'qemu_console_gl_render_lock();' "$source_dir/ui/cocoa.m") == 2 ]] || \
   die "ui/cocoa.m: both AppKit draws of virgl textures must take the GPU lock (console-gl-render-lock patch)"

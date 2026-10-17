@@ -23,19 +23,23 @@ ok() { N=$((N + 1)); printf '  ok    %s\n' "$1"; }
 bad() { N=$((N + 1)); FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$1"; }
 check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then ok "$what"; else bad "$what"; fi; }
 
-for p in qemu-cocoa-gl-present-bh-main-thread qemu-console-gl-render-lock qemu-cocoa-gl-context-depth qemu-virtio-gpu-virgl-unlocked; do
+for p in qemu-cocoa-gl-present-bh-main-thread qemu-cocoa-gl-present-trim qemu-console-gl-render-lock qemu-cocoa-gl-context-depth qemu-virtio-gpu-virgl-unlocked; do
   check "$p.patch is pinned in SHA256SUMS" grep -q " $p.patch$" "$PD/SHA256SUMS"
 done
 line() { grep -n "patches/$1.patch\"" "$B" | head -1 | cut -d: -f1; }
-l0=$(line qemu-cocoa-gl-present-bh-main-thread); l1=$(line qemu-console-gl-render-lock)
+l0=$(line qemu-cocoa-gl-present-bh-main-thread); lt=$(line qemu-cocoa-gl-present-trim); l1=$(line qemu-console-gl-render-lock)
 lc=$(line qemu-cocoa-gl-context-depth); l2=$(line qemu-virtio-gpu-virgl-unlocked); nap=$(line omacvm-cocoa-no-app-nap)
 vs=$(line qemu-cocoa-gl-present-vsync); fence=$(grep -n 'patches/qemu-cocoa-gl-async-fence.patch' "$B" | head -1 | cut -d: -f1)
 check "runtime build applies them in order, after the present and fence patches, before App Nap" \
   test -n "$l0" -a -n "$l1" -a -n "$l2" -a "${l0:-0}" -gt "${vs:-0}" -a "${l0:-0}" -gt "${fence:-0}" \
-       -a "${l1:-0}" -gt "${l0:-0}" -a "${lc:-0}" -gt "${l1:-0}" -a "${l2:-0}" -gt "${lc:-0}" -a "${l2:-0}" -lt "${nap:-0}"
+       -a "${lt:-0}" -gt "${l0:-0}" -a "${l1:-0}" -gt "${lt:-0}" -a "${lc:-0}" -gt "${l1:-0}" -a "${l2:-0}" -gt "${lc:-0}" -a "${l2:-0}" -lt "${nap:-0}"
 check "the present BH runs on the iohandler context (main loop thread only)" \
   grep -qF '+        present_bh = aio_bh_new(iohandler_get_aio_context(),' "$P0"
 
+TP=$PD/qemu-cocoa-gl-present-trim.patch
+check "the quarter-second trim only with OMACVM_GL_TRIM=quarter" grep -qF '+    present_trim_quarter = present_vsync && tr && !strcmp(tr, "quarter");' "$TP"
+check "launcher asks for it with gpuOffMainLoop" grep -qF 'env["OMACVM_GL_TRIM"] = "quarter"' "$RUNNER"
+check "an empty refresh starts the count again" grep -qF '+        present_sync.left_run = 0;' "$TP"
 CD=$PD/qemu-cocoa-gl-context-depth.patch
 check "virgl's GL context callback reads no surface pointer" grep -qF '+    bpp = qatomic_read(&gl_ctx_bpp);' "$CD"
 check "the depth is set with the surface" grep -qF '+    qatomic_set(&gl_ctx_bpp, PIXMAN_FORMAT_BPP(surface_format(new_surface)));' "$CD"

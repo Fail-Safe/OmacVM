@@ -471,9 +471,13 @@ final class Runner {
             env["OMACVM_AUDIO_THREAD"] = "1"
         }
         // virgl's GPU-only commands without the BQL (gpuOffMainLoop, ADR 0046;
-        // qemu-virtio-gpu-virgl-unlocked.patch); safe mode keeps the BQL.
+        // qemu-virtio-gpu-virgl-unlocked.patch); safe mode keeps the BQL. The
+        // VM's frames then come steadily, and the present skips a frame left
+        // over for a quarter second (qemu-cocoa-gl-present-trim.patch), or
+        // the queue would keep extra frames of latency.
         if Settings.gpuOffMainLoop {
             env["OMACVM_GPU_UNLOCKED"] = "1"
+            env["OMACVM_GL_TRIM"] = "quarter"
         }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
