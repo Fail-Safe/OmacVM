@@ -11,6 +11,9 @@
 # powered off. Nothing is deleted: a failed apply leaves the VM as it was
 # (omacvm apply rolls its own steps back), and it starts as before.
 set -euo pipefail
+# The app's answer comes on fd 3; everything else reads nothing (an open stdin
+# would keep a command that reads it waiting).
+exec 3<&0 < /dev/null
 HERE=$(cd "$(dirname "$0")" && pwd)
 source "$HERE/vm-common.sh"
 
@@ -42,18 +45,20 @@ trap 'if [[ -n $WATCH ]]; then kill "$WATCH" 2>/dev/null || true; fi; stop_vm' E
 REASON=$LOG/update-stopped
 DEADLINE=$LOG/update-deadline
 rm -f "$REASON"
-echo $(( $(date +%s) + ${OMACVM_UPDATE_SECONDS:-$((${OMACVM_UPDATE_MINUTES:-40} * 60))} )) > "$DEADLINE"
+deadline() { echo "$1" > "$DEADLINE.new" && mv -f "$DEADLINE.new" "$DEADLINE"; }   # never read half-written
+deadline $(( $(date +%s) + ${OMACVM_UPDATE_SECONDS:-$((${OMACVM_UPDATE_MINUTES:-40} * 60))} ))
 : > "$LOG/omacvm-update.log"   # the last update's lines are not this one's
-later() { echo $(( $(cat "$DEADLINE") + $1 )) > "$DEADLINE"; }   # SECONDS more
+later() { deadline $(( $(cat "$DEADLINE") + $1 )); }   # SECONDS more
 watch_update() {
-  local line
+  local line d
   while qemu_running; do
     if line=$(disk_error "$LOG/update-console.log" "$LOG/omacvm-update.log"); then
       printf 'disk %s\n' "$line" > "$REASON"
       qemu_quit
       return
     fi
-    if (( $(date +%s) >= $(cat "$DEADLINE") )); then
+    d=$(cat "$DEADLINE" 2>/dev/null) || d=""
+    if [[ $d =~ ^[0-9]+$ ]] && (( $(date +%s) >= d )); then
       echo "time" > "$REASON"
       if vssh "systemctl poweroff" < /dev/null 2>/dev/null; then qemu_wait_exit 60 || qemu_quit; else qemu_quit; fi
       return
@@ -89,7 +94,7 @@ if grep -qw 'thp-kernel=on' <<<"$kfeats" &&
     read -r klo khi <<<"$(kernel_build_minutes "$kcpus")"
     later 600; asked=$(date +%s)   # the question's time does not count
     echo "ASK kernel $khave $klatest $kcpus $klo $khi"
-    answer=""; read -r -t "${OMACVM_ASK_SECONDS:-600}" answer || answer=""
+    answer=""; read -r -t "${OMACVM_ASK_SECONDS:-600}" -u 3 answer || answer=""
     later $(( $(date +%s) - asked - 600 ))
     if [[ $answer == build ]]; then
       OMACVM_KERNEL_NEW=build
@@ -100,6 +105,7 @@ if grep -qw 'thp-kernel=on' <<<"$kfeats" &&
     fi
   fi
 fi
+exec 3<&-
 
 step 2 "Updating OmacVM in the VM and on the Mac"
 run_logged "$LOG/omacvm-update.log" "$HERE/apply-vm.sh" "$VM_DIR" ||
