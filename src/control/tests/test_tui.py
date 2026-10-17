@@ -1607,7 +1607,7 @@ def test_old_package_list_says_why_and_offers_omarchy_update(slow_world, monkeyp
     with open(os.environ["OMACVM_ENV"], "a") as f:
         f.write("OMACVM_VM_TYPE=app\n")
     # src/cmd/apply.sh what_failed's text for the mini's job log (src/tests/vulkan-feature.sh).
-    mac.job_end = ("rolled-back", "WebGPU and GPU compute was not set up: Omarchy's package list is older than "
+    mac.job_end = ("rolled-back", "OmacVM's own Mesa (macOS 15) was not set up: Omarchy's package list is older than "
                                   "the mirrors (omarchy update first)")
     mac.job_extra = {"failed_part": "vulkan"}
 
@@ -1619,7 +1619,7 @@ def test_old_package_list_says_why_and_offers_omarchy_update(slow_world, monkeyp
             await pilot.press("space")
             assert await settle(pilot, lambda: bool(a.last_result), 10)
             assert a.last_result == (
-                "WebGPU and GPU compute on: WebGPU and GPU compute was not set up: Omarchy's package list is older "
+                "OmacVM's own Mesa (macOS 15) on: OmacVM's own Mesa (macOS 15) was not set up: Omarchy's package list is older "
                 "than the mirrors. This VM went back to its features from before. Run omarchy update in the VM "
                 "first (o on Updates, U), then space again (! reports the problem)."), a.last_result
             assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen))

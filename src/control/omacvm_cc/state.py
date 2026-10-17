@@ -213,8 +213,9 @@ def feature_about(f: Feature, macos: str = "") -> str:
     return ("Needs an OmacVM.app VM; works with every Graphics setting.\n" + mac + "\n"
             "Switching on: the VM builds OmacVM's Mesa (about 3 minutes, a 140 MB download), then "
             "WebGPU and GPU compute from the VM's next start (shut it down and start it again).\n"
-            "Switching off: OpenGL only again from the next start; OmacVM's Mesa is removed. "
-            "You can switch it on again at any time (the build again, about 3 minutes).")
+            "Switching off: OmacVM's Mesa is removed; from the next start Vulkan follows the Graphics "
+            "setting (Automatic keeps it on macOS 26 and newer, with WebGPU and GPU compute from that "
+            "feature). You can switch it on again at any time (the build again, about 3 minutes).")
 
 
 def parse_check_tsv(text: str, side: str = "vm") -> list[Check]:

@@ -401,10 +401,11 @@ fi
 # so the control centre can repair it alone.
 if want vulkan && [[ $TYPE == app ]]; then
   if [[ ${F[vulkan]} == on ]]; then
-    log "WebGPU and GPU compute (the first time: Mesa builds in the VM, a few minutes)"
-    "$R/app/guest/venus/install.sh" --force || not_set_up vulkan "Vulkan (GL is as it was)"
+    log "OmacVM's own Mesa for WebGPU and GPU compute (the first time it builds in the VM, a few minutes)"
+    "$R/app/guest/venus/install.sh" --force || not_set_up vulkan "OmacVM's own Mesa (GL is as it was)"
   elif [[ -e /opt/omacvm-mesa ]]; then
-    log "Vulkan: off"; "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "Vulkan (off)"
+    log "OmacVM's own Mesa: removed; Vulkan follows the Graphics setting"
+    "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "OmacVM's own Mesa (off)"
   fi
   # The driver check after each boot follows the switch (a switch runs only this step).
   "$R/app/guest/venus/timer.sh" || true
