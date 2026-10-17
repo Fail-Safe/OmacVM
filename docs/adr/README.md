@@ -32,5 +32,6 @@ a new record replaces it and says so.
 | [0043](0043-mac-ime.md) | The Mac's input methods in the VM: macOS composes, Fcitx5 inserts (#273) | accepted, built (`mac-ime`, 3.0.8, off by default) |
 | [0044](0044-fullpanel.md) | Omanotch is the shared notch integration; FullPanel is OmacVM.app only, experimental (#339) | accepted, built (off by default) |
 | [0045](0045-sound-own-thread.md) | The sound on its own real-time thread, not in QEMU's main loop | accepted, built (`audio`, 3.1.16) |
+| [0046](0046-gpu-off-the-main-loop.md) | The VM's GPU work lets go of the BQL, then leaves the main loop | draft (`gpu-thread`) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).
