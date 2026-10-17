@@ -255,6 +255,14 @@ VM is on:
   its own control (Apple displays), or why not. No DDC/CI: on some Macs'
   built-in HDMI ports (try USB-C or DisplayPort), through some docks, or when
   DDC/CI is switched off in the display's own menu.
+- **Never on the Mac's HDMI port.** From 3.1.17 the Bridge sends no DDC/CI
+  to a display on the Mac's own HDMI port (USB-C to HDMI adapters are fine):
+  there a DDC/CI request made a display behind an HDMI to DisplayPort adapter
+  drop off until it was plugged in again (#433). A display that goes away
+  within 3 s of DDC/CI anywhere else gets none again either (kept in
+  `ddc-unsafe.json` in the Bridge's folder; delete it to try again). A display
+  that does not answer is asked at most three times, then again only after
+  the displays change.
 - **Off.** `omacvm disable external-brightness` takes it out of the VM and,
   through the Bridge's `config.json` (`external_brightness`), out of the
   keys. Off means no DDC/CI at all: the Bridge then does not even read the

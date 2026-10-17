@@ -124,7 +124,13 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   another port: some Macs' built-in HDMI ports (M1/M2 Mac mini) and some docks
   pass no DDC/CI (USB-C or DisplayPort usually do). A display that was asleep
   when the Bridge looked is asked again after a minute (by the keys, the VM
-  or `omacvm check`) or when displays change.
+  or `omacvm check`), at most three times, or when displays change. On the
+  Mac's own HDMI port the Bridge sends no DDC/CI at all (3.1.17, #433: a
+  display behind an HDMI to DisplayPort adapter went black at the Bridge's
+  first read); `omacvm check` says so.
+- **An external display went black or vanished when the Bridge started**
+  (3.1.16 and before, on the Mac's HDMI port): replug it, then update. Until
+  then, `omacvm disable external-brightness --vm NAME` stops all DDC/CI.
 - **Touch ID asks for the password instead**: the line above the password
   prompt says why ("Touch ID not available (VM not in front), use your
   password", "the Mac is still starting: try again in a moment", ...).
