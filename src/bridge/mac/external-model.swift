@@ -71,26 +71,49 @@ enum DDCPacket {
 /// macOS's own control (DisplayServices) comes first: the displays macOS dims
 /// itself (Studio Display, Pro Display XDR, the LG UltraFine family over USB)
 /// use it even when they also have an AV service, since it is what macOS's
-/// keys use and the UltraFine has no DDC/CI. DDC/CI only for the rest.
+/// keys use and the UltraFine has no DDC/CI. DDC/CI only for the rest, and
+/// never on the Mac's own HDMI port (`hdmi`: its framebuffer's Transport says
+/// Downstream HDMI) or on a display that went away right after DDC/CI once
+/// (`dropped`, DDCDrop): there a DDC/CI request can make a display drop off
+/// the link until it is plugged in again (#433, a BenQ PD2500Q through an
+/// HDMI to DisplayPort adapter).
 enum MethodPick {
-  enum Choice: Equatable { case builtin, virtual, native, ddc, noIOAV, noService }
+  enum Choice: Equatable { case builtin, virtual, native, ddc, hdmi, dropped, noIOAV, noService }
   static func choose(builtin: Bool, virtual: Bool, nativeCan: Bool, nativeReads: Bool,
-                     hasService: Bool, ioav: Bool) -> Choice {
+                     hasService: Bool, ioav: Bool, hdmi: Bool = false, dropped: Bool = false) -> Choice {
     if builtin { return .builtin }
     if virtual { return .virtual }
     if nativeCan && nativeReads { return .native }
+    if hasService && hdmi { return .hdmi }
+    if hasService && dropped { return .dropped }
     if hasService { return .ddc }
     return ioav ? .noService : .noIOAV
   }
 }
 
+/// A display that leaves within `window` seconds of DDC/CI traffic to it is
+/// taken to have been dropped by it: the Bridge sends it no DDC/CI again
+/// (kept by vendor, model and serial in ddc-unsafe.json in the Bridge's
+/// folder; delete the file to try again).
+enum DDCDrop {
+  static let window = 3.0
+  static func key(vendor: UInt32, model: UInt32, serial: UInt32) -> String { "\(vendor)-\(model)-\(serial)" }
+  static func dropped(lastDDC: Date?, now: Date) -> Bool {
+    guard let lastDDC else { return false }
+    return now.timeIntervalSince(lastDDC) <= window
+  }
+}
+
 /// When the Bridge looks at a display (again). `works`: nil = never looked.
 /// A display that could not be set is asked again after `retry` seconds: it
-/// may have been asleep, or its AV service not there yet.
+/// may have been asleep, or its AV service not there yet. After `maxTries`
+/// looks it is left alone until the displays change (plugged in again,
+/// woken): no DDC/CI every minute to a display that never answers (#433).
 enum ProbeRule {
-  static func due(works: Bool?, probedAt: Date, now: Date, retry: Double) -> Bool {
+  static let maxTries = 3
+  static func due(works: Bool?, probedAt: Date, now: Date, retry: Double, tries: Int = 1) -> Bool {
     guard let works else { return true }
-    return !works && now.timeIntervalSince(probedAt) > retry
+    return !works && tries < maxTries && now.timeIntervalSince(probedAt) > retry
   }
 }
 
@@ -129,6 +152,10 @@ enum NotSettable {
   static let noAnswer = "it does not answer DDC/CI (switched off in its own menu, asleep, or this port passes none: " +
     "some Macs' HDMI ports, try USB-C/DisplayPort)"
   static let noService = "no DDC/CI on this connection (some Macs' HDMI ports have none: try USB-C/DisplayPort)"
+  static let hdmi = "on the Mac's HDMI port, where DDC/CI can make some displays drop off, so the Bridge sends none: " +
+    "use USB-C/DisplayPort for its brightness"
+  static let dropped = "it went away right after a DDC/CI request, so the Bridge sends it none " +
+    "(delete ddc-unsafe.json in the Bridge's folder to try again)"
 }
 
 /// The on-screen normal windows (layer 0, bigger than 100x100) of one process,

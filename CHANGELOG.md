@@ -11,6 +11,13 @@ in more words.
   Input), with an (i) saying what it does. Off there (or `defaults write org.omacvm.app
   audioThread -bool false`) goes back to the sound as in 3.1.16 and before. Counts from the next
   start of the VM.
+- **External display brightness never sends DDC/CI on the Mac's HDMI port.** There the Bridge's
+  first DDC/CI read made a BenQ PD2500Q behind an HDMI to DisplayPort adapter go black and drop
+  off until it was plugged in again, even with no VM running (#433, thanks @yusiwen for the
+  thorough report). `omacvm check` now says "on the Mac's HDMI port" for such a display; use
+  USB-C/DisplayPort for its brightness. A display that goes away right after DDC/CI on any other
+  port gets none again, and a display that does not answer is asked at most three times instead
+  of every minute.
 
 ## 3.1.16
 

@@ -56,6 +56,7 @@ final class ExternalBrightness {
     var level: Double?     // 0...1, last read or written
     var readAt = Date.distantPast
     var probedAt = Date()
+    var tries = 1          // looks since the displays last changed (ProbeRule)
   }
 
   /// Called after a brightness key changed a display: percent 0-100, its name.
@@ -65,7 +66,13 @@ final class ExternalBrightness {
   static var retryNone = 60.0    // a display that did not answer is asked again after this (tests shorten it)
 
   private let enabled: () -> Bool
-  init(enabled: @escaping () -> Bool) { self.enabled = enabled }
+  private let unsafeFile: String?
+  /// `unsafeFile`: where the displays DDC/CI dropped are kept (DDCDrop); nil = this run only.
+  init(unsafeFile: String? = nil, enabled: @escaping () -> Bool) {
+    self.enabled = enabled; self.unsafeFile = unsafeFile
+    if let unsafeFile, let data = FileManager.default.contents(atPath: unsafeFile),
+       let keys = try? JSONSerialization.jsonObject(with: data) as? [String] { unsafe = Set(keys) }
+  }
 
   private let io = DispatchQueue(label: "omacvm-bridge.external-brightness")
   private let lock = NSLock()
@@ -82,6 +89,10 @@ final class ExternalBrightness {
   private var pendingFromVM = false                            // io: a queued write the VM asked for
   private var lookCount = 0                                    // io: probes so far
   private var failures: [CGDirectDisplayID: Int] = [:]         // io
+  private var hdmi: Set<CGDirectDisplayID> = []                 // io: on the Mac's HDMI port
+  private var lastDDC: [CGDirectDisplayID: Date] = [:]          // io: the last DDC/CI traffic (kept across changes)
+  private var seen: [CGDirectDisplayID: (key: String, name: String)] = [:]   // io: DDCDrop's key (kept across changes)
+  private var unsafe: Set<String> = []                          // io: DDCDrop keys
 
   /// A raw level on its way; `ramp`: at most this much per write (a key's), nil = in one write (the VM's).
   private struct Pending { var raw: Int; var ramp: Int? }
@@ -90,7 +101,8 @@ final class ExternalBrightness {
 
   /// Finds what works on each display now and after every display change (while on).
   func start() {
-    CGDisplayRegisterReconfigurationCallback({ _, flags, _ in
+    CGDisplayRegisterReconfigurationCallback({ id, flags, _ in
+      if flags.contains(.removeFlag) { externalBrightness.displayRemoved(id) }
       if !flags.contains(.beginConfigurationFlag) { externalBrightness.displaysChanged() }
     }, nil)
     io.asyncAfter(deadline: .now() + 1) { if self.enabled() { self.probeAll() } }
@@ -106,6 +118,19 @@ final class ExternalBrightness {
     }
     io.asyncAfter(deadline: .now() + 2) {
       if self.locked({ self.generation }) == g, self.enabled() { self.probeAll() }
+    }
+  }
+
+  /// A display left: if DDC/CI had just gone to it, it gets none again (DDCDrop).
+  /// Queued before displaysChanged's reset, which keeps lastDDC and seen.
+  func displayRemoved(_ id: CGDirectDisplayID) {
+    io.async {
+      guard DDCDrop.dropped(lastDDC: self.lastDDC[id], now: Date()), let s = self.seen[id], !self.unsafe.contains(s.key) else { return }
+      self.unsafe.insert(s.key)
+      if let f = self.unsafeFile, let data = try? JSONSerialization.data(withJSONObject: self.unsafe.sorted()) {
+        try? data.write(to: URL(fileURLWithPath: f), options: .atomic)
+      }
+      log("external brightness: \(s.name) went away right after DDC/CI: no DDC/CI for it from now on (\(self.unsafeFile ?? "this run"))")
     }
   }
 
@@ -127,7 +152,8 @@ final class ExternalBrightness {
   var looks: Int { io.sync { lookCount } }
 
   private func due(_ d: Display?) -> Bool {
-    ProbeRule.due(works: d?.method.works, probedAt: d?.probedAt ?? .distantPast, now: Date(), retry: Self.retryNone)
+    ProbeRule.due(works: d?.method.works, probedAt: d?.probedAt ?? .distantPast, now: Date(), retry: Self.retryNone,
+                  tries: d?.tries ?? 0)
   }
 
   // ---- looking at the displays (io) ----
@@ -150,6 +176,9 @@ final class ExternalBrightness {
     lookCount += 1
     if !servicesLoaded || (again && services[id] == nil) { loadServices() }
     let name = displayName(id)
+    let key = DDCDrop.key(vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id), serial: CGDisplaySerialNumber(id))
+    seen[id] = (key, name)
+    let tries = (locked { known[id]?.tries } ?? 0) + 1
     var d: Display
     let info = displayInfo?(id)?.takeRetainedValue() as? [String: Any]
     let builtin = CGDisplayIsBuiltin(id) != 0
@@ -157,20 +186,25 @@ final class ExternalBrightness {
     let can = !builtin && !virtual && dsCan?(id) == true
     let native = can ? appleLevel(id) : nil
     switch MethodPick.choose(builtin: builtin, virtual: virtual, nativeCan: can, nativeReads: native != nil,
-                             hasService: services[id] != nil, ioav: avCreate != nil && avRead != nil && avWrite != nil) {
+                             hasService: services[id] != nil, ioav: avCreate != nil && avRead != nil && avWrite != nil,
+                             hdmi: hdmi.contains(id), dropped: unsafe.contains(key)) {
     case .builtin: d = Display(method: .none(NotSettable.builtin), name: name)
     case .virtual: d = Display(method: .none(NotSettable.virtual), name: name)
     case .native: d = Display(method: .apple, name: name, level: native, readAt: Date())
     case .ddc:
+      defer { lastDDC[id] = Date() }   // after the traffic (DDCDrop)
       if let av = services[id], let (cur, max) = ddcRead(av) {
         lastRaw[id] = cur
         d = Display(method: .ddc, name: name, max: max, level: BrightnessStep.level(cur, max: max), readAt: Date())
       } else {
         d = Display(method: .none(NotSettable.noAnswer), name: name)
       }
+    case .hdmi: d = Display(method: .none(NotSettable.hdmi), name: name)
+    case .dropped: d = Display(method: .none(NotSettable.dropped), name: name)
     case .noIOAV: d = Display(method: .none(NotSettable.noIOAV), name: name)
     case .noService: d = Display(method: .none(NotSettable.noService), name: name)
     }
+    d.tries = tries
     let before: Method? = locked { let b = known[id]?.method; known[id] = d; return b }
     if before != d.method {
       let level = d.level.map { " at \(BrightnessStep.percent($0)) %" } ?? ""
@@ -198,14 +232,14 @@ final class ExternalBrightness {
   /// IOService plane; the framebuffer's path is the display's
   /// IODisplayLocation (CoreDisplay), else vendor, model and serial match.
   private func loadServices() {
-    services = [:]; servicesLoaded = true
+    services = [:]; hdmi = []; servicesLoaded = true
     guard let avCreate else { return }
-    struct Found { let path: String; let vendor: Int?; let model: Int?; let serial: Int?; let av: CFTypeRef }
+    struct Found { let path: String; let vendor: Int?; let model: Int?; let serial: Int?; let hdmi: Bool; let av: CFTypeRef }
     var found: [Found] = []
     var it = io_iterator_t()
     guard IORegistryCreateIterator(kIOMainPortDefault, kIOServicePlane, IOOptionBits(kIORegistryIterateRecursively), &it) == KERN_SUCCESS else { return }
     defer { IOObjectRelease(it) }
-    var fb: (path: String, vendor: Int?, model: Int?, serial: Int?)?
+    var fb: (path: String, vendor: Int?, model: Int?, serial: Int?, hdmi: Bool)?
     while case let s = IOIteratorNext(it), s != 0 {
       defer { IOObjectRelease(s) }
       var cls = [CChar](repeating: 0, count: 128)
@@ -216,12 +250,15 @@ final class ExternalBrightness {
         IORegistryEntryGetPath(s, kIOServicePlane, &p)
         let attrs = IORegistryEntryCreateCFProperty(s, "DisplayAttributes" as CFString, nil, 0)?.takeRetainedValue() as? [String: Any]
         let pa = attrs?["ProductAttributes"] as? [String: Any]
+        // The Mac's HDMI port: {"Upstream" = "DP", "Downstream" = "HDMI"} (USB-C to HDMI adapters say DP: the Mac sends DP).
+        let transport = IORegistryEntryCreateCFProperty(s, "Transport" as CFString, nil, 0)?.takeRetainedValue() as? [String: Any]
         fb = (String(cString: p), (pa?["LegacyManufacturerID"] as? NSNumber)?.intValue,
-              (pa?["ProductID"] as? NSNumber)?.intValue, (pa?["SerialNumber"] as? NSNumber)?.intValue)
+              (pa?["ProductID"] as? NSNumber)?.intValue, (pa?["SerialNumber"] as? NSNumber)?.intValue,
+              transport?["Downstream"] as? String == "HDMI")
       case "DCPAVServiceProxy":
         let loc = IORegistryEntryCreateCFProperty(s, "Location" as CFString, nil, 0)?.takeRetainedValue() as? String
         if loc == "External", let f = fb, let av = avCreate(kCFAllocatorDefault, s)?.takeRetainedValue() {
-          found.append(Found(path: f.path, vendor: f.vendor, model: f.model, serial: f.serial, av: av))
+          found.append(Found(path: f.path, vendor: f.vendor, model: f.model, serial: f.serial, hdmi: f.hdmi, av: av))
         }
         fb = nil
       default: break
@@ -230,13 +267,13 @@ final class ExternalBrightness {
     for id in externalIDs() {
       let info = displayInfo?(id)?.takeRetainedValue() as? [String: Any]
       if let loc = info?["IODisplayLocation"] as? String, let f = found.first(where: { $0.path == loc }) {
-        services[id] = f.av; continue
+        services[id] = f.av; if f.hdmi { hdmi.insert(id) }; continue
       }
       let same = found.filter {
         $0.vendor == Int(CGDisplayVendorNumber(id)) && $0.model == Int(CGDisplayModelNumber(id)) &&
           ($0.serial == nil || $0.serial == Int(CGDisplaySerialNumber(id)))
       }
-      if same.count == 1 { services[id] = same[0].av }   // two of a kind without a location: neither
+      if same.count == 1 { services[id] = same[0].av; if same[0].hdmi { hdmi.insert(id) } }   // two of a kind without a location: neither
     }
   }
 
@@ -304,7 +341,9 @@ final class ExternalBrightness {
     for (id, p) in work {
       guard let av = services[id] else { continue }
       let raw = p.ramp.map { Ramp.next(from: lastRaw[id], to: p.raw, limit: $0) } ?? p.raw
-      if ddcWrite(av, raw) {
+      let ok = ddcWrite(av, raw)
+      lastDDC[id] = Date()
+      if ok {
         failures[id] = 0; lastRaw[id] = raw
         // Not there yet: the rest after the next gap (a newer level queued meanwhile replaces it).
         if raw != p.raw { queueWrite(id, p.raw, ramp: p.ramp, fromVM: false) }
@@ -337,6 +376,7 @@ final class ExternalBrightness {
       guard let v = appleLevel(id) else { return nil }
       d.level = v
     case .ddc:
+      defer { lastDDC[id] = Date() }   // after the traffic (DDCDrop)
       guard let av = services[id], let (cur, max) = ddcRead(av) else { return nil }
       d.max = max; d.level = BrightnessStep.level(cur, max: max)
       if pending[id] == nil { lastRaw[id] = cur }

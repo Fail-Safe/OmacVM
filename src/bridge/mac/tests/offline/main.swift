@@ -165,6 +165,9 @@ check(ProbeRule.due(works: nil, probedAt: .distantPast, now: t0, retry: 60), "ne
 check(!ProbeRule.due(works: true, probedAt: t0, now: t0.addingTimeInterval(3600), retry: 60), "settable: not asked again")
 check(!ProbeRule.due(works: false, probedAt: t0, now: t0.addingTimeInterval(30), retry: 60), "nothing found 30 s ago: not yet")
 check(ProbeRule.due(works: false, probedAt: t0, now: t0.addingTimeInterval(61), retry: 60), "nothing found over a minute ago: again")
+check(ProbeRule.due(works: false, probedAt: t0, now: t0.addingTimeInterval(61), retry: 60, tries: 2), "second look found nothing: a third")
+check(!ProbeRule.due(works: false, probedAt: t0, now: t0.addingTimeInterval(3600), retry: 60, tries: 3),
+      "#433: three looks found nothing: left alone until the displays change")
 
 // ---- write pace: 50 ms for anything, 250 ms between writes the VM asked for ----
 check(WritePace.delay(sinceTransfer: 1, sinceWrite: 1, fromVM: false) == 0, "idle: at once")
@@ -199,6 +202,23 @@ check(pick(service: true) == .ddc, "a third-party monitor (Pi-X9): DDC/CI")
 check(pick(builtin: true, can: true, reads: true) == .builtin, "the built-in display is never ours")
 check(pick(virtual: true, can: true, reads: true, service: true) == .virtual, "virtual / AirPlay: never")
 check(pick() == .noService && pick(ioav: false) == .noIOAV, "nothing: why")
+// #433: a BenQ PD2500Q on a MacBook Pro's HDMI port (Transport Downstream HDMI, an HDMI to DP
+// adapter) dropped off the link at the Bridge's first DDC/CI read.
+func pick(service: Bool, hdmi: Bool, dropped: Bool = false, can: Bool = false, reads: Bool = false) -> MethodPick.Choice {
+  MethodPick.choose(builtin: false, virtual: false, nativeCan: can, nativeReads: reads, hasService: service, ioav: true,
+                    hdmi: hdmi, dropped: dropped)
+}
+check(pick(service: true, hdmi: true) == .hdmi, "#433: the Mac's HDMI port: no DDC/CI")
+check(pick(service: true, hdmi: false, dropped: true) == .dropped, "#433: a display DDC/CI dropped once: none again")
+check(pick(service: true, hdmi: true, can: true, reads: true) == .native, "HDMI: macOS's own control still (no DDC/CI)")
+check(pick(service: false, hdmi: true) == .noService, "HDMI without an AV service: as before")
+check(pick(service: true, hdmi: false) == .ddc, "DisplayPort/USB-C: DDC/CI as before")
+check(NotSettable.hdmi.contains("HDMI") && NotSettable.hdmi.contains("USB-C"), "the HDMI reason says what to use")
+check(NotSettable.dropped.contains("ddc-unsafe.json"), "the dropped reason says how to try again")
+check(DDCDrop.dropped(lastDDC: t0, now: t0.addingTimeInterval(2)), "gone 2 s after DDC/CI: dropped by it")
+check(!DDCDrop.dropped(lastDDC: t0, now: t0.addingTimeInterval(10)), "gone 10 s after: unplugged, not dropped")
+check(!DDCDrop.dropped(lastDDC: nil, now: t0), "no DDC/CI to it: never dropped by it")
+check(DDCDrop.key(vendor: 2513, model: 32_651, serial: 0) == "2513-32651-0", "kept by vendor, model and serial")
 
 // A Mac mini with only an LG UltraFine 5K (2560x1440 points): full screen and windowed.
 let ultraFine = MacDisplay(id: 2, bounds: CGRect(x: 0, y: 0, width: 2560, height: 1440), builtin: false)

@@ -170,7 +170,7 @@ let relaySocket = RelaySocket(path: env["OMACVM_BRIDGE_RELAY_SOCKET"] ?? support
 let osdEvents = OSDEvents()
 let camera = CameraHub { log("camera: \($0)") }
 let mediaKeys = MediaKeys()
-let externalBrightness = ExternalBrightness { config.externalBrightness }
+let externalBrightness = ExternalBrightness(unsafeFile: supportDir + "/ddc-unsafe.json") { config.externalBrightness }
 let menuBar = MenuBar()
 
 log("starting (pid \(getpid()), token \(tokenPath))")
