@@ -236,6 +236,10 @@ rm -f "$O"; OMACVM_VENUS_ON=$T/venus-on OMACVM_CLINFO=$T/clinfo-none ocl --check
   pass "opencl.sh --check: switch off: nothing to do" || fail "opencl.sh --check with the switch off"
 grep -q 'ExecStartPost=-/usr/local/share/omacvm/app/guest/venus/opencl.sh --check' "$D/omacvm-venus-driver.service" &&
   pass "the boot check runs opencl.sh --check" || fail "no OpenCL check after boot"
+# F1: with the vulkan feature's Mesa the session's OpenCL loader reads only OmacVM's ICD.
+grep -q '^OCL_ICD_VENDORS=$CLONLY$' "$D/install.sh" && grep -q 'cp "$CLICD" "$CLONLY/"' "$D/install.sh" &&
+  grep -q 'rm -rf "$PREFIX" "$ICD" "$CLICD" "$CLONLY"' "$D/install.sh" && pass "vulkan feature: OmacVM's ICD alone (and gone on --remove)" ||
+  fail "vulkan feature: the distro's rusticl still loads beside OmacVM's"
 
 # WebGPU (venus/webgpu.sh): the launcher and Firefox's switch; --off keeps them while gpu-compute
 # gives them (Graphics Vulkan) or the vulkan feature's Mesa is there.

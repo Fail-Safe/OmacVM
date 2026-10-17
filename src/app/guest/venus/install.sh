@@ -11,7 +11,11 @@
 # (Arch Linux ARM's Mesa stays the GL driver) and registers it:
 #   /etc/vulkan/icd.d/omacvm_venus_icd.json     Vulkan (Venus)
 #   /etc/OpenCL/vendors/omacvm-rusticl.icd      OpenCL (rusticl, Zink)
-#   /etc/environment.d/90-omacvm-venus.conf     RUSTICL_ENABLE=zink, distro venus off
+#   /etc/OpenCL/omacvm-only/                    the same ICD alone: the session's OpenCL
+#                                               loader reads only it (OCL_ICD_VENDORS), so the
+#                                               distro's rusticl (opencl-mesa, from Graphics
+#                                               Vulkan) adds no second platform without a device
+#   /etc/environment.d/90-omacvm-venus.conf     RUSTICL_ENABLE=zink, OCL_ICD_VENDORS, distro venus off
 #   webgpu.sh: Firefox's WebGPU switch, omacvm-chromium-webgpu (+ omacvm-chrome-webgpu)
 #   and a "Chromium (WebGPU)" menu entry: Chromium with its compositor on Vulkan, which WebGPU needs
 # ./install.sh --remove undoes all of it (the launcher stays with Graphics Vulkan).
@@ -24,11 +28,12 @@ MESA_SHA256=bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9
 PREFIX=/opt/omacvm-mesa
 ICD=/etc/vulkan/icd.d/omacvm_venus_icd.json
 CLICD=/etc/OpenCL/vendors/omacvm-rusticl.icd
+CLONLY=/etc/OpenCL/omacvm-only
 ENVF=/etc/environment.d/90-omacvm-venus.conf
 LOG=/var/log/omacvm-mesa-build.log      # the last failed build's log
 
 remove() {
-  rm -rf "$PREFIX" "$ICD" "$CLICD" "$ENVF" "$LOG" /var/cache/omacvm/mesa-build
+  rm -rf "$PREFIX" "$ICD" "$CLICD" "$CLONLY" "$ENVF" "$LOG" /var/cache/omacvm/mesa-build
   # The launcher and Firefox's switch stay while gpu-compute gives them (Graphics Vulkan).
   ./webgpu.sh --off
   echo "OmacVM Venus extras removed"
@@ -99,10 +104,15 @@ mkdir -p /etc/vulkan/icd.d /etc/OpenCL/vendors /etc/environment.d
 sed "s#\"library_path\": \"[^\"]*\"#\"library_path\": \"$PREFIX/lib/libvulkan_virtio.so\"#" \
   "$PREFIX/share/vulkan/icd.d/virtio_icd.aarch64.json" > "$ICD"
 echo "$PREFIX/lib/libRusticlOpenCL.so.1" > "$CLICD"
+mkdir -p "$CLONLY"; cp "$CLICD" "$CLONLY/"
 # The distro's venus (Mesa < 26.2.4 cannot round blobs to the host's 16 KiB
 # pages) would add a second, broken device: the loader skips its manifest.
+# The distro's rusticl (opencl-mesa) refuses Zink on MoltenVK and printed
+# "Zink requires the nullDescriptor feature" at every OpenCL start: the
+# OpenCL loader reads only OmacVM's ICD.
 cat > "$ENVF" <<CONF
 RUSTICL_ENABLE=zink
+OCL_ICD_VENDORS=$CLONLY
 VK_LOADER_DRIVERS_DISABLE=virtio_icd.json
 CONF
 ./webgpu.sh >/dev/null || echo "OmacVM Venus extras: the Chromium (WebGPU) launcher is not installed"
