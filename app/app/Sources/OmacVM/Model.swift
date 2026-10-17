@@ -526,14 +526,21 @@ enum Settings {
     /// The VM's GPU work without QEMU's big lock (ADR 0046): virgl's
     /// commands that touch only the GPU run without the BQL, so the VM's
     /// CPUs and the window do not wait while an app opens or a page draws.
-    /// Off by default (experimental). Hidden:
-    /// defaults write org.omacvm.app gpuOffMainLoop -bool true;
+    /// Off by default (experimental). The VM window's switch (GPUOffMainLoopRow)
+    /// or defaults write org.omacvm.app gpuOffMainLoop -bool true;
     /// gpuMainLoop -bool true keeps today's path whatever the default, and
-    /// GPU safe mode always does.
+    /// GPU safe mode always does. The switch writes the choice and drops
+    /// gpuMainLoop: the person chose.
     static var gpuOffMainLoop: Bool {
-        let d = UserDefaults.standard
-        if gpuSafeMode || d.bool(forKey: "gpuMainLoop") { return false }
-        return d.object(forKey: "gpuOffMainLoop") as? Bool ?? false
+        get {
+            let d = UserDefaults.standard
+            if gpuSafeMode || d.bool(forKey: "gpuMainLoop") { return false }
+            return d.object(forKey: "gpuOffMainLoop") as? Bool ?? false
+        }
+        set {
+            UserDefaults.standard.removeObject(forKey: "gpuMainLoop")
+            UserDefaults.standard.set(newValue, forKey: "gpuOffMainLoop")
+        }
     }
     /// Added to the sound delay the app tells the VM (AudioLatencyWatch), in
     /// ms, -500 ... 500: negative when the sound comes early in the VM's

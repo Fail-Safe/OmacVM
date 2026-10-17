@@ -462,6 +462,7 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 |---|---|---|---|
 | Resources | `vm.env` `CPUS`, `MEM_MB` (`omacvm resources`) | the tier chosen at setup (Balanced) | VM |
 | Graphics | `graphics`: `auto`, `opengl`, `vulkan` (`omacvm graphics`) | `auto` (no file) | VM |
+| Graphics without QEMU's lock (experimental) | `gpuOffMainLoop` (bool; hidden `gpuMainLoop` and `gpuSafeMode` force it off; read at each start; ADR 0046) | `false` (3.1.18: defaults only; switch from 3.1.19) | app |
 | Closing the window | `closeAction`: `shutdown`, `keepRunning`, `ask` (QEMU: `OMACVM_CLOSE_ACTION`) | `shutdown` | app |
 | Start in: Window / Full screen | `startFullScreen` (bool) | `true` | app |
 | Start in: Full screen including notch | `notch-mode`: `fullpanel` (`omacvm fullscreen`) | native (no file) | VM |
