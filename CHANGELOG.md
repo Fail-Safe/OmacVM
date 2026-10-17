@@ -10,6 +10,12 @@ in more words.
   mpv draw with OpenGL, which plays it (a 4K60 clip on the Mac mini). A `gpu-api` line in your
   own `~/.config/mpv/mpv.conf` still wins; Graphics OpenGL takes the line out again. A VM gets it
   at its next Update VM; `omacvm check` has an mpv line.
+- **Swipe out to macOS goes the right way on macOS 26 and older.** On a MacBook Pro on macOS
+  15.7 the Space first moved the wrong way (or bounced), then the swipe out took one step after
+  all, and after two such swipes it stopped following the fingers. macOS before 27 reads the
+  swipe's direction from fields it does not document; the direction the escape combo learned on
+  that Mac now counts for the swipe out too, and a swipe that lands on the other side, or bounces,
+  teaches it once. macOS 27 is unchanged.
 
 ## 3.1.20
 
