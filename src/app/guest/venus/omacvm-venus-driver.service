@@ -16,6 +16,9 @@ Type=oneshot
 ExecCondition=/bin/sh -c 'grep -qxE "OMACVM_GRAPHICS=vulkan|OMACVM_FEATURE_vulkan=on" /etc/omacvm/env'
 Environment=OMACVM_VENUS_BOOT=1
 ExecStart=/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh
+# OpenCL off again when Zink lists no GPU device on this start's Vulkan driver
+# (opencl.sh: a Mac whose driver Zink refuses); quick, and nothing when it is off.
+ExecStartPost=-/usr/local/share/omacvm/app/guest/venus/opencl.sh --check
 Nice=19
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle

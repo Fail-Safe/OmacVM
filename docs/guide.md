@@ -184,7 +184,11 @@ omacvm graphics --vm Omarchy vulkan     # opengl, vulkan or auto
 Also in the app (setup and the VM's window) and on the control centre's
 Graphics row. It applies at the VM's next start. Automatic picks the faster
 path on this Mac; Vulkan adds Vulkan for Vulkan apps next to OpenGL
-([details](routes/app.md)).
+([details](routes/app.md)). With Vulkan the VM also gets WebGPU and GPU compute
+(on by default): OpenCL apps and WebGPU (Firefox, and Chromium from its
+"Chromium (WebGPU)" menu entry) on the Mac's GPU. Their switch is the VM
+window's General › WebGPU and GPU compute, the control centre or
+`omacvm disable gpu-compute --vm Omarchy`; Vulkan stays as Graphics says.
 
 ## Change CPUs and memory
 

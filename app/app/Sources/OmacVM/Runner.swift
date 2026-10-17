@@ -234,7 +234,8 @@ final class Runner {
                              driverReady: Graphics.driverReady(folder: c.folder), forced: forced,
                              macMemoryGB: Mac.memoryGB, vmMemoryGB: c.memoryMB / 1024,
                              ipaBits: bits, smallHighWindow: small,
-                             fallback: Graphics.fallback(folder: c.folder), fallbackOnce: fallbackOnce)
+                             fallback: Graphics.fallback(folder: c.folder), fallbackOnce: fallbackOnce,
+                             environment: ProcessInfo.processInfo.environment)
     }
 
     // MARK: A Vulkan start that shows nothing (VenusStartWatch)

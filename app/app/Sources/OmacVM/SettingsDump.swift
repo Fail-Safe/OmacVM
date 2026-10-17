@@ -52,6 +52,7 @@ enum SettingsDump {
             "usbVendorHID": USBVendorHID.isOn(folder: f),
             "fastNetwork": FastNetwork.isOn(c),
             "macIME": MacIME.pending(pending) ?? MacIME.isOn(features: record),
+            "gpuCompute": GPUCompute.isOn(features: record),
         ]
     }
 

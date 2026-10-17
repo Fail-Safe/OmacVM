@@ -70,12 +70,13 @@ if [[ -n $SET && $(graphics_wants "$d") == vulkan ]] && { $CHANGED || [[ ! -e $d
     fi
     if (( rc == 0 )); then
       : > "$d/venus-ready"
-      # OpenCL on it (an older guest side has no opencl.sh: omacvm apply brings it).
-      gssh "$ip" "f=/usr/local/share/omacvm/app/guest/venus/opencl.sh; [ ! -x \$f ] || \$f" < /dev/null >&2 ||
-        NOTE="${NOTE:+$NOTE; }OpenCL is not set up (see /var/log/omacvm-opencl.log in the VM)"
-      # WebGPU in Chromium (the launcher; an older guest side has no webgpu.sh).
-      gssh "$ip" "f=/usr/local/share/omacvm/app/guest/venus/webgpu.sh; [ ! -x \$f ] || \$f" < /dev/null >&2 ||
-        NOTE="${NOTE:+$NOTE; }WebGPU in Chromium is not set up"
+      # The driver check after each boot (it also checks OpenCL's device) follows the switch.
+      gssh "$ip" "f=/usr/local/share/omacvm/app/guest/venus/timer.sh; [ ! -x \$f ] || \$f" < /dev/null >&2 || true
+      # WebGPU and GPU compute on it, as the VM's gpu-compute feature says
+      # (compute.sh; an older guest side has only opencl.sh and webgpu.sh).
+      gssh "$ip" "d=/usr/local/share/omacvm/app/guest/venus; if [ -x \$d/compute.sh ]; then \$d/compute.sh;
+                  else { [ ! -x \$d/opencl.sh ] || \$d/opencl.sh; } && { [ ! -x \$d/webgpu.sh ] || \$d/webgpu.sh; }; fi" < /dev/null >&2 ||
+        NOTE="${NOTE:+$NOTE; }WebGPU and GPU compute are not set up (see above)"
     else
       rm -f "$d/venus-ready"
       case $rc in

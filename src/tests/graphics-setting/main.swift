@@ -21,6 +21,15 @@ if args.count > 1 && args[1] == "didnotstart" {
     print(Graphics.didNotStart)
     exit(0)
 }
+if args.count > 1 && args[1] == "driver" {
+    // driver MACOS KK [K=V...]: the plan line for Automatic with that environment (F2: the driver QEMU loads).
+    var env: [String: String] = [:]
+    for kv in args.dropFirst(4) { let p = kv.split(separator: "=", maxSplits: 1); if p.count == 2 { env[String(p[0])] = String(p[1]) } }
+    let p = Graphics.plan(choice: .auto, macOSMajor: Int(args[2]) ?? 26, kosmicKrisp: args[3] == "1", driverReady: true,
+                          forced: false, macMemoryGB: 16, vmMemoryGB: 8, environment: env)
+    print(p.why)
+    exit(0)
+}
 if args.count > 1 && args[1] == "fallback" {
     // fallback DIR: what the app reads from graphics-fallback ("-": none).
     print(Graphics.fallback(folder: URL(fileURLWithPath: args[2])) ?? "-")

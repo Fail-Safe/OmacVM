@@ -8,7 +8,7 @@
 #                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app) [--kernel-new build|keep]
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, no-idle-lock, autologin, thp-kernel, battery, external-brightness,
-# control-centre, fast-network, chromium-video, vulkan, x86-apps, touch-id, mac-ime) with its defaults; a feature
+# control-centre, fast-network, chromium-video, gpu-compute, vulkan, x86-apps, touch-id, mac-ime) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -164,6 +164,7 @@ esac
 # Chromium's video through V4L2 needs OmacVM.app's VA-API decoding.
 [[ $TYPE == app ]] || F[chromium-video]=off
 [[ $TYPE == app ]] || F[vulkan]=off
+[[ $TYPE == app ]] || F[gpu-compute]=off
 [[ $TYPE == app ]] || F[mac-ime]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
@@ -400,13 +401,21 @@ fi
 # so the control centre can repair it alone.
 if want vulkan && [[ $TYPE == app ]]; then
   if [[ ${F[vulkan]} == on ]]; then
-    log "WebGPU and GPU compute (the first time: Mesa builds in the VM, a few minutes)"
-    "$R/app/guest/venus/install.sh" --force || not_set_up vulkan "Vulkan (GL is as it was)"
+    log "OmacVM's own Mesa for WebGPU and GPU compute (the first time it builds in the VM, a few minutes)"
+    "$R/app/guest/venus/install.sh" --force || not_set_up vulkan "OmacVM's own Mesa (GL is as it was)"
   elif [[ -e /opt/omacvm-mesa ]]; then
-    log "Vulkan: off"; "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "Vulkan (off)"
+    log "OmacVM's own Mesa: removed; Vulkan follows the Graphics setting"
+    "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "OmacVM's own Mesa (off)"
   fi
   # The driver check after each boot follows the switch (a switch runs only this step).
   "$R/app/guest/venus/timer.sh" || true
+fi
+# WebGPU and GPU compute on the VM's Vulkan (OmacVM.app): OpenCL, the
+# "Chromium (WebGPU)" entry and Firefox's switch while Graphics gives the VM
+# Vulkan, else none of it (venus/compute.sh). After the vulkan step: its Mesa
+# brings its own. Its own step, so the control centre can switch it alone.
+if want gpu-compute && [[ $TYPE == app ]]; then
+  "$R/app/guest/venus/compute.sh" "${F[gpu-compute]}" || not_set_up gpu-compute "WebGPU and GPU compute"
 fi
 # x86 apps: box64, built once in the VM as a pacman package. Every route.
 if want x86-apps; then

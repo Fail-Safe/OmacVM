@@ -1,14 +1,16 @@
 #!/bin/bash
-# webgpu.sh (as root, in an OmacVM.app VM): WebGPU in Chromium/Chrome on the
-# Mac's GPU for a VM whose Graphics setting gives it Vulkan. Chrome hands
-# pages a Vulkan WebGPU adapter only when its own compositor runs on Vulkan
-# (omacvm-chromium-webgpu says how) and the Venus driver shares semaphores
-# (vulkan-virtio.sh builds it with that patch). This puts the launcher in
-# place: omacvm-chromium-webgpu (+ omacvm-chrome-webgpu) and a
-# "Chromium (WebGPU)" menu entry. Chromium's normal entry stays as it is.
-#   webgpu.sh          install the launcher
-#   webgpu.sh --off    remove it, unless the VM still has WebGPU another way
-#                      (Graphics Vulkan, or the vulkan feature's Mesa)
+# webgpu.sh (as root, in an OmacVM.app VM): WebGPU on the Mac's GPU for a VM
+# whose Graphics setting gives it Vulkan (feature gpu-compute: compute.sh runs
+# this; the vulkan feature's Mesa too). Chrome hands pages a Vulkan WebGPU
+# adapter only when its own compositor runs on Vulkan (omacvm-chromium-webgpu
+# says how) and the Venus driver shares semaphores (vulkan-virtio.sh builds it
+# with that patch). This puts the launcher in place: omacvm-chromium-webgpu
+# (+ omacvm-chrome-webgpu) and a "Chromium (WebGPU)" menu entry; Chromium's
+# normal entry stays as it is. And Firefox's WebGPU switch (omacvm-webgpu.js).
+#   webgpu.sh          install the launcher and Firefox's switch
+#   webgpu.sh --off    remove them, unless the VM still has WebGPU another way:
+#                      gpu-compute on with Graphics Vulkan, or the vulkan feature's Mesa
+# gpu-compute's value: OMACVM_GPU_COMPUTE (compute.sh), else /etc/omacvm/env (on when missing).
 # Tests: src/tests/venus-driver.sh (offline).
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -16,14 +18,17 @@ DEST=${OMACVM_WEBGPU_ROOT:-}
 LAUNCH=$DEST/usr/local/bin/omacvm-chromium-webgpu
 LAUNCH2=$DEST/usr/local/bin/omacvm-chrome-webgpu
 DESK=$DEST/usr/share/applications/omacvm-chromium-webgpu.desktop
+FFPREF=$DEST/usr/lib/firefox/defaults/pref/omacvm-webgpu.js
 ENVF=$DEST/etc/omacvm/env
 OURS=$DEST/etc/vulkan/icd.d/omacvm_venus_icd.json
 
 case ${1:-} in
   --off)
     graphics=$(sed -n 's/^OMACVM_GRAPHICS=//p' "$ENVF" 2>/dev/null | tail -1)
-    [[ $graphics == vulkan || -f $OURS ]] && exit 0
-    rm -f "$LAUNCH" "$LAUNCH2" "$DESK"
+    gc=${OMACVM_GPU_COMPUTE:-$(sed -n 's/^OMACVM_FEATURE_gpu_compute=//p' "$ENVF" 2>/dev/null | tail -1)}
+    [[ -f $OURS ]] && exit 0
+    [[ $graphics == vulkan && ${gc:-on} == on ]] && exit 0
+    rm -f "$LAUNCH" "$LAUNCH2" "$DESK" "$FFPREF"
     exit 0 ;;
   "") ;;
   *) echo "usage: webgpu.sh [--off]" >&2; exit 2 ;;
@@ -35,4 +40,6 @@ ln -sf omacvm-chromium-webgpu "$LAUNCH2"
 if [[ -x ${OMACVM_CHROMIUM:-/usr/bin/chromium} ]]; then
   install -Dm644 omacvm-chromium-webgpu.desktop "$DESK"
 fi
-echo "WebGPU: \"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)"
+# Also before Firefox is installed (Omarchy has none): Firefox reads it once it is.
+install -Dm644 omacvm-webgpu.js "$FFPREF"
+echo "WebGPU: \"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu), and in Firefox"

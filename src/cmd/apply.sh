@@ -640,10 +640,11 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
   # (on only with OmacVM's Mesa in the VM, see above).
   if on vulkan; then
     [[ -e $d/vulkan ]] || { : > "$d/vulkan"; [[ -z $(app_pid_dir "$d" 2>/dev/null) ]] ||
-      info "WebGPU and GPU compute (Vulkan): from the VM's next start (shut it down, then start it again)"; }
+      info "OmacVM's own Mesa (vulkan feature): from the VM's next start (shut it down, then start it again)"; }
   elif [[ -e $d/vulkan ]]; then
     rm -f "$d/vulkan"
-    [[ -z $(app_pid_dir "$d" 2>/dev/null) ]] || info "Vulkan: off from the VM's next start"
+    [[ -z $(app_pid_dir "$d" 2>/dev/null) ]] ||
+      info "OmacVM's own Mesa (vulkan feature): off from the VM's next start; Vulkan follows Graphics (next start: $(graphics_summary "$d"))"
   fi
   # Graphics: Automatic gives Vulkan only to a VM whose Venus driver sizes
   # GPU memory to the Mac's 16 KiB pages (the app reads venus-ready).
