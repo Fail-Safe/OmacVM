@@ -22,6 +22,8 @@ pushed to the queue with the BQL when it ends (one notification).
   vCPU's queue kick); nothing in a run maps guest memory.
 - During a device reset (resetting, set with the BQL) no run starts: the vCPU
   that resets frees the queues after the reset BH.
+- Runs belong to the thread that ran the queue first (the main loop's); on
+  any other thread the queue runs with the BQL (and qemu.log says so once).
 - Only with fences reported by the sync thread (polled fences answer the guest
   from inside virgl_renderer_poll). qemu.log: "virtio-gpu: virgl runs without
   the BQL" / "with the BQL" (a warning when asked but fences are polled).
@@ -173,7 +175,7 @@ index b8c7c65..de2019d 100644
          info_report("virtio-gpu: virgl fences reported by the sync thread");
      } else if (flags & VIRGL_RENDERER_ASYNC_FENCE_CB) {
 diff --git a/hw/display/virtio-gpu.c b/hw/display/virtio-gpu.c
-index 935a187..7d88f30 100644
+index 935a187..31dd3b5 100644
 --- a/hw/display/virtio-gpu.c
 +++ b/hw/display/virtio-gpu.c
 @@ -176,6 +176,12 @@ void virtio_gpu_ctrl_response(VirtIOGPU *g,
@@ -189,7 +191,7 @@ index 935a187..7d88f30 100644
      virtqueue_push(cmd->vq, &cmd->elem, s);
      virtio_notify(VIRTIO_DEVICE(g), cmd->vq);
      cmd->finished = true;
-@@ -1130,10 +1136,58 @@ static void virtio_gpu_handle_cursor_cb(VirtIODevice *vdev, VirtQueue *vq)
+@@ -1130,10 +1136,78 @@ static void virtio_gpu_handle_cursor_cb(VirtIODevice *vdev, VirtQueue *vq)
      qemu_bh_schedule(g->cursor_bh);
  }
  
@@ -207,6 +209,26 @@ index 935a187..7d88f30 100644
 + * A run clears it: nothing in a run maps guest memory (commands that do keep
 + * the BQL), so the re-entrancy it guards against cannot happen in one.
 + */
++/*
++ * Runs belong to one thread, the main loop's (the first one that runs the
++ * queue). Anywhere else the queue is run with the BQL, as without runs.
++ */
++static bool virtio_gpu_run_thread_ok(void)
++{
++    static int run_thread;
++    int self = qemu_get_thread_id();
++
++    if (!run_thread) {
++        run_thread = self;
++    }
++    if (self != run_thread) {
++        warn_report_once("virtio-gpu: the queue ran on another thread: "
++                         "no unlocked run there");
++        return false;
++    }
++    return true;
++}
++
 +static void virtio_gpu_run_begin(VirtIOGPU *g, bool *guard)
 +{
 +    DeviceState *transport = qdev_get_parent_bus(DEVICE(g))->parent;
@@ -248,12 +270,13 @@ index 935a187..7d88f30 100644
  
      if (g->processing_cmdq) {
          return;
-@@ -1146,6 +1200,17 @@ void virtio_gpu_process_cmdq(VirtIOGPU *g)
+@@ -1146,6 +1220,18 @@ void virtio_gpu_process_cmdq(VirtIOGPU *g)
              break;
          }
  
 +        /* OmacVM: never during a reset (a vCPU frees the queues after it) */
-+        if (!g->resetting && vgc->cmd_unlocked && vgc->cmd_unlocked(g, cmd)) {
++        if (!g->resetting && vgc->cmd_unlocked && vgc->cmd_unlocked(g, cmd) &&
++            (in_run || virtio_gpu_run_thread_ok())) {
 +            if (!in_run) {
 +                virtio_gpu_run_begin(g, &guard);
 +                in_run = true;
@@ -266,7 +289,7 @@ index 935a187..7d88f30 100644
          /* process command */
          vgc->process_cmd(g, cmd);
  
-@@ -1169,10 +1234,15 @@ void virtio_gpu_process_cmdq(VirtIOGPU *g)
+@@ -1169,10 +1255,15 @@ void virtio_gpu_process_cmdq(VirtIOGPU *g)
                  }
                  trace_virtio_gpu_inc_inflight_fences(g->inflight);
              }
@@ -282,7 +305,7 @@ index 935a187..7d88f30 100644
      g->processing_cmdq = false;
  }
  
-@@ -1673,6 +1743,7 @@ void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
+@@ -1673,6 +1764,7 @@ void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
      qemu_cond_init(&g->reset_cond);
      QTAILQ_INIT(&g->reslist);
      QTAILQ_INIT(&g->cmdq);
@@ -290,7 +313,7 @@ index 935a187..7d88f30 100644
      QTAILQ_INIT(&g->fenceq);
  }
  
-@@ -1723,6 +1794,7 @@ void virtio_gpu_reset(VirtIODevice *vdev)
+@@ -1723,6 +1815,7 @@ void virtio_gpu_reset(VirtIODevice *vdev)
      VirtIOGPU *g = VIRTIO_GPU(vdev);
      struct virtio_gpu_ctrl_command *cmd;
  
@@ -298,7 +321,7 @@ index 935a187..7d88f30 100644
      if (qemu_in_vcpu_thread()) {
          g->reset_finished = false;
          qemu_bh_schedule(g->reset_bh);
-@@ -1749,6 +1821,7 @@ void virtio_gpu_reset(VirtIODevice *vdev)
+@@ -1749,6 +1842,7 @@ void virtio_gpu_reset(VirtIODevice *vdev)
      }
  
      virtio_gpu_base_reset(VIRTIO_GPU_BASE(vdev));

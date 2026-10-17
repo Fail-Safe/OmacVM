@@ -79,7 +79,8 @@ check "the type is checked again where a command runs (guest rewrites)" \
   grep -qF 'if (g->unlocked_run && cmd->cmd_hdr.type != cmd->run_type) {' "$U"
 check "the blob kind is checked again where a blob is made" \
   grep -qF 'if (g->unlocked_run && cblob.blob_mem != VIRTIO_GPU_BLOB_MEM_HOST3D) {' "$U"
-check "no run during a device reset" grep -qF 'if (!g->resetting && vgc->cmd_unlocked && vgc->cmd_unlocked(g, cmd)) {' "$U"
+check "no run during a device reset" grep -qF 'if (!g->resetting && vgc->cmd_unlocked && vgc->cmd_unlocked(g, cmd) &&' "$U"
+check "runs only on the thread that ran the queue first" grep -qF '(in_run || virtio_gpu_run_thread_ok())) {' "$U"
 check "a run gives the BQL up before it takes the GPU lock" \
   bash -c "sed -n '/^+static void virtio_gpu_run_begin/,/^+}/p' '$U' | tr -d '\n' | grep -q 'bql_unlock();+    qemu_console_gl_render_lock();'"
 check "and the GPU lock back before it takes the BQL again" \
