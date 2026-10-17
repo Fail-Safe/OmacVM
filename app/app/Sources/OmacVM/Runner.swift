@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import Foundation
 import OmacVMFeatures
+import OmacVMAudio
 import OmacVMAuth
 import OmacVMNet
 import OmacVMUpdate
@@ -23,6 +24,12 @@ final class Runner {
     init(config: VMConfig) { self.config = config }
 
     var isRunning: Bool { process?.isRunning ?? false }
+
+    /// The sound path of this start (Settings.audioThread), fixed when it
+    /// starts so QEMU's options, its environment and the delay the VM is
+    /// told all agree.
+    private var startAudioThread: Bool?
+    var audioThread: Bool { startAudioThread ?? Settings.audioThread }
 
     /// virtio-gpu outputs: the window and up to four more Mac displays.
     static let maxOutputs = 5
@@ -74,7 +81,7 @@ final class Runner {
             // No recording without the microphone permission: QEMU's recording
             // would wait minutes for an answer (silence, and a sound that
             // starts meanwhile waits too).
-            "-audiodev", "sdl,id=snd0,timer-period=1000,out.buffer-count=8\(Runner.micAllowed ? "" : ",in.voices=0")",
+            "-audiodev", Runner.audiodev(thread: audioThread, mic: Runner.micAllowed),
             "-device", "intel-hda,id=hda0,romfile=",
             // The codec paces the guest's sound (no catch-up after a stalled
             // main loop); audioClassic keeps QEMU's own timing.
@@ -344,6 +351,7 @@ final class Runner {
 
     func start() throws {
         let c = config
+        startAudioThread = Settings.audioThread
         try FileManager.default.createDirectory(at: c.folder.appendingPathComponent("logs"),
                                                 withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: c.qmpSocket)
@@ -456,6 +464,12 @@ final class Runner {
         if Settings.audioClassic {
             env["OMACVM_MAIN_LOOP_QOS"] = "default"
         }
+        // The sound card's DMA and the mixer on a real-time thread of their
+        // own (qemu-audio-own-thread.patch); audioMainLoop keeps them in the
+        // main loop, as up to 3.1.14.
+        if audioThread {
+            env["OMACVM_AUDIO_THREAD"] = "1"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"
@@ -559,7 +573,7 @@ final class Runner {
         if links.camera { startCamera() }
         startControl()
         // The sound's delay on the Mac, so the VM's videos keep the picture in step.
-        let audioDelay = AudioLatencyWatch(agentSocket: agentPath) { [weak self] line in
+        let audioDelay = AudioLatencyWatch(agentSocket: agentPath, thread: audioThread) { [weak self] line in
             Task { @MainActor in self?.appendLog(line) }
         }
         audioDelay.start()
@@ -770,6 +784,13 @@ final class Runner {
             if let colon = l.firstIndex(of: ":"), l[colon...].hasPrefix(": index=") { names.insert(String(l[..<colon])) }
         }
         return names
+    }
+
+    /// The sound backend's options (AudioPath). No recording without the
+    /// microphone permission (in.voices=0).
+    static func audiodev(thread: Bool, mic: Bool) -> String {
+        let ring = thread ? AudioPath.threadOptions : AudioPath.mainLoopOptions
+        return "sdl,id=snd0,timer-period=1000,\(ring)\(mic ? "" : ",in.voices=0")"
     }
 
     static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }

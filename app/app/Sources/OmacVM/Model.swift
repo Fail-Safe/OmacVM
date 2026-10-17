@@ -3,6 +3,7 @@ import IOKit
 import Foundation
 import OmacVMUpdate
 import OmacVMFeatures
+import OmacVMAudio
 
 enum HelperError: LocalizedError, Equatable {
     case io(String)
@@ -504,6 +505,16 @@ enum Settings {
     /// HDA catching up after a stall), if the new one ever misbehaves.
     /// Hidden: defaults write org.omacvm.app audioClassic -bool true
     static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
+    /// The sound card's DMA and the mixer on a real-time thread of their own
+    /// (3.1.16), not in QEMU's main loop with the VM's GPU; AudioPath says
+    /// whether by default. Hidden: defaults write org.omacvm.app audioThread
+    /// -bool true (or false); audioMainLoop -bool true keeps 3.1.14's path
+    /// whatever the default, and audioClassic (2.9.1's timing) implies it.
+    static var audioThread: Bool {
+        let d = UserDefaults.standard
+        if audioClassic || d.bool(forKey: "audioMainLoop") { return false }
+        return d.object(forKey: "audioThread") as? Bool ?? AudioPath.threadByDefault
+    }
     /// Added to the sound delay the app tells the VM (AudioLatencyWatch), in
     /// ms, -500 ... 500: negative when the sound comes early in the VM's
     /// videos, positive when it still comes late (a device that under-reports).

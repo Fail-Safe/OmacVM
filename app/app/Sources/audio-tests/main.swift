@@ -22,6 +22,17 @@ expect(AudioDelay.total(deviceMs: airpods.ms) == AudioDelay.qemuMs + 171, "AirPo
 expect(AudioDelay.total(deviceMs: lg.ms) == AudioDelay.qemuMs + 13, "wired: QEMU + 13 ms")
 expect(AudioDelay.total(deviceMs: nil) == AudioDelay.qemuMs, "unknown device: QEMU's part alone")
 
+// The sound's own thread (AudioPath): its smaller buffers, its own QEMU part.
+expect(AudioDelay.qemuPart(thread: false) == AudioDelay.qemuMs, "main loop path: QEMU's part as before")
+expect(AudioDelay.qemuPart(thread: true) == AudioDelay.qemuThreadMs, "own thread: its QEMU part")
+expect(AudioDelay.qemuThreadMs < AudioDelay.qemuMs, "own thread: QEMU's part is smaller")
+expect(AudioDelay.total(deviceMs: lg.ms, thread: true) == AudioDelay.qemuThreadMs + 13, "own thread, wired: QEMU + 13 ms")
+expect(AudioPath.threadOptions.contains("out.frequency=48000") && AudioPath.threadOptions.contains("in.frequency=48000"),
+       "own thread: 48 kHz both ways (the probe's loopback and the Mac's devices)")
+expect(AudioPath.threadOptions.contains("out.buffer-count=6") && AudioPath.threadOptions.contains("out.buffer-length=5334"),
+       "own thread: ring 6 x 256 frames")
+expect(AudioPath.mainLoopOptions == "out.buffer-count=8", "main loop path: 3.1.14's ring")
+
 // The user's correction, and the limits.
 expect(AudioDelay.total(deviceMs: 10, extraMs: -40) == AudioDelay.qemuMs - 30, "a negative correction")
 expect(AudioDelay.total(deviceMs: nil, extraMs: -5000) == 0, "never below 0")

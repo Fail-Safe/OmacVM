@@ -931,6 +931,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-display-settl
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-display-settle.patch"
 "$native_dir/Tests/display/test-display-settle.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: display changes are not settled as tested (test-display-settle.sh)"
+# OmacVM: the sound on its own real-time thread (OMACVM_AUDIO_THREAD=1): the
+# HDA's DMA and the mixer no longer wait for the main loop (virgl).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-audio-own-thread.patch"
+grep -q 'getenv("OMACVM_AUDIO_THREAD")' "$source_dir/audio/audio-rt.c" || \
+  die "audio/audio-rt.c: the sound's own thread is missing (audio-own-thread patch)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"

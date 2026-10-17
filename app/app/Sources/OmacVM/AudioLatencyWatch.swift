@@ -20,6 +20,7 @@ final class AudioLatencyWatch: @unchecked Sendable {
     static let unknown = AudioObjectID(kAudioObjectUnknown)
 
     private let agentSocket: String
+    private let thread: Bool
     private let log: (String) -> Void
     private let queue = DispatchQueue(label: "org.omacvm.audio-latency")
     // On queue:
@@ -31,8 +32,9 @@ final class AudioLatencyWatch: @unchecked Sendable {
     private var stopped = false
     private lazy var changed: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.update() }
 
-    init(agentSocket: String, log: @escaping (String) -> Void) {
+    init(agentSocket: String, thread: Bool, log: @escaping (String) -> Void) {
         self.agentSocket = agentSocket
+        self.thread = thread
         self.log = log
     }
 
@@ -66,7 +68,7 @@ final class AudioLatencyWatch: @unchecked Sendable {
         let id = Self.defaultOutput()
         watchDevice(id)
         let info = id == Self.unknown ? nil : Self.device(id)
-        let ms = AudioDelay.total(deviceMs: info?.ms, extraMs: Settings.audioDelayExtraMs)
+        let ms = AudioDelay.total(deviceMs: info?.ms, extraMs: Settings.audioDelayExtraMs, thread: thread)
         if ms == sent {   // back to what the VM has: nothing to send
             wanted = nil
             retry?.cancel()
@@ -78,7 +80,7 @@ final class AudioLatencyWatch: @unchecked Sendable {
         tries = 0
         let name = id == Self.unknown ? "none" : Self.name(id)
         let deviceText = info?.ms.map { String(format: "%.1f ms", $0) } ?? "unknown"
-        log("OmacVM: sound delay for the VM: \(ms) ms (QEMU \(AudioDelay.qemuMs) ms, Mac output '\(name)' \(deviceText)"
+        log("OmacVM: sound delay for the VM: \(ms) ms (QEMU \(AudioDelay.qemuPart(thread: thread)) ms, Mac output '\(name)' \(deviceText)"
             + (Settings.audioDelayExtraMs != 0 ? ", audioDelayExtraMs \(Settings.audioDelayExtraMs)" : "") + ")")
         send()
     }

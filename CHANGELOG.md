@@ -3,6 +3,20 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.16
+
+- **The sound on its own real-time thread (experimental, off by default).** OmacVM.app moved the
+  VM's sound in QEMU's main loop, next to the VM's graphics: when an app opened or a page
+  scrolled, the graphics held that loop for 100-350 ms and QEMU's sound buffer ran dry. With
+  `defaults write org.omacvm.app audioThread -bool true` the sound card and the mixer run on a
+  thread of their own at real-time priority, and the sound reaches the Mac about 60 ms sooner
+  (round trip in the VM 272 -> 209 ms; videos stay in step). Measured on the Mac mini, 4 minutes
+  each: browsing in Chromium while music plays 0, 0, 0, 0 and 2 breaks (before: 5, 14, 0, 0);
+  the Mac busy 0 in 4 runs (before: 12, 0, 0). Not better yet with the VM's GPU busy (a game, WebGL)
+  or everything busy at once: the VM itself stops while its graphics work, and the shorter
+  buffer covers less of that. `defaults delete org.omacvm.app audioThread` goes back. `omacvm
+  check` says which way the sound goes ("sound timing").
+
 ## 3.1.15
 
 - **No more full-screen Spaces in a loop when a display goes while the Mac is locked.** With the

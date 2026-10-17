@@ -616,6 +616,28 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   RTKit's other limits stay), and `omacvm check` shows "sound priority".
   By hand: `systemctl --user restart pipewire pipewire-pulse wireplumber`
   makes PipeWire real-time again until the next stop.
+- **3.1.16, experimental (off by default):** the sound card's DMA and the
+  mixer on a thread of their own at real-time priority (macOS's
+  time-constraint policy), not in QEMU's main loop:
+  `defaults write org.omacvm.app audioThread -bool true`, then restart the
+  VM (`defaults delete org.omacvm.app audioThread` goes back). Measured on
+  the Mac mini M4 (VM with 8 CPUs, a 30 Hz tone, 4 minutes each), the
+  main loop's path stopped the sound card whenever the VM's graphics held
+  that loop (100-350 ms while Chromium opened a window or scrolled), and
+  QEMU's ring ran dry. On its own thread the sound card is never more than
+  a few ms late, so QEMU's ring is 32 ms at 48 kHz instead of 93 ms at
+  44.1 kHz: the round trip in the VM goes from 272 to 209 ms, and the app
+  tells the VM the shorter delay for videos. Breaks: browsing while music
+  plays 0, 0, 0, 0, 2 (5, 14, 0, 0 before), the Mac busy 0 in 4 runs (12,
+  0, 0 before). With the VM's GPU busy (glmark2) about the same (own thread 8,
+  4, 13; main loop 7, 4, 18), and worse in one run with everything busy at
+  once (13; main loop 4):
+  while the main loop holds the BQL, vCPUs that leave the guest wait for
+  it, and the guest's own buffers have to cover that, which are shorter
+  than QEMU's old ring. `omacvm check` "sound timing" says "sound card and
+  mixer on their own real-time thread". What is left in every path: a Mac
+  so busy that the VM's own threads get no time (a build on every core:
+  the guest stopped for up to 150 ms) breaks the guest's streams. ADR 0045.
 - **For 2.9.0 and 2.9.1:** a bigger safety buffer in the VM. As root in
   the VM (USER = your user):
 
@@ -632,8 +654,10 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   the same sound path as 2.9.0.)
 - **Where:** `app/runtime/patches/qemu-darwin-main-loop-qos.patch`,
   `app/runtime/patches/qemu-hda-no-catch-up.patch`,
+  `app/runtime/patches/qemu-audio-own-thread.patch` (3.1.16, `audioThread`;
+  `AudioPath.swift`, `AudioDelay.qemuThreadMs`),
   `app/app/Sources/OmacVM/Runner.swift` (`audioClassic`), `src/cmd/check.sh`,
-  the measurement tools in `app/runtime/Tests/audio/`, ADR 0036; in the
+  the measurement tools in `app/runtime/Tests/audio/`, ADR 0036 and 0045; in the
   VM `src/guest/sound/rtkit-no-canary.conf`, `src/guest/install.sh`,
   `src/guest/check.sh` ("sound priority").
 
