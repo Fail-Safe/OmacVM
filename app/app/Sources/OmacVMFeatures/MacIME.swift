@@ -12,16 +12,11 @@ public enum MacIME {
     /// After org.omacvm.auth (7) on vser0: a port moves no PCI device.
     public static let portNumber = 8
 
+    /// Switched in the window while the VM is stopped: PendingSwitch.
+    public static let switchState = PendingSwitch(feature: feature, defaultOn: false)
+
     /// The record's word for it; anything but "on" (or no record) is off.
-    public static func isOn(features text: String?) -> Bool {
-        guard let text else { return false }
-        var on = false
-        for word in text.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }) {
-            let kv = word.split(separator: "=", maxSplits: 1)
-            if kv.count == 2, kv[0] == Substring(feature) { on = kv[1] == "on" }
-        }
-        return on
-    }
+    public static func isOn(features text: String?) -> Bool { switchState.isOn(features: text) }
 
     /// QEMU's arguments for the port (`socket` already quoted for QEMU's
     /// option syntax). QEMU's window code connects to the socket itself.
@@ -39,47 +34,26 @@ public enum MacIME {
     /// stopped ("on" or "off"). The record says it already, so the next start
     /// has the port (or none); once the VM answers, the app runs `omacvm
     /// apply` for the VM's part and removes the file when that worked.
-    public static let pendingFile = "mac-ime-pending"
+    public static let pendingFile = switchState.pendingFile
 
     /// The pending choice from that file's text; nil when there is none.
-    public static func pending(_ text: String?) -> Bool? {
-        switch text?.split(whereSeparator: { $0 == " " || $0 == "\n" }).first {
-        case "on": return true
-        case "off": return false
-        default: return nil
-        }
-    }
+    public static func pending(_ text: String?) -> Bool? { switchState.pending(text) }
 
     /// A switch while the VM is stopped: the new record (mac-ime set, the
     /// other words as they were) and the pending file's text, nil to remove
     /// it (switched back before a start: the VM still has what it had).
     public static func switchStopped(record: String?, pending current: String?, on: Bool) -> (record: String, pending: String?) {
-        var words = (record ?? "").split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).map(String.init)
-        let word = "\(feature)=\(on ? "on" : "off")"
-        if let i = words.firstIndex(where: { $0.hasPrefix("\(feature)=") }) { words[i] = word } else { words.append(word) }
-        let p = pending(current)
-        let next: String? = p == nil ? (on ? "on" : "off") : (p == on ? (on ? "on" : "off") : nil)
-        return (words.joined(separator: " ") + "\n", next.map { $0 + "\n" })
+        switchState.switchStopped(record: record, pending: current, on: on)
     }
 
     /// At the VM's start, before its links are read: the pending choice, or
     /// nil; the record (FOLDER/features) follows it (an apply that failed
     /// and rolled back may have reset it), so this start has the port or not.
-    public static func prepareStart(folder f: URL) -> Bool? {
-        guard let on = pending(try? String(contentsOf: f.appendingPathComponent(pendingFile), encoding: .utf8)) else { return nil }
-        let url = f.appendingPathComponent("features")
-        let text = try? String(contentsOf: url, encoding: .utf8)
-        if isOn(features: text) != on {
-            try? switchStopped(record: text, pending: nil, on: on).record.write(to: url, atomically: true, encoding: .utf8)
-        }
-        return on
-    }
+    public static func prepareStart(folder f: URL) -> Bool? { switchState.prepareStart(folder: f) }
 
     /// The app's omacvm at the start: the VM's part for the pending choice
     /// (only that part: apply's feature switch).
-    public static func applyArguments(vm: String, on: Bool) -> [String] {
-        ["apply", "--vm", vm, "--vm-type", "app", "--feature", "\(feature)=\(on ? "on" : "off")", "--yes", "--transaction"]
-    }
+    public static func applyArguments(vm: String, on: Bool) -> [String] { switchState.applyArguments(vm: vm, on: on) }
 
     /// The app's row: on or off (a pending choice over the record), whether
     /// it can be switched now, and its note. Stopped: it is written down for

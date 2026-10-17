@@ -601,7 +601,8 @@ final class Runner {
         let pid = p.processIdentifier
         VMDisk.runJobs(config: c, agentPath: agentPath, running: { kill(pid, 0) == 0 })
         if let on = imePending {
-            MacIMEStart.run(config: c, on: on, agentPath: agentPath, running: { kill(pid, 0) == 0 }) { [weak self] line in
+            FeatureStart.run(config: c, switch: MacIME.switchState, what: "Mac input methods", on: on, agentPath: agentPath,
+                             running: { kill(pid, 0) == 0 }) { [weak self] line in
                 Task { @MainActor in self?.appendLog(line) }
             }
         }
