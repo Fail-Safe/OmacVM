@@ -13,7 +13,7 @@ omanotch	omanotch/** guest/omacvm-omanotch.service guest/omanotch-notifications.
 mac-clock	clock/**
 camera	camera/**
 battery	battery/**
-thp-kernel	kernel/build-thp-kernel.sh kernel/thp-pkgbuild.py
+thp-kernel	kernel/build-thp-kernel.sh kernel/thp-pkgbuild.py kernel/alarm.sh
 control-centre	control/**
 fast-network	net/**
 chromium-video	vdec/**

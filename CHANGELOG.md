@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Update VM no longer builds a new kernel by itself.** With the memory-optimized kernel on
+  (off by default), every update after Arch Linux ARM released a new kernel (about once a week)
+  built it in the VM: 10 minutes with 16 CPUs, over an hour with 4, and on a MacBook Air close
+  to Update VM's 40-minute limit. Now Update VM asks first (Build Now or Later, with the time for
+  the VM's CPUs); Later keeps the VM's kernel, and the next Update VM asks again. `omacvm update`
+  asks in Terminal; `omacvm update --kernel` builds it without asking. A build gets its own time
+  in Update VM instead of the 40 minutes.
+
 ## 3.1.18
 
 - **The VM's graphics without QEMU's big lock (experimental, off by default).** While an app

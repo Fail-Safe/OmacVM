@@ -6,7 +6,7 @@
 #                [--feature NAME=on|off]... [--FEATURE | --no-FEATURE]...
 #                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--vm-key PRIVATE_KEY] [--no-mac]
 #                [--reset-host-key] [--reinstall FEATURE]... [--transaction] [--yes]
-#                [--allow-downgrade]
+#                [--allow-downgrade] [--kernel]
 # Features: `omacvm features` lists them (src/features.tsv). Not given: what the
 # VM has (new to OmacVM: the defaults; a VM from before the control centre is
 # asked once whether it gets it, yes with --yes or without a terminal).
@@ -31,6 +31,11 @@
 # A VM with a newer OmacVM than this omacvm is not touched (exit 3, before
 # anything changes on the Mac or in the VM): an older copy would replace the
 # VM's. --allow-downgrade goes back to this version on purpose.
+# The memory-optimized kernel (thp-kernel) follows Arch Linux ARM's kernel, but
+# a newer release is a kernel build in the VM (10 minutes to over an hour), so
+# it is asked first in a terminal; --kernel builds it without asking, --yes or
+# no terminal keeps the VM's kernel (OMACVM_KERNEL_NEW=build|keep: OmacVM.app's
+# Update VM asked already).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
@@ -39,7 +44,7 @@ source "$R/src/lib/features.sh"
 source "$R/src/lib/graphics.sh"
 features_load
 VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; VMKEY=""; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1; TRANSACTION=0
-YES=0; NEWKEY=0; REINSTALL=()
+YES=0; NEWKEY=0; REINSTALL=(); KERNEL=0
 SETN=(); SETV=()
 set_feature() {   # NAME on|off (an old name too: idle-lock=off is no-idle-lock=on)
   local n v
@@ -63,6 +68,7 @@ while (( $# )); do
     --transaction) TRANSACTION=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --allow-downgrade) export OMACVM_ALLOW_DOWNGRADE=1; shift ;;
+    --kernel) KERNEL=1; shift ;;
     --reinstall) f=$(feature_alias "${2:-}"); f=${f%% *}
                  feature_index "$f" >/dev/null || { echo "omacvm apply: --reinstall: unknown feature '${2:-}' (omacvm features lists them)" >&2; exit 2; }
                  REINSTALL+=("$f"); shift 2 ;;
@@ -70,7 +76,7 @@ while (( $# )); do
     --no-tools) TOOLS=0; shift ;;   # prebuilt images: no Parallels Tools
     --feature) set_feature "${2%%=*}" "${2#*=}"; shift 2 ;;
     --no-*) set_feature "${1#--no-}" off; shift ;;
-    -h|--help) sed -n '2,33s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,38s/^# \{0,1\}//p' "$0"; exit 0 ;;
     --*) f=$(feature_alias "${1#--}"); feature_index "${f%% *}" >/dev/null || { echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2; }
          set_feature "${1#--}" on; shift ;;
     *) echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2 ;;
@@ -186,6 +192,30 @@ camera_via_bridge() { on camera && [[ $TYPE == utm || $TYPE == fusion ]]; }
 needs_bridge() { on bridge || battery_via_bridge || camera_via_bridge || on control-centre; }
 log "$TYPE VM '$VM' at $IP, user $U${had:+, OmacVM $had}"
 info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)"
+
+# ---------- a newer memory-optimized kernel: asked before the long part ----------
+KERNEL_NEW=${OMACVM_KERNEL_NEW:-keep}
+khave=$(sed -n 's/^OMACVM_THP_KERNEL=//p' <<<"$probe" | tail -1)
+if [[ -z ${OMACVM_KERNEL_NEW:-} ]] && on thp-kernel && [[ -n $khave ]]; then
+  source "$R/src/kernel/alarm.sh"
+  if klatest=$(alarm_kernel_latest) && [[ $klatest != "$khave" ]]; then
+    kcpus=$(sed -n 's/^OMACVM_NPROC=//p' <<<"$probe" | tail -1)
+    read -r klo khi <<<"$(kernel_build_minutes "$kcpus")"
+    if (( KERNEL )); then
+      KERNEL_NEW=build
+    elif (( ! YES )) && { : < /dev/tty; } 2>/dev/null; then
+      source "$R/src/lib/setup.sh"
+      ask_yn "Arch Linux ARM has a newer kernel ($klatest; '$VM' has $khave). Build the memory-optimized kernel now? About $klo-$khi minutes on its ${kcpus:-?} CPUs" n && KERNEL_NEW=build
+    fi
+    kcmd="omacvm update --kernel"; (( NAMED )) && kcmd+=" --vm \"$VM\""
+    [[ $KERNEL_NEW == build ]] || info "the memory-optimized kernel stays at $khave (Arch Linux ARM has $klatest): $kcmd builds it, about $klo-$khi minutes"
+  elif (( KERNEL )); then
+    if [[ -n ${klatest:-} ]]; then info "the memory-optimized kernel $khave is Arch Linux ARM's current one: nothing to build"
+    else KERNEL_NEW=build; fi   # GitHub not reachable from the Mac: the VM looks itself
+  fi
+elif (( KERNEL )) && ! on thp-kernel; then
+  info "--kernel: the memory-optimized kernel is off in '$VM' (omacvm enable thp-kernel)"
+fi
 
 # ---------- the Mac side ----------
 # helper_of FEATURE: the Mac helper it needs built (empty: none).
@@ -397,6 +427,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build --exclude __pycac
 # FN), and GI_ARGS. KNOWN: the feature names the VM's copy knows (a copy of an
 # older OmacVM, when going back), all when empty.
 GI_ARGS=""; KNOWN=""
+[[ $KERNEL_NEW == build ]] && GI_ARGS+=" --kernel-new build"
 # Fusion, new VM: its display scale is the Mac display's (2 on Retina; a
 # prebuilt image has the scale of the Mac it was made on). Later applies keep
 # the scale in the VM: the one Omarchy's scaling menu chose stays.

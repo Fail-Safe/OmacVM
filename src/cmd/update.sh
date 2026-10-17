@@ -1,6 +1,6 @@
 #!/bin/bash
 # omacvm update [--vm NAME [--vm-type T]] [--no-pull] [--commit C] [--transaction] [--yes]
-# [--allow-downgrade]: OmacVM up to date everywhere. This checkout
+# [--allow-downgrade] [--kernel]: OmacVM up to date everywhere. This checkout
 # (install.sh's goes to the newest release; another clean clone: git pull),
 # the Mac side that is installed (Omanotch with it), OmacVM.app when it is
 # installed and a newer one is published (not while it runs), then OmacVM in
@@ -14,7 +14,8 @@
 # failed and went back to what it had). --yes: no questions (as apply --yes).
 # A VM with a newer OmacVM than this omacvm (after the pull): nothing is
 # updated, not the Mac side either (exit 3); --allow-downgrade puts this
-# version into it on purpose.
+# version into it on purpose. --kernel: a newer memory-optimized kernel is
+# built without asking (as apply --kernel; otherwise asked in a terminal).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
@@ -30,6 +31,7 @@ while (( $# )); do
     --transaction) APPLY_ARGS+=(--transaction); shift ;;
     --yes|-y) APPLY_ARGS+=(--yes); shift ;;
     --allow-downgrade) APPLY_ARGS+=(--allow-downgrade); export OMACVM_ALLOW_DOWNGRADE=1; shift ;;
+    --kernel) APPLY_ARGS+=(--kernel); shift ;;
     -h|--help) sed -n '2,21s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "omacvm update: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac

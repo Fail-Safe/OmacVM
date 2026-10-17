@@ -4,7 +4,10 @@
 # console or in the apply) or an update past its time stops the VM and says
 # why, with the next step. 2026-10-09: a VM copied while it ran came up on a
 # MacBook Air with "BTRFS error ... bad tree block start", went read-only,
-# and Update VM hung. A stand-in QEMU, ssh and apply in a fixture app; no VM.
+# and Update VM hung. A newer memory-optimized kernel is asked first (ASK
+# kernel on stdout, the answer on stdin) and a build gets its time
+# (2026-10-17: a weekly ALARM kernel build started by itself in Update VM).
+# A stand-in QEMU, ssh, curl and apply in a fixture app; no VM.
 #   src/tests/update-vm-watch.sh
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -51,15 +54,27 @@ cat > "$T/bin/ssh" <<'SSH'
 # Stand-in ssh: the VM answers unless it never comes up; poweroff stops QEMU.
 [[ $FAKE_MODE == btrfs || $FAKE_MODE == down ]] && exit 255
 kill -0 "$(cat "$FAKE_DIR/qemu.pid")" 2>/dev/null || exit 255
+case ${*: -1} in
+  "pacman -Q linux-aarch64-thp"*) echo "${FAKE_KERNEL:-}"; exit 0 ;;
+  nproc) echo 8; exit 0 ;;
+esac
 # A guest takes a few seconds to power off: the update's watch ends first.
 [[ ${*: -1} == "systemctl poweroff" ]] && { (sleep 5; kill "$(cat "$FAKE_DIR/qemu.pid")") & }
 exit 0
 SSH
+cat > "$T/bin/curl" <<'CURL'
+#!/bin/bash
+# Stand-in curl: ALARM's kernel PKGBUILD.
+printf 'pkgver=7.2.11\npkgrel=1\n'
+CURL
 cat > "$A/scripts/apply-vm.sh" <<'APPLY'
 #!/bin/bash
 # Stand-in apply: ok, or hangs (as an apply on a read-only VM did) until QEMU goes.
+echo "${OMACVM_KERNEL_NEW:-unset}" > "$FAKE_DIR/kernel-new"
 case $FAKE_MODE in
   ok) echo "==> OmacVM applied"; exit 0 ;;
+  # An apply that takes 10 s (a kernel build, made short).
+  slow) sleep 10; echo "==> OmacVM applied"; exit 0 ;;
   # The VM powers off by itself at the end, and the watch ends before the update does.
   ok-off) echo "==> OmacVM applied"; kill "$(cat "$FAKE_DIR/qemu.pid")"; sleep 5; exit 0 ;;
   ro) echo "touch: cannot touch '/usr/local/share/omacvm/x': Read-only file system" ;;
@@ -68,7 +83,7 @@ while kill -0 "$(cat "$FAKE_DIR/qemu.pid")" 2>/dev/null; do sleep 1; done
 echo "Connection to 127.0.0.1 closed by remote host." >&2
 exit 255
 APPLY
-chmod +x "$A/runtime/bin/OmacVM" "$T/bin/ssh" "$A/scripts/apply-vm.sh"
+chmod +x "$A/runtime/bin/OmacVM" "$T/bin/ssh" "$T/bin/curl" "$A/scripts/apply-vm.sh"
 V=$T/VMs/Copied; mkdir -p "$V"
 printf "NAME='Copied'\nCPUS=2\nMEM_MB=4096\nDISK_GB=64\nSSH_PORT=52999\nVM_USER='me'\n" > "$V/vm.env"
 : > "$V/disk.img"; : > "$V/efi-vars.fd"; : > "$V/ready"; : > "$T/key"
@@ -106,4 +121,36 @@ expect "a good update: no false alarm" "UPDATED Copied" "$r"
 expect "... and exits 0" "0" "$rc"
 r=$(run ok-off); r=${r#* }; rc=${r%% *}; r=${r#* }
 expect "the VM off before the update ends: still UPDATED, exit 0 (the watch had ended)" "0 UPDATED Copied" "$rc $r"
+
+# ---------- a newer memory-optimized kernel: asked, not built by itself ----------
+expect "no memory-optimized kernel: no question, the apply keeps" "keep" "$(cat "$T/kernel-new")"
+expect "... no ASK line" "" "$(grep '^ASK' "$T/out")"
+printf 'bridge=on thp-kernel=on control-centre=on\n' > "$V/features"
+krun() {   # ANSWER|none MODE [VAR=VALUE...]: the exit status and the last ERROR/UPDATED
+  local a=$1 mode=$2 rc; shift 2
+  rm -f "$T/qemu.pid" "$T/kernel-new"
+  if [[ $a == none ]]; then
+    sleep 6 | env PATH="$T/bin:$PATH" FAKE_DIR="$T" FAKE_MODE="$mode" FAKE_KERNEL=7.2.10-1 OMACVM_KEY="$T/key" OMACVM_HOST_PORTS= "$@" \
+      /bin/bash "$A/scripts/update-vm.sh" "$V" > "$T/out" 2>&1
+  else
+    { sleep 1; echo "$a"; } | env PATH="$T/bin:$PATH" FAKE_DIR="$T" FAKE_MODE="$mode" FAKE_KERNEL=7.2.10-1 OMACVM_KEY="$T/key" OMACVM_HOST_PORTS= "$@" \
+      /bin/bash "$A/scripts/update-vm.sh" "$V" > "$T/out" 2>&1
+  fi
+  rc=${PIPESTATUS[1]}
+  echo "$rc $(grep -E '^(ERROR|UPDATED)' "$T/out" | tail -1)"
+}
+r=$(krun later ok)
+expect "ALARM has a newer kernel: the app is asked (have, latest, CPUs, minutes)" "ASK kernel 7.2.10-1 7.2.11-1 8 20 30" "$(grep '^ASK' "$T/out")"
+expect "Later: the update goes on and the VM keeps its kernel" "0 UPDATED Copied keep" "$r $(cat "$T/kernel-new")"
+expect "... and says so" "1" "$(grep -c '^==> the memory-optimized kernel stays at 7.2.10-1' "$T/out")"
+r=$(krun build ok)
+expect "Build Now: the apply builds it" "0 UPDATED Copied build" "$r $(cat "$T/kernel-new")"
+r=$(krun none ok OMACVM_ASK_SECONDS=3)
+expect "no answer in time: later" "0 UPDATED Copied keep" "$r $(cat "$T/kernel-new")"
+r=$(krun later slow OMACVM_UPDATE_SECONDS=6)
+expect "the time it waits for an answer does not count; a long apply after Later still stops" "yes" "$([[ $r == "1 ERROR: The update took too long"* ]] && echo yes || echo "$r")"
+r=$(krun build slow OMACVM_UPDATE_SECONDS=6)
+expect "Build Now: the update gets the build's time" "0 UPDATED Copied" "$r"
+r=$(krun build ok FAKE_KERNEL=7.2.11-1)
+expect "the VM has ALARM's kernel: no question" "0 UPDATED Copied keep" "$r $(cat "$T/kernel-new")"
 exit $fail
