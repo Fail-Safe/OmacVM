@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.17 (unreleased)
+## 3.1.17
 
 - **The sound on its own thread is on for everyone.** 3.1.16 brought it as an experiment; with it
   the VM's sound crackles much less while apps open, pages scroll or the Mac is busy, and reaches
