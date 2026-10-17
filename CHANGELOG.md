@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.19 (unreleased)
+## 3.1.19
 
 - **Update VM no longer builds a new kernel by itself.** With the memory-optimized kernel on
   (off by default), every update after Arch Linux ARM released a new kernel (about once a week)
