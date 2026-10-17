@@ -204,12 +204,12 @@ cr() { rm -f "$C/calls"; printf '%s\n' "$@" > "$C/env"; OMACVM_ENV=$C/env "$C/co
 [[ $(ARG=off cr OMACVM_GRAPHICS=vulkan OMACVM_FEATURE_gpu_compute=on) == "opencl --off;webgpu --off gc=off;" ]] && pass "compute.sh off: the argument wins" || fail "compute.sh off by argument"
 ARG=maybe cr OMACVM_GRAPHICS=vulkan >/dev/null; OMACVM_ENV=$C/env "$C/compute.sh" maybe >/dev/null 2>&1; [[ $? == 2 ]] && pass "compute.sh: unknown value: usage" || fail "compute.sh: unknown value accepted"
 
-O=$T/opencl.conf
-ocl() { OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=${ICD:-$T/none.icd} "$D/opencl.sh" "$@"; }
+O=$T/opencl.conf; OF=$T/opencl-off
+ocl() { OMACVM_OPENCL_ENV=$O OMACVM_OPENCL_OFF=$OF OMACVM_MESA_CLICD=${ICD:-$T/none.icd} "$D/opencl.sh" "$@"; }
 ocl --nonsense >/dev/null 2>&1
 [[ $? == 2 ]] && pass "opencl.sh: unknown option: usage" || fail "opencl.sh: unknown option accepted"
-echo RUSTICL_ENABLE=zink > "$O"
-ocl --off && [[ ! -e $O ]] && pass "opencl.sh --off removes the switch" || fail "opencl.sh --off kept the switch"
+echo RUSTICL_ENABLE=zink > "$O"; echo why > "$OF"
+ocl --off && [[ ! -e $O && ! -e $OF ]] && pass "opencl.sh --off removes the switch (and the reason)" || fail "opencl.sh --off kept the switch"
 echo RUSTICL_ENABLE=zink > "$O"; : > "$T/ours.icd"
 out=$(ICD=$T/ours.icd ocl 2>&1); rc=$?
 [[ $rc == 0 && ! -e $O && $out == *"feature vulkan"* ]] && pass "opencl.sh: OmacVM's Mesa has its own rusticl" ||
@@ -219,6 +219,23 @@ if (( EUID != 0 )); then
   [[ $rc == 1 && $out == *"run as root"* && ! -e $O ]] && pass "opencl.sh installs as root only" ||
     fail "opencl.sh as a user: rc $rc, said '$out'"
 fi
+grep -q '^ZINK_DEBUG=quiet' <(sed -n "s/^printf '\(.*\)' > \"\$ENVF\"$/\1/p" "$D/opencl.sh" | sed 's/\\n/\n/g') &&
+  pass "opencl.sh: the switch quiets Zink's warning (ZINK_DEBUG=quiet)" || fail "opencl.sh: no ZINK_DEBUG=quiet"
+# The Zink device check at run time (opencl.sh --check after each boot): no device -> the switch goes, the reason stays.
+printf '#!/bin/bash\nexit %s\n' 0 > "$T/venus-on"; chmod +x "$T/venus-on"
+printf '#!/bin/bash\necho "MESA: error: Zink requires the nullDescriptor feature of KHR/EXT robustness2."; echo "Platform #0: rusticl"\n' > "$T/clinfo-none"
+printf '#!/bin/bash\necho "Platform #0: rusticl"; echo " \`-- Device #0: zink Vulkan 1.4(Virtio-GPU Venus (Apple M4) (MESA_KOSMICKRISP))"\n' > "$T/clinfo-zink"
+chmod +x "$T"/clinfo-*
+chk() { echo RUSTICL_ENABLE=zink > "$O"; rm -f "$OF"; OMACVM_VENUS_ON=$T/venus-on OMACVM_CLINFO=$T/clinfo-$1 ocl --check; }
+out=$(chk none); [[ ! -e $O && $(cat "$OF" 2>/dev/null) == *"no GPU device"*"nullDescriptor"* && $out == *"OpenCL: off"* ]] &&
+  pass "opencl.sh --check: no Zink device: off, with the reason" || fail "opencl.sh --check without a device: '$out', $(cat "$OF" 2>/dev/null)"
+chk zink >/dev/null; [[ -e $O && ! -e $OF ]] && pass "opencl.sh --check: a Zink device: stays on" || fail "opencl.sh --check removed a working switch"
+printf '#!/bin/bash\nexit 1\n' > "$T/venus-on"
+chk none >/dev/null; [[ -e $O && ! -e $OF ]] && pass "opencl.sh --check: no Venus this start: not judged" || fail "opencl.sh --check judged without Venus"
+rm -f "$O"; OMACVM_VENUS_ON=$T/venus-on OMACVM_CLINFO=$T/clinfo-none ocl --check; [[ ! -e $O && ! -e $OF ]] &&
+  pass "opencl.sh --check: switch off: nothing to do" || fail "opencl.sh --check with the switch off"
+grep -q 'ExecStartPost=-/usr/local/share/omacvm/app/guest/venus/opencl.sh --check' "$D/omacvm-venus-driver.service" &&
+  pass "the boot check runs opencl.sh --check" || fail "no OpenCL check after boot"
 
 # WebGPU (venus/webgpu.sh): the launcher and Firefox's switch; --off keeps them while gpu-compute
 # gives them (Graphics Vulkan) or the vulkan feature's Mesa is there.

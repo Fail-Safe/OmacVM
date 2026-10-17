@@ -476,13 +476,15 @@ app)
   elif [[ ${OMACVM_FEATURE_gpu_compute:-on} == off ]]; then
     FEATURE=gpu-compute
     skip "WebGPU and GPU compute" "off (omacvm enable gpu-compute)"
-  elif [[ -f /etc/environment.d/90-omacvm-opencl.conf ]]; then
+  elif [[ -f /etc/environment.d/90-omacvm-opencl.conf || -f /var/lib/omacvm/opencl-off ]]; then
     # Graphics Vulkan, gpu-compute on: the distro's rusticl on Zink on Venus (venus/opencl.sh).
     FEATURE=gpu-compute
-    if ! /usr/local/share/omacvm/app/guest/venus/install.sh --venus-on; then
+    if [[ -f /var/lib/omacvm/opencl-off ]]; then
+      skip "OpenCL (rusticl on Zink)" "off on this Mac: $(head -1 /var/lib/omacvm/opencl-off) (on MoltenVK, macOS 15: omacvm enable vulkan)"
+    elif ! /usr/local/share/omacvm/app/guest/venus/install.sh --venus-on; then
       skip "OpenCL (rusticl on Zink)" "with Vulkan from the VM's next start"
-    elif RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink; then
-      ok "OpenCL (rusticl on Zink)" "$(RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | sed -n 's/.*Device #0: //p' | head -1)"
+    elif RUSTICL_ENABLE=zink ZINK_DEBUG=quiet clinfo -l 2>/dev/null | grep -q zink; then
+      ok "OpenCL (rusticl on Zink)" "$(RUSTICL_ENABLE=zink ZINK_DEBUG=quiet clinfo -l 2>/dev/null | sed -n 's/.*Device #0: //p' | head -1)"
     else
       bad "OpenCL (rusticl on Zink)" "no device: on MoltenVK (macOS 15) Zink needs OmacVM's Mesa (omacvm enable vulkan)"
     fi
