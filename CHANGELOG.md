@@ -7,8 +7,8 @@ in more words.
 
 - **WebGPU and GPU compute have a switch.** On macOS 26 and newer, where Graphics Automatic gives
   the VM Vulkan, OpenCL and WebGPU have run on the Mac's GPU since 3.0.13. Now they can be
-  switched off and on again: General › WebGPU and GPU compute in the VM window (while the VM
-  runs), the control centre, or `omacvm disable gpu-compute`. Off removes OpenCL's switch, the
+  switched off and on again: General › WebGPU and GPU compute in the VM window (with the VM
+  stopped, it counts from its next start), the control centre, or `omacvm disable gpu-compute`. Off removes OpenCL's switch, the
   "Chromium (WebGPU)" menu entry and Firefox's WebGPU; Vulkan stays as Graphics says. On by
   default, as before; a VM gets the switch at its next Update VM, with nothing to rebuild.
 - **OpenCL only where it works.** With Graphics on Vulkan on a Mac whose driver Zink cannot use

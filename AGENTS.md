@@ -462,7 +462,7 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 |---|---|---|---|
 | Resources | `vm.env` `CPUS`, `MEM_MB` (`omacvm resources`) | the tier chosen at setup (Balanced) | VM |
 | Graphics | `graphics`: `auto`, `opengl`, `vulkan` (`omacvm graphics`) | `auto` (no file) | VM |
-| WebGPU and GPU compute (with Vulkan) | `features` `gpu-compute=on\|off` (`omacvm enable\|disable gpu-compute`, the control centre; the switch only while the VM runs: its part is in the VM) | on (no word = on) | VM |
+| WebGPU and GPU compute (with Vulkan) | `features` `gpu-compute=on\|off` (`omacvm enable\|disable gpu-compute`, the control centre); switched while the VM is stopped: + `gpu-compute-pending`, set up at the next start (as Mac input) | on (no word = on) | VM |
 | Graphics without QEMU's lock (experimental) | `gpuOffMainLoop` (bool; hidden `gpuMainLoop` and `gpuSafeMode` force it off; read at each start; ADR 0046) | `false` (3.1.18: defaults only; switch from 3.1.19) | app |
 | Closing the window | `closeAction`: `shutdown`, `keepRunning`, `ask` (QEMU: `OMACVM_CLOSE_ACTION`) | `shutdown` | app |
 | Start in: Window / Full screen | `startFullScreen` (bool) | `true` | app |
