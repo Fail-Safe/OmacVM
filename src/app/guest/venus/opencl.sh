@@ -8,8 +8,9 @@
 # there the feature vulkan's Mesa (venus/install.sh, with its MoltenVK
 # patches) is the way.
 #   opencl.sh          install opencl-mesa + clinfo, turn rusticl's Zink on
-#   opencl.sh --check  turn it off again when Zink lists no GPU device now
-#                      (after each boot: omacvm-venus-driver.service)
+#   opencl.sh --check  turn it off when Zink lists no GPU device now, on again
+#                      when it was off for that and lists one now (another Mac,
+#                      a newer macOS); after each boot: omacvm-venus-driver.service
 #   opencl.sh --off    turn it off (the VM has OpenGL only, or gpu-compute off)
 # Rusticl only lists drivers named in RUSTICL_ENABLE, so the switch is what
 # gives apps the device; the package stays (pacman -Rns opencl-mesa removes it).
@@ -34,13 +35,21 @@ zink_device() {
   return 1
 }
 off_for_mac() { rm -f "$ENVF"; echo "OpenCL: off: $(cat "$OFF") (on MoltenVK, macOS 15: omacvm enable vulkan)"; }
+# ZINK_DEBUG=quiet: Zink's "Some incorrect rendering might occur ..." line on
+# every start (KosmicKrisp has no VK_EXT_custom_border_color); Mesa documents
+# the flag as "suppress probably-harmless warnings" (docs/drivers/zink.rst).
+switch_on() { mkdir -p "$(dirname "$ENVF")"; printf 'RUSTICL_ENABLE=zink\nZINK_DEBUG=quiet\n' > "$ENVF"; }
 
 case ${1:-} in
   --off) rm -f "$ENVF" "$OFF"; exit 0 ;;
   --check)
-    [[ -f $ENVF ]] || exit 0
+    [[ ! -f $OURS ]] || exit 0   # the vulkan feature's Mesa has its own OpenCL
+    [[ -f $ENVF || -f $OFF ]] || exit 0
     rc=0; zink_device || rc=$?
-    case $rc in 0) rm -f "$OFF" ;; 1) off_for_mac ;; esac
+    case $rc in
+      0) if [[ -f $OFF ]]; then rm -f "$OFF"; switch_on; echo "OpenCL: on again: Zink lists a GPU device on this Mac's Vulkan driver"; fi ;;
+      1) off_for_mac ;;
+    esac
     exit 0 ;;
   "") ;;
   *) echo "usage: opencl.sh [--check | --off]" >&2; exit 2 ;;
@@ -50,11 +59,7 @@ if [[ -f $OURS ]]; then rm -f "$ENVF" "$OFF"; echo "OpenCL: OmacVM's Mesa (featu
 (( EUID == 0 )) || { echo "opencl.sh: run as root" >&2; exit 1; }
 "${OMACVM_PKG_ADD:-$HERE/../../../guest/pkg-add}" opencl-mesa clinfo ||
   { echo "OpenCL: opencl-mesa not installed (see above)" >&2; exit 1; }
-mkdir -p "$(dirname "$ENVF")"
-# ZINK_DEBUG=quiet: Zink's "Some incorrect rendering might occur ..." line on
-# every start (KosmicKrisp has no VK_EXT_custom_border_color); Mesa documents
-# the flag as "suppress probably-harmless warnings" (docs/drivers/zink.rst).
-printf 'RUSTICL_ENABLE=zink\nZINK_DEBUG=quiet\n' > "$ENVF"
+switch_on
 rc=0; zink_device || rc=$?
 case $rc in
   0) rm -f "$OFF"; echo "OpenCL: rusticl on Zink (Vulkan) for apps started after the next login" ;;

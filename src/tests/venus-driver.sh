@@ -222,7 +222,7 @@ if (( EUID != 0 )); then
   [[ $rc == 1 && $out == *"run as root"* && ! -e $O ]] && pass "opencl.sh installs as root only" ||
     fail "opencl.sh as a user: rc $rc, said '$out'"
 fi
-grep -q '^ZINK_DEBUG=quiet' <(sed -n "s/^printf '\(.*\)' > \"\$ENVF\"$/\1/p" "$D/opencl.sh" | sed 's/\\n/\n/g') &&
+grep -q 'ZINK_DEBUG=quiet' <(sed -n "s/^switch_on() {.*printf '\(.*\)' > \"\$ENVF\"; }$/\1/p" "$D/opencl.sh" | sed 's/\\n/\n/g') &&
   pass "opencl.sh: the switch quiets Zink's warning (ZINK_DEBUG=quiet)" || fail "opencl.sh: no ZINK_DEBUG=quiet"
 # The Zink device check at run time (opencl.sh --check after each boot): no device -> the switch goes, the reason stays.
 printf '#!/bin/bash\nexit %s\n' 0 > "$T/venus-on"; chmod +x "$T/venus-on"
@@ -233,6 +233,9 @@ chk() { echo RUSTICL_ENABLE=zink > "$O"; rm -f "$OF"; OMACVM_VENUS_ON=$T/venus-o
 out=$(chk none); [[ ! -e $O && $(cat "$OF" 2>/dev/null) == *"no GPU device"*"nullDescriptor"* && $out == *"OpenCL: off"* ]] &&
   pass "opencl.sh --check: no Zink device: off, with the reason" || fail "opencl.sh --check without a device: '$out', $(cat "$OF" 2>/dev/null)"
 chk zink >/dev/null; [[ -e $O && ! -e $OF ]] && pass "opencl.sh --check: a Zink device: stays on" || fail "opencl.sh --check removed a working switch"
+rm -f "$O"; echo "Zink lists no GPU device" > "$OF"; out=$(OMACVM_VENUS_ON=$T/venus-on OMACVM_CLINFO=$T/clinfo-zink ocl --check)
+[[ -e $O && ! -e $OF && $out == *"on again"* && $(cat "$O") == *ZINK_DEBUG=quiet* ]] && pass "opencl.sh --check: off for this Mac, a device now: on again" ||
+  fail "opencl.sh --check did not turn OpenCL on again: '$out'"
 printf '#!/bin/bash\nexit 1\n' > "$T/venus-on"
 chk none >/dev/null; [[ -e $O && ! -e $OF ]] && pass "opencl.sh --check: no Venus this start: not judged" || fail "opencl.sh --check judged without Venus"
 rm -f "$O"; OMACVM_VENUS_ON=$T/venus-on OMACVM_CLINFO=$T/clinfo-none ocl --check; [[ ! -e $O && ! -e $OF ]] &&
