@@ -12,6 +12,9 @@ in more words.
   the VM's CPUs); Later keeps the VM's kernel, and the next Update VM asks again. `omacvm update`
   asks in Terminal; `omacvm update --kernel` builds it without asking. A build gets its own time
   in Update VM instead of the 40 minutes.
+- **The graphics switch from 3.1.18 is in the VM window.** General › Graphics without QEMU's lock
+  (experimental, off by default), with an (i) saying what it does and what was measured. Same
+  key as the `defaults write` in 3.1.18; counts from the next start of the VM.
 
 ## 3.1.18
 

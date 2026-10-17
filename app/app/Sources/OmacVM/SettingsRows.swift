@@ -235,6 +235,25 @@ struct SoundThreadRow: View {
     }
 }
 
+/// The VM's GPU work without QEMU's big lock (Settings.gpuOffMainLoop,
+/// 3.1.18, experimental, off by default): read by each start of the VM.
+struct GPUOffMainLoopRow: View {
+    var tick = 0
+    @State private var on = Settings.gpuOffMainLoop
+
+    static let info = "Fewer short freezes in the VM. While an app opens or a page draws new things, the VM's graphics held QEMU's lock for up to 100-350 ms, and the VM's CPUs, its sound and typing waited that long. With this on, graphics work that only touches the GPU runs without that lock. Measured on a Mac mini: the longest stop of the VM while Chromium windows opened 107 ms -> 1 ms, while a Vulkan app started 779 ms -> 14 ms; keys reach the screen as fast as before, and the GPU scores are the same. Experimental: tested on the Mac mini only so far. GPU safe mode always takes the old way. Counts from the next start of the VM."
+
+    var body: some View {
+        SettingRow(title: "Graphics without QEMU's lock", badge: "experimental",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Fewer short freezes while apps open or pages draw.",
+                   info: Self.info, probe: "gpu-off-main-loop") {
+            RowSwitch(title: "Graphics without QEMU's lock", isOn: $on, enabled: !Settings.gpuSafeMode)
+        }
+        .onChange(of: on) { _, v in if v != Settings.gpuOffMainLoop { Settings.gpuOffMainLoop = v } }
+        .onChange(of: tick) { _, _ in on = Settings.gpuOffMainLoop }
+    }
+}
+
 /// The escape combo (EscapeSetting: org.omacvm.gestures EscapeSwipe).
 struct EscapeRow: View {
     var tick = 0

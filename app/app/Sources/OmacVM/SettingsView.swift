@@ -164,6 +164,7 @@ struct SettingsSections: View {
             Card {
                 ResourcesRow(state: state)
                 GraphicsRow(state: state)
+                GPUOffMainLoopRow(tick: state.tick)
                 CloseActionRow(tick: state.tick)
             }
         }
