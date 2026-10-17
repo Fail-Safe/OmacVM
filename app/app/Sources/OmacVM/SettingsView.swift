@@ -149,7 +149,8 @@ extension EnvironmentValues {
     @Entry var spyStart: String? = nil
 }
 
-/// The five sections: General, Display, Input, Sharing & Devices, Storage & Updates.
+/// The six sections: General, Display, Input, Output (the sound), Sharing & Devices,
+/// Storage & Updates.
 struct SettingsSections: View {
     @ObservedObject var state: AppState
     var preview: RenderVMWindow.Preview?
@@ -191,6 +192,13 @@ struct SettingsSections: View {
             }
         }
         .spySection("input")
+        VStack(alignment: .leading, spacing: 0) {
+            SectionTitle(text: "Output")
+            Card {
+                SoundThreadRow(tick: state.tick)
+            }
+        }
+        .spySection("output")
         VStack(alignment: .leading, spacing: 0) {
             SectionTitle(text: "Sharing & Devices")
             Card {

@@ -507,13 +507,21 @@ enum Settings {
     static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
     /// The sound card's DMA and the mixer on a real-time thread of their own
     /// (3.1.16), not in QEMU's main loop with the VM's GPU; AudioPath says
-    /// whether by default. Hidden: defaults write org.omacvm.app audioThread
-    /// -bool true (or false); audioMainLoop -bool true keeps 3.1.14's path
-    /// whatever the default, and audioClassic (2.9.1's timing) implies it.
+    /// whether by default. The VM window's switch (SoundThreadRow) or
+    /// defaults write org.omacvm.app audioThread -bool true (or false);
+    /// audioMainLoop -bool true keeps 3.1.14's path whatever the default, and
+    /// audioClassic (2.9.1's timing) implies it. The switch writes the choice
+    /// and drops audioMainLoop: the person chose.
     static var audioThread: Bool {
-        let d = UserDefaults.standard
-        if audioClassic || d.bool(forKey: "audioMainLoop") { return false }
-        return d.object(forKey: "audioThread") as? Bool ?? AudioPath.threadByDefault
+        get {
+            let d = UserDefaults.standard
+            if audioClassic || d.bool(forKey: "audioMainLoop") { return false }
+            return d.object(forKey: "audioThread") as? Bool ?? AudioPath.threadByDefault
+        }
+        set {
+            UserDefaults.standard.removeObject(forKey: "audioMainLoop")
+            UserDefaults.standard.set(newValue, forKey: "audioThread")
+        }
     }
     /// Added to the sound delay the app tells the VM (AudioLatencyWatch), in
     /// ms, -500 ... 500: negative when the sound comes early in the VM's

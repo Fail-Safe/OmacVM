@@ -27,6 +27,7 @@ MainActor.assumeIsolated {
         // App-wide (every VM).
         case "startFullScreen": Settings.startFullScreen = value == "true"
         case "keepDockAway": Settings.keepDockAway = value == "true"
+        case "audioThread": Settings.audioThread = value == "true"
         case "closeAction": Settings.closeAction = CloseAction.parse(value)
         case "appIconTheme": AppIcon.set(IconTheme.choice(stored: value))
         case "escapeSwipe": EscapeSetting.set(EscapeSetting.Choice(rawValue: value) ?? .pointer)

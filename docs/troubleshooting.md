@@ -618,7 +618,8 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   makes PipeWire real-time again until the next stop.
 - **3.1.16, experimental (off by default):** the sound card's DMA and the
   mixer on a thread of their own at real-time priority (macOS's
-  time-constraint policy), not in QEMU's main loop:
+  time-constraint policy), not in QEMU's main loop: the VM window's
+  Output › Sound on its own thread (from 3.1.17), or
   `defaults write org.omacvm.app audioThread -bool true`, then restart the
   VM (`defaults delete org.omacvm.app audioThread` goes back). Measured on
   the Mac mini M4 (VM with 8 CPUs, a 30 Hz tone, 4 minutes each), the
