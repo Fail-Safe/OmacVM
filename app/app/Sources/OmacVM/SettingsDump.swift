@@ -52,7 +52,8 @@ enum SettingsDump {
             "usbVendorHID": USBVendorHID.isOn(folder: f),
             "fastNetwork": FastNetwork.isOn(c),
             "macIME": MacIME.pending(pending) ?? MacIME.isOn(features: record),
-            "gpuCompute": GPUCompute.isOn(features: record),
+            "gpuCompute": GPUCompute.switchState.pending(
+                try? String(contentsOf: f.appendingPathComponent(GPUCompute.pendingFile), encoding: .utf8)) ?? GPUCompute.isOn(features: record),
         ]
     }
 
