@@ -1,7 +1,7 @@
 # 0046: The VM's GPU work lets go of the BQL, then leaves the main loop
 
-Status: draft (`gpu-thread`, design phase; numbers in work/tracks/gpu-thread.md
-on the mini). Builds on [0011](0011-async-fences.md),
+Status: accepted, built (`gpu-thread`), off by default (`gpuOffMainLoop`).
+Option 2 not built. Builds on [0011](0011-async-fences.md),
 [0026](0026-fence-tests-off-the-render-threads-lock.md),
 [0036](0036-sound-main-loop-qos.md) and [0045](0045-sound-own-thread.md).
 
@@ -78,16 +78,18 @@ Option 1's rules:
   guest freeze 18 ms -> 0; glmark2 40 ms -> 1 ms; browsing with the sound on
   its own thread: worst vCPU wait 58 ms -> 4 ms. Every long hold before was a
   single SUBMIT_3D. Numbers and method: work/tracks/gpu-thread.md.
-- Open before it can be the default: at 60 Hz with a busy page beside, the
-  spike's key-to-screen latency was worse (p50 36-62 ms vs 33-34 ms), all of
-  it between the guest's flush and the screen; glmark2 scores and the Venus
-  configuration are not measured yet.
-- The main loop itself is still busy during a batch: its timers (the
-  main-loop sound path, the present timer, GUI refresh), libslirp, NVMe
-  completions and QMP wait as before. Option 2 is for those.
-- GL threading on macOS does not change in this step.
-- Extra displays and the layer fallback wait for the GPU lock during a long
-  batch, as they wait for the BQL today.
+- With it the VM's frames reach the present steadily, and its jitter buffer
+  (ADR 0020) then kept one or two extra frames: the guest's display clock
+  runs about a frame a second faster than the Mac's, the once-a-second trim
+  only held the queue where it was, and virgl's BQL holds no longer made the
+  guest miss the frames that used to drain it (60 Hz, Chromium scrolling:
+  key to screen p50 36-62 ms vs 33-34). So the app sets
+  `OMACVM_GL_TRIM=quarter` with it: a frame left over after every refresh for
+  a quarter second is skipped. Then, pooled over interleaved runs: 60 Hz
+  scrolling p50 34.8 / p95 45.5 ms (today 37.3 / 69.2), 120 Hz scrolling
+  24.8 / 36.9 (today 25.5 / 34.0; the tail is Mac-side input delivery in
+  runs of both). The trim stays off without gpuOffMainLoop.
+- Off by default; the user decides after their own test.
 - One BQL drop/take and at most one extra queue notification per run.
 - The guest may rewrite a command while QEMU reads it twice; the type (and a
   blob's kind) a run picked a command for is checked again where it runs, so
