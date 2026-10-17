@@ -473,8 +473,12 @@ app)
       check "OpenCL (rusticl on Zink)" "a zink device" bash -c 'RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink'
       check "WebGPU in Chromium" "\"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)" test -x /usr/local/bin/omacvm-chromium-webgpu
     fi
+  elif [[ ${OMACVM_FEATURE_gpu_compute:-on} == off ]]; then
+    FEATURE=gpu-compute
+    skip "WebGPU and GPU compute" "off (omacvm enable gpu-compute)"
   elif [[ -f /etc/environment.d/90-omacvm-opencl.conf ]]; then
-    # Graphics Vulkan: the distro's rusticl on Zink on Venus (venus/opencl.sh).
+    # Graphics Vulkan, gpu-compute on: the distro's rusticl on Zink on Venus (venus/opencl.sh).
+    FEATURE=gpu-compute
     if ! /usr/local/share/omacvm/app/guest/venus/install.sh --venus-on; then
       skip "OpenCL (rusticl on Zink)" "with Vulkan from the VM's next start"
     elif RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink; then
@@ -490,7 +494,7 @@ app)
     else
       skip "WebGPU in Chromium" "after OmacVM's Venus driver build ($(pacman -Q vulkan-virtio 2>/dev/null || echo "no vulkan-virtio") now; the VM builds it after its next start)"
     fi
-  else skip "Vulkan, WebGPU, GPU compute" "off (experimental: omacvm enable vulkan)"; fi
+  else skip "Vulkan, WebGPU, GPU compute" "off: Graphics gives this VM OpenGL only (omacvm graphics; macOS 15: omacvm enable vulkan)"; fi
   FEATURE=""
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
   else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi

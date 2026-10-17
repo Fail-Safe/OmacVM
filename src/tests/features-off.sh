@@ -33,6 +33,7 @@ no-idle-lock:nothing of it talks to the Mac; off is Omarchy's own screensaver an
 autologin:nothing of it talks to the Mac
 thp-kernel:nothing of it talks to the Mac
 fast-network:apply takes the Mac's service off when no VM has it (src/net/mac/test.sh)
+gpu-compute:venus/compute.sh off on every apply of an app VM (OpenCL switch, the Chromium (WebGPU) launcher and Firefox's switch go; Vulkan stays as Graphics says); never on the other routes; nothing of it talks to the Mac (src/tests/venus-driver.sh)
 vulkan:apply removes the VM's vulkan file (no Venus device from the next start) and venus/install.sh --remove; nothing of it talks to the Mac (src/tests/vulkan-feature.sh)
 x86-apps:x86/guest/install.sh off removes OmacVM's box64 package and its binfmt rule on every apply; nothing of it talks to the Mac (src/tests/x86-apps.sh)
 mac-ime:ime/guest/install.sh off removes OmacVM's Fcitx5 module, its port rule, the GTK line and the Chromium flag on every apply; OmacVM.app adds the org.omacvm.ime port and its socket only for a VM whose record says mac-ime=on, and QEMU's window code reads keys as before without OMACVM_IME_SOCKET (src/ime/tests/run.sh, app/runtime/Tests/keys/test-ime.sh)

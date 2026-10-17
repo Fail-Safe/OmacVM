@@ -118,12 +118,7 @@ venus/vulkan-virtio.sh $want || echo "WARN: Vulkan (Venus) is not set up; OpenGL
 if pacman -Q vulkan-virtio >/dev/null 2>&1 && ! command -v vulkaninfo >/dev/null; then
   ../../guest/pkg-add vulkan-tools || echo "WARN: vulkaninfo not installed (vulkan-tools); omacvm check does not ask it"
 fi
-# OpenCL (GPU compute) on that Vulkan: the distro's rusticl on Zink (venus/opencl.sh says where it works).
-if [[ $graphics == vulkan ]]; then venus/opencl.sh || echo "WARN: OpenCL is not set up; Vulkan and OpenGL are unaffected"
-elif [[ $graphics == opengl ]]; then venus/opencl.sh --off; fi
-# WebGPU in Chromium on that Vulkan: the "Chromium (WebGPU)" launcher (venus/webgpu.sh).
-if [[ $graphics == vulkan ]]; then venus/webgpu.sh || echo "WARN: WebGPU in Chromium is not set up; Vulkan and OpenGL are unaffected"
-elif [[ $graphics == opengl ]]; then venus/webgpu.sh --off; fi
+# OpenCL and WebGPU on that Vulkan: guest/install.sh's gpu-compute step (venus/compute.sh).
 # Vulkan windows: on the GPU when the Mac's app can show them, else through a
 # CPU copy (omacvm-vulkan-present says why). It replaces 3.0.0 RC's fixed
 # environment.d file.

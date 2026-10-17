@@ -180,51 +180,68 @@ else
 fi
 grep -q 'app/guest/venus/vulkan-virtio.sh --status' src/guest/check.sh && pass "check has the Vulkan (Venus) row" || fail "no check row"
 
-# OpenCL on that Vulkan (venus/opencl.sh): apply sets it up for Graphics Vulkan, off for OpenGL,
-# leaves it to the vulkan feature's Mesa when that is there; omacvm graphics does it too.
-grep -q '^if \[\[ $graphics == vulkan \]\]; then venus/opencl.sh ||' src/app/guest/install.sh &&
-  grep -q 'venus/opencl.sh --off' src/app/guest/install.sh && pass "app install sets up OpenCL with Vulkan" ||
-  fail "app install does not run venus/opencl.sh"
-grep -q 'app/guest/venus/opencl.sh' src/cmd/graphics.sh && pass "omacvm graphics sets up OpenCL" || fail "omacvm graphics skips OpenCL"
-grep -q '90-omacvm-opencl.conf' src/guest/check.sh && pass "check has the OpenCL row" || fail "no OpenCL check row"
+# WebGPU and GPU compute on that Vulkan (feature gpu-compute, venus/compute.sh): its own
+# install step (after the vulkan feature's), and omacvm graphics runs it on a running VM.
+grep -q 'want gpu-compute && \[\[ $TYPE == app \]\]' src/guest/install.sh &&
+  grep -q 'app/guest/venus/compute.sh" "${F\[gpu-compute\]}"' src/guest/install.sh &&
+  [[ $(grep -n 'want gpu-compute' src/guest/install.sh | cut -d: -f1) -gt $(grep -n 'want vulkan &&' src/guest/install.sh | cut -d: -f1) ]] &&
+  pass "install: the gpu-compute step, after the vulkan step" || fail "install: no gpu-compute step after the vulkan step"
+! grep -q 'venus/opencl.sh\|venus/webgpu.sh' src/app/guest/install.sh && pass "app install leaves OpenCL and WebGPU to gpu-compute" ||
+  fail "app install still sets up OpenCL/WebGPU itself"
+grep -q 'compute.sh' src/cmd/graphics.sh && pass "omacvm graphics runs compute.sh" || fail "omacvm graphics skips compute.sh"
+grep -q '90-omacvm-opencl.conf' src/guest/check.sh && grep -q 'FEATURE=gpu-compute' src/guest/check.sh &&
+  pass "check has the OpenCL row, under gpu-compute" || fail "no OpenCL check row under gpu-compute"
+C=$T/compute; mkdir -p "$C"
+for f in compute.sh; do cp "$D/$f" "$C/"; done
+printf '#!/bin/bash\necho "opencl $*" >> "%s/calls"\n' "$C" > "$C/opencl.sh"
+printf '#!/bin/bash\necho "webgpu $* gc=$OMACVM_GPU_COMPUTE" >> "%s/calls"\n' "$C" > "$C/webgpu.sh"
+chmod +x "$C"/*.sh
+cr() { rm -f "$C/calls"; printf '%s\n' "$@" > "$C/env"; OMACVM_ENV=$C/env "$C/compute.sh" ${ARG:-} >/dev/null 2>&1; cat "$C/calls" 2>/dev/null | tr '\n' ';'; }
+[[ $(cr OMACVM_GRAPHICS=vulkan OMACVM_FEATURE_gpu_compute=on) == "opencl ;webgpu  gc=on;" ]] && pass "compute.sh: on with Vulkan: OpenCL and WebGPU" || fail "compute.sh on: $(cr OMACVM_GRAPHICS=vulkan OMACVM_FEATURE_gpu_compute=on)"
+[[ $(cr OMACVM_GRAPHICS=vulkan) == "opencl ;webgpu  gc=on;" ]] && pass "compute.sh: no record yet (a VM from before 3.1.20): on" || fail "compute.sh without a record"
+[[ $(cr OMACVM_GRAPHICS=vulkan OMACVM_FEATURE_gpu_compute=off) == "opencl --off;webgpu --off gc=off;" ]] && pass "compute.sh: off: both go" || fail "compute.sh off: $(cr OMACVM_GRAPHICS=vulkan OMACVM_FEATURE_gpu_compute=off)"
+[[ $(cr OMACVM_GRAPHICS=opengl OMACVM_FEATURE_gpu_compute=on) == "opencl --off;webgpu --off gc=on;" ]] && pass "compute.sh: Graphics OpenGL: both go" || fail "compute.sh with OpenGL"
+[[ $(ARG=off cr OMACVM_GRAPHICS=vulkan OMACVM_FEATURE_gpu_compute=on) == "opencl --off;webgpu --off gc=off;" ]] && pass "compute.sh off: the argument wins" || fail "compute.sh off by argument"
+ARG=maybe cr OMACVM_GRAPHICS=vulkan >/dev/null; OMACVM_ENV=$C/env "$C/compute.sh" maybe >/dev/null 2>&1; [[ $? == 2 ]] && pass "compute.sh: unknown value: usage" || fail "compute.sh: unknown value accepted"
+
 O=$T/opencl.conf
-OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=$T/none.icd "$D/opencl.sh" --nonsense >/dev/null 2>&1
+ocl() { OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=${ICD:-$T/none.icd} "$D/opencl.sh" "$@"; }
+ocl --nonsense >/dev/null 2>&1
 [[ $? == 2 ]] && pass "opencl.sh: unknown option: usage" || fail "opencl.sh: unknown option accepted"
 echo RUSTICL_ENABLE=zink > "$O"
-OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=$T/none.icd "$D/opencl.sh" --off && [[ ! -e $O ]] &&
-  pass "opencl.sh --off removes the switch" || fail "opencl.sh --off kept the switch"
+ocl --off && [[ ! -e $O ]] && pass "opencl.sh --off removes the switch" || fail "opencl.sh --off kept the switch"
 echo RUSTICL_ENABLE=zink > "$O"; : > "$T/ours.icd"
-out=$(OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=$T/ours.icd "$D/opencl.sh" 2>&1); rc=$?
+out=$(ICD=$T/ours.icd ocl 2>&1); rc=$?
 [[ $rc == 0 && ! -e $O && $out == *"feature vulkan"* ]] && pass "opencl.sh: OmacVM's Mesa has its own rusticl" ||
   fail "opencl.sh with OmacVM's Mesa: rc $rc, said '$out'"
 if (( EUID != 0 )); then
-  out=$(OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=$T/none.icd "$D/opencl.sh" 2>&1); rc=$?
+  out=$(ocl 2>&1); rc=$?
   [[ $rc == 1 && $out == *"run as root"* && ! -e $O ]] && pass "opencl.sh installs as root only" ||
     fail "opencl.sh as a user: rc $rc, said '$out'"
 fi
 
-# WebGPU in Chromium on that Vulkan (venus/webgpu.sh): the launcher with Graphics
-# Vulkan; --off keeps it while Graphics Vulkan or the vulkan feature's Mesa gives WebGPU.
-grep -q '^if \[\[ $graphics == vulkan \]\]; then venus/webgpu.sh ||' src/app/guest/install.sh &&
-  grep -q 'venus/webgpu.sh --off' src/app/guest/install.sh && pass "app install sets up WebGPU with Vulkan" ||
-  fail "app install does not run venus/webgpu.sh"
-grep -q 'app/guest/venus/webgpu.sh' src/cmd/graphics.sh && pass "omacvm graphics sets up WebGPU" || fail "omacvm graphics skips WebGPU"
+# WebGPU (venus/webgpu.sh): the launcher and Firefox's switch; --off keeps them while gpu-compute
+# gives them (Graphics Vulkan) or the vulkan feature's Mesa is there.
 grep -q '"WebGPU in Chromium"' src/guest/check.sh && grep -qF 'pacman -Q vulkan-virtio 2>/dev/null) == *omacvm*' src/guest/check.sh &&
   pass "check has the WebGPU row for Graphics Vulkan" || fail "no WebGPU check row for Graphics Vulkan"
-grep -q './webgpu.sh --off' "$D/install.sh" && pass "vulkan feature off leaves the launcher to webgpu.sh" ||
-  fail "venus/install.sh --remove deletes the launcher itself"
+grep -q './webgpu.sh --off' "$D/install.sh" && ! grep -q 'FFPREF' "$D/install.sh" && pass "vulkan feature off leaves the launcher and Firefox's switch to webgpu.sh" ||
+  fail "venus/install.sh --remove deletes the launcher or Firefox's switch itself"
 W=$T/root; mkdir -p "$W/etc/omacvm"
 wg() { PATH="$T:$PATH" OMACVM_WEBGPU_ROOT=$W OMACVM_CHROMIUM=${CHR:-/nonexistent} "$D/webgpu.sh" "$@" >/dev/null 2>&1; }
-has() { [[ -f $W/usr/local/bin/omacvm-chromium-webgpu && -L $W/usr/local/bin/omacvm-chrome-webgpu ]]; }
+has() { [[ -f $W/usr/local/bin/omacvm-chromium-webgpu && -L $W/usr/local/bin/omacvm-chrome-webgpu && -f $W/usr/lib/firefox/defaults/pref/omacvm-webgpu.js ]]; }
 CHR=$T/ldd wg && has && [[ -f $W/usr/share/applications/omacvm-chromium-webgpu.desktop ]] &&
-  pass "webgpu.sh: launcher, Chrome link and menu entry" || fail "webgpu.sh did not install the launcher"
+  pass "webgpu.sh: launcher, Chrome link, menu entry, Firefox's switch" || fail "webgpu.sh did not install the launcher or Firefox's switch"
 echo OMACVM_GRAPHICS=vulkan > "$W/etc/omacvm/env"
-wg --off; has && pass "webgpu.sh --off keeps it with Graphics Vulkan" || fail "webgpu.sh --off removed it with Graphics Vulkan"
-echo OMACVM_GRAPHICS=opengl > "$W/etc/omacvm/env"; mkdir -p "$W/etc/vulkan/icd.d"; : > "$W/etc/vulkan/icd.d/omacvm_venus_icd.json"
-wg --off; has && pass "webgpu.sh --off keeps it with the vulkan feature's Mesa" || fail "webgpu.sh --off removed the vulkan feature's launcher"
+wg --off; has && pass "webgpu.sh --off keeps them with Graphics Vulkan (gpu-compute on by default)" || fail "webgpu.sh --off removed them with Graphics Vulkan"
+OMACVM_GPU_COMPUTE=off wg --off; ! has && [[ ! -e $W/usr/lib/firefox/defaults/pref/omacvm-webgpu.js ]] &&
+  pass "webgpu.sh --off removes them with gpu-compute off" || fail "webgpu.sh --off kept them with gpu-compute off"
+CHR=$T/ldd wg; printf 'OMACVM_GRAPHICS=vulkan\nOMACVM_FEATURE_gpu_compute=off\n' > "$W/etc/omacvm/env"
+wg --off; ! has && pass "webgpu.sh --off: gpu-compute off in the record" || fail "webgpu.sh --off ignored the record's gpu-compute=off"
+CHR=$T/ldd wg; echo OMACVM_GRAPHICS=opengl > "$W/etc/omacvm/env"; mkdir -p "$W/etc/vulkan/icd.d"; : > "$W/etc/vulkan/icd.d/omacvm_venus_icd.json"
+OMACVM_GPU_COMPUTE=off wg --off; has && pass "webgpu.sh --off keeps them with the vulkan feature's Mesa" || fail "webgpu.sh --off removed the vulkan feature's launcher"
 rm "$W/etc/vulkan/icd.d/omacvm_venus_icd.json"
 wg --off; ! has && [[ ! -e $W/usr/share/applications/omacvm-chromium-webgpu.desktop ]] &&
-  pass "webgpu.sh --off removes it with OpenGL" || fail "webgpu.sh --off left the launcher with OpenGL"
+  pass "webgpu.sh --off removes them with OpenGL" || fail "webgpu.sh --off left the launcher with OpenGL"
 wg --nonsense; [[ $? == 2 ]] && pass "webgpu.sh: unknown option: usage" || fail "webgpu.sh: unknown option accepted"
 wg; has && [[ ! -e $W/usr/share/applications/omacvm-chromium-webgpu.desktop ]] &&
   pass "webgpu.sh without Chromium: launcher, no menu entry" || fail "webgpu.sh without Chromium"
