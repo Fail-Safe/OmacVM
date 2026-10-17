@@ -295,6 +295,13 @@ for tool in awk bash chmod curl ditto file grep install mkdir mktemp patch \
   pkg-config python3 rm sed shasum sw_vers tar uname; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool is unavailable: $tool"
 done
+# Apple's /usr/bin/python3 is a shim under SIP: macOS drops DYLD_LIBRARY_PATH
+# for it, so the virgl test binaries it starts below would not find libepoxy.
+# The python3 it stands for (Xcode's or the Command Line Tools') keeps it.
+if [[ $(command -v python3) == /usr/bin/python3 ]] && real_python=$(xcrun -f python3 2>/dev/null) &&
+   [[ -x $real_python && $real_python != /usr/bin/* ]]; then
+  PATH="$(dirname "$real_python"):$PATH"
+fi
 
 [[ $(uname -s) == Darwin ]] || die "this source build requires macOS"
 [[ $(uname -m) == arm64 ]] || die "this source build requires Apple Silicon (arm64)"
