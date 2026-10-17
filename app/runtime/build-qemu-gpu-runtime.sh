@@ -940,6 +940,12 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-display-settl
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-audio-own-thread.patch"
 grep -q 'getenv("OMACVM_AUDIO_THREAD")' "$source_dir/audio/audio-rt.c" || \
   die "audio/audio-rt.c: the sound's own thread is missing (audio-own-thread patch)"
+# OmacVM: the VM's GPU work without the BQL (OMACVM_GPU_UNLOCKED=1, ADR 0046):
+# the present BH on the main thread only, a GPU lock for the AppKit thread's
+# own virgl draws, then the unlocked runs in virtio-gpu.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-bh-main-thread.patch"
+grep -q 'aio_bh_new(iohandler_get_aio_context(),' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the present BH must run on the main loop thread (present-bh-main-thread patch)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
