@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.18 (unreleased)
+## 3.1.18
 
 - **The VM's graphics without QEMU's big lock (experimental, off by default).** While an app
   opened or a page drew new things, the VM's graphics held QEMU's lock for up to 100-350 ms,
