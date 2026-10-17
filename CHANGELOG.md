@@ -10,10 +10,11 @@ in more words.
   and the VM's CPUs stopped with it: the VM froze for that long, and its sound and typing
   waited. With `defaults write org.omacvm.app gpuOffMainLoop -bool true` the graphics work runs
   without that lock (counts from the next start of the VM). Measured on the Mac mini while new
-  Chromium windows opened: the longest stop of the VM 107 ms -> 1 ms. Typing shows up as fast
-  as before or faster (60 Hz with a page scrolling beside: half of the keys within 34.8 ms,
-  95 % within 45.5 ms; before 37.3 and 69.2). `defaults delete org.omacvm.app gpuOffMainLoop`
-  goes back. GPU safe mode always takes the old way.
+  Chromium windows opened: the longest stop of the VM 107 ms -> 1 ms; while a Vulkan app
+  started 779 ms -> 14 ms. Keys reach the screen as fast as before (60 Hz with a page scrolling
+  beside: half within 34.8 ms, 95 % within 45.5 ms; before 37.3 and 69.2; 120 Hz the same), and
+  Vulkan, WebGPU and OpenGL scores are unchanged. `defaults delete org.omacvm.app
+  gpuOffMainLoop` goes back. GPU safe mode always takes the old way.
 
 ## 3.1.17
 

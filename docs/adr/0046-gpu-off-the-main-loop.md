@@ -89,6 +89,13 @@ Option 1's rules:
   scrolling p50 34.8 / p95 45.5 ms (today 37.3 / 69.2), 120 Hz scrolling
   24.8 / 36.9 (today 25.5 / 34.0; the tail is Mac-side input delivery in
   runs of both). The trim stays off without gpuOffMainLoop.
+- Venus (KosmicKrisp): vkcube, vkmark (3131 vs 3123), glmark2 (2074 vs
+  2065) and WebGPU in Chromium (1169 vs 1122 GFLOPS) as before; the worst
+  BQL hold of that run 779 -> 14 ms (one Venus host blob of vkmark's, made
+  without the BQL now). The sound on its own thread while browsing: no
+  breaks on either path, worst vCPU wait 301 -> 1.2 ms. 20 rounds of GPU
+  process kills, desktop restarts, VM resets and shutdowns under load: all
+  came back.
 - Off by default; the user decides after their own test.
 - One BQL drop/take and at most one extra queue notification per run.
 - The guest may rewrite a command while QEMU reads it twice; the type (and a
