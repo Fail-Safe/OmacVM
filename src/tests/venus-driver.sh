@@ -191,6 +191,7 @@ grep -q 'want gpu-compute && \[\[ $TYPE == app \]\]' src/guest/install.sh &&
 grep -q 'compute.sh' src/cmd/graphics.sh && pass "omacvm graphics runs compute.sh" || fail "omacvm graphics skips compute.sh"
 grep -q '90-omacvm-opencl.conf' src/guest/check.sh && grep -q 'FEATURE=gpu-compute' src/guest/check.sh &&
   pass "check has the OpenCL row, under gpu-compute" || fail "no OpenCL check row under gpu-compute"
+for f in compute.sh opencl.sh webgpu.sh; do [[ -x $D/$f ]] && pass "$f is executable (install.sh runs it)" || fail "$f is not executable"; done
 C=$T/compute; mkdir -p "$C"
 for f in compute.sh; do cp "$D/$f" "$C/"; done
 printf '#!/bin/bash\necho "opencl $*" >> "%s/calls"\n' "$C" > "$C/opencl.sh"
