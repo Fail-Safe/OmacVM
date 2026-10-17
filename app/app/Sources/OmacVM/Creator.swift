@@ -63,6 +63,12 @@ final class Creator: ObservableObject {
         try? answers?.write(contentsOf: Data((build ? "build\n" : "later\n").utf8))
     }
 
+    /// The window pictures (RenderVMWindow): Update VM at its kernel question.
+    func showForRendering(kernel q: KernelQuestion) {
+        job = .update; failed = nil; step = 1; steps = 3
+        title = "Starting the VM without a window"; kernelQuestion = q
+    }
+
     /// What runs: a new VM (create-vm.sh, prebuilt-vm.sh) or an existing VM's
     /// OmacVM brought up to this app's (update-vm.sh).
     enum Job { case build, update }

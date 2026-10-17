@@ -178,6 +178,12 @@ enum RenderVMWindow {
                                                   notes: URL(string: "https://github.com/gillesgoetsch/OmacVM/releases"), teams: []),
                            notice: nil, enabled: true, waiting: false, previous: nil)
         window("window-12-update-no-changelog", state, usual)
+        // Update VM asks before it builds a newer memory-optimized kernel.
+        let screen = state.screen
+        state.creator.showForRendering(kernel: .init(have: "7.2.10-1", latest: "7.2.11-1", cpus: 8, low: 20, high: 30))
+        state.screen = .building
+        window("window-20-update-kernel-question", state, usual)
+        state.screen = screen
         u.showForRendering(staged: staged, notice: nil, enabled: true, waiting: false, previous: nil)
         sheet("sheet-1-whats-new") { WhatsNewSheet(updater: u, running: false) {} }
         u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil)
