@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.24 (unreleased)
 
 - **The VM window keeps its size after full screen.** Leaving full screen gave the window back
   smaller, again with every full screen (1280 x 720 became 1140 x 700, then 1120 x 700): macOS
