@@ -22,6 +22,14 @@ public enum WindowSize {
     public static func defaultHeight(visible: Double) -> Double {
         max(minHeight, (visible - 2 * margin).rounded(.down))
     }
+
+    /// The window's frame (x, width) after something made it wider or
+    /// narrower than `width`: as wide as before, around the same middle. The
+    /// height stays as it was given. macOS's Fill (a double-click on the title
+    /// bar) and window tiling do not keep to the window's maximum width.
+    public static func fixedWidth(x: Double, width w: Double) -> (x: Double, width: Double) {
+        ((x + w / 2 - width / 2).rounded(), width)
+    }
 }
 
 /// Which section the sidebar marks while the settings scroll. A probe line

@@ -384,6 +384,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.collectionBehavior.insert(.fullScreenNone)
         w.contentMinSize = NSSize(width: WindowSize.width, height: WindowSize.minHeight)
         w.contentMaxSize = NSSize(width: WindowSize.width, height: 100_000)
+        w.delegate = FixedWidthWindow.shared
         let host = NSHostingController(rootView: root)
         host.sizingOptions = []
         w.contentViewController = host
@@ -391,6 +392,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.isReleasedWhenClosed = false
         w.isRestorable = false
         return w
+    }
+
+    /// Keeps the app's window 800 pt wide; only its height changes. Its
+    /// minimum and maximum width hold a drag on its side, but macOS's Fill (a
+    /// double-click on the title bar, the default since macOS 15) and window
+    /// tiling ignore them: the window went as wide as the screen while its
+    /// content stayed 800 pt. Main thread.
+    @MainActor
+    final class FixedWidthWindow: NSObject, NSWindowDelegate {
+        static let shared = FixedWidthWindow()
+
+        func windowDidResize(_ note: Notification) {
+            guard let w = note.object as? NSWindow, abs(w.frame.width - WindowSize.width) > 0.5 else { return }
+            let fixed = WindowSize.fixedWidth(x: w.frame.origin.x, width: w.frame.width)
+            var f = w.frame
+            f.origin.x = fixed.x
+            f.size.width = fixed.width
+            w.setFrame(f, display: true)
+        }
     }
 
     /// The window's height on the screen it opens on.
