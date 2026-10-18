@@ -1,21 +1,28 @@
 #!/bin/bash
-# mpv.sh (as root, in an OmacVM.app VM): mpv draws with OpenGL while the VM has
-# Vulkan. mpv picks Vulkan by itself whenever the VM has a Vulkan driver
-# (gpu-api=auto -> waylandvk), and on Venus it shows no video at all (Mac mini
-# M4, KosmicKrisp, 2026-10-17: stuck after its first frames in every swap
-# mode). OpenGL (virgl) plays it. The system-wide mpv.conf gets gpu-api=opengl
-# in a marked block; mpv reads the user's ~/.config/mpv/mpv.conf after it, so a
-# gpu-api line there wins.
-#   mpv.sh          add the block (Graphics Vulkan or the vulkan feature)
-#   mpv.sh --off    remove it, unless the VM still has Vulkan another way
-# The rest of the file is left as it is; a file that held only the block goes.
+# mpv.sh (as root, in an OmacVM.app VM): mpv's defaults for the VM, in a marked
+# block of the system-wide mpv.conf. mpv reads the user's ~/.config/mpv/mpv.conf
+# after it, so a vo or gpu-api line there wins.
+# - vo=gpu in every app VM. mpv's default output, gpu-next, leaks a GL fence per
+#   frame on OpenGL: mpv presents through its own swap_buffers, and libplacebo
+#   frees its frame fences only in pl_swapchain_swap_buffers, which mpv never
+#   calls. On virgl each fence holds a file descriptor, so after ~17 s at
+#   60 fps mpv reaches its 1024 limit and every frame fails ("expect bad
+#   rendering 24"). vo=gpu frees its fences (mpv 0.41, libplacebo 7.360,
+#   Mesa 26.2; Mac mini M4, 2026-10-18).
+# - gpu-api=opengl while the VM has Vulkan. mpv picks Vulkan by itself whenever
+#   the VM has a Vulkan driver, and on Venus it shows no video at all (Mac mini
+#   M4, KosmicKrisp, 2026-10-17: stuck after its first frames in every swap
+#   mode). OpenGL (virgl) plays it.
+#   mpv.sh          write the block for the VM's graphics now
+#   mpv.sh --off    the same (older callers ran it when Vulkan was switched off)
+# The rest of the file is left as it is.
 # Tests: src/tests/venus-driver.sh (offline).
 set -euo pipefail
 DEST=${OMACVM_MPV_ROOT:-}
 CONF=$DEST/etc/mpv/mpv.conf
 ENVF=$DEST/etc/omacvm/env
 OURS=$DEST/etc/vulkan/icd.d/omacvm_venus_icd.json
-BEGIN='# OmacVM: begin (mpv shows no video on Venus yet; a gpu-api line in ~/.config/mpv/mpv.conf wins)'
+BEGIN='# OmacVM: begin (vo=gpu: gpu-next leaks a file per frame here; gpu-api=opengl: no video on Venus yet; ~/.config/mpv/mpv.conf wins)'
 END='# OmacVM: end'
 
 strip() {   # the file without our block
@@ -25,17 +32,15 @@ strip() {   # the file without our block
 }
 
 case ${1:-} in
-  --off)
-    graphics=$(sed -n 's/^OMACVM_GRAPHICS=//p' "$ENVF" 2>/dev/null | tail -1)
-    feature=$(sed -n 's/^OMACVM_FEATURE_vulkan=//p' "$ENVF" 2>/dev/null | tail -1)
-    [[ $graphics == vulkan || $feature == on || -f $OURS ]] && exit 0
-    strip
-    exit 0 ;;
-  "") ;;
+  ""|--off) ;;
   *) echo "usage: mpv.sh [--off]" >&2; exit 2 ;;
 esac
 [[ -n $DEST ]] || (( EUID == 0 )) || { echo "mpv.sh: run as root" >&2; exit 1; }
+graphics=$(sed -n 's/^OMACVM_GRAPHICS=//p' "$ENVF" 2>/dev/null | tail -1)
+feature=$(sed -n 's/^OMACVM_FEATURE_vulkan=//p' "$ENVF" 2>/dev/null | tail -1)
+api=""
+[[ $graphics == vulkan || $feature == on || -f $OURS ]] && api=$'\ngpu-api=opengl'
 strip
 mkdir -p "$(dirname "$CONF")"
-printf '%s\ngpu-api=opengl\n%s\n' "$BEGIN" "$END" >> "$CONF"
-echo "mpv: OpenGL (it shows no video on Vulkan here yet; ~/.config/mpv/mpv.conf can choose)"
+printf '%s\nvo=gpu%s\n%s\n' "$BEGIN" "$api" "$END" >> "$CONF"
+echo "mpv: vo=gpu${api:+, OpenGL} (~/.config/mpv/mpv.conf can choose)"

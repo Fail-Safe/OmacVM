@@ -13,6 +13,14 @@ in more words.
 - **The app's window stays 800 points wide.** A double-click on its title bar (macOS's Fill) or
   window tiling made it as wide as the screen while its content stayed 800 points. It now goes
   back to 800 points at once, around the same middle; only its height changes, as intended.
+- **mpv keeps playing after 17 seconds.** In app VMs mpv's default video output (gpu-next)
+  kept one open file per frame: after about 17 s of 60 fps video it hit its limit of 1024 and
+  every frame after that failed ("expect bad rendering" in its log). The leak is mpv's: it never
+  hands its frames back to libplacebo's OpenGL swapchain, which frees each frame's fence only
+  there, and on the VM's OpenGL (virgl) every fence is a file. The VM's system-wide mpv.conf now
+  has `vo=gpu`, which frees them (5 minutes of 1080p60: 28 open files throughout). A `vo` line
+  in your own `~/.config/mpv/mpv.conf` still wins. A VM gets it at its next Update VM;
+  `omacvm check`'s mpv line now shows in every app VM.
 - **Vulkan windows run at the display's rate.** A Vulkan app that waits for the display
   (vkcube, most games) ran at 45-50 frames a second on a 60 Hz display, OpenGL apps at 60.
   Mesa gave each frame a target time from the last frame's presentation and Hyprland held it
