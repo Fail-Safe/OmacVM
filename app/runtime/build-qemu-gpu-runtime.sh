@@ -1243,6 +1243,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-transfer-upload-pb
 # OmacVM: shader constants go through uniform buffers, one upload per submit and one range
 # bound per draw (Apple's GL redoes much of its draw setup after every glUniform call).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-const-uniform-buffer.patch"
+# OmacVM: Vulkan windows without a copy (ADR 0047, vkWindowsNoCopy): a Vulkan window's buffer is
+# an IOSurface that OpenGL binds; the GPU re-strides it into the window's texture (no CPU copy).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-vulkan-windows-iosurface.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
