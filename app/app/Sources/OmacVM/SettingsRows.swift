@@ -273,6 +273,25 @@ struct ShareKeyboardRow: View {
     }
 }
 
+/// Vulkan windows without a copy (Settings.vkWindowsNoCopy, ADR 0047,
+/// experimental, off by default): read by each start of the VM.
+struct VKWindowsNoCopyRow: View {
+    var tick = 0
+    @State private var on = Settings.vkWindowsNoCopy
+
+    static let info = "Vulkan apps' windows reach the Mac's screen without a copy. QEMU copied every frame of a Vulkan window on its main loop: 2.5 ms a frame for a 1816 x 870 window on a Mac mini, while the VM's CPUs waited for it. With this on, the Vulkan driver writes each frame into memory the Mac's OpenGL can read, and the GPU puts it in place: 0.3 ms of QEMU's time a frame. Frame rates stay the same; the pictures are bit for bit the same. Only on macOS 26 and newer (KosmicKrisp). Experimental: tested on the Mac mini only so far. GPU safe mode always copies. Counts from the next start of the VM."
+
+    var body: some View {
+        SettingRow(title: "Vulkan windows without a copy", badge: "experimental",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Less work for QEMU on each frame of a Vulkan app (macOS 26 and newer).",
+                   info: Self.info, probe: "vk-windows-no-copy") {
+            RowSwitch(title: "Vulkan windows without a copy", isOn: $on, enabled: !Settings.gpuSafeMode)
+        }
+        .onChange(of: on) { _, v in if v != Settings.vkWindowsNoCopy { Settings.vkWindowsNoCopy = v } }
+        .onChange(of: tick) { _, _ in on = Settings.vkWindowsNoCopy }
+    }
+}
+
 /// The escape combo (EscapeSetting: org.omacvm.gestures EscapeSwipe).
 struct EscapeRow: View {
     var tick = 0

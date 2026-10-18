@@ -482,6 +482,13 @@ final class Runner {
             env["OMACVM_GPU_UNLOCKED"] = "1"
             env["OMACVM_GL_TRIM"] = "quarter"
         }
+        // Vulkan windows without a copy (vkWindowsNoCopy, ADR 0047;
+        // virgl-vulkan-windows-iosurface.patch): window buffers are IOSurfaces
+        // when the Vulkan driver is KosmicKrisp; virglrenderer checks the driver
+        // and says in qemu.log which way this start went.
+        if Settings.vkWindowsNoCopy {
+            env["OMACVM_VK_WINDOWS"] = "iosurface"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"

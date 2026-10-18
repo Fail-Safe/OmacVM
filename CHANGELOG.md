@@ -11,6 +11,12 @@ in more words.
   until then; the VM's frame clock runs a few ms late, so frames often waited a refresh more.
   VMs with Vulkan now leave that timing out (`MESA_VK_WSI_DEBUG=nowlts`; a value you set
   yourself wins): vkcube 50 -> 60 fps on the Mac mini. Counts from the next login.
+- **Vulkan windows without a copy (experimental, off).** A new switch in the VM window's General
+  section, next to "Graphics without QEMU's lock". QEMU copied every frame of a Vulkan window
+  on its main loop: 2.5 ms a frame for a 1816 x 870 window on a Mac mini, while the VM's CPUs
+  waited. With it on (macOS 26 and newer), the Vulkan driver writes each frame into memory the
+  Mac's OpenGL can read and the GPU puts it in place: 0.3 ms. Frame rates and pictures stay the
+  same. `omacvm check` says which way the VM's Vulkan windows go (ADR 0047).
 
 ## 3.1.23
 

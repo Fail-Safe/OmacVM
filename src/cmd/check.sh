@@ -440,6 +440,14 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     "virgl runs with the BQL"*) ok "GPU lock" "virgl runs with QEMU's big lock (the default)" ;;
   esac
 fi
+# Vulkan windows without a copy this run (ADR 0047, experimental: vkWindowsNoCopy).
+# virglrenderer says so once Venus made its device; nothing when the switch is off.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  case $(grep -o 'Vulkan windows are [a-zA-Z]*.*' "$miclog" | tail -1) in
+    "Vulkan windows are IOSurfaces"*) ok "Vulkan windows" "without a copy (IOSurfaces; vkWindowsNoCopy, experimental)" ;;
+    "Vulkan windows are copied"*) warn "Vulkan windows" "vkWindowsNoCopy is on, but they are copied this run: $(grep -o 'no IOSurfaces: [^)]*' "$miclog" | tail -1)" ;;
+  esac
+fi
 # OmacVM.app's Graphics setting: what this start got (the app says so in
 # qemu.log), and whether the next start gets something else.
 if [[ $TYPE == app ]] && gd=$(app_dir "$VM" 2>/dev/null); then

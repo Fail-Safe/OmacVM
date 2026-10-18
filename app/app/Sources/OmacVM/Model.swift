@@ -542,6 +542,25 @@ enum Settings {
             UserDefaults.standard.set(newValue, forKey: "gpuOffMainLoop")
         }
     }
+    /// Vulkan windows without a copy (ADR 0047): a Vulkan app's frames are
+    /// written into IOSurface memory that macOS OpenGL reads, instead of
+    /// being copied by QEMU's main loop. KosmicKrisp (macOS 26 and newer)
+    /// only; QEMU's virglrenderer decides and logs it. Off by default
+    /// (experimental). The VM window's switch (VKWindowsNoCopyRow) or
+    /// defaults write org.omacvm.app vkWindowsNoCopy -bool true;
+    /// vkWindowsCopy -bool true keeps the copy whatever the default, and
+    /// GPU safe mode always does. Read at each start of the VM.
+    static var vkWindowsNoCopy: Bool {
+        get {
+            let d = UserDefaults.standard
+            if gpuSafeMode || d.bool(forKey: "vkWindowsCopy") { return false }
+            return d.object(forKey: "vkWindowsNoCopy") as? Bool ?? false
+        }
+        set {
+            UserDefaults.standard.removeObject(forKey: "vkWindowsCopy")
+            UserDefaults.standard.set(newValue, forKey: "vkWindowsNoCopy")
+        }
+    }
     /// Added to the sound delay the app tells the VM (AudioLatencyWatch), in
     /// ms, -500 ... 500: negative when the sound comes early in the VM's
     /// videos, positive when it still comes late (a device that under-reports).

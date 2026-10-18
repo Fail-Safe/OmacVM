@@ -504,6 +504,9 @@ jobs:
       - name: The VM's GPU work without QEMU's big lock (patches pinned and ordered, switch, log lines, check, what runs unlocked)
         run: src/tests/gpu-unlocked.sh
 
+      - name: Vulkan windows without a copy (patch pinned and ordered, switch, log lines, check)
+        run: src/tests/vk-windows.sh
+
       - name: No App Nap for QEMU's window process (patch pinned, applied, before the run loop, idle sleep kept)
         run: src/tests/app-nap.sh
 
