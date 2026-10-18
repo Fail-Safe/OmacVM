@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.23
 
 - **Keyboard sharing apps has a switch.** The setting for Synergy, Deskflow, Barrier and Input
   Leap (3.0.18, #350) was only a Terminal command. It is now a switch in the VM window's
