@@ -541,6 +541,15 @@ Patches (all in `app/runtime/patches`, one per concern):
   frame clock runs a few ms late, so frames waited a refresh more and FIFO
   windows ran at 45-50 fps on 60 Hz (vkcube; 59-60 without it, as through
   Xwayland). The fifo-v1 barrier still paces them.
+- `virgl-vulkan-windows-iosurface.patch` (ADR 0047, experimental switch
+  `vkWindowsNoCopy`, KosmicKrisp only): the window's buffer is an IOSurface
+  of 16 KiB rows imported into KosmicKrisp as host memory
+  (`VIRGL_RESOURCE_IOSURFACE`); vrend binds it as a RECTANGLE texture and the
+  blitter's context re-strides it into the window's texture on the GPU (4-byte
+  BGRA/RGBA or 8-byte half-float pixels, bit-exact): no CPU copy, no CPU wait,
+  0.3-0.4 ms of QEMU's time a frame instead of 1.8-2.5 ms. Anything else falls
+  back to the copy above, logged once ("Vulkan windows are copied (no
+  IOSurfaces: ...)"); `omacvm check` names the path.
 
 Switch: the VM's Graphics setting (ADR 0035; up to 2.9 the hidden `venus`
 default, moved into it at the first 3.0.0 launch) adds

@@ -33,5 +33,6 @@ a new record replaces it and says so.
 | [0044](0044-fullpanel.md) | Omanotch is the shared notch integration; FullPanel is OmacVM.app only, experimental (#339) | accepted, built (off by default) |
 | [0045](0045-sound-own-thread.md) | The sound on its own real-time thread, not in QEMU's main loop | accepted, built (`audio`, 3.1.16) |
 | [0046](0046-gpu-off-the-main-loop.md) | The VM's GPU work lets go of the BQL, then leaves the main loop | accepted, built (`gpu-thread`), off by default |
+| [0047](0047-vulkan-windows-without-a-copy.md) | Vulkan windows at the display's rate (no Wayland commit timing), and without a CPU copy (IOSurface window buffers, GPU re-stride) | accepted; no copy built (`vulkan-zc`), off by default |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

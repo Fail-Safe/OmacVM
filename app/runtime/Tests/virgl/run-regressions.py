@@ -242,6 +242,8 @@ run_test("test-thread-sync-fallback", "vrend_renderer.c")
 run_test("test-fence-wait-busy", "vrend_renderer.c")
 run_test("test-core-glsl-shaders", "vrend_shader.c")
 run_test("test-blitter-shaders", "vrend_blitter.c")
+# Vulkan windows without a copy (virgl-vulkan-windows-iosurface.patch): the re-stride and its layout check.
+run_test("test-vulkan-window-restride", "vrend_blitter.c")
 run_api_test("test-empty-framebuffer")
 run_api_test("test-sampler-limit")
 run_api_test("test-set-type-no-egl")

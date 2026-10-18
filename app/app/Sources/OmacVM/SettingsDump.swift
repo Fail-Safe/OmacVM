@@ -22,6 +22,7 @@ enum SettingsDump {
             "audioThread": Settings.audioThread,
             "gpuOffMainLoop": Settings.gpuOffMainLoop,
             "shareKeyboard": Settings.shareKeyboard,
+            "vkWindowsNoCopy": Settings.vkWindowsNoCopy,
             "closeAction": Settings.closeAction.rawValue,
             "appIconTheme": IconTheme.choice(stored: UserDefaults.standard.object(forKey: IconTheme.key)).id,
             "escapeSwipe": EscapeSetting.current().rawValue,
