@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **mpv keeps playing in UTM VMs too.** UTM's VM draws OpenGL with virgl as well, with the same
+  Mesa and mpv, so mpv's default output (gpu-next) keeps one open file per frame there too and
+  stops drawing after about 17 s of 60 fps video. UTM VMs now get the same `vo=gpu` line in the
+  system-wide mpv.conf as app VMs at their next `omacvm apply`; a `vo` line in your own
+  `~/.config/mpv/mpv.conf` still wins. `omacvm check` shows the mpv line in UTM VMs.
+
 ## 3.1.24
 
 - **The VM window keeps its size after full screen.** Leaving full screen gave the window back
