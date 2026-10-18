@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.22 (unreleased)
+## 3.1.22
 
 - **New VMs build again, and omarchy update works again.** Since 18 October, Omarchy's package
   server has no ARM builds of two Hyprland parts (hyprtoolkit and hyprland-guiutils), but
