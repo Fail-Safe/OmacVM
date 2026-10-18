@@ -119,6 +119,10 @@ if pacman -Q vulkan-virtio >/dev/null 2>&1 && ! command -v vulkaninfo >/dev/null
   ../../guest/pkg-add vulkan-tools || echo "WARN: vulkaninfo not installed (vulkan-tools); omacvm check does not ask it"
 fi
 # OpenCL and WebGPU on that Vulkan: guest/install.sh's gpu-compute step (venus/compute.sh).
+# mpv on that Vulkan shows no video (venus/mpv.sh): it draws with OpenGL while the VM has Venus.
+vkfeature=$(sed -n 's/^OMACVM_FEATURE_vulkan=//p' /etc/omacvm/env 2>/dev/null | tail -1)
+if [[ $graphics == vulkan || $vkfeature == on ]]; then venus/mpv.sh || echo "WARN: mpv's OpenGL default is not set; mpv may show no video"
+elif [[ $graphics == opengl ]]; then venus/mpv.sh --off; fi
 # Vulkan windows: on the GPU when the Mac's app can show them, else through a
 # CPU copy (omacvm-vulkan-present says why). It replaces 3.0.0 RC's fixed
 # environment.d file.

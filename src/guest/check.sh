@@ -461,6 +461,12 @@ app)
   elif [[ -z $vb ]]; then skip "display vblank" "no DRM vblank setting in this kernel"
   else warn "display vblank" "runs ${vb} ms after each frame (omacvm apply sets 100 ms)"; fi
   FEATURE=vulkan
+  # mpv picks Vulkan by itself and shows no video on Venus: venus/mpv.sh makes OpenGL its default.
+  mpv_row() {
+    if ! command -v mpv >/dev/null; then skip "mpv" "not installed"
+    elif grep -q '^# OmacVM: begin' /etc/mpv/mpv.conf 2>/dev/null; then ok "mpv" "draws with OpenGL (on Vulkan it shows no video yet)"
+    else bad "mpv" "would draw with Vulkan and show no video: omacvm apply"; fi
+  }
   if [[ ${OMACVM_FEATURE_vulkan:-off} == on && ! -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
     bad "Vulkan (OmacVM's Mesa)" "on, but OmacVM's Mesa is not installed: omacvm apply (its log says why)"
   elif [[ -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
@@ -497,6 +503,8 @@ app)
       skip "WebGPU in Chromium" "after OmacVM's Venus driver build ($(pacman -Q vulkan-virtio 2>/dev/null || echo "no vulkan-virtio") now; the VM builds it after its next start)"
     fi
   else skip "Vulkan, WebGPU, GPU compute" "off: Graphics gives this VM OpenGL only (omacvm graphics; macOS 15: omacvm enable vulkan)"; fi
+  # mpv draws with OpenGL while the VM has Venus (Graphics Vulkan or the vulkan feature: venus/mpv.sh).
+  if [[ ${OMACVM_GRAPHICS:-} == vulkan || ${OMACVM_FEATURE_vulkan:-off} == on ]]; then FEATURE=""; mpv_row; fi
   FEATURE=""
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
   else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi

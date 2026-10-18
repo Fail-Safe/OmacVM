@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **mpv shows video with Vulkan.** With Graphics on Vulkan (Automatic on macOS 26 and newer), mpv
+  picked Vulkan by itself and showed no picture at all. Now the VM's system-wide mpv.conf has
+  mpv draw with OpenGL, which plays it (a 4K60 clip on the Mac mini). A `gpu-api` line in your
+  own `~/.config/mpv/mpv.conf` still wins; Graphics OpenGL takes the line out again. A VM gets it
+  at its next Update VM; `omacvm check` has an mpv line.
+
 ## 3.1.20
 
 - **WebGPU and GPU compute have a switch.** On macOS 26 and newer, where Graphics Automatic gives
