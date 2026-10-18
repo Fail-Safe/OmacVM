@@ -254,6 +254,25 @@ struct GPUOffMainLoopRow: View {
     }
 }
 
+/// Keyboard sharing apps (Settings.shareKeyboard, #350): OmacVM's key taps
+/// at the end of macOS's chain; read by each start of the VM.
+struct ShareKeyboardRow: View {
+    var tick = 0
+    @State private var on = Settings.shareKeyboard
+
+    static let info = "Turn this on if you use one keyboard and mouse for several computers with Synergy, Deskflow, Barrier or Input Leap. Without it, a VM started after the sharing app takes the keys even while the pointer is on the other computer. With it, the sharing app sees the keys first: it keeps the ones for the other computer and the VM gets the rest. Trackpad gestures still go to the VM. Counts from the next start of the VM."
+
+    var body: some View {
+        SettingRow(title: "Keyboard sharing apps",
+                   subtitle: "Synergy, Deskflow, Barrier or Input Leap get the keys first.",
+                   info: Self.info, probe: "share-keyboard") {
+            RowSwitch(title: "Keyboard sharing apps", isOn: $on)
+        }
+        .onChange(of: on) { _, v in if v != Settings.shareKeyboard { Settings.shareKeyboard = v } }
+        .onChange(of: tick) { _, _ in on = Settings.shareKeyboard }
+    }
+}
+
 /// The escape combo (EscapeSetting: org.omacvm.gestures EscapeSwipe).
 struct EscapeRow: View {
     var tick = 0

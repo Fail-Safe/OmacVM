@@ -325,7 +325,7 @@ OmacVM.app (QEMU's window code, mac-ime on only): ◀▶ Omarchy's Fcitx5 + Omac
   turns the switch on. Gestures' tap still takes ⌃⌥ Esc (and the old ⌃⌥⌘ Esc) first;
   QEMU's tap lets both through to it (omacvm-cocoa-escape-combo-tap.patch); the Bridge
   still routes media keys. Keyboard sharing apps (Synergy, Deskflow, #350): the
-  hidden `shareKeyboard` (org.omacvm.app, off by default; the test identity's
+  window's switch `shareKeyboard` (org.omacvm.app, off by default; the test identity's
   org.omacvm.app.test) puts QEMU's tap (`OMACVM_KEYS_LAST=1`,
   `omacvm-cocoa-keys-last.patch`), Gestures' and the Bridge's media-key tap at the
   end of the chain (kCGTailAppendEventTap) instead of the head, so the sharing app
@@ -475,6 +475,7 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 | Keyboard access | macOS: Accessibility ("control the computer") for the app | asked | Mac |
 | Mac input | `features` `mac-ime=on` (+ `mac-ime-pending` while stopped) | off | VM |
 | Swipe out to macOS | Gestures `SwipeOut` (bool); hidden `SwipeOutTravel` (trackpad widths per Space, 0.15-1.5) | `false`; 0.5 | app |
+| Keyboard sharing apps | `shareKeyboard` (bool; QEMU's `OMACVM_KEYS_LAST=1` at each start; Gestures and the Bridge read it when they make their taps) | `false` (3.0.18: defaults only; switch from 3.1.23) | app |
 | Sound on its own thread | `audioThread` (bool; hidden `audioMainLoop`, `audioClassic` force it off; read at each start) | `true` (from 3.1.17; 3.1.16 `false`) | app |
 | Mac folder | `mac-folder` (the folder's path) | off (no file) | VM |
 | USB devices | `usb-enabled`, remembered devices `usb.json` | off | VM |

@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Keyboard sharing apps has a switch.** The setting for Synergy, Deskflow, Barrier and Input
+  Leap (3.0.18, #350) was only a Terminal command. It is now a switch in the VM window's
+  settings, under Input, with an (i) that says what it does. It counts from the VM's next start.
+- **Mac input: modifier keys in the debug log.** With `OMACVM_IME_DEBUG=1`, each Shift, Control,
+  Option or Command press and release now shows in the log with what the Mac's input method did
+  with it, to find why a Shift tap does not always switch Chinese and English (#357, thanks
+  @Vocllum).
+
 ## 3.1.22
 
 - **New VMs build again, and omarchy update works again.** Since 18 October, Omarchy's package

@@ -87,7 +87,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      }
      return bool_with_bql(^{
          return [self handleEventLocked:event];
-@@ -8465,8 +8480,893 @@
+@@ -8465,8 +8480,903 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -585,10 +585,20 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    }
 +    omacvm_ime.window_key = omacvm_ime_window_key();
 +    if (kt == OMACVM_IME_FLAGS) {
-+        /* Modifiers go to the VM; the input method sees them too (Shift switches some to Latin). */
-+        if (omacvm_ime_active(&omacvm_ime)) {
++        /*
++         * Modifiers go to the VM; the input method sees them too: a Shift
++         * press and release with no key between switches some to Latin.
++         */
++        bool active = omacvm_ime_active(&omacvm_ime);
++        BOOL used = NO;
++        if (active) {
 +            omacvm_ime_activate();
-+            [omacvm_ime_ctx handleEvent:event];
++            used = [omacvm_ime_ctx handleEvent:event];
++        }
++        if (omacvm_ime_debug) {
++            fprintf(stderr, "omacvm-ime: modifier key %d flags 0x%lx: %s\n", [event keyCode],
++                    (unsigned long)[event modifierFlags], !active ? "inactive, only to the VM" :
++                    used ? "input method used it, also to the VM" : "input method did not want it, to the VM");
 +        }
 +        return false;
 +    }
@@ -981,7 +991,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9690,7 @@
+@@ -8790,6 +9700,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();

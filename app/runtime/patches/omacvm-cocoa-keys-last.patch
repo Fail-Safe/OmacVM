@@ -3,8 +3,8 @@ Subject: [PATCH] cocoa: the full-grab tap at the end of the chain for keyboard s
 
 What: with OMACVM_KEYS_LAST=1 the full-grab event tap goes at the end of
 macOS's event tap chain (kCGTailAppendEventTap) instead of its head.
-OmacVM.app sets it for a start when its hidden setting is on:
-  defaults write org.omacvm.app shareKeyboard -bool true
+OmacVM.app sets it for a start when its Keyboard sharing apps switch is on
+(defaults write org.omacvm.app shareKeyboard -bool true).
 qemu.log then says "full-grab tap at the end of the event tap chain".
 Without it nothing changes. OmacVM Gestures and the Bridge read the same
 setting for their own taps.

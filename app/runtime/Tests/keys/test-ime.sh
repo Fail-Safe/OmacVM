@@ -35,6 +35,12 @@ order=$(grep -nF -e 'if (omacvm_key_for_macos(event)) {' -e 'if (omacvm_ime_on &
   { echo "FAIL handleEvent: the mac-ime hook is not between the macOS-key check and QEMU's handling"; fail=1; }
 [[ $(grep -cF 'omacvm_ime_key(' "$src") -eq 3 ]] && echo "ok   ... the only call (declaration, definition, handleEvent:)" ||
   { echo "FAIL omacvm_ime_key is called somewhere else too"; fail=1; }
+# A modifier change (both the press and the release of a Shift tap) goes to the
+# input method while it is active, and to the VM too; logged with OMACVM_IME_DEBUG (#357).
+fl=$(awk 'index($0, "    if (kt == OMACVM_IME_FLAGS) {") == 1 {on=1} on {print} on && /^    }$/ {exit}' "$src")
+has "a modifier change goes to the input method while it is active" "$fl" 'used = [omacvm_ime_ctx handleEvent:event];'
+has "... and to the VM as well" "$fl" 'return false;'
+has "... logged with OMACVM_IME_DEBUG" "$fl" 'omacvm-ime: modifier key %d flags 0x%lx: %s'
 init=$(body "$src" 'static void omacvm_ime_init(void)')
 has "omacvm_ime_on only with OMACVM_IME_SOCKET" "$init" 'if (!path || !*path) {'
 on_line=$(grep -nF 'omacvm_ime_on = true;' <<<"$init" | cut -d: -f1)
