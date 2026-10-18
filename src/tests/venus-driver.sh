@@ -282,26 +282,34 @@ wg --nonsense; [[ $? == 2 ]] && pass "webgpu.sh: unknown option: usage" || fail 
 wg; has && [[ ! -e $W/usr/share/applications/omacvm-chromium-webgpu.desktop ]] &&
   pass "webgpu.sh without Chromium: launcher, no menu entry" || fail "webgpu.sh without Chromium"
 
-# mpv on that Vulkan (venus/mpv.sh): OpenGL by default while the VM has Venus, in a marked block of
-# the system mpv.conf that keeps the rest of the file; --off removes it once no Vulkan is left.
-grep -q 'venus/mpv.sh ||' src/app/guest/install.sh && grep -q 'venus/mpv.sh --off' src/app/guest/install.sh &&
-  pass "app install sets mpv's OpenGL default with Vulkan" || fail "app install does not run venus/mpv.sh"
+# mpv's defaults (venus/mpv.sh): vo=gpu in every app VM (gpu-next leaks a fence fd per frame on
+# virgl), gpu-api=opengl while the VM has Venus; a marked block of the system mpv.conf that keeps the
+# rest of the file.
+grep -qx 'venus/mpv.sh || echo .*' src/app/guest/install.sh && ! grep -q 'mpv.sh --off' src/app/guest/install.sh &&
+  pass "app install sets mpv's defaults in every app VM" || fail "app install does not run venus/mpv.sh for every VM"
 grep -q 'app/guest/venus/mpv.sh' src/cmd/graphics.sh && pass "omacvm graphics sets mpv's default" || fail "omacvm graphics skips mpv"
-grep -q '"mpv" "draws with OpenGL' src/guest/check.sh && pass "check has the mpv row" || fail "no mpv check row"
+grep -q '"mpv" "vo=gpu' src/guest/check.sh && grep -q 'mpv_row; fi' src/guest/check.sh &&
+  pass "check has the mpv row for every app VM" || fail "no mpv check row for every app VM"
 M=$T/mpvroot; MC=$M/etc/mpv/mpv.conf; mkdir -p "$M/etc/omacvm"
 mp() { OMACVM_MPV_ROOT=$M "$D/mpv.sh" "$@" >/dev/null 2>&1; }
 blocks() { grep -c '^# OmacVM: begin' "$MC" 2>/dev/null || true; }
-mp && [[ $(blocks) == 1 ]] && grep -qx 'gpu-api=opengl' "$MC" && pass "mpv.sh: gpu-api=opengl in its block" || fail "mpv.sh did not write its block"
+lines() { awk '/^# OmacVM: begin/ { s = 1; next } /^# OmacVM: end/ { s = 0 } s' "$MC" | tr '\n' ' '; }
+echo OMACVM_GRAPHICS=vulkan > "$M/etc/omacvm/env"
+mp && [[ $(blocks) == 1 && $(lines) == 'vo=gpu gpu-api=opengl ' ]] && pass "mpv.sh with Vulkan: vo=gpu + gpu-api=opengl" ||
+  fail "mpv.sh with Vulkan wrote: $(lines)"
 mp && [[ $(blocks) == 1 ]] && pass "mpv.sh twice: one block" || fail "mpv.sh twice: $(blocks) blocks"
 echo OMACVM_GRAPHICS=opengl > "$M/etc/omacvm/env"
-mp --off; [[ ! -e $MC ]] && pass "mpv.sh --off: a file of only its block goes" || fail "mpv.sh --off left $(cat "$MC" 2>/dev/null | head -2)"
+mp && [[ $(blocks) == 1 && $(lines) == 'vo=gpu ' ]] && pass "mpv.sh with OpenGL: vo=gpu only" || fail "mpv.sh with OpenGL wrote: $(lines)"
+mp --off && [[ $(blocks) == 1 && $(lines) == 'vo=gpu ' ]] && pass "mpv.sh --off (older callers): vo=gpu stays" ||
+  fail "mpv.sh --off wrote: $(lines)"
+printf '# OmacVM: begin (mpv shows no video on Venus yet; a gpu-api line in ~/.config/mpv/mpv.conf wins)\ngpu-api=opengl\n# OmacVM: end\n' > "$MC"
+mp && [[ $(blocks) == 1 && $(lines) == 'vo=gpu ' ]] && pass "mpv.sh replaces 3.1.21's block" || fail "mpv.sh after 3.1.21's block: $(cat "$MC")"
 printf 'volume=70\nsub-auto=fuzzy\n' > "$MC"; mp
-[[ $(blocks) == 1 && $(head -1 "$MC") == volume=70 ]] && pass "mpv.sh keeps the file's own lines" || fail "mpv.sh changed the file's own lines"
-mp --off; [[ $(cat "$MC") == $'volume=70\nsub-auto=fuzzy' ]] && pass "mpv.sh --off removes only its block" || fail "mpv.sh --off left: $(cat "$MC")"
-mp; echo OMACVM_GRAPHICS=vulkan > "$M/etc/omacvm/env"; mp --off; [[ $(blocks) == 1 ]] &&
-  pass "mpv.sh --off keeps it with Graphics Vulkan" || fail "mpv.sh --off removed it with Graphics Vulkan"
-printf 'OMACVM_GRAPHICS=opengl\nOMACVM_FEATURE_vulkan=on\n' > "$M/etc/omacvm/env"; mp --off; [[ $(blocks) == 1 ]] &&
-  pass "mpv.sh --off keeps it with the vulkan feature" || fail "mpv.sh --off removed it with the vulkan feature"
+[[ $(blocks) == 1 && $(head -2 "$MC") == $'volume=70\nsub-auto=fuzzy' ]] && pass "mpv.sh keeps the file's own lines" || fail "mpv.sh changed the file's own lines"
+printf 'OMACVM_GRAPHICS=opengl\nOMACVM_FEATURE_vulkan=on\n' > "$M/etc/omacvm/env"; mp
+[[ $(lines) == 'vo=gpu gpu-api=opengl ' ]] && pass "mpv.sh: gpu-api=opengl with the vulkan feature" || fail "mpv.sh with the vulkan feature: $(lines)"
+echo OMACVM_GRAPHICS=opengl > "$M/etc/omacvm/env"; mkdir -p "$M/etc/vulkan/icd.d"; : > "$M/etc/vulkan/icd.d/omacvm_venus_icd.json"; mp
+[[ $(lines) == 'vo=gpu gpu-api=opengl ' ]] && pass "mpv.sh: gpu-api=opengl while OmacVM's Venus driver is there" || fail "mpv.sh with the Venus ICD: $(lines)"
 OMACVM_MPV_ROOT=$M "$D/mpv.sh" --nonsense >/dev/null 2>&1; [[ $? == 2 ]] && pass "mpv.sh: unknown option: usage" || fail "mpv.sh: unknown option accepted"
 if (( EUID != 0 )); then
   out=$("$D/mpv.sh" 2>&1); rc=$?
