@@ -563,6 +563,15 @@ app)
     no-venus|no-pages) skip "Vulkan (Venus)" "${vk#* }" ;;
     *) skip "Vulkan (Venus)" "not known (an OmacVM from before this check: omacvm apply)" ;;
   esac
+  # FIFO Vulkan windows at the display's rate: the session leaves out Mesa's Wayland
+  # commit timing (omacvm-vulkan-present sets MESA_VK_WSI_DEBUG=nowlts); a Mesa that
+  # no longer knows the word ignores it and FIFO windows run at 45-50 fps on 60 Hz.
+  if [[ " ok update omacvm " == *" ${vk%% *} "* ]] && grep -qx 'OMACVM_VKWINDOWS=1' /run/omacvm/host.env 2>/dev/null; then
+    lib=$(ls /opt/omacvm-mesa/lib/libvulkan_virtio.so /usr/lib/libvulkan_virtio.so 2>/dev/null | head -1)
+    if [[ -z $lib ]]; then skip "Vulkan windows' pacing" "no Venus driver library found"
+    elif grep -aq nowlts "$lib"; then ok "Vulkan windows' pacing" "at the display's rate (no Wayland commit timing)"
+    else warn "Vulkan windows' pacing" "this Mesa ignores MESA_VK_WSI_DEBUG=nowlts: FIFO windows may run below the display's rate"; fi
+  fi
   FEATURE=""
   # Video decoding on the Mac's media engine (an app with it lists decoders).
   drv=virtio_gpu; [[ -f /usr/local/lib/dri/omacvm_drv_video.so ]] && drv=omacvm
