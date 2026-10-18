@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Vulkan windows run at the display's rate.** A Vulkan app that waits for the display
+  (vkcube, most games) ran at 45-50 frames a second on a 60 Hz display, OpenGL apps at 60.
+  Mesa gave each frame a target time from the last frame's presentation and Hyprland held it
+  until then; the VM's frame clock runs a few ms late, so frames often waited a refresh more.
+  VMs with Vulkan now leave that timing out (`MESA_VK_WSI_DEBUG=nowlts`; a value you set
+  yourself wins): vkcube 50 -> 60 fps on the Mac mini. Counts from the next login.
+
 ## 3.1.23
 
 - **Keyboard sharing apps has a switch.** The setting for Synergy, Deskflow, Barrier and Input
@@ -17,12 +26,6 @@ in more words.
   so the first session after switching Graphics to Vulkan could offer OpenCL without a device
   until the next login (apps then fell back to the CPU). It now also runs before the desktop
   session starts.
-- **Vulkan windows run at the display's rate.** A Vulkan app that waits for the display
-  (vkcube, most games) ran at 45-50 frames a second on a 60 Hz display, OpenGL apps at 60.
-  Mesa gave each frame a target time from the last frame's presentation and Hyprland held it
-  until then; the VM's frame clock runs a few ms late, so frames often waited a refresh more.
-  VMs with Vulkan now leave that timing out (`MESA_VK_WSI_DEBUG=nowlts`; a value you set
-  yourself wins): vkcube 50 -> 60 fps on the Mac mini. Counts from the next login.
 
 ## 3.1.22
 
