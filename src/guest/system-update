@@ -76,10 +76,18 @@ run_unit() {   # -> the update's exit status
   h=$(getent passwd "$u" | cut -d: -f6); uid=$(id -u "$u" 2>/dev/null)
   [[ -n $u && -d $h ]] || { say "no desktop user to run omarchy update as" >&2; return 1; }
   # OMARCHY_PATH must be the checkout the command comes from (Omarchy checks).
-  if [[ -x $h/.local/share/omarchy/bin/omarchy-update ]]; then
-    path=$(realpath "$h/.local/share/omarchy"); cmd=$path/bin/omarchy-update
+  # The one Omarchy's env-bootstrap picks, so this runs what the person's
+  # omarchy update runs: a dev link (/etc/omarchy.conf), else the package.
+  # The installer's checkout in the home only without the package (older
+  # Omarchy); with it, it is the installer's leftover.
+  path=""
+  [[ -f /etc/omarchy.conf ]] && path=$(. /etc/omarchy.conf >/dev/null 2>&1; echo "${OMARCHY_PATH:-}")
+  if [[ -n $path && $path != /usr/share/omarchy && -x $path/bin/omarchy-update ]]; then
+    path=$(realpath "$path"); cmd=$path/bin/omarchy-update
   elif [[ -x /usr/share/omarchy/bin/omarchy-update ]]; then
     path=/usr/share/omarchy; cmd=/usr/bin/omarchy-update
+  elif [[ -x $h/.local/share/omarchy/bin/omarchy-update ]]; then
+    path=$(realpath "$h/.local/share/omarchy"); cmd=$path/bin/omarchy-update
   else
     say "no omarchy update in this VM" >&2; return 1
   fi
