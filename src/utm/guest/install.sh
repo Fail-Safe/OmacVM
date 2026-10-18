@@ -36,6 +36,11 @@ if gcc -shared -fPIC -O2 -o "$L.new" virgl-msaa.c -ldl; then mv -f "$L.new" "$L"
 else rm -f "$L.new"; echo "UTM: could not build virgl-msaa.so (browser GPU not updated)" >&2; fi
 if [[ -f $L ]]; then grep -qx "$L" /etc/ld.so.preload 2>/dev/null || echo "$L" >> /etc/ld.so.preload; fi
 
+# mpv's defaults, as in app VMs (app/guest/venus/mpv.sh): vo=gpu. UTM's GPU is
+# virgl too, where mpv's default output (gpu-next) keeps a file per frame and
+# stops drawing after ~17 s of 60 fps video.
+../../app/guest/venus/mpv.sh || echo "UTM: mpv's defaults are not set; mpv may stop drawing after ~17 s of video" >&2
+
 M=$H/.config/hypr/monitors.lua
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
 # Written next to it and moved into place, only when it changes: Hyprland

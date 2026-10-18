@@ -414,6 +414,15 @@ check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.
 kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null)
 if [[ -n $kb ]]; then ok "keyboard layout" "$kb"; else bad "keyboard layout" "no layout from Hyprland"; fi
 
+# mpv's defaults in app and UTM VMs (app/guest/venus/mpv.sh): vo=gpu (gpu-next leaks a file per
+# frame on virgl and stops drawing after ~17 s), and OpenGL while the VM has Venus (on Vulkan mpv
+# shows no video yet).
+mpv_row() {   # mpv_row [vulkan]
+  if ! command -v mpv >/dev/null; then skip "mpv" "not installed"
+  elif ! grep -qx 'vo=gpu' /etc/mpv/mpv.conf 2>/dev/null; then bad "mpv" "gpu-next would stop drawing after ~17 s of video: omacvm apply"
+  elif [[ ${1:-} == vulkan ]] && ! grep -qx 'gpu-api=opengl' /etc/mpv/mpv.conf; then bad "mpv" "would draw with Vulkan and show no video: omacvm apply"
+  else ok "mpv" "vo=gpu${1:+ with OpenGL} (gpu-next stops drawing after ~17 s here${1:+; on Vulkan no video yet})"; fi
+}
 case $TYPE in
 parallels)
   section "Parallels"
@@ -440,7 +449,8 @@ EOF
   else bad "pointer range" "tablet $tab px vs screen $w px"; fi
   check "QEMU guest agent" "utmctl ip-address/exec" systemctl is-active -q qemu-guest-agent
   check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf
-  check "GPU for browsers" "virgl-msaa.so preloaded" bash -c 'test -s /usr/local/lib/omacvm/virgl-msaa.so && grep -qx /usr/local/lib/omacvm/virgl-msaa.so /etc/ld.so.preload' ;;
+  check "GPU for browsers" "virgl-msaa.so preloaded" bash -c 'test -s /usr/local/lib/omacvm/virgl-msaa.so && grep -qx /usr/local/lib/omacvm/virgl-msaa.so /etc/ld.so.preload'
+  mpv_row ;;
 app)
   section "OmacVM.app"
   check "display follows the window" "omacvm-display-sync" pgrep -u "$U" -f omacvm-display-sync
@@ -461,14 +471,6 @@ app)
   elif [[ -z $vb ]]; then skip "display vblank" "no DRM vblank setting in this kernel"
   else warn "display vblank" "runs ${vb} ms after each frame (omacvm apply sets 100 ms)"; fi
   FEATURE=vulkan
-  # mpv's defaults (venus/mpv.sh): vo=gpu (gpu-next leaks a file per frame on virgl and stops
-  # drawing after ~17 s), and OpenGL while the VM has Venus (on Vulkan mpv shows no video yet).
-  mpv_row() {   # mpv_row [vulkan]
-    if ! command -v mpv >/dev/null; then skip "mpv" "not installed"
-    elif ! grep -qx 'vo=gpu' /etc/mpv/mpv.conf 2>/dev/null; then bad "mpv" "gpu-next would stop drawing after ~17 s of video: omacvm apply"
-    elif [[ ${1:-} == vulkan ]] && ! grep -qx 'gpu-api=opengl' /etc/mpv/mpv.conf; then bad "mpv" "would draw with Vulkan and show no video: omacvm apply"
-    else ok "mpv" "vo=gpu${1:+ with OpenGL} (gpu-next stops drawing after ~17 s here${1:+; on Vulkan no video yet})"; fi
-  }
   if [[ ${OMACVM_FEATURE_vulkan:-off} == on && ! -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
     bad "Vulkan (OmacVM's Mesa)" "on, but OmacVM's Mesa is not installed: omacvm apply (its log says why)"
   elif [[ -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
