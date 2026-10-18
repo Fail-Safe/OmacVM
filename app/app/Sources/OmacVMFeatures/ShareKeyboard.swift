@@ -4,7 +4,7 @@ import Foundation
 /// Barrier or Input Leap tap the keys at the head of macOS's event tap chain,
 /// as QEMU's full grab does, and the newest tap runs first: a VM started
 /// after the sharing app took the keys while the pointer was on the other
-/// computer. Hidden, off by default:
+/// computer. Off by default; the VM window's Keyboard sharing apps switch, or
 ///   defaults write org.omacvm.app shareKeyboard -bool true
 /// QEMU then puts its tap at the end of the chain (OMACVM_KEYS_LAST=1,
 /// omacvm-cocoa-keys-last.patch), from the VM's next start; OmacVM Gestures

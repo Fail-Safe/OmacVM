@@ -21,6 +21,7 @@ enum SettingsDump {
             "keepDockAway": Settings.keepDockAway,
             "audioThread": Settings.audioThread,
             "gpuOffMainLoop": Settings.gpuOffMainLoop,
+            "shareKeyboard": Settings.shareKeyboard,
             "closeAction": Settings.closeAction.rawValue,
             "appIconTheme": IconTheme.choice(stored: UserDefaults.standard.object(forKey: IconTheme.key)).id,
             "escapeSwipe": EscapeSetting.current().rawValue,

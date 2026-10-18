@@ -903,15 +903,14 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   newest tap runs first. A VM started after the sharing app sees the keys
   before it and keeps them. The mouse is not affected: QEMU's tap only
   takes keys.
-- **Fix (3.0.18, hidden, off by default):**
-
-      defaults write org.omacvm.app shareKeyboard -bool true
+- **Fix (off by default):** in the VM window's settings, Input, turn on
+  **Keyboard sharing apps** (3.1.23; before that only in Terminal:
+  `defaults write org.omacvm.app shareKeyboard -bool true`).
 
   Then restart the VM. OmacVM's taps (QEMU's, OmacVM Gestures', the
   Bridge's media keys) go to the end of the chain, so the sharing app sees
   the keys first. QEMU's log says "full-grab tap at the end of the event
-  tap chain". To turn it off: `defaults delete org.omacvm.app
-  shareKeyboard`, then restart the VM.
+  tap chain". To turn it off, switch it off again and restart the VM.
 - **Limits:** trackpad gestures (swipes, the scroll momentum) still go to
   Omarchy while the pointer is on the other computer: OmacVM Gestures reads
   them from the trackpad itself, not from the tap. On Parallels, UTM and

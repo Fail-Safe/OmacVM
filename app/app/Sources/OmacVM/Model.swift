@@ -592,9 +592,12 @@ enum Settings {
     /// Keyboard sharing apps (Synergy, Deskflow, Barrier, Input Leap, #350):
     /// OmacVM's event taps go at the end of macOS's chain, so the sharing app
     /// sees the keys first (QEMU's from the VM's next start, OMACVM_KEYS_LAST;
-    /// Gestures and the Bridge read it too). Off by default.
-    /// Hidden: defaults write org.omacvm.app shareKeyboard -bool true
-    static var shareKeyboard: Bool { ShareKeyboard.isOn(.standard) }
+    /// Gestures and the Bridge read it too). Off by default. The VM window's
+    /// switch (ShareKeyboardRow) or defaults write org.omacvm.app shareKeyboard -bool true
+    static var shareKeyboard: Bool {
+        get { ShareKeyboard.isOn(.standard) }
+        set { UserDefaults.standard.set(newValue, forKey: ShareKeyboard.key) }
+    }
     /// HDR as the VM gets it: only while a display can show it.
     static var hdrActive: Bool { hdr && Mac.hasHDRDisplay }
     static var startFullScreen: Bool {
