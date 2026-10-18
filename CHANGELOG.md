@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.20
+## 3.1.20 (unreleased)
 
 - **WebGPU and GPU compute have a switch.** On macOS 26 and newer, where Graphics Automatic gives
   the VM Vulkan, OpenCL and WebGPU have run on the Mac's GPU since 3.0.13. Now they can be
