@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.21 (unreleased)
+## 3.1.21
 
 - **mpv shows video with Vulkan.** With Graphics on Vulkan (Automatic on macOS 26 and newer), mpv
   picked Vulkan by itself and showed no picture at all. Now the VM's system-wide mpv.conf has
