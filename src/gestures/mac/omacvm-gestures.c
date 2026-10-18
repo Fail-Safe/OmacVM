@@ -1945,7 +1945,9 @@ static CGEventFlags heldNow(void) { return CGEventSourceFlagsState(kCGEventSourc
 
 // Which sign of the swipe's progress goes to the Space on the right. Not
 // documented: a swipe seen going the other way flips it (learnSign), kept in
-// the settings domain for the next start.
+// the settings domain for the next start. macOS 26 and older only (the
+// fields); the escape combo's Dock swipe and the swipe out that follows the
+// fingers both use it (a MacBook Pro on macOS 15.7 learned -1, 2026-10-17).
 static int swipeSign = 1;
 
 // ---- the Dock's swipe: what a trackpad's three/four-finger swipe gives the Dock ----
@@ -2818,6 +2820,7 @@ typedef struct {
 // The swipe the Mac has now (one at a time).
 typedef struct {
   int on, follows, toward;
+  int sign;                 // the progress's way: 1 (macOS 27's HID event) or swipeSign, at the start
   double began, unit;       // unit: the Dock's progress for one Space there
   CGPoint at;
   TakeDisplay d;
@@ -2830,6 +2833,7 @@ static double (*takeClockFn)(void) = monoNow;   // the offline test's own clock
 static double takeClock(void) { return takeClockFn(); }
 static volatile int dockFollows = 1;     // 0: macOS did not follow twice in a row: one step from then on (main thread writes)
 static int dockMisses;                   // finished swipes in a row that did not change the Space (main thread)
+static int missFlipped;                  // macOS 26 and older: swipeSign flipped after a miss, to be confirmed (main thread)
 static volatile double takeQuietUntil;   // the real trackpad's gesture events dropped until then
 static volatile double takeTravel = TAKE_TRAVEL;   // trackpad widths per Space ("SwipeOutTravel")
 #define TAKE_QUIET 0.4                   // s after a taken swipe's end
@@ -2912,9 +2916,17 @@ static void takeSides(int *sl, int *sr, int k) {
 }
 
 // macOS did not follow a swipe (main thread): that one goes in one step; two
-// in a row, every one from then on (logged once).
+// in a row, every one from then on (logged once). macOS 26 and older first
+// try the other way (a swipe the wrong way only bounces at the edge): the
+// next swipe that lands keeps it; one that misses too puts it back.
 static void takeMissed(const char *why) {
   if (!dockFollows) return;
+  if (!hidSwipeFn() && !missFlipped && !dockMisses) {   // the first miss in a row only
+    swipeSign = -swipeSign; missFlipped = 1;
+    logf_("swipe out: macOS did not follow this swipe (%s): one step; the next one tries the other direction", why);
+    return;
+  }
+  if (missFlipped) { swipeSign = -swipeSign; missFlipped = 0; }   // not the way: as it was
   if (++dockMisses < 2) { logf_("swipe out: macOS did not follow this swipe (%s): one step", why); return; }
   dockFollows = 0;
   logf_("swipe out: macOS does not follow the swipe here (%s): one step at the lift from now on", why);
@@ -2954,6 +2966,16 @@ static void takeLanded(TakeRun r, int looks) {
   if (!d) { logf_("swipe out: the display is gone"); return; }
   if (d->current != r.d.vmSpace) {
     dockMisses = 0;
+    int from = spaceIndex(d, r.d.vmSpace), to = spaceIndex(d, d->current);
+    if (!hidSwipeFn() && from >= 0 && to >= 0 && (to - from) * r.toward < 0) {
+      // macOS 26 and older read the way from fields it does not document:
+      // it went the other way. Learned for the next swipe (and the combo).
+      if (missFlipped) missFlipped = 0;
+      swipeSign = -swipeSign; saveSignFn();
+      logf_("swipe out: macOS went to the %s instead: direction learned for the next swipe", r.toward < 0 ? "right" : "left");
+      return;
+    }
+    if (missFlipped) { missFlipped = 0; saveSignFn(); logf_("swipe out: the other direction worked: direction learned"); }
     logf_("swipe out: out of the VM's Space (macOS's swipe)");
     if (!leaveToward(r.toward, r.d.id)) focusPointerDisplay();   // with "all" the other displays follow
     return;
@@ -2972,7 +2994,7 @@ static int takeOn(void) {
   return on;
 }
 
-static double takeUnits(double spaces) { return -takeRun.toward * spaces * takeRun.unit; }
+static double takeUnits(double spaces) { return -takeRun.toward * takeRun.sign * spaces * takeRun.unit; }
 
 // What a frame of a swipe the Mac may take does (the trackpad's or a Magic
 // Mouse's thread): macOS's swipe begins, moves, ends.
@@ -2981,6 +3003,7 @@ static void takeAct(SwipeTake *s, int tk, const char *who) {
   if (tk == TK_BEGIN) {
     pthread_mutex_lock(&takeLock);
     takeRun.on = 1; takeRun.d = takeDisp; takeRun.toward = s->toward; takeRun.began = now;
+    takeRun.sign = hidSwipeFn() ? 1 : swipeSign;
     takeRun.follows = dockFollows && (!hidSwipeFn() || lookUpHID());
     takeRun.unit = takeRun.d.n <= 1 ? 2.0 : 1.0 + 1.0 / (takeRun.d.n - 1);
     CGPoint p = pointerFn();

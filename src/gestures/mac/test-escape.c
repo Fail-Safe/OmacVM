@@ -190,10 +190,11 @@ typedef struct { int phase; double p, v; } DockEv;
 static DockEv dockEv[1024];
 static int nDockEv;
 static int dockFollow = 1;   // "macOS": a finished swipe moves the Space under it
+static int dockSign = 1;     // -1: a macOS that reads the progress the other way (a MacBook Pro on 15.7)
 static int fakeDockPost(int phase, double progress, double speed, CGPoint at) {
   if (nDockEv < 1024) dockEv[nDockEv++] = (DockEv){ phase, progress, speed };
   if (phase == kSwipeEnded && dockFollow)
-    for (int i = 0; i < nWorld; i++) if (CGRectContainsPoint(world[i].b, at)) moveSpace(&world[i], progress < 0 ? 1 : -1);
+    for (int i = 0; i < nWorld; i++) if (CGRectContainsPoint(world[i].b, at)) moveSpace(&world[i], progress * dockSign < 0 ? 1 : -1);
   return 1;
 }
 static int dockLast(void) { return nDockEv ? dockEv[nDockEv - 1].phase : 0; }
@@ -1325,13 +1326,19 @@ int main(void) {
     // all; twice in a row: the one step from then on, no Dock swipe.
     dockFollow = 0; nDockEv = 0; keys = spaceKeys = 0;
     padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
-    check(dockLast() == kSwipeEnded && spaceKeys == 1 && lastKey.keycode == 124 && world[0].cur == 103 && dockFollows && dockMisses == 1 &&
-          gotFrames == 0, "follow: finished but the Space did not change: one step with macOS's shortcut (as before)");
+    check(dockLast() == kSwipeEnded && spaceKeys == 1 && lastKey.keycode == 124 && world[0].cur == 103 && dockFollows && !dockMisses &&
+          missFlipped && swipeSign == -1 && gotFrames == 0,
+          "follow: finished but the Space did not change: one step with macOS's shortcut; the next one tries the other direction");
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
     nDockEv = 0; spaceKeys = 0;
     padSwipe(3, 0.6, 0.55, 4); padLift(); guestGot();
-    check(dockEv[nDockEv - 1].phase == kSwipeEnded && spaceKeys == 1 && world[0].cur == 103 && !dockFollows,
-          "follow: ... again (a flick): one step, and so from now on");
+    check(dockEv[nDockEv - 1].phase == kSwipeEnded && spaceKeys == 1 && world[0].cur == 103 && dockFollows && dockMisses == 1 &&
+          !missFlipped && swipeSign == 1, "follow: ... again (a flick), the other direction misses too: one step, the direction as it was");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    nDockEv = 0; spaceKeys = 0;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(dockLast() == kSwipeEnded && spaceKeys == 1 && world[0].cur == 103 && !dockFollows && swipeSign == 1,
+          "follow: ... a third: one step, and so from now on");
     dockFollow = 1;
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
     nDockEv = 0; spaceKeys = 0;
@@ -1345,13 +1352,48 @@ int main(void) {
     // Finished, but the Space did not change: the one step.
     dockFollow = 0; nDockEv = 0; spaceKeys = 0;
     padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
-    check(dockLast() == kSwipeEnded && spaceKeys == 1 && world[0].cur == 103 && dockFollows && dockMisses == 1,
-          "follow: finished but the Space did not change: one step with the shortcut after all (one miss)");
+    check(dockLast() == kSwipeEnded && spaceKeys == 1 && world[0].cur == 103 && dockFollows && !dockMisses && missFlipped,
+          "follow: finished but the Space did not change: one step with the shortcut after all (one miss, the other direction next)");
     dockFollow = 1;
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    int saves0 = signSaves;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(world[0].cur == 101 && !missFlipped && swipeSign == 1 && signSaves == saves0 + 1 && dockFollows,
+          "follow: ... the other direction lands on the other side (this macOS reads it as before): the direction learned back, kept");
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
     padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
     check(world[0].cur == 103 && dockMisses == 0 && dockFollows, "follow: ... the next one macOS follows: the misses start again");
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+
+    // macOS 26 and older read the progress from fields they do not document; a MacBook Pro on
+    // 15.7 reads it the other way (user, 2026-10-17: "sometimes it even swipes into the false
+    // direction first"). The escape combo's learned way counts for the swipe that follows the fingers.
+    dockSign = -1; swipeSign = -1; nDockEv = 0; spaceKeys = 0; saves0 = signSaves;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(world[0].cur == 103 && !spaceKeys && dockEv[nDockEv - 1].phase == kSwipeEnded && dockEv[nDockEv - 1].p > 0 && signSaves == saves0,
+          "follow, macOS 15 (learned way -1): out to the right with the fingers, the progress the other way, no shortcut");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    // Not learned yet: macOS goes the other way once, the way is learned and kept.
+    swipeSign = 1; nDockEv = 0; spaceKeys = 0;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(world[0].cur == 101 && swipeSign == -1 && signSaves == saves0 + 1 && dockFollows,
+          "follow, macOS 15 (not learned): macOS went to the left instead: the direction learned");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(world[0].cur == 103 && swipeSign == -1, "follow, macOS 15: ... the next swipe goes to the right with the fingers");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    // A miss first (the wrong way only bounced): the other direction is tried, lands and is kept.
+    swipeSign = 1; dockFollow = 0; nDockEv = 0; spaceKeys = 0; saves0 = signSaves;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(spaceKeys == 1 && world[0].cur == 103 && missFlipped && swipeSign == -1, "follow, macOS 15: a miss: one step, the other direction next");
+    dockFollow = 1;
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    nDockEv = 0; spaceKeys = 0;
+    padSwipe(3, 0.6, 0.3, 30); padLift(); guestGot();
+    check(world[0].cur == 103 && !spaceKeys && !missFlipped && swipeSign == -1 && signSaves == saves0 + 1,
+          "follow, macOS 15: ... the other direction lands with the fingers: learned and kept");
+    settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot(); takeLook();
+    dockSign = 1; swipeSign = 1;
 
     // The fingers the guest switches workspaces with (user, 2026-10-14: "3 finger is for window tiling,
     // and 4 for workspace swiping"): "G", Hyprland's gestures.
