@@ -308,16 +308,21 @@ if (( EUID != 0 )); then
   [[ $rc == 1 && $out == *"run as root"* ]] && pass "mpv.sh writes /etc as root only" || fail "mpv.sh as a user: rc $rc, said '$out'"
 fi
 
-# Vulkan windows: Mesa's normal WSI when the app says it shows them (omacvm.vkwindows=1),
-# else the software WSI (an older app ended Hyprland's GPU context on the import).
+# Vulkan windows: Mesa's normal WSI without Wayland commit timing when the app says it shows
+# them (omacvm.vkwindows=1), else the software WSI (an older app ended Hyprland's GPU context
+# on the import).
 G=src/app/guest/omacvm-vulkan-present
 d=$(mktemp -d)
 sed "s#/run/omacvm/host.env#$d/host.env#" "$G" > "$d/gen"
 [[ $(sh "$d/gen") == MESA_VK_WSI_DEBUG=sw ]] && pass "no host.env: software WSI" || fail "no host.env: not software WSI"
 echo OMACVM_VKWINDOWS=1 > "$d/host.env"
-[[ -z $(sh "$d/gen") ]] && pass "app shows Vulkan windows: normal WSI" || fail "app shows Vulkan windows: still software WSI"
+[[ $(env -u MESA_VK_WSI_DEBUG sh "$d/gen") == MESA_VK_WSI_DEBUG=nowlts ]] &&
+  pass "app shows Vulkan windows: normal WSI, without commit timing (FIFO at the display's rate)" ||
+  fail "app shows Vulkan windows: not the normal WSI without commit timing"
+[[ -z $(MESA_VK_WSI_DEBUG=buffer sh "$d/gen") ]] && pass "a MESA_VK_WSI_DEBUG the user set wins" ||
+  fail "the generator overrides the user's MESA_VK_WSI_DEBUG"
 printf 'OMACVM_SCREEN=2056x1329\nOMACVM_VKWINDOWS=0\n' > "$d/host.env"
-[[ $(sh "$d/gen") == MESA_VK_WSI_DEBUG=sw ]] && pass "flag 0: software WSI" || fail "flag 0: not software WSI"
+[[ $(MESA_VK_WSI_DEBUG=nowlts sh "$d/gen") == MESA_VK_WSI_DEBUG=sw ]] && pass "flag 0: software WSI (whatever the user set)" || fail "flag 0: not software WSI"
 rm -rf "$d"
 grep -q 'user-environment-generators/90-omacvm-vulkan-present' src/app/guest/install.sh &&
   grep -q 'rm -f /etc/environment.d/90-omacvm-vulkan.conf' src/app/guest/install.sh && pass "installed as a session generator" ||
