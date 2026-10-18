@@ -13,11 +13,13 @@ ENV=${OMACVM_ENV:-/etc/omacvm/env}
 rm -f /etc/systemd/system/multi-user.target.wants/omacvm-venus-driver.service
 install -Dm644 omacvm-venus-driver.service /etc/systemd/system/omacvm-venus-driver.service
 install -Dm644 omacvm-venus-driver.timer /etc/systemd/system/omacvm-venus-driver.timer
+install -Dm644 omacvm-opencl-check.service /etc/systemd/system/omacvm-opencl-check.service
 systemctl daemon-reload
 graphics=$(sed -n 's/^OMACVM_GRAPHICS=//p' "$ENV" 2>/dev/null | tail -1)
 vfeat=$(sed -n 's/^OMACVM_FEATURE_vulkan=//p' "$ENV" 2>/dev/null | tail -1)
 if [[ $graphics == vulkan || $vfeat == on ]]; then
-  systemctl enable omacvm-venus-driver.timer >/dev/null 2>&1 || true
+  systemctl enable omacvm-venus-driver.timer omacvm-opencl-check.service >/dev/null 2>&1 || true
 else
   systemctl disable --now omacvm-venus-driver.timer >/dev/null 2>&1 || true
+  systemctl disable omacvm-opencl-check.service >/dev/null 2>&1 || true
 fi

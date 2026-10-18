@@ -1,0 +1,24 @@
+# OmacVM.app: OpenCL on the Mac's GPU only where Zink lists a device on this
+# start's Vulkan driver (opencl.sh --check), before any desktop session: the
+# session reads RUSTICL_ENABLE once, at login. Without this the first session
+# after a switch to Vulkan on MoltenVK (macOS 15) offered OpenCL without a
+# device until the next login (the check after the desktop came 90 s later;
+# omacvm-venus-driver.service keeps it as the backstop). A few seconds at most,
+# and only while OpenCL is on or was turned off for this Mac. Installed and
+# enabled with the Venus check (timer.sh), only for a VM with Vulkan.
+[Unit]
+Description=OmacVM: OpenCL only with a GPU device, before the desktop session
+After=local-fs.target omacvm-app-host.service
+Before=systemd-user-sessions.service
+ConditionPathExists=/usr/local/share/omacvm/app/guest/venus/opencl.sh
+ConditionPathExists=|/etc/environment.d/90-omacvm-opencl.conf
+ConditionPathExists=|/var/lib/omacvm/opencl-off
+
+[Service]
+Type=oneshot
+ExecCondition=/bin/sh -c 'grep -qxE "OMACVM_GRAPHICS=vulkan|OMACVM_FEATURE_vulkan=on" /etc/omacvm/env'
+ExecStart=-/usr/local/share/omacvm/app/guest/venus/opencl.sh --check
+TimeoutStartSec=20s
+
+[Install]
+WantedBy=multi-user.target
