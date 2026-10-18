@@ -3,6 +3,19 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.22 (unreleased)
+
+- **New VMs build again, and omarchy update works again.** Since 18 October, Omarchy's package
+  server has no ARM builds of two Hyprland parts (hyprtoolkit and hyprland-guiutils), but
+  omarchy-mac still asks that server for them by name. So building a new VM here stopped while
+  Omarchy installed, and `omarchy update` in a VM stopped with "target not found"
+  (omacom/omarchy-mac#741). OmacVM now leaves those two out while Omarchy's server does not have
+  them, and the VM takes Arch Linux ARM's builds of them, which fit Omarchy's Hyprland. When the
+  server has them again, nothing changes from how Omarchy does it. A VM gets this at its next
+  Update VM; new VMs have it from the start. The ready-made VM download was not affected.
+- The control centre's Omarchy update (and Graphics -> Vulkan on an older ready-made VM) now runs
+  the same Omarchy as `omarchy update` in the terminal, not the copy the installer left behind.
+
 ## 3.1.21
 
 - **mpv shows video with Vulkan.** With Graphics on Vulkan (Automatic on macOS 26 and newer), mpv
