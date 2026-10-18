@@ -535,6 +535,12 @@ Patches (all in `app/runtime/patches`, one per concern):
   KosmicKrisp's heaps are shared memory, so the texture is filled straight
   from them, without the blit); the guest then keeps Mesa's normal WSI,
   otherwise (older app) it sets `MESA_VK_WSI_DEBUG=sw` (`omacvm-vulkan-present`).
+  With the normal WSI it sets `MESA_VK_WSI_DEBUG=nowlts` (unless
+  the user set the variable): Mesa then leaves out Wayland commit timing, which
+  gave each FIFO frame a target time from the last presentation; the VM's
+  frame clock runs a few ms late, so frames waited a refresh more and FIFO
+  windows ran at 45-50 fps on 60 Hz (vkcube; 59-60 without it, as through
+  Xwayland). The fifo-v1 barrier still paces them.
 
 Switch: the VM's Graphics setting (ADR 0035; up to 2.9 the hidden `venus`
 default, moved into it at the first 3.0.0 launch) adds
