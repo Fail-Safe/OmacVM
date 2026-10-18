@@ -366,6 +366,8 @@ final class Runner {
         // The Mac's input methods switched in the app while the VM was stopped
         // (#316): the record follows that choice, the VM's part comes below.
         let imePending = MacIME.prepareStart(folder: c.folder)
+        // WebGPU and GPU compute switched in the window while it was stopped: the same way.
+        let gpuComputePending = GPUCompute.switchState.prepareStart(folder: c.folder)
         // What of the Mac this start may use (its features), read once.
         links = MacLinks.load(folder: c.folder)
         // The strip beside the notch (NotchArea, #339): FullPanel only with the
@@ -601,7 +603,14 @@ final class Runner {
         let pid = p.processIdentifier
         VMDisk.runJobs(config: c, agentPath: agentPath, running: { kill(pid, 0) == 0 })
         if let on = imePending {
-            MacIMEStart.run(config: c, on: on, agentPath: agentPath, running: { kill(pid, 0) == 0 }) { [weak self] line in
+            FeatureStart.run(config: c, switch: MacIME.switchState, what: "Mac input methods", on: on, agentPath: agentPath,
+                             running: { kill(pid, 0) == 0 }) { [weak self] line in
+                Task { @MainActor in self?.appendLog(line) }
+            }
+        }
+        if let on = gpuComputePending {
+            FeatureStart.run(config: c, switch: GPUCompute.switchState, what: "WebGPU and GPU compute", on: on, agentPath: agentPath,
+                             running: { kill(pid, 0) == 0 }) { [weak self] line in
                 Task { @MainActor in self?.appendLog(line) }
             }
         }

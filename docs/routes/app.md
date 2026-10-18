@@ -133,7 +133,7 @@ VM runs, and goes back by itself when a new version does not start
   Mac in 3.0.0 (CHANGELOG).
   WebGPU and GPU compute come with it (feature `gpu-compute`, on by default;
   [`venus/compute.sh`](../../src/app/guest/venus/compute.sh); its switch is
-  the VM window's General › WebGPU and GPU compute while the VM runs, the
+  the VM window's General › WebGPU and GPU compute (stopped: set up at the next start), the
   control centre or `omacvm disable gpu-compute`; off removes the parts
   below, Vulkan stays as Graphics says). OpenCL: apply installs Arch's
   `opencl-mesa` (rusticl) and `clinfo` and turns rusticl's Zink on

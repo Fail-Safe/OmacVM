@@ -29,14 +29,14 @@ case "row":   // the row's switch while the VM is stopped (MacIMERow.write)
     let p = f.appendingPathComponent(MacIME.pendingFile)
     if let t = n.pending { try! t.write(to: p, atomically: true, encoding: .utf8) } else { try? FileManager.default.removeItem(at: p) }
     print(MacIME.row(record: read("features"), pending: read(MacIME.pendingFile), running: false, busy: false, cli: true).note ?? "-")
-case "start":   // Runner.start: prepareStart, then the links; MacIMEStart runs apply
+case "start":   // Runner.start: prepareStart, then the links; FeatureStart runs apply
     let pending = MacIME.prepareStart(folder: f)
     let port = MacLinks.load(folder: f).macIME
     print("port=\(port ? "on" : "off") apply=\(pending.map { MacIME.applyArguments(vm: "Test VM", on: $0).joined(separator: " ") } ?? "none")")
 default: exit(2)
 }
 SWIFT
-swiftc -O -o "$T/ime" "$R/app/app/Sources/OmacVM/MacLinks.swift" "$R/app/app/Sources/OmacVMFeatures/MacIME.swift" "$T/main.swift" 2>"$T/swiftc.log" ||
+swiftc -O -o "$T/ime" "$R/app/app/Sources/OmacVM/MacLinks.swift" "$R/app/app/Sources/OmacVMFeatures/MacIME.swift" "$R/app/app/Sources/OmacVMFeatures/PendingSwitch.swift" "$T/main.swift" 2>"$T/swiftc.log" ||
   { echo "FAIL the start path does not compile:"; cat "$T/swiftc.log"; exit 1; }
 V=$T/vm; mkdir -p "$V"
 rec() { cat "$V/features"; }
@@ -52,7 +52,7 @@ printf 'bridge=on gestures=on mac-ime=off\n' > "$V/features"
 check "start after a failed apply: the record follows the choice" \
   "port=on apply=apply --vm Test VM --vm-type app --feature mac-ime=on --yes --transaction" "$("$T/ime" start "$V")"
 check "start after a failed apply: the record says on again" "bridge=on gestures=on mac-ime=on" "$(rec)"
-# Done (MacIMEStart removes the pending file): later starts just have the port.
+# Done (FeatureStart removes the pending file): later starts just have the port.
 rm "$V/mac-ime-pending"
 check "start after it was set up: the port, no apply" "port=on apply=none" "$("$T/ime" start "$V")"
 
@@ -77,6 +77,8 @@ grep -q 'if want mac-ime; then' "$R/src/guest/install.sh" && grep -q '"$R/ime/gu
 r=$R/app/app/Sources/OmacVM/Runner.swift
 check "Runner: prepareStart before MacLinks.load" "ok" \
   "$(awk '/MacIME.prepareStart\(folder: c.folder\)/ { p = NR } /links = MacLinks.load\(folder: c.folder\)/ && p && NR > p { print "ok"; exit }' "$r")"
-check "Runner: MacIMEStart.run after QEMU started" "ok" \
-  "$(awk '/try p.run\(\)/ { p = NR } /MacIMEStart.run\(config: c, on: on/ && p && NR > p { print "ok"; exit }' "$r")"
+check "Runner: FeatureStart.run for Mac input after QEMU started" "ok" \
+  "$(awk '/try p.run\(\)/ { p = NR } /FeatureStart.run\(config: c, switch: MacIME.switchState/ && p && NR > p { print "ok"; exit }' "$r")"
+check "Runner: the same for WebGPU and GPU compute (#445)" "ok" \
+  "$(awk '/GPUCompute.switchState.prepareStart\(folder: c.folder\)/ { q = NR } /try p.run\(\)/ && q { p = NR } /FeatureStart.run\(config: c, switch: GPUCompute.switchState/ && p && NR > p { print "ok"; exit }' "$r")"
 exit $fail

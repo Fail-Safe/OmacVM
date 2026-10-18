@@ -9,7 +9,7 @@ import SwiftUI
 /// the VM (its Fcitx5 gets a small module); the port comes with the VM's next
 /// start. While the VM is stopped it writes the choice into the VM's record
 /// and a pending file (MacIME.pendingFile): the next start has the port (or
-/// none), and the app sets up the VM's part at that start (MacIMEStart).
+/// none), and the app sets up the VM's part at that start (FeatureStart).
 /// Nothing changes for a VM that leaves it off.
 struct MacIMERow: View {
     @ObservedObject var state: AppState
@@ -34,7 +34,7 @@ struct MacIMERow: View {
         .onChange(of: state.config) { _, _ in note = nil; refresh() }
         .onChange(of: state.tick) { _, _ in if !busy { refresh() } }
         .onChange(of: running) { _, _ in note = nil; refresh() }
-        .onReceive(NotificationCenter.default.publisher(for: MacIMEStart.done)) { _ in refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: FeatureStart.done)) { _ in refresh() }
     }
 
     private func refresh() {
@@ -101,16 +101,19 @@ struct MacIMERow: View {
     }
 }
 
-/// At the VM's start: a choice made in the row while the VM was stopped
-/// (#316; MacIME.prepareStart before the start). The record already says it (the port comes with this start or
-/// not); once the guest agent answers, the app's omacvm sets up or removes
-/// the VM's part (apply's switch of mac-ime alone). Done: the pending file
-/// goes. Failed: it stays for the next start, and qemu.log says why.
-enum MacIMEStart {
-    static let done = Notification.Name("OmacVM.MacIMEStart.done")
+/// At the VM's start: a choice made in the window while the VM was stopped
+/// (PendingSwitch.prepareStart before the start: Mac input #316, WebGPU and
+/// GPU compute). The record already says it; once the guest agent answers,
+/// the app's omacvm sets up or removes the VM's part (apply's switch of that
+/// feature alone). Done: the pending file goes. Failed: it stays for the next
+/// start, and qemu.log says why.
+enum FeatureStart {
+    static let done = Notification.Name("OmacVM.FeatureStart.done")
+    /// One apply into the VM at a time (two features switched while it was stopped).
+    private static let applyLock = NSLock()
 
-    static func run(config c: VMConfig, on: Bool, agentPath: String, running: @escaping () -> Bool,
-                    log: @escaping (String) -> Void) {
+    static func run(config c: VMConfig, switch sw: PendingSwitch, what: String, on: Bool, agentPath: String,
+                    running: @escaping () -> Bool, log: @escaping (String) -> Void) {
         Thread.detachNewThread {
             // The guest agent starts with Omarchy: up to ten minutes.
             let deadline = Date().addingTimeInterval(600)
@@ -120,16 +123,18 @@ enum MacIMEStart {
                 Thread.sleep(forTimeInterval: 5)
             }
             guard up, running() else { return }
-            let what = "Mac input methods \(on ? "on" : "off") (switched while the VM was stopped)"
-            log("OmacVM: \(what): setting up the VM's part")
-            let err = MacIMERow.run(MacIME.applyArguments(vm: c.name, on: on))
-            let url = c.folder.appendingPathComponent(MacIME.pendingFile)
+            let line = "\(what) \(on ? "on" : "off") (switched while the VM was stopped)"
+            log("OmacVM: \(line): setting up the VM's part")
+            applyLock.lock()
+            let err = MacIMERow.run(sw.applyArguments(vm: c.name, on: on))
+            applyLock.unlock()
+            let url = c.folder.appendingPathComponent(sw.pendingFile)
             if let err {
-                log("OmacVM: \(what): not set up, tried again at the next start: \(err)")
+                log("OmacVM: \(line): not set up, tried again at the next start: \(err)")
             } else {
                 // Only when it was not switched again meanwhile.
-                if MacIME.pending(try? String(contentsOf: url, encoding: .utf8)) == on { try? FileManager.default.removeItem(at: url) }
-                log("OmacVM: \(what): set up in the VM")
+                if sw.pending(try? String(contentsOf: url, encoding: .utf8)) == on { try? FileManager.default.removeItem(at: url) }
+                log("OmacVM: \(line): set up in the VM")
             }
             DispatchQueue.main.async { NotificationCenter.default.post(name: done, object: nil) }
         }

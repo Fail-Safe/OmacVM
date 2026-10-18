@@ -245,14 +245,32 @@ expect(!GPUCompute.isOn(features: "bridge=on gpu-compute=off vulkan=off") && GPU
        "gpu-compute: the record's word")
 expect(GPUCompute.isOn(features: "gpu-compute=off gpu-compute=on") && GPUCompute.isOn(features: "xgpu-compute=off"),
        "gpu-compute: the last word counts, only its own")
-let gcStopped = GPUCompute.row(record: "gpu-compute=on", running: false, vulkan: true, busy: false, cli: true)
-expect(gcStopped.on && !gcStopped.enabled && gcStopped.note != nil, "gpu-compute row: stopped VM: shown, not switched")
-let gcOn = GPUCompute.row(record: nil, running: true, vulkan: true, busy: false, cli: true)
+let gcStopped = GPUCompute.row(record: "gpu-compute=on", pending: nil, running: false, vulkan: true, busy: false, cli: true)
+expect(gcStopped == GPUCompute.Row(on: true, enabled: true, note: nil), "gpu-compute row: stopped VM: switched for the next start")
+let gcOn = GPUCompute.row(record: nil, pending: nil, running: true, vulkan: true, busy: false, cli: true)
 expect(gcOn == GPUCompute.Row(on: true, enabled: true, note: nil), "gpu-compute row: running with Vulkan: on, switchable")
-let gcGL = GPUCompute.row(record: "gpu-compute=off", running: true, vulkan: false, busy: false, cli: true)
+let gcGL = GPUCompute.row(record: "gpu-compute=off", pending: nil, running: true, vulkan: false, busy: false, cli: true)
 expect(!gcGL.on && gcGL.enabled && gcGL.note?.contains("OpenGL") == true, "gpu-compute row: OpenGL says it needs Vulkan")
-expect(!GPUCompute.row(record: nil, running: true, vulkan: true, busy: true, cli: true).enabled &&
-       !GPUCompute.row(record: nil, running: true, vulkan: true, busy: false, cli: false).enabled, "gpu-compute row: busy or no CLI: not switchable")
+expect(!GPUCompute.row(record: nil, pending: nil, running: true, vulkan: true, busy: true, cli: true).enabled &&
+       !GPUCompute.row(record: nil, pending: nil, running: true, vulkan: true, busy: false, cli: false).enabled, "gpu-compute row: busy or no CLI: not switchable")
+// Switched while stopped (the window hides while a VM it started runs): record + pending, set up at the next start.
+let gs1 = GPUCompute.switchState.switchStopped(record: "bridge=on vulkan=off\n", pending: nil, on: false)
+expect(!GPUCompute.isOn(features: gs1.record) && gs1.pending == "off\n", "gpu-compute stopped, off: the record says off, pending off")
+let gs2 = GPUCompute.switchState.switchStopped(record: gs1.record, pending: gs1.pending, on: true)
+expect(GPUCompute.isOn(features: gs2.record) && gs2.pending == nil, "gpu-compute switched back before a start: no pending left")
+expect(GPUCompute.row(record: gs1.record, pending: gs1.pending, running: true, vulkan: true, busy: false, cli: true).note == "Being set up in the VM for this start.",
+       "gpu-compute row: a pending choice while the start sets it up")
+expect(GPUCompute.pendingFile == "gpu-compute-pending" && MacIME.pendingFile == "mac-ime-pending", "pending files keep their names")
+expect(GPUCompute.switchState.applyArguments(vm: "V", on: false) == ["apply", "--vm", "V", "--vm-type", "app", "--feature", "gpu-compute=off", "--yes", "--transaction"],
+       "gpu-compute at the start: apply's switch of it alone")
+let gdir = FileManager.default.temporaryDirectory.appendingPathComponent("gc-\(getpid())")
+try? FileManager.default.createDirectory(at: gdir, withIntermediateDirectories: true)
+try? "bridge=on gpu-compute=on\n".write(to: gdir.appendingPathComponent("features"), atomically: true, encoding: .utf8)
+try? "off\n".write(to: gdir.appendingPathComponent(GPUCompute.pendingFile), atomically: true, encoding: .utf8)
+expect(GPUCompute.switchState.prepareStart(folder: gdir) == false &&
+       !GPUCompute.isOn(features: try? String(contentsOf: gdir.appendingPathComponent("features"), encoding: .utf8)),
+       "gpu-compute prepareStart: the pending off, the record follows")
+try? FileManager.default.removeItem(at: gdir)
 
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
