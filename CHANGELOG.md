@@ -12,6 +12,11 @@ in more words.
   Option or Command press and release now shows in the log with what the Mac's input method did
   with it, to find why a Shift tap does not always switch Chinese and English (#357, thanks
   @Vocllum).
+- **OpenCL is right from the first login after a switch to Vulkan.** The check whether the Mac's
+  Vulkan driver gives OpenCL a GPU (it does not on macOS 15) ran 90 s after the desktop came up,
+  so the first session after switching Graphics to Vulkan could offer OpenCL without a device
+  until the next login (apps then fell back to the CPU). It now also runs before the desktop
+  session starts.
 
 ## 3.1.22
 

@@ -242,6 +242,15 @@ rm -f "$O"; OMACVM_VENUS_ON=$T/venus-on OMACVM_CLINFO=$T/clinfo-none ocl --check
   pass "opencl.sh --check: switch off: nothing to do" || fail "opencl.sh --check with the switch off"
 grep -q 'ExecStartPost=-/usr/local/share/omacvm/app/guest/venus/opencl.sh --check' "$D/omacvm-venus-driver.service" &&
   pass "the boot check runs opencl.sh --check" || fail "no OpenCL check after boot"
+# The same check before the desktop session: the session reads RUSTICL_ENABLE at login.
+u=$D/omacvm-opencl-check.service
+grep -q '^Before=systemd-user-sessions.service' "$u" && grep -q '^ExecStart=-/usr/local/share/omacvm/app/guest/venus/opencl.sh --check$' "$u" &&
+  grep -q '^ConditionPathExists=|/etc/environment.d/90-omacvm-opencl.conf' "$u" && grep -q '^TimeoutStartSec=' "$u" &&
+  grep -q 'install -Dm644 omacvm-opencl-check.service' "$D/timer.sh" &&
+  grep -q 'systemctl enable omacvm-venus-driver.timer omacvm-opencl-check.service' "$D/timer.sh" &&
+  grep -q 'systemctl disable omacvm-opencl-check.service' "$D/timer.sh" &&
+  pass "OpenCL is checked before the desktop session (enabled with Vulkan only)" ||
+  fail "no OpenCL check before the desktop session"
 # F1: with the vulkan feature's Mesa the session's OpenCL loader reads only OmacVM's ICD.
 grep -q '^OCL_ICD_VENDORS=$CLONLY$' "$D/install.sh" && grep -q 'cp "$CLICD" "$CLONLY/"' "$D/install.sh" &&
   grep -q 'rm -rf "$PREFIX" "$ICD" "$CLICD" "$CLONLY"' "$D/install.sh" && pass "vulkan feature: OmacVM's ICD alone (and gone on --remove)" ||
