@@ -323,15 +323,23 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
      return NSMakeRect(floor(NSMidX(available) - size.width / 2.0),
                        floor(NSMidY(available) - size.height / 2.0),
-@@ -2555,6 +2714,7 @@ - (void)windowDidFailToEnterFullScreen:(NSWindow *)window
+@@ -2555,6 +2714,15 @@ - (void)windowDidFailToEnterFullScreen:(NSWindow *)window
  - (void)windowWillExitFullScreen:(NSNotification *)notification
  {
      omacvm_main_full_settled = false;
 +    [cocoaView omacvmGuestAtTop:false];
++    /*
++     * OmacVM: the guest follows a window, so no aspect ratio from full
++     * screen; resizing goes in 20 point steps (windowWillResize). Before
++     * macOS puts the old frame back: under the full-screen aspect ratio it
++     * came back narrower and a step or two smaller (1280 x 720 -> 1140 x 700
++     * on a 16:10 display), smaller again with every full screen.
++     */
++    [[cocoaView window] setContentResizeIncrements:NSMakeSize(1, 1)];
      omacvm_corner_release();
  }
- 
-@@ -2566,6 +2726,8 @@ - (void)windowDidEnterFullScreen:(NSNotification *)notification
+
+@@ -2566,6 +2734,8 @@ - (void)windowDidEnterFullScreen:(NSNotification *)notification
      [fullScreenMenuItem setTitle:@"Exit Full Screen"];
      [cocoaView updateScale];
      [cocoaView updateUIInfo];
@@ -340,14 +348,11 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      omacvm_full_screen_take();
      omacvm_displays_update();
  }
-@@ -2574,6 +2736,11 @@ - (void)windowDidExitFullScreen:(NSNotification *)notification
+@@ -2574,6 +2744,8 @@ - (void)windowDidExitFullScreen:(NSNotification *)notification
  {
      omacvm_main_full_settled = false;
      [fullScreenMenuItem setTitle:@"Enter Full Screen"];
-+    /*
-+     * OmacVM: the guest follows a window, so no aspect ratio from full
-+     * screen; resizing goes in 20 point steps (windowWillResize).
-+     */
++    /* Again, in case a guest mode change during the animation set one. */
 +    [[cocoaView window] setContentResizeIncrements:NSMakeSize(1, 1)];
      [cocoaView resizeWindow];
      [cocoaView updateScale];

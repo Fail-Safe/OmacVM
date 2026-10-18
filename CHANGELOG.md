@@ -5,6 +5,14 @@ in more words.
 
 ## Unreleased
 
+- **The VM window keeps its size after full screen.** Leaving full screen gave the window back
+  smaller, again with every full screen (1280 x 720 became 1140 x 700, then 1120 x 700): macOS
+  put the old size back while the window still had the full-screen display's shape, and the
+  window's 20-point steps rounded that down. The window now drops that shape before macOS puts
+  its size back.
+- **The app's window stays 800 points wide.** A double-click on its title bar (macOS's Fill) or
+  window tiling made it as wide as the screen while its content stayed 800 points. It now goes
+  back to 800 points at once, around the same middle; only its height changes, as intended.
 - **Vulkan windows run at the display's rate.** A Vulkan app that waits for the display
   (vkcube, most games) ran at 45-50 frames a second on a 60 Hz display, OpenGL apps at 60.
   Mesa gave each frame a target time from the last frame's presentation and Hyprland held it
