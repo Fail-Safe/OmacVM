@@ -640,6 +640,9 @@ jobs:
       - name: OmacVM's edits of Omarchy's shell on Linux (GNU tools, as in the VM)
         run: src/tests/omarchy-shell.sh
 
+      - name: omarchy-mac's ARM package targets that Omarchy's repo has (bash 5, as in the VM)
+        run: src/tests/omarchy-targets.sh
+
       - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
         run: src/tests/touchid-client.sh
 

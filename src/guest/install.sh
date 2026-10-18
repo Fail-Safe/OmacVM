@@ -220,6 +220,15 @@ HOOK
     *) log "Omarchy shell colours: $r" ;;
   esac
 fi
+# omarchy-mac asks Omarchy's own repo for hyprtoolkit and hyprland-guiutils by
+# name; since 2026-10-18 it has no ARM builds of them, and omarchy update stops
+# with "target not found" (omacom/omarchy-mac#741). omarchy-targets.sh leaves
+# out what the repo lacks (Arch Linux ARM's builds fill in); its pacman hook
+# does it again after Omarchy updates.
+if system; then
+  r=$(bash "$R/guest/omarchy-targets.sh" --hook 2>&1) || r="failed: $r"
+  case $r in patched:*|failed*) log "Omarchy's ARM package targets: $r" ;; esac
+fi
 
 if system; then
   log "system: SSH from the Mac, bootable snapshots, DNS fallback"

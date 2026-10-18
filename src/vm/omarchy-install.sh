@@ -86,6 +86,15 @@ trap remove_helpers EXIT
 log "system update"
 pacman -Syu --noconfirm >/dev/null 2>&1 || true
 
+# omarchy-mac asks Omarchy's own repo for ARM packages it no longer has
+# (omacom/omarchy-mac#741): build.sh and create-vm.sh copy
+# guest/omarchy-targets.sh here first. Its pacman hook patches the installed
+# Omarchy; the user's script below patches the installer's checkout for the
+# install and takes it out again afterwards (a clean git checkout).
+T=/usr/local/lib/omacvm/omarchy-targets.sh
+[[ -x $T ]] || T=""
+[[ -z $T ]] || "$T" --hook >/dev/null || log "omarchy-targets.sh --hook failed"
+
 log "omarchy-mac (channel ${OMARCHY_MAC_CHANNEL:-rc})"
 {
   cat <<EOF
@@ -95,12 +104,15 @@ cd ~
 [[ -d ~/.local/share/omarchy/.git ]] || git clone https://github.com/omacom/omarchy-mac.git ~/.local/share/omarchy
 cd ~/.local/share/omarchy
 echo "omarchy-mac \$(cat version) \$(git rev-parse --short HEAD)"
+${T:+$T install/helpers/arm-package-sources.sh}
 EOF
   # Quoted for the shell: a name may hold quotes, $ or backticks.
   printf 'export OMARCHY_USER_NAME=%q\nexport OMARCHY_USER_EMAIL=%q\n' "$OMA_FULLNAME" "${OMA_EMAIL:-}"
   cat <<EOF
 bash install.sh --channel ${OMARCHY_MAC_CHANNEL:-rc} < /dev/null
-echo "INSTALL-EXIT=\$?"
+rc=\$?
+${T:+$T --restore install/helpers/arm-package-sources.sh}
+echo "INSTALL-EXIT=\$rc"
 EOF
 } > "$H/.omacvm-install.sh"
 chown "$U:$U" "$H/.omacvm-install.sh"; chmod +x "$H/.omacvm-install.sh"

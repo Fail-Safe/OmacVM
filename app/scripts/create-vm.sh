@@ -84,6 +84,9 @@ wait_ssh 300 || die "the new system did not answer on SSH (log: $LOG/system-cons
 # ---------- 4. Omarchy ----------
 step 4 "Installing Omarchy (omarchy-mac)"   # the window says how long it usually takes
 CHANNEL=$(omarchy_channel)
+# Omarchy's ARM package targets its repo has (omacom/omarchy-mac#741): omarchy-install.sh uses it.
+vssh "install -Dm755 /dev/stdin /usr/local/lib/omacvm/omarchy-targets.sh" < "$OMACVM_SRC/guest/omarchy-targets.sh" ||
+  die "could not copy omarchy-targets.sh into the VM"
 run_logged "$LOG/omarchy-install.log" vssh "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < <(vm_script omarchy-install.sh) ||
   die "Omarchy did not install (log: $LOG/omarchy-install.log)"
 vssh "rm -f /root/omacvm.env"   # it holds the password hash
