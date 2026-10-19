@@ -21,6 +21,10 @@ as_user() {
 
 id=$(jq -r .id "$dir/manifest.json")
 dest=$H/.config/omarchy/plugins/$id
+# The user copies it: from a copy the user can read (the caller's folder may
+# be root's alone, as the app's display widget's temp folder).
+pub=$(mktemp -d); trap 'rm -rf "$pub"' EXIT
+cp -R "$dir/." "$pub/"; chmod -R a+rX,go-w "$pub"; dir=$pub
 home_mkdir "$H/.config/omarchy/plugins"
 # A running shell keeps the plugin it loaded: note real changes so
 # guest/install.sh restarts the shell once at the end.

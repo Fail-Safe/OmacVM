@@ -191,6 +191,12 @@ expect "... the clock moved in shell.json, the user's" "1 $LU" "$(jq '.bar.layou
 expect "... the plugin clone pinned, still the user's" "1 $LU" "$(grep -c '^import QtQuick 6.11 ' "$H/.config/omarchy/plugins/p/Bar.qml") $(owner "$H/.config/omarchy/plugins/p/Bar.qml")"
 expect "... the plugin's queue link, in a folder root had left" "yes $LU" \
   "$([[ -L $H/.config/systemd/user/graphical-session.target.wants/omacvm-plugins.service ]] && echo yes) $(owner "$H/.config/systemd/user")"
+# A plugin from a folder only root can read (the app's display widget is built in a temp folder).
+mkdir -m 700 "$T/rootonly"; cp -R "$G/workspaces/plugins/omacvm.workspaces" "$T/rootonly/p"
+rm -rf "$H/.config/omarchy/plugins/omacvm.workspaces"
+bash "$G/lib/install-plugin.sh" "$LU" "$T/rootonly/p" >/dev/null 2>&1
+expect "... a plugin from a folder only root reads: the user's copy" "yes $LU" \
+  "$([[ -f $H/.config/omarchy/plugins/omacvm.workspaces/manifest.json ]] && echo yes) $(owner "$H/.config/omarchy/plugins/omacvm.workspaces/manifest.json")"
 ( U=$LU; source "$G/guest/home-files.sh"; echo new | home_append "$H/.local/state/omacvm/restart-shell" ) >/dev/null 2>&1
 expect "... a file root had left there: added to, now the user's" "old new $LU" \
   "$(tr '\n' ' ' < "$H/.local/state/omacvm/restart-shell")$(owner "$H/.local/state/omacvm/restart-shell")"
