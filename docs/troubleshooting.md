@@ -989,3 +989,37 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `src/tests/e2e/display-unplug.sh` (the head cases; `OMACVM_TEST_LOCK_HOOK=1`
   with `app/scripts/dev/test-lock.m` stands in for the lock).
   Issue [#428](https://github.com/gillesgoetsch/OmacVM/issues/428).
+
+## 37. All routes: files deleted in the VM keep their space on the Mac
+
+- **Symptom:** you delete big files in Omarchy, but the VM's disk on the Mac
+  (OmacVM.app: `disk.img`, the size in the window's Storage) does not get
+  smaller.
+- **Cause:** the space comes back by itself within about two minutes:
+  btrfs discards what it frees (`discard=async`), QEMU punches it out of
+  `disk.img`, and a trim at every Update VM and once a week
+  (`fstrim.timer`) gets the rest. `disk.img` still grows up to the disk's
+  set size. The space stays taken when:
+  - an update snapshot still holds the files. omarchy-mac snapshots `/`
+    before every `omarchy update`, so whatever you delete outside `/home`
+    stays until that snapshot goes. omarchy-mac keeps 5 (up to 3.1.24, 5
+    updates); OmacVM now keeps the last 2.
+  - `@factory`, omarchy-mac's factory-reset copy of the system as
+    installed, still holds files that updates replaced. OmacVM leaves it,
+    so the factory reset keeps working.
+  - the VMs folder is on a Mac OS Extended drive (no sparse files: the disk
+    takes its full size there), or another file shares the blocks: an APFS
+    clone such as `disk-before-resize.img` during a resize, or a Finder
+    duplicate.
+  - UTM, Parallels and Fusion: the VM trims the same way; whether their
+    disk file gets smaller is up to the app.
+- **Fix:** Update VM (or `omacvm apply`): 2 update snapshots instead of 5,
+  the extra ones go at once, then a trim. `omacvm check` shows it as
+  "freeing disk space". OmacVM changes omarchy-mac's 5 once; a number you
+  set afterwards stays:
+  `sudo snapper -c root set-config NUMBER_LIMIT=N NUMBER_LIMIT_IMPORTANT=N`.
+  To free the space at once: `sudo snapper list`, then
+  `sudo snapper delete N` for the snapshots you no longer need.
+- **Where:** `src/guest/disk-space.sh` (run by `src/guest/install.sh`),
+  `src/guest/check.sh`; test `src/tests/disk-space.sh`;
+  [ADR 0048](adr/0048-freed-space-back-to-the-mac.md).

@@ -5,6 +5,14 @@ in more words.
 
 ## Unreleased
 
+- **Deleted files give their space back sooner.** What you delete in the VM goes back to the
+  Mac by itself within about two minutes (OmacVM.app: disk.img gets smaller, and still grows up
+  to the size you set). Files deleted outside your home folder stayed as long as one of
+  omarchy-mac's update snapshots held them, and it keeps 5, one per `omarchy update`. VMs now
+  keep the last 2: the older ones go at the next Update VM, which also trims the disk once.
+  A number you set yourself stays. On a test VM with 5 update snapshots, Update VM gave back
+  2.4 GB on the Mac, and each update after it gives back what its oldest snapshot held (before:
+  nothing). `omacvm check` shows a "freeing disk space" line.
 - **The app's window opens at most 800 pt tall,** centred. On a large display it used to open as
   tall as the screen; you can still drag it taller.
 - **mpv keeps playing in UTM VMs too.** UTM's VM draws OpenGL with virgl as well, with the same

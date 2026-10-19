@@ -69,6 +69,8 @@ for the Mac's sleep, so this would freeze a user's VM. Not shipped.
 
 - Keep NVMe, `cache=writeback,discard=unmap`, aio threads. No
   `detect-zeroes`. Keep btrfs `discard=async` and `fstrim.timer` in the VM.
+  What still kept freed space (update snapshots, space free before the
+  boot) and what changed for it: ADR 0048.
 - `cache=none`: no. It loses 70 % of random write speed; the Mac's file
   cache is memory macOS takes back when it needs it.
 - virtio-blk + iothread: not until the pause hang is found and fixed in

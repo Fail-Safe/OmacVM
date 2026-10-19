@@ -47,8 +47,11 @@ VM runs, and goes back by itself when a new version does not start
   The clone goes when the check passes; on a failed step the window
   offers Go Back. The steps are in the VM folder's `disk-resize`, the
   results in `logs/disk`. Space Omarchy frees goes back to the Mac by
-  itself (btrfs `discard=async`, `fstrim.timer`, disk.img sparse:
-  [disk options](../adr/0039-system-disk-options.md)).
+  itself within about two minutes (btrfs `discard=async`, a trim at every
+  Update VM and once a week, disk.img sparse:
+  [disk options](../adr/0039-system-disk-options.md)). Files deleted
+  outside your home folder stay while an update snapshot still holds them:
+  OmacVM keeps the last 2 (omarchy-mac kept 5).
 - Where things are: the app in `~/Applications`, the VMs in
   `~/OmacVM/<VM name>/`; moves, other drives, sizes and downloads:
   [where things are](#where-things-are).
@@ -274,8 +277,9 @@ VM runs, and goes back by itself when a new version does not start
   either place.
 - **The VMs**: `~/OmacVM/<VM name>/`, one folder per VM: `vm.env` (the
   settings), `disk.img` (the disk; sparse: it takes what it holds, not its
-  full size; what Omarchy deletes goes back to the Mac within a minute),
-  `efi-vars.fd`, `logs/` ([disk options](../adr/0039-system-disk-options.md)),
+  full size; what Omarchy deletes goes back to the Mac within about two
+  minutes), `efi-vars.fd`, `logs/`
+  ([disk options](../adr/0039-system-disk-options.md)),
   `ssh-key` (the VM's own SSH key: `omacvm apply` puts it into the VM beside
   the Mac's `~/.ssh/omacvm`, so the VM is reached on any Mac its folder goes to).
   To take a VM to another Mac, copy its folder into that Mac's VMs folder

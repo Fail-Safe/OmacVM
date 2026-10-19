@@ -704,6 +704,14 @@ if command -v grub-mkconfig >/dev/null; then
     bad "bootable snapshots" "no snapshots menu in GRUB: it finds no kernel with an initramfs (omacvm apply)"
   else ok "bootable snapshots" "grub-btrfsd, snapshots menu in GRUB"; fi
 fi
+# What the VM frees goes back to the Mac (guest/disk-space.sh).
+d=""
+[[ ,$(findmnt -no OPTIONS / 2>/dev/null), == *,discard[,=]* ]] && d="discard"
+systemctl is-enabled -q fstrim.timer 2>/dev/null && d="${d:+$d, }weekly trim"
+n=$(sed -n 's/^NUMBER_LIMIT="\([0-9]*\)"$/\1/p' /etc/snapper/configs/root 2>/dev/null)
+if [[ -z $d ]]; then bad "freeing disk space" "nothing trims: deleted files keep their space (omacvm apply)"
+elif [[ $n == 5 && ! -e /var/lib/omacvm/update-snapshots ]]; then warn "freeing disk space" "$d; 5 update snapshots keep deleted system files (omacvm apply keeps 2)"
+else ok "freeing disk space" "$d${n:+; $n update snapshots}"; fi
 if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH from the Mac" "firewall rule"
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi
 

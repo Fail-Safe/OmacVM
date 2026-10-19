@@ -380,6 +380,11 @@ OmacVM.app (QEMU's window code, mac-ime on only): ◀▶ Omarchy's Fcitx5 + Omac
 - Disk: GPT on NVMe: 2 GiB EFI at `/boot` + btrfs `@ @home @log` (+ `@factory`
   and snapper from omarchy-mac), `noatime,compress=zstd:1,space_cache=v2,discard=async`.
   GRUB (omarchy-mac's restore tooling expects it), normal and `--removable`.
+  What the VM frees goes back to the Mac (QEMU `discard=unmap` punches holes
+  in disk.img): `src/guest/disk-space.sh` at every full apply has snapper keep
+  2 update snapshots once (omarchy-mac's 5 held deleted files for 5 updates; a
+  number set by hand stays), `fstrim.timer` on and a trim; `@factory` stays
+  (factory reset). Check line "freeing disk space"; `src/tests/disk-space.sh`.
 - Kernel: stock `linux-aarch64`, booted as `/boot/vmlinuz-linux` (a copy of
   its `/boot/Image`, kept current by a pacman hook, `src/kernel/stock-kernel.sh`:
   only that name pairs with `initramfs-linux.img` in GRUB and grub-btrfs);
