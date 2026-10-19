@@ -74,12 +74,15 @@ final class Creator: ObservableObject {
 
     /// update-vm.sh's "FIX ssh-key": the folder's key into the VM through
     /// the guest agent (the update's QEMU has its port where the window's
-    /// has it), off the main thread; the answer goes back on its stdin.
+    /// has it), off the main thread; the answer goes back on its stdin. The
+    /// agent answers a few seconds after the start, before sshd turns the key
+    /// down (MacBook Air, 2026-10-19): a minute is plenty, and a VM without
+    /// one gets its Copy Command within about a minute and a half.
     private func fixKey() {
         guard let c = updating, let p = process else { return }
         let id = run, folder = c.folder, agent = c.agentSocket.path
         Thread.detachNewThread { [weak self] in
-            let r = VMKey.ensure(folder: folder, agentPath: agent, pingWait: 120, running: { p.isRunning })
+            let r = VMKey.ensure(folder: folder, agentPath: agent, pingWait: 60, running: { p.isRunning })
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, id == self.run else { return }
