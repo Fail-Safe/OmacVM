@@ -980,11 +980,6 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-cursor-stays-
 grep -q 'omacvm_cursor_image(omacvm_pointer_image(hw, omacvm_hwc_visible(&omacvm_hwc), hide));' "$source_dir/ui/cocoa.m" && \
   [[ $(grep -c '^    omacvm_cursor_motion();$' "$source_dir/ui/cocoa.m") == 2 ]] || \
   die "ui/cocoa.m: the hidden Mac cursor needs its empty image, set again on motion (cursor-stays-hidden patch)"
-# OmacVM: no App Nap while the VM runs: with its window out of sight (screen
-# locked, another Space) macOS slowed the whole VM to a few percent.
-patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
-grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
-  die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
 # OmacVM, HDR (ADR 0049): the guest tone-maps into the window's display's
 # headroom, which QEMU tells it over the display port; macOS does not tone-map
 # again (PQ 203 nits stays the Mac's white). Its rules' test, then the wiring.
@@ -992,6 +987,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hdr-headroom-
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hdr-headroom.patch"
 "$native_dir/Tests/display/test-hdr-headroom.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the HDR headroom is not wired as tested (test-hdr-headroom.sh)"
+# OmacVM: no App Nap while the VM runs: with its window out of sight (screen
+# locked, another Space) macOS slowed the whole VM to a few percent.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
+grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
