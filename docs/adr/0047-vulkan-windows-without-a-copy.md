@@ -56,8 +56,8 @@ page-aligned whole pages, so it takes them.
      re-strides it into the window's 2D texture: 4-byte BGRA/RGBA pixels, or
      8-byte half floats taken apart bit by bit. Bit-exact; 0.3-0.4 ms of
      QEMU's time a frame, no CPU wait.
-   - Off by default until a number shows something users notice (a busy
-     GPU, 5K windows, M1/M2).
+   - On by default after 3.1.25 (Mac mini M4 and MacBook Air M2 soaks,
+     PR #475).
 
 Options not taken: a GPU copy through a staging IOSurface (needs a CPU wait
 for the Metal blit: 11-14 ms on a busy GPU); a guest Mesa patch that tells

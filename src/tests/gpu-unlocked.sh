@@ -64,7 +64,7 @@ verdict() {   # LOG_LINE -> the status check.sh prints
 }
 check "check.sh: unlocked is ok" grep -q "^ok:virgl's GPU-only commands run without" \
   <<<"$(verdict 'OmacVM: info: virtio-gpu: virgl runs without the BQL')"
-check "check.sh: the default is ok" grep -q "^ok:virgl runs with QEMU's big lock" \
+check "check.sh: the BQL kept is ok" grep -q "^ok:virgl runs with QEMU's big lock" \
   <<<"$(verdict 'OmacVM: info: virtio-gpu: virgl runs with the BQL')"
 check "check.sh: asked but fences polled warns" grep -q "^warn:" \
   <<<"$(verdict 'OmacVM: warning: virtio-gpu: virgl runs with the BQL (fences polled: no unlocked runs)')"

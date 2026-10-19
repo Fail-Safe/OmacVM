@@ -97,7 +97,7 @@ Option 1's rules:
   breaks on either path, worst vCPU wait 301 -> 1.2 ms. 20 rounds of GPU
   process kills, desktop restarts, VM resets and shutdowns under load: all
   came back.
-- Off by default; the user decides after their own test.
+- On by default after 3.1.25; the switch and GPU safe mode go back.
 - One BQL drop/take and at most one extra queue notification per run.
 - The guest may rewrite a command while QEMU reads it twice; the type (and a
   blob's kind) a run picked a command for is checked again where it runs, so
