@@ -147,23 +147,6 @@ public final class USBSession {
     /// A device appeared (or was there when the VM started).
     public func plugged(_ d: USBDevice) {
         guard !stopped else { return }
-        // Vendor HID devices (switch on): the same device read again with a
-        // new HID part, or without one (USBWatch). QEMU's usb-host-hid is tied
-        // to the part it opened, so this is a new device: the VM gives the old
-        // one back, and this one is asked about or remembered like any other.
-        // (Unplugged and back: the reset below.) Never while the switch is off.
-        if let p = plugs[d.location], p.state != .leaving, p.device.hid != d.hid {
-            if p.state == .asking {
-                asker.cancel()
-                asking = nil
-            }
-            queue.removeAll { $0 == d.location }
-            plugs[d.location] = nil
-            if p.state == .connected || p.state == .connecting {
-                machine.detach(p.device) { _ in }
-                log("OmacVM: USB: \(Self.label(p.device)) disconnected (macOS changed its HID part)")
-            }
-        }
         if var p = plugs[d.location] {
             // The same device back (same id and serial, still free): a reset.
             if p.state == .leaving && p.device.id == d.id && p.device.serial == d.serial && d.availability == .free {
@@ -250,11 +233,9 @@ public final class USBSession {
     private func finishLeaving(_ location: UInt32, attached: Bool) {
         guard var p = plugs[location], p.state == .leaving else { return }
         if let back = p.returned {
-            // A vendor HID device back with a new HID part: QEMU's is gone.
-            let samePart = back.hid == p.device.hid
             p.device = back
             p.returned = nil
-            if attached && samePart {
+            if attached {
                 p.state = .connected
                 plugs[location] = p
                 log("OmacVM: USB: \(Self.label(back)) reconnected on the Mac: still with the VM")

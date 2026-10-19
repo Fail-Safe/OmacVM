@@ -5,6 +5,10 @@ in more words.
 
 ## Unreleased
 
+- **The experimental Vendor HID devices option is removed.** We could not make this approach
+  reliable for the intended device workflow and are retiring it rather than leaving unused code
+  to maintain. Ordinary USB passthrough, its device choices and remembered connections stay as
+  they were. Devices held by macOS's HID driver stay with the Mac.
 - **Chrome no longer looks gray with HDR on.** With the experimental HDR switch on, Chrome and
   Chromium draw their whole window as HDR, and the VM dimmed all of it to fit, so pages and white
   looked gray. Their normal content now looks exactly like any other app's, and HDR video still
