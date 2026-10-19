@@ -84,14 +84,23 @@ public enum SSHRepair {
 
     /// qemu.log's line after a window start's repair: only when the key was
     /// added or could not be. No agent is said only while the VM still runs
-    /// (a VM shut down during the wait has nothing to say).
+    /// (a VM shut down during the wait has nothing to say). The VM may not
+    /// have had the key because it knew another Mac's, or because the folder's
+    /// key was just made: the line says neither.
     public static func logLine(_ r: Result, stillRunning: Bool) -> String? {
         switch r {
-        case .added: return "OmacVM: SSH: this VM folder's key added in the VM (it only knew another Mac's key)"
+        case .added: return "OmacVM: SSH: this VM folder's key added in the VM (the VM did not have it)"
         case .present: return nil
         case .noAgent: return stillRunning ? "OmacVM: SSH: the VM's guest agent did not answer: this VM folder's key was not checked" : nil
-        case .failed(let why): return "OmacVM: SSH: could not add this VM folder's key in the VM: \(why)"
+        case .failed(let why): return "OmacVM: SSH: could not add this VM folder's key in the VM: \(plain(why))"
         }
+    }
+
+    /// Text that may come from the guest (the agent's error), for one log
+    /// line: printable ASCII only (anything else becomes "?"), 120 characters at most.
+    public static func plain(_ s: String) -> String {
+        let t = String(String.UnicodeScalarView(s.unicodeScalars.prefix(121).map { (0x20...0x7e).contains($0.value) ? $0 : "?" }))
+        return t.count > 120 ? String(t.prefix(117)) + "..." : t
     }
 
     /// update-vm.sh's own lines for the repair. Only the script prints them,
