@@ -2,8 +2,9 @@
 # Freeing disk space (src/guest/disk-space.sh) without a VM: omarchy-mac's 5
 # update snapshots become KEEP (once) and the extra ones go at once, a number
 # set by hand stays (also 5 after the change), the weekly trim is on, the
-# trim starts only after btrfs's cleaner (at most a minute); guest/install.sh
-# runs it at every full apply; omacvm check's "freeing disk space" line.
+# trim starts only after btrfs's cleaner (at most a minute); omacvm apply
+# runs it only after the VM side worked, never for a repair; omacvm check's
+# "freeing disk space" line.
 # snapper, systemctl, btrfs, timeout and findmnt are stand-ins.
 #   src/tests/disk-space.sh
 set -uo pipefail
@@ -120,13 +121,38 @@ expect "snapper fails: no cleanup, the trim still" "snapper -c root set-config N
 expect "snapper fails: says so, exit 0" "update snapshots: could not set the number kept (snapper)|0" "$out|$rc"
 expect "snapper fails: tried again next time" no "$([[ -e $OMACVM_SNAPPER_DONE ]] && echo yes || echo no)"
 
-# guest/install.sh: at every full apply, after the initramfs and GRUB.
-I=$R/src/guest/install.sh
-call=$(grep -n 'bash "$R/guest/disk-space.sh"' "$I" | cut -d: -f1)
-stamp=$(grep -n '| install -Dm644 /dev/stdin $BOOT_STAMP' "$I" | cut -d: -f1)
-expect "install.sh runs it once" 1 "$(grep -c 'guest/disk-space.sh' "$I")"
-expect "install.sh: after the boot files" yes "$( (( ${call:-0} > ${stamp:-0} && ${stamp:-0} > 0 )) && echo yes)"
-expect "install.sh: only at a full apply" 'if system; then' "$(sed -n "$((call - 1))p" "$I")"
+# omacvm apply (src/cmd/apply.sh): its own lines from the VM side to
+# "finishing", with stand-ins. The update snapshots go only after the VM
+# side worked: a failed or rolled back apply leaves them.
+A=$R/src/cmd/apply.sh
+expect "guest/install.sh does not run it" 0 "$(grep -c 'disk-space.sh' "$R/src/guest/install.sh")"
+expect "apply.sh runs it once" 1 "$(grep -c 'bash $S/guest/disk-space.sh' "$A")"
+blk=$(awk '/^if ! guest_install "\$\{FV\[@\]\}"/ {on = 1} on {print} on && /^step finish/ {exit}' "$A")
+expect "apply.sh: the VM side block found" yes "$([[ $blk == *disk-space.sh* && $blk == *'exit 4'* ]] && echo yes)"
+cat > "$T/apply" <<EOF
+set -euo pipefail
+guest_install() { echo "guest_install \$*" >> "\$CALLS"; [[ \$1 == new ]] && return "\$GI_RC"; return 0; }
+gssh() { echo "gssh \$2" >> "\$CALLS"; [[ \$2 != *disk-space.sh* ]] || echo "update snapshots: the last 2 kept (were 5)"; }
+what_failed() { :; }
+step() { echo "step \$1" >> "\$CALLS"; }
+log() { :; }
+info() { echo "info \$*" >> "\$CALLS"; }
+die() { echo "die" >> "\$CALLS"; exit 1; }
+FV=(new); PREV=(old); GI_LOG=$T/gi.log; IP=vm; S=/usr/local/share/omacvm; VM=t; had=3.1.24; now=3.1.25; KNOWN=""; GI_ARGS=""
+$blk
+EOF
+ap() { : > "$CALLS"; bash "$T/apply" > /dev/null 2>&1; rc=$?; calls=$(tr '\n' ';' < "$CALLS"); }
+O=/usr/local/share/omacvm
+GI_RC=0 ONLY="" TRANSACTION=0 ap
+expect "apply: the VM side worked: then the snapshots and the trim, then finishing" \
+  "guest_install new;gssh rm -rf $O.old;gssh bash $O/guest/disk-space.sh;info disk space: update snapshots: the last 2 kept (were 5);step finish;|0" "$calls|$rc"
+GI_RC=1 ONLY="" TRANSACTION=0 ap
+expect "apply: the VM side failed: the snapshots stay" "guest_install new;gssh rm -rf $O.old;die;|1" "$calls|$rc"
+GI_RC=1 ONLY="" TRANSACTION=1 ap
+expect "apply --transaction: rolled back: the snapshots stay" \
+  "guest_install new;gssh test -d $O.old;step rollback;gssh set -e; rm -rf $O.failed; mv $O $O.failed; mv $O.old $O; rm -rf $O.failed;gssh grep -v '^#' $O/features.tsv | cut -f1;guest_install old;|4" "$calls|$rc"
+GI_RC=0 ONLY=bridge TRANSACTION=0 ap
+expect "apply --reinstall (a repair, --only): no snapshots, no trim" "guest_install new;gssh rm -rf $O.old;step finish;|0" "$calls|$rc"
 
 # omacvm check's line, the block from guest/check.sh with the stand-ins.
 blk=$(sed -n '/^# What the VM frees goes back to the Mac/,/^else ok "freeing disk space"/p' "$R/src/guest/check.sh" |

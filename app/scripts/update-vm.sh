@@ -10,8 +10,10 @@
 # later). SSH that turns the VM folder's key down: "FIX ssh-key", answered
 # added, present, noagent or failed on stdin (the app adds the key through the
 # guest agent); not fixed: "SSHKEY refused" before the ERROR. Exit 0 = updated and
-# powered off. Nothing is deleted: a failed apply leaves the VM as it was
-# (omacvm apply rolls its own steps back), and it starts as before.
+# powered off. Of the person's things it deletes only omarchy-mac's update
+# snapshots beyond the number OmacVM keeps (once per VM, src/guest/disk-space.sh),
+# and only after the VM side worked: a failed apply leaves them, and the VM
+# starts as before.
 set -euo pipefail
 # The app's answer comes on fd 3; everything else reads nothing (an open stdin
 # would keep a command that reads it waiting).

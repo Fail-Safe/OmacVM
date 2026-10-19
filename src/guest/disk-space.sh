@@ -5,8 +5,9 @@
 # trims the rest weekly. Only snapshots keep deleted files: omarchy-mac
 # snapshots / before each update and kept 5, so a file deleted outside /home
 # stayed on the disk for 5 more updates. OmacVM keeps fewer: KEEP.
-# Root, idempotent; guest/install.sh runs it at every full apply (build,
-# Update VM). Test: src/tests/disk-space.sh.
+# Root, idempotent. omacvm apply (src/cmd/apply.sh) runs it at every full
+# apply (build, Update VM), once the VM side worked: update snapshots are the
+# way back to a system that worked. Test: src/tests/disk-space.sh.
 set -u
 KEEP=2   # update snapshots kept (omarchy-mac: 5)
 C=${OMACVM_SNAPPER_ROOT:-/etc/snapper/configs/root}
