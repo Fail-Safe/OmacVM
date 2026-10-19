@@ -38,7 +38,7 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
    show now. QEMU is the single source of truth; the guest follows.
 2. **The 10-bit driver is dormant until a start asks for it.** `omacvm
    apply` builds it on every app VM (7 s; downloaded, patched and built as
-   `nobody`, root only installs it) into `/usr/local/lib/omacvm/virtio-gpu/K`,
+   a user id of its own, root only installs it) into `/usr/local/lib/omacvm/virtio-gpu/K`,
    which depmod never sees; a modprobe `install` rule loads it only when
    the start's SMBIOS says `omacvm.deepcolor=1`, else (and on any failure)
    the stock driver. Turning the switch on needs one VM restart; VMs whose

@@ -36,7 +36,7 @@ install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displa
 # the 10-bit driver's loader.
 install -Dm755 omacvm-smbios /usr/local/lib/omacvm/omacvm-smbios
 # 10-bit colour (HDR): the 10-bit virtio-gpu driver, built now and by a pacman
-# hook for new kernels (as nobody, from kernel.org; a kernel without headers
+# hook for new kernels (as a user id of its own, from kernel.org; a kernel without headers
 # is skipped), into /usr/local/lib/omacvm/virtio-gpu/<kernel>, where depmod
 # does not see it. A modprobe rule hands virtio_gpu to omacvm-virtio-gpu-load,
 # which loads it only when the app's switch starts the VM, else the stock one.

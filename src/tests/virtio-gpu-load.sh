@@ -6,7 +6,7 @@
 # did. The modprobe rule falls back to the stock driver without the loader.
 # The builder skips current builds and kernels without headers, drops the old
 # by-hand install and builds of removed kernels, writes the rule only once a
-# build is there, and builds as nobody. A made-up file system
+# build is there, and builds as its own user id. A made-up file system
 # (OMACVM_VIRTIO_GPU_TEST_ROOT) and stand-ins for modprobe, insmod, modinfo,
 # uname, depmod, chown, timeout and curl: no root, no network, no kernel.
 #   src/tests/virtio-gpu-load.sh
@@ -169,21 +169,26 @@ expect "the loader writes nothing to stderr" "" "$(cat "$T/load.err")"
 mkdir -p "$T/r"
 OMACVM_VIRTIO_GPU_TEST_ROOT=$T/r "$BUILD" --remove > /dev/null   # nothing there: fine
 rule_line=$(sed -n 's/^install virtio_gpu //p' "$BUILD")
-expect "the rule: the loader if it is there, else the stock driver" \
-  '[ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ] && /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS' \
+expect "the rule: the loader if it is there; without it (the initramfs) nothing for a 10-bit start, else the stock driver" \
+  'if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi' \
   "$rule_line"
-run_rule() {   # LOADER (a path): runs the rule with the loader and modprobe swapped for stand-ins
+run_rule() {   # LOADER (a path) SMBIOS-ROOT: runs the rule with the loader, modprobe and SMBIOS swapped for stand-ins
   local cmd=${rule_line//\$CMDLINE_OPTS/opt=1}
   cmd=${cmd//\/usr\/local\/lib\/omacvm\/virtio-gpu\/omacvm-virtio-gpu-load/$1}
   cmd=${cmd//\/sbin\/modprobe/$T/bin/modprobe}
+  cmd=${cmd//\/sys\/firmware/$2/sys/firmware}
   : > "$CALLS"
   sh -c "$cmd"
 }
-run_rule "$T/r/missing"; expect "rule: no loader (the initramfs): the stock driver" "0 $STOCK" "$? $(calls)"
+smbios "$T/rs" omacvm.notchskip=1 omacvm.deepcolor=1
+smbios "$T/rn" omacvm.notchskip=1
+run_rule "$T/r/missing" "$T/rn"; expect "rule: no loader (the initramfs), an 8-bit start: the stock driver" "0 $STOCK" "$? $(calls)"
+run_rule "$T/r/missing" "$T/rs"; expect "rule: no loader (the initramfs), a 10-bit start: nothing yet (the real root loads it)" "0 " "$? $(calls)"
+run_rule "$T/r/missing" "$T/none"; expect "rule: no loader, no SMBIOS: the stock driver" "0 $STOCK" "$? $(calls)"
 printf '#!/bin/sh\necho "loader $*" >> "$CALLS"\n' > "$T/r/ok"; chmod +x "$T/r/ok"
-run_rule "$T/r/ok"; expect "rule: the loader, and nothing else when it loaded a driver" "0 loader opt=1;" "$? $(calls)"
+run_rule "$T/r/ok" "$T/rs"; expect "rule: the loader, and nothing else when it loaded a driver" "0 loader opt=1;" "$? $(calls)"
 printf '#!/bin/sh\necho "loader $*" >> "$CALLS"\nexit 1\n' > "$T/r/bad"; chmod +x "$T/r/bad"
-run_rule "$T/r/bad"; expect "rule: a failing loader: the stock driver after all" "0 loader opt=1;$STOCK" "$? $(calls)"
+run_rule "$T/r/bad" "$T/rn"; expect "rule: a failing loader: the stock driver after all" "0 loader opt=1;$STOCK" "$? $(calls)"
 
 # ---------- omacvm-virtio-gpu-build (only what needs no network) ----------
 B=$T/b
@@ -219,16 +224,16 @@ expect "status: built (exit 0)" "0 built for $K (this start: omacvm)" "$rc $out"
 out=$(FAKE_KERNEL=7.1.4-1-aarch64-ARCH builder --status); rc=$?
 expect "status: no headers (exit 1)" "1 not built for 7.1.4-1-aarch64-ARCH: no kernel headers (this start: omacvm)" "$rc $out"
 
-# A build from another patch is built again, as nobody, with the proxy.
+# A build from another patch is built again, as its own user id, with the proxy.
 echo "0000 $K" > "$B/$VG/$K/stamp"; rm "$B/run/omacvm/virtio-gpu"
 : > "$CALLS"
 out=$(https_proxy=http://10.0.2.2:7890 builder --kernel "$K"); expect "stale build, no network: exit 1" 1 $?
-has "stale build: built again, as nobody, in a clean environment with the proxy" \
-  "setpriv --reuid=nobody --regid=nobody --clear-groups --no-new-privs -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=" "$(calls)"
+has "stale build: built again, as its own user id, in a clean environment with the proxy" \
+  "setpriv --reuid=64917 --regid=64917 --clear-groups --no-new-privs -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=" "$(calls)"
 has "stale build: the proxy goes along" "LC_ALL=C https_proxy=http://10.0.2.2:7890 " "$(calls)"
 has "stale build: kernel, its tag's version" "--unprivileged $K 7.2.9 " "$(calls)"
 has "stale build: within the time cap" "timeout --kill-after=10 " "$(calls)"
-has "stale build: its work folder belongs to nobody" "chown nobody:nobody " "$(calls)"
+has "stale build: its work folder belongs to the build's user id" "chown 64917:64917 " "$(calls)"
 has "stale build: says why it failed" "$K: not built: curl: (6) Could not resolve host: git.kernel.org" "$out"
 expect "stale build: the old one stays (the loader refuses it by its stamp)" "module" "$(cat "$B/$VG/$K/virtio-gpu.ko")"
 out=$(builder --status)

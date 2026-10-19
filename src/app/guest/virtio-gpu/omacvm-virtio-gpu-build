@@ -7,7 +7,8 @@
 # switch on. omacvm apply runs this on every app VM, the pacman hook after
 # kernel updates. Needs the kernel's headers. The driver's sources are the
 # upstream stable release of the kernel's version, from kernel.org; download,
-# patch and build run as nobody, root only installs the result.
+# patch and build run as a user id of their own (no account, nothing else
+# runs as it), root only installs the result.
 # Usage (root):
 #   omacvm-virtio-gpu-build             build for the running kernel
 #   omacvm-virtio-gpu-build --kernel K  build for kernel K
@@ -26,6 +27,9 @@ root=$P/usr/local/lib/omacvm/virtio-gpu
 mods=$P/lib/modules
 rule=$P/etc/modprobe.d/omacvm-virtio-gpu.conf
 patch_file=$root/linux-virtio-gpu-deep-color.patch
+# The build's own user id: no account, no other process runs as it (nobody
+# is shared by other services, which could change the sources mid-build).
+builder=64917
 budget=300   # seconds for all builds of one run: the pacman hook holds kernel updates
 work="" stage=""
 trap 'rm -rf ${work:+"$work"} ${stage:+"$stage"}' EXIT
@@ -43,7 +47,7 @@ failed() {   # KERNEL WHY: said, and kept for --status
   { mkdir -p "$root/$1" && printf '%s\n' "$2" > "$root/$1/error"; } 2>/dev/null || true
 }
 
-# As nobody, in its own WORK folder: fetch, patch, build. The module goes to
+# As the build's own user id, in its own WORK folder: fetch, patch, build. The module goes to
 # stdout, everything else to stderr.
 fetch_and_make() {   # KERNEL VERSION WORK
   local kernel=$1 version=$2 src=$3/drivers/gpu/drm/virtio f
@@ -81,15 +85,15 @@ build() {   # KERNEL: 0 = built, current or no headers; 1 = failed
   left=$((budget - SECONDS))
   (( left > 10 )) || { failed "$kernel" "no time left in this run (${budget} s for all kernels)"; return 1; }
   if ! { work=$(mktemp -d "$P/tmp/omacvm-virtio-gpu.XXXXXX") && stage=$(mktemp -d "$P/tmp/omacvm-virtio-gpu.XXXXXX") &&
-         chown nobody:nobody "$work"; }; then
-    failed "$kernel" "no work folder for nobody"; return 1
+         chown "$builder:$builder" "$work"; }; then
+    failed "$kernel" "no work folder for the build"; return 1
   fi
   # A clean environment, but the proxy (the Mac's, from the build) stays.
   keep=(PATH=/usr/local/bin:/usr/bin:/bin "HOME=$work" LC_ALL=C)
   for v in http_proxy https_proxy all_proxy no_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY; do
     [[ -z ${!v:-} ]] || keep+=("$v=${!v}")
   done
-  timeout --kill-after=10 "$left" setpriv --reuid=nobody --regid=nobody --clear-groups --no-new-privs -- \
+  timeout --kill-after=10 "$left" setpriv --reuid="$builder" --regid="$builder" --clear-groups --no-new-privs -- \
     env -i "${keep[@]}" "$self" --unprivileged "$kernel" "$version" "$work" \
     > "$stage/virtio-gpu.ko" 2> "$stage/log" || rc=$?
   if (( rc != 0 )); then
@@ -129,9 +133,12 @@ rule_text() {
   cat <<'EOF'
 # OmacVM.app (omacvm-virtio-gpu-build): virtio_gpu goes through
 # omacvm-virtio-gpu-load, which loads the 10-bit driver only for a start with
-# the app's switch on, else the stock one. Without the loader (in the
-# initramfs) the stock driver loads.
-install virtio_gpu [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ] && /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS
+# the app's switch on, else the stock one (and the stock one if it fails).
+# In the initramfs (no loader there; mkinitcpio's kms hook puts virtio_gpu in
+# it) a start that asks for 10 bits loads nothing yet: udev loads it again
+# from the real root, through the loader. Every other start: the stock one,
+# as before.
+install virtio_gpu if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi
 EOF
 }
 
@@ -145,6 +152,22 @@ write_rule() {
     rule_text > "$rule.tmp" && chmod 644 "$rule.tmp" && mv -f "$rule.tmp" "$rule"
     return 0
   done
+}
+
+# An initramfs made before the rule (or before it changed) that has
+# virtio_gpu in it loads the stock driver for every start: made again, once
+# (mkinitcpio -P; a kernel update makes them anyway, after this rule).
+refresh_initramfs() {
+  local img stale=""
+  [[ -f $rule ]] || return 0
+  for img in "$P"/boot/initramfs-*.img; do
+    [[ -f $img && $img -ot $rule ]] || continue
+    lsinitcpio "$img" 2>/dev/null | grep -q 'virtio.gpu' && stale=1
+  done
+  [[ -n $stale ]] || return 0
+  say "the initramfs has virtio_gpu but not the rule yet: mkinitcpio -P"
+  timeout 300 mkinitcpio -P > "$P/var/log/omacvm-virtio-gpu-mkinitcpio.log" 2>&1 ||
+    say "mkinitcpio -P failed (log: /var/log/omacvm-virtio-gpu-mkinitcpio.log); 10-bit starts get the stock driver until the next one"
 }
 
 status() {
@@ -177,7 +200,8 @@ case ${1:-} in
   --hook)
     migrate
     for d in "$mods"/*/; do
-      [[ -d $d ]] && build "$(basename "$d")" || true
+      # Only installed kernels: headers can outlive their kernel for a while.
+      [[ -d $d && -d $d/kernel ]] && build "$(basename "$d")" || true
     done
     for d in "$root"/*/; do
       [[ -d $d ]] || continue
@@ -185,6 +209,7 @@ case ${1:-} in
       [[ -d $mods/$k/kernel ]] || { rm -rf "$d"; say "$k: removed (the kernel is gone)"; }
     done
     write_rule || true
+    refresh_initramfs || true
     exit 0   # never fails the kernel update
     ;;
   --kernel|"")
@@ -193,6 +218,7 @@ case ${1:-} in
     migrate
     rc=0; build "$k" || rc=1
     write_rule
+    refresh_initramfs || true
     exit $rc
     ;;
   --unprivileged)
