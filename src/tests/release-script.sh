@@ -38,6 +38,14 @@ if command -v cc >/dev/null; then
   expect 1 "import: another Mesa commit is refused" "$rt/import-kosmickrisp.sh" "$T/mesa" --stamp
   cp -R "$T/good" "$T/script"; sed -i '' "s/ $script / $(printf '%064d' 0) /" "$T/script/stamp"
   expect 1 "import: another build script is refused" "$rt/import-kosmickrisp.sh" "$T/script" --stamp
+  # The Mesa patches: a build without the checkout's patches, and one with them.
+  mkdir -p "$rt/patches"; echo "--- a/x" > "$rt/patches/mesa-kosmickrisp-test.patch"
+  expect 1 "import: a build without the checkout's Mesa patches is refused" "$rt/import-kosmickrisp.sh" "$T/good" --stamp
+  cp -R "$T/good" "$T/patched"
+  echo "$(cat "$T/good/stamp") patches-$(shasum -a 256 "$rt/patches/mesa-kosmickrisp-test.patch" | cut -c1-16)" > "$T/patched/stamp"
+  expect 0 "import: a build with the same Mesa patches is taken" "$rt/import-kosmickrisp.sh" "$T/patched" --stamp
+  rm -r "$rt/patches"
+  expect 1 "import: a patched build for an unpatched checkout is refused" "$rt/import-kosmickrisp.sh" "$T/patched" --stamp
   cp -R "$T/good" "$T/noicd"; rm "$T/noicd/kosmickrisp_mesa_icd.json"
   expect 1 "import: a build without its ICD file is refused" "$rt/import-kosmickrisp.sh" "$T/noicd" --stamp
   cp -R "$T/good" "$T/nolic"; : > "$T/nolic/LICENSE.mesa-kosmickrisp.txt"

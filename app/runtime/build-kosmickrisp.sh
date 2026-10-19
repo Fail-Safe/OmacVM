@@ -18,6 +18,8 @@
 # Build-time needs: Homebrew llvm, spirv-llvm-translator, spirv-tools, bison
 # and pkgconf, and an SDK with Metal 4 (Xcode 26 or newer). The LLVM version
 # is not pinned (it is Homebrew's); it is in the stamp, so a new one rebuilds.
+# OmacVM's changes to Mesa are patches/mesa-kosmickrisp-*.patch, applied in
+# name order; they are in the stamp too.
 set -euo pipefail
 
 mesa_commit=e5f0687867f5c5e88619175d9b0442f8560e8d53
@@ -65,6 +67,8 @@ while (($#)); do
 done
 
 native_dir=$(cd "$(dirname "$0")" && pwd -P)
+mesa_patches=()
+for p in "$native_dir"/patches/mesa-kosmickrisp-*.patch; do [[ -f $p ]] && mesa_patches+=("$p"); done
 out_dir="$native_dir/.build/kosmickrisp"
 stamp="$out_dir/stamp"
 
@@ -99,9 +103,10 @@ if ((${#missing[@]})); then
   exit 1
 fi
 
-# Rebuild when this script, the Mesa commit or the build-time LLVM changes.
+# Rebuild when this script, the Mesa commit, its patches or the build-time LLVM changes.
 want_stamp="$mesa_commit $(shasum -a 256 "$0" | cut -d' ' -f1) llvm-$("$llvm_bin/llvm-config" --version)"
 want_stamp+=" spirv-llvm-translator-$("$pkg_config" --modversion LLVMSPIRVLib)"
+((${#mesa_patches[@]})) && want_stamp+=" patches-$(cat "${mesa_patches[@]}" | shasum -a 256 | cut -c1-16)"
 case $mode in
   check) log "build machine OK (LLVM $("$llvm_bin/llvm-config" --version))"; exit 0 ;;
   stamp) echo "$want_stamp"; exit 0 ;;
@@ -152,6 +157,13 @@ python3 -m venv "$work/venv"
   --no-build-isolation --no-binary markupsafe,pyyaml -r <(python_generator_requirements)
 
 src="$work/$mesa_root"
+for p in ${mesa_patches[@]+"${mesa_patches[@]}"}; do
+  pinned=$(awk -v n="$(basename "$p")" '$2 == n { print $1 }' "$native_dir/patches/SHA256SUMS")
+  [[ -n $pinned && $(shasum -a 256 "$p" | cut -d' ' -f1) == "$pinned" ]] ||
+    die "$(basename "$p") is not pinned in patches/SHA256SUMS"
+  log "patch $(basename "$p")"
+  patch -s -p1 -d "$src" < "$p" || die "$(basename "$p") does not apply to Mesa $mesa_commit"
+done
 meson=("$work/venv/bin/python3" "$work/$meson_root/meson.py")
 export PATH="$work/venv/bin:$ninja_dir:$llvm_bin:$bison_bin:$PATH" PKG_CONFIG="$pkg_config"
 # The scratch path changes on every run; keep it out of the binaries.
@@ -205,10 +217,13 @@ PY
 # their sources and headers from ninja's deps, the kernels' sources), its
 # licence and copyright lines. An unknown licence stops the build.
 log "licences of the Mesa files in the driver"
-python3 - "$work/build-kk" "$src" "$mesa_commit" "$work/LICENSE.mesa-kosmickrisp.txt" <<'PY'
+python3 - "$work/build-kk" "$src" "$mesa_commit" "$work/LICENSE.mesa-kosmickrisp.txt" \
+  ${mesa_patches[@]+$(for p in "${mesa_patches[@]}"; do basename "$p"; done)} <<'PY'
 import os, re, subprocess, sys
 
 build, src, commit, out = sys.argv[1:5]
+patches = sys.argv[5:]
+patched = (" with OmacVM's changes in " + ", ".join(patches)) if patches else ""
 src = os.path.realpath(src)
 target = "src/kosmickrisp/vulkan/libvulkan_kosmickrisp.dylib"
 
@@ -333,7 +348,7 @@ rule = "=" * 72
 parts = [f"""KosmicKrisp (lib/libvulkan_kosmickrisp.dylib in OmacVM.app's runtime)
 
 KosmicKrisp is Mesa's Vulkan driver on Metal, built from Mesa commit
-{commit} (https://gitlab.freedesktop.org/mesa/mesa).
+{commit} (https://gitlab.freedesktop.org/mesa/mesa){patched}.
 The driver is built from {len(files)} Mesa files (sources, headers, kernels and
 code generators, as the build used them). Their licences:
 """]
