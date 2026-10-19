@@ -115,6 +115,8 @@ vm_load() {
   if [[ ! -f $VM_KEY || ! -f $VM_KEY.pub ]]; then
     rm -f "$VM_KEY" "$VM_KEY.pub"
     (umask 077; ssh-keygen -t ed25519 -N "" -C omacvm-vm -f "$VM_KEY" -q)
+    # A finished VM does not know a new key yet (the app adds it in the VM).
+    [[ ! -e $VM_DIR/ready ]] || log "this VM folder had no SSH key: made a new one, OmacVM adds it in the VM"
   fi
 }
 
@@ -311,11 +313,18 @@ vssh() {
   ssh -i "${VM_KEY:-$KEY}" -i "$KEY" -o IdentitiesOnly=yes -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@127.0.0.1 "$@"
 }
-wait_ssh() {   # [seconds]
-  local i
+# wait_ssh [SECONDS] [refused]: until the VM lets us in over SSH (0), or not
+# within SECONDS (1). With "refused": 2 at the first "Permission denied": the
+# VM is up but turns our keys down, and waiting does not change that (its
+# authorized_keys is on disk; each try also counts against us in sshd's
+# PerSourcePenalties). Builds keep the plain wait: a prebuilt VM's first boot
+# writes root's key while its sshd already runs.
+wait_ssh() {
+  local i e
   for ((i = 0; i < ${1:-300}; i += 3)); do
     qemu_running || return 1
-    vssh true < /dev/null 2>/dev/null && return 0
+    e=$(vssh true < /dev/null 2>&1 >/dev/null) && return 0
+    [[ ${2:-} == refused && $e == *"Permission denied"* ]] && return 2
     sleep 3
   done
   return 1

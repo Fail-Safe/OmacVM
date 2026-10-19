@@ -186,6 +186,9 @@ enum RenderVMWindow {
         state.creator.showForRendering(kernel: .init(have: "7.2.10-1", latest: "7.2.11-1", cpus: 8, low: 20, high: 30))
         state.screen = .building
         window("window-20-update-kernel-question", state, usual)
+        // Update VM: SSH turned the key down and the guest agent did not answer.
+        state.creator.showForRendering(keyRefused: config)
+        window("window-21-update-ssh-key", state, usual)
         state.screen = screen
         u.showForRendering(staged: staged, notice: nil, enabled: true, waiting: false, previous: nil)
         sheet("sheet-1-whats-new") { WhatsNewSheet(updater: u, running: false) {} }

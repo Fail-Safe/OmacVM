@@ -7,7 +7,9 @@
 # Progress lines as create-vm.sh ("==>", "STEP n/N"). A newer memory-optimized
 # kernel is asked first: "ASK kernel HAVE LATEST CPUS LOW HIGH" (the build's
 # minutes), answered "build" or "later" on stdin (no answer in 10 minutes:
-# later). Exit 0 = updated and
+# later). SSH that turns the VM folder's key down: "FIX ssh-key", answered
+# added, present, noagent or failed on stdin (the app adds the key through the
+# guest agent); not fixed: "SSHKEY refused" before the ERROR. Exit 0 = updated and
 # powered off. Nothing is deleted: a failed apply leaves the VM as it was
 # (omacvm apply rolls its own steps back), and it starts as before.
 set -euo pipefail
@@ -31,11 +33,15 @@ step() { echo "STEP $1/$STEPS $2"; }
 # it has the user's files.
 stop_vm() {
   qemu_running || return 0
-  vssh "systemctl poweroff" < /dev/null 2>/dev/null || true
+  # A VM that turns our keys down: the power button (ACPI) instead.
+  vssh "systemctl poweroff" < /dev/null 2>/dev/null || qmp system_powerdown || true
   qemu_wait_exit 90 || qemu_quit
 }
+# The guest agent's port at the path the window uses (VMConfig.agentSocket):
+# the app adds the folder's key through it when SSH turns the key down.
+AGENT=$RUN_DIR/$VM_ID.qga
 WATCH=
-trap 'if [[ -n $WATCH ]]; then kill "$WATCH" 2>/dev/null || true; fi; stop_vm' EXIT
+trap 'if [[ -n $WATCH ]]; then kill "$WATCH" 2>/dev/null || true; fi; stop_vm; rm -f "$AGENT"' EXIT
 
 # Never waits forever: a disk that fails (the console or the apply shows
 # btrfs/ext4 errors or a read-only file system) or an update that takes more
@@ -76,10 +82,36 @@ stopped_why() {   # the plain error after a step failed, with the next step
 }
 
 step 1 "Starting $NAME without a window"
-qemu_headless update "${QEMU_UEFI[@]}" -drive "$DISK_OPT" -device nvme,serial=omacvm,drive=disk,bootindex=0
+rm -f "$AGENT"
+qemu_headless update "${QEMU_UEFI[@]}" -drive "$DISK_OPT" -device nvme,serial=omacvm,drive=disk,bootindex=0 \
+  -device virtio-serial-pci,id=vser0 -chardev "socket,id=qga0,path=$(qe "$AGENT"),server=on,wait=off" \
+  -device virtserialport,bus=vser0.0,nr=1,chardev=qga0,name=org.qemu.guest_agent.0
 watch_update &
 WATCH=$!
-wait_ssh 300 || die "$(stopped_why "$NAME did not come up within 5 minutes (log: $LOG/update-console.log). Start it from the app to see what it shows.")"
+# SSH that turns the folder's key down (a VM set up on another Mac, or before
+# 3.0.12): the app adds the key through the guest agent ("FIX ssh-key"; its
+# answer on fd 3: added, present, noagent or failed; VMKey.ensure), then one
+# more wait. The (i) and the Copy Command come from the app ("SSHKEY refused").
+rc=0; wait_ssh 300 refused || rc=$?
+if (( rc == 2 )); then
+  log "$NAME only knows another Mac's SSH key: adding this one"
+  echo "FIX ssh-key"
+  fix=""; read -r -t "${OMACVM_FIX_SECONDS:-180}" -u 3 fix || fix=""
+  rc=2
+  if [[ $fix == added || $fix == present ]]; then rc=0; wait_ssh 60 refused || rc=$?; fi
+  if (( rc == 0 )); then
+    log "SSH works again."
+  elif [[ $fix == added || $fix == present ]]; then
+    die "$(stopped_why "OmacVM added this Mac's key in $NAME, but its SSH still turns OmacVM away. Its SSH settings may have been changed in the VM (log: $LOG/update-console.log).")"
+  else
+    echo "SSHKEY refused"
+    why="the VM's guest agent did not answer"
+    [[ $fix != failed ]] || why="adding it in the VM failed"
+    die "$(stopped_why "$NAME doesn't let this Mac in over SSH, and OmacVM could not add its key ($why). Add the key once by hand: start the VM, open a terminal in it, paste the command (Copy Command) and enter your password. Then click Update VM again.")"
+  fi
+elif (( rc != 0 )); then
+  die "$(stopped_why "$NAME did not come up within 5 minutes (log: $LOG/update-console.log). Start it from the app to see what it shows.")"
+fi
 
 # The memory-optimized kernel follows Arch Linux ARM's: a newer one is a kernel
 # build in the VM (10 minutes to over an hour), done only when the user says so.

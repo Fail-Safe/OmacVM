@@ -140,7 +140,8 @@ UTM, or choose their password: hand those over, never work around them.
   at once in a running VM; `--json` says `skip` and `skip_ready` (the VM's bar can do it).
 - **An Omarchy installed by hand**: `omacvm apply --vm NAME`. Exit 3 with a
   command in the message = the person runs that command once in the VM's
-  terminal (it adds OmacVM's SSH key), then apply again.
+  terminal (it adds OmacVM's SSH key), then apply again. An OmacVM.app VM
+  that knows only another Mac's key: starting it once in the app does the same.
 - **Update**: `omacvm update` (all running OmacVM VMs) or `--vm NAME`.
 - **Something is off**: `omacvm check --json`, then section 7 below.
 
@@ -365,6 +366,23 @@ OmacVM.app (QEMU's window code, mac-ime on only): ◀▶ Omarchy's Fcitx5 + Omac
 - SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
   the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
   another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`.
+  OmacVM.app VMs are reached with their folder's key first (`ssh-key`,
+  `app_ssh_key`). A VM that knows only another Mac's key (set up there, or
+  before 3.0.12) gets the folder's key through the guest agent, without SSH
+  (`VMKey.swift`; the guest script, key checks and texts in
+  `OmacVMWindow/SSHRepair.swift`): root's `authorized_keys` only, the key as
+  an argument, `systemctl try-restart sshd` only after an add (clears sshd's
+  PerSourcePenalties, keeps open sessions). At each window start, before the
+  feature switches made while the VM was stopped (qemu.log
+  `OmacVM: SSH: ... added` only when it was missing). In Update VM, whose
+  headless QEMU has the agent's port at the window's path: `wait_ssh 300
+  refused` stops at the first "Permission denied", `FIX ssh-key` on stdout,
+  the app answers on fd 3 (added, present, noagent, failed). Not fixed:
+  `SSHKEY refused`, then the failed screen's Copy Command (`ssh_setup_command
+  app` with the folder key, built by the app, never taken from the output)
+  with an (i); a VM that turns the key down shuts down by ACPI
+  (`qmp system_powerdown`). Tests: `src/tests/update-vm-watch.sh`,
+  `swift run window-tests`.
 - Scroll momentum in the guest (feature `scroll-momentum`, called Glide in the code and
   the experiment: the `Glide` class, `glide.sh`, `omacvm_glide.lua`, `OMACVM_GLIDE_*`): two-finger frames go through a One Euro
   filter (rigid spacing, so libinput never reads a pinch); below 80 mm/s the

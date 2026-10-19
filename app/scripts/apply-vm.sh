@@ -21,7 +21,11 @@ done
 HERE=$(cd "$(dirname "$0")" && pwd)
 source "$HERE/vm-common.sh"
 vm_load "$VM_DIR"
-vssh true < /dev/null 2>/dev/null || die "the VM is not running (or has no SSH yet)"
+if ! err=$(vssh true < /dev/null 2>&1 >/dev/null); then
+  [[ $err != *"Permission denied"* ]] ||
+    die "$NAME doesn't let this Mac in over SSH: it does not know this VM folder's key. Start it once in the app (it adds the key as it starts), then try again."
+  die "$NAME does not answer over SSH (127.0.0.1:$SSH_PORT): it is not running, or still starting."
+fi
 
 # A copy of src/ only: the Mac installers build next to their sources, never
 # inside the app (or the source tree).

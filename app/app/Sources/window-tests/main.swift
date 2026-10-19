@@ -1,7 +1,7 @@
 // The VM window's rules (OmacVMWindow), without a VM or the app:
 //   cd app/app && swift run window-tests
 // Custom resources, the disk's size (slider bounds, smaller in steps), "omacvm in Terminal", the window's
-// height, the keyboard note. Exit 0 when all pass. CI runs it on every pull request.
+// height, the keyboard note, the SSH repair. Exit 0 when all pass. CI runs it on every pull request.
 import Foundation
 import OmacVMIcon
 import OmacVMWindow
@@ -578,6 +578,106 @@ expect(KeyNote.decide(allowedNow: true, lastLog: nil) == .none, "allowed, no sta
 expect(KeyNote.startHadAccess(refused) == false && KeyNote.startHadAccess(fine) == true
        && KeyNote.startHadAccess(refusedWithIM) == false && KeyNote.startHadAccess(refusedWithAccess) == true
        && KeyNote.startHadAccess("x") == nil, "the record read: Accessibility (keys) only")
+
+// MARK: SSH repair (SSHRepair: the folder's key into a VM that knows only another Mac's)
+
+let sshKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOmacVMwindowTestKeyOnly0123456789abcdefghij omacvm-vm"
+expect(SSHRepair.valid(sshKey), "ssh: a folder key is one valid line")
+expect(SSHRepair.keyLine(pub: Data((sshKey + "\n").utf8)) == sshKey, "ssh: the .pub's line, its newline dropped")
+expect(SSHRepair.keyLine(pub: Data((sshKey + "\nssh-ed25519 BBBB other\n").utf8)) == nil, "ssh: a .pub of two lines refused")
+expect(!SSHRepair.valid(sshKey + "\r"), "ssh: a CR refused")
+expect(!SSHRepair.valid("ssh-rsa AAAAB3NzaC1yc2E other"), "ssh: another key type refused")
+expect(SSHRepair.valid("ssh-ed25519 " + String(repeating: "A", count: 188)), "ssh: 200 bytes taken")
+expect(!SSHRepair.valid("ssh-ed25519 " + String(repeating: "A", count: 189)), "ssh: 201 bytes refused")
+expect(!SSHRepair.valid("ssh-ed25519 AAAA\u{7}bell"), "ssh: a control character refused")
+expect(!SSHRepair.valid("ssh-ed25519 AAAA$(reboot)"), "ssh: shell characters refused")
+let sshCall = SSHRepair.command(key: sshKey)
+expect(sshCall.path == "/bin/sh" && sshCall.args == ["-c", SSHRepair.script, "omacvm-key", sshKey], "ssh: the key goes in as $1 (argv), no shell around the call")
+expect(!SSHRepair.script.contains("AAAA"), "ssh: no key inside the script")
+for (r, word) in [(SSHRepair.Result.added, "added"), (.present, "present"), (.noAgent, "noagent"), (.failed("x"), "failed")] {
+    expect(SSHRepair.answer(r) == word, "ssh: Update VM gets '\(word)'")
+}
+expect(SSHRepair.logLine(.added, stillRunning: true)?.contains("key added in the VM") == true, "ssh: qemu.log says when the key was added")
+expect(SSHRepair.logLine(.present, stillRunning: true) == nil, "ssh: nothing logged when it was there")
+expect(SSHRepair.logLine(.noAgent, stillRunning: false) == nil && SSHRepair.logLine(.noAgent, stillRunning: true) != nil,
+       "ssh: no agent is logged only while the VM runs")
+expect(SSHRepair.logLine(.failed("exit 1"), stillRunning: true)?.hasSuffix("exit 1") == true, "ssh: a failure says why")
+
+// update-vm.sh's lines: only its own, in step 1 of an update, once each.
+var sshLines = SSHRepair.Lines()
+expect(sshLines.take("FIX ssh-key", update: false, step: 1) == nil, "ssh: a build's FIX line is ignored")
+expect(sshLines.take("FIX ssh-key", update: true, step: 2) == nil, "ssh: FIX in step 2 (the guest's apply output) is ignored")
+expect(sshLines.take("FIX ssh-key ERROR", update: true, step: 1) == nil, "ssh: only the exact line counts")
+expect(sshLines.take("FIX ssh-key", update: true, step: 1) == .fix, "ssh: FIX in step 1 of an update: the repair")
+expect(sshLines.take("FIX ssh-key", update: true, step: 1) == nil, "ssh: the repair once per run")
+expect(sshLines.take("SSHKEY refused", update: true, step: 2) == nil, "ssh: SSHKEY refused in step 2 is ignored")
+expect(sshLines.take("SSHKEY refused", update: true, step: 1) == .refused, "ssh: SSHKEY refused in step 1: Copy Command")
+var nextRun = SSHRepair.Lines()   // Creator.reset
+expect(nextRun.take("FIX ssh-key", update: true, step: 1) == .fix, "ssh: the next run asks again")
+
+// The guest script under sh, root's folder in a temp folder.
+do {
+    let fm = FileManager.default
+    let tmp = (fm.temporaryDirectory.appendingPathComponent("ssh-repair-\(getpid())").path as NSString).resolvingSymlinksInPath
+    try? fm.removeItem(atPath: tmp)
+    try fm.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(atPath: tmp) }
+    let file = tmp + "/root/.ssh/authorized_keys"
+    let script = SSHRepair.script.replacingOccurrences(of: "/root/.ssh", with: tmp + "/root/.ssh")
+    func guest(_ key: String) -> (Int32, String) {
+        let p = Process(), out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", script, "omacvm-key", key]
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return (-1, "") }
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        return (p.terminationStatus, text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    func mode(_ path: String) -> Int { ((try? fm.attributesOfItem(atPath: path))?[.posixPermissions] as? Int) ?? -1 }
+    func lines() -> [String] { ((try? String(contentsOfFile: file, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init) }
+    let first = guest(sshKey)
+    expect(first.0 == 0 && first.1 == "added", "ssh script: added (\(first))")
+    expect(mode(tmp + "/root/.ssh") == 0o700 && mode(file) == 0o600, "ssh script: folder 700, file 600")
+    let again = guest(sshKey)
+    expect(again.0 == 0 && again.1 == "present" && lines() == [sshKey], "ssh script: present, no second line")
+    let rsa = guest("ssh-rsa AAAAB3NzaC1yc2E other")
+    expect(rsa.0 == 2 && rsa.1 == "bad" && lines() == [sshKey], "ssh script: another key type: bad, nothing written")
+    let pwned = tmp + "/pwned"
+    let injected = guest("ssh-ed25519 AAAA$(touch \(pwned))")
+    expect(injected.0 == 2 && !fm.fileExists(atPath: pwned) && lines() == [sshKey], "ssh script: a key with $(...) runs nothing")
+    let two = guest("ssh-ed25519 AAAA\nssh-ed25519 BBBB")
+    expect(two.0 == 2 && lines() == [sshKey], "ssh script: two lines: bad")
+    let long = guest("ssh-ed25519 " + String(repeating: "A", count: 189))
+    expect(long.0 == 2 && lines() == [sshKey], "ssh script: over 200 bytes: bad")
+    try Data("ssh-ed25519 OTHERKEY other-mac".utf8).write(to: URL(fileURLWithPath: file))   // no newline at its end
+    let other = guest(sshKey)
+    expect(other.1 == "added" && lines() == ["ssh-ed25519 OTHERKEY other-mac", sshKey], "ssh script: another Mac's key stays on its own line")
+} catch {
+    expect(false, "ssh script test: \(error)")
+}
+
+// Copy Command: the same command as src/lib/vm.sh's ssh_setup_command for app VMs.
+do {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let pub = FileManager.default.temporaryDirectory.appendingPathComponent("ssh-repair-\(getpid()).pub")
+    try Data((sshKey + "\n").utf8).write(to: pub)
+    defer { try? FileManager.default.removeItem(at: pub) }
+    let p = Process(), out = Pipe()
+    p.executableURL = URL(fileURLWithPath: "/bin/bash")
+    p.arguments = ["-c", "eval \"$(sed -n '/^ssh_setup_command()/,/^}/p' \"$1\")\"; ssh_setup_command app \"$2\"", "bash",
+                   repo.appendingPathComponent("src/lib/vm.sh").path, pub.path]
+    p.standardOutput = out
+    try p.run()
+    let shell = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    p.waitUntilExit()
+    expect(!shell.isEmpty && SSHRepair.manualCommand(key: sshKey) == shell, "ssh: Copy Command = ssh_setup_command app with the folder's key")
+    expect(SSHRepair.manualCommand(key: "ssh-ed25519 AAAA\"; reboot; \"") == nil, "ssh: no command from a key that is not one")
+} catch {
+    expect(false, "ssh command test: \(error)")
+}
 
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)

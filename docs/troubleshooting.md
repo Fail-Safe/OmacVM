@@ -1025,3 +1025,29 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Where:** `src/guest/disk-space.sh` (run by `src/guest/install.sh`),
   `src/guest/check.sh`; test `src/tests/disk-space.sh`;
   [ADR 0048](adr/0048-freed-space-back-to-the-mac.md).
+
+## 38. app: Update VM stops: the VM doesn't let this Mac in over SSH
+
+- **Symptom:** Update VM stops in its first step. Up to 3.1.24 it waited 5
+  minutes and said the VM "did not come up", although it had started. Now it
+  says "... doesn't let this Mac in over SSH" and offers **Copy Command**.
+  `omacvm apply` exits 3 with the same command.
+- **Cause:** OmacVM reaches an app VM over SSH with a key kept in the VM's
+  folder (`ssh-key`). A VM set up on another Mac, or before OmacVM 3.0.12,
+  may know only that Mac's key (`~/.ssh/omacvm` there). Its SSH turns this
+  Mac away.
+- **Fix:** none needed in most cases: the app adds the folder's key in the
+  VM through its guest agent, without SSH, at each start in the app and in
+  Update VM (`logs/qemu.log`: "OmacVM: SSH: this VM folder's key added in the
+  VM"). Only when the guest agent does not answer (it was removed, or never
+  installed): click **Copy Command**, start the VM, open a terminal in it,
+  paste the command and enter your password, then Update VM again. It adds
+  that one public key for root and keeps SSH on, reachable from this Mac
+  only; it changes no passwords and removes no keys. If the key went in and
+  SSH still refuses, the VM's SSH settings were changed (`/etc/ssh/sshd_config`:
+  `PermitRootLogin` must allow keys).
+- **Where:** `app/app/Sources/OmacVM/VMKey.swift`,
+  `app/app/Sources/OmacVMWindow/SSHRepair.swift` (the guest script),
+  `app/scripts/update-vm.sh`, `app/scripts/vm-common.sh` (`wait_ssh ...
+  refused`), `src/lib/vm.sh` (`ssh_setup_command`); tests
+  `src/tests/update-vm-watch.sh`, `swift run window-tests`.
