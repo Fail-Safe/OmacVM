@@ -432,19 +432,21 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   fi
 fi
 # Whether the VM's GPU work ran without QEMU's big lock this run (ADR 0046,
-# experimental: gpuOffMainLoop). A runtime before 3.1.18 says nothing.
+# gpuOffMainLoop: on by default after 3.1.25). A runtime before 3.1.18 says nothing.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   case $(grep -o 'virgl runs with[a-z ]* the BQL.*' "$miclog" | tail -1) in
-    "virgl runs without the BQL"*) ok "GPU lock" "virgl's GPU-only commands run without QEMU's big lock (gpuOffMainLoop, experimental)" ;;
+    "virgl runs without the BQL"*) ok "GPU lock" "virgl's GPU-only commands run without QEMU's big lock (gpuOffMainLoop)" ;;
     *"fences polled"*) warn "GPU lock" "gpuOffMainLoop is on, but fences are polled this run: virgl keeps QEMU's big lock" ;;
-    "virgl runs with the BQL"*) ok "GPU lock" "virgl runs with QEMU's big lock (the default)" ;;
+    "virgl runs with the BQL"*) ok "GPU lock" "virgl runs with QEMU's big lock (Graphics without QEMU's lock is off)" ;;
   esac
 fi
-# Vulkan windows without a copy this run (ADR 0047, experimental: vkWindowsNoCopy).
-# virglrenderer says so once Venus made its device; nothing when the switch is off.
+# Vulkan windows without a copy this run (ADR 0047, vkWindowsNoCopy: on by default
+# after 3.1.25). virglrenderer says so once Venus made its device; nothing when
+# the switch is off. MoltenVK (macOS 15) always copies: that is no warning.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   case $(grep -o 'Vulkan windows are [a-zA-Z]*.*' "$miclog" | tail -1) in
-    "Vulkan windows are IOSurfaces"*) ok "Vulkan windows" "without a copy (IOSurfaces; vkWindowsNoCopy, experimental)" ;;
+    "Vulkan windows are IOSurfaces"*) ok "Vulkan windows" "without a copy (IOSurfaces; vkWindowsNoCopy)" ;;
+    *"driver is not KosmicKrisp"*) ok "Vulkan windows" "copied (the Vulkan driver is MoltenVK)" ;;
     "Vulkan windows are copied"*) warn "Vulkan windows" "vkWindowsNoCopy is on, but they are copied this run: $(grep -o 'no IOSurfaces: [^)]*' "$miclog" | tail -1)" ;;
   esac
 fi

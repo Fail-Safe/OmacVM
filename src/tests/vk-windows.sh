@@ -1,7 +1,7 @@
 #!/bin/bash
 # Offline checks for Vulkan windows without a copy (ADR 0047; no VM, no runtime build):
 #  - the patch is pinned and applied after the CPU copy it falls back to
-#  - the app's switch (vkWindowsNoCopy, off by default; GPU safe mode and vkWindowsCopy keep
+#  - the app's switch (vkWindowsNoCopy, on by default; GPU safe mode and vkWindowsCopy keep
 #    the copy) sets QEMU's OMACVM_VK_WINDOWS=iosurface, which the patch reads
 #  - the patch's log lines are the ones omacvm check reads, and check.sh's verdicts
 #  - the build runs the re-stride test
@@ -26,7 +26,7 @@ check "the runtime build applies it after the CPU copy and the last virgl patch"
   test -n "$lv" -a "${lv:-0}" -gt "${lc:-0}" -a "${lv:-0}" -gt "${lu:-0}"
 check "the patch has the header (what, why, upstream, test)" \
   sh -c "grep -q '^What:' '$P' && grep -q '^Why:' '$P' && grep -q '^Upstream:' '$P' && grep -q '^Test:' '$P'"
-check "the app's switch is off by default" grep -qF 'return d.object(forKey: "vkWindowsNoCopy") as? Bool ?? false' "$MODEL"
+check "the app's switch is on by default" grep -qF 'return d.object(forKey: "vkWindowsNoCopy") as? Bool ?? true' "$MODEL"
 check "GPU safe mode and vkWindowsCopy keep the copy" grep -qF 'if gpuSafeMode || d.bool(forKey: "vkWindowsCopy") { return false }' "$MODEL"
 check "the launcher sets OMACVM_VK_WINDOWS=iosurface for it" grep -qF 'env["OMACVM_VK_WINDOWS"] = "iosurface"' "$RUNNER"
 check "the patch reads OMACVM_VK_WINDOWS=iosurface" sh -c "grep -qF '+   const char *env = getenv(\"OMACVM_VK_WINDOWS\");' '$P' && grep -qF '!strcmp(env, \"iosurface\")' '$P'"
@@ -44,8 +44,10 @@ verdict() {   # LOG_LINE -> the status check.sh prints
   rm -f "$miclog"; echo "$out"
 }
 check "check.sh: IOSurfaces are ok" grep -q "^ok:without a copy" <<<"$(verdict 'vkr: Vulkan windows are IOSurfaces (OMACVM_VK_WINDOWS=iosurface)')"
-check "check.sh: asked but copied warns with the reason" grep -q "^warn:.*no IOSurfaces: the Vulkan driver is not KosmicKrisp" \
+check "check.sh: copied on MoltenVK is ok (macOS 15, nothing to fix)" grep -q "^ok:copied (the Vulkan driver is MoltenVK)" \
   <<<"$(verdict 'vkr: Vulkan windows are copied (no IOSurfaces: the Vulkan driver is not KosmicKrisp)')"
+check "check.sh: copied for another reason warns with it" grep -q "^warn:.*no IOSurfaces: the Vulkan driver has no vkGetMemoryHostPointerPropertiesEXT" \
+  <<<"$(verdict 'vkr: Vulkan windows are copied (no IOSurfaces: the Vulkan driver has no vkGetMemoryHostPointerPropertiesEXT)')"
 check "check.sh: switch off prints nothing" test -z "$(verdict 'context 8 (Hyprland) shows a Vulkan image by CPU copy')"
 
 echo "vk-windows: $((N - FAIL))/$N ok"

@@ -47,7 +47,7 @@ check "the depth is set with the surface" grep -qF '+    qatomic_set(&gl_ctx_bpp
 # The switch: app setting -> environment -> QEMU, safe mode and gpuMainLoop keep the BQL.
 check "QEMU's patch reads OMACVM_GPU_UNLOCKED" grep -qF 'getenv("OMACVM_GPU_UNLOCKED")' "$U"
 check "launcher sets OMACVM_GPU_UNLOCKED=1 for gpuOffMainLoop" grep -qF 'env["OMACVM_GPU_UNLOCKED"] = "1"' "$RUNNER"
-check "gpuOffMainLoop is off by default" grep -qF 'return d.object(forKey: "gpuOffMainLoop") as? Bool ?? false' "$MODEL"
+check "gpuOffMainLoop is on by default" grep -qF 'return d.object(forKey: "gpuOffMainLoop") as? Bool ?? true' "$MODEL"
 check "GPU safe mode and gpuMainLoop keep the BQL" grep -qF 'if gpuSafeMode || d.bool(forKey: "gpuMainLoop") { return false }' "$MODEL"
 check "no unlocked runs with polled fences" grep -qF 'gl->unlocked = want && virgl_poll_fd >= 0;' "$U"
 for l in 'virtio-gpu: virgl runs without the BQL' 'virtio-gpu: virgl runs with the BQL'; do
@@ -64,7 +64,7 @@ verdict() {   # LOG_LINE -> the status check.sh prints
 }
 check "check.sh: unlocked is ok" grep -q "^ok:virgl's GPU-only commands run without" \
   <<<"$(verdict 'OmacVM: info: virtio-gpu: virgl runs without the BQL')"
-check "check.sh: the default is ok" grep -q "^ok:virgl runs with QEMU's big lock" \
+check "check.sh: the BQL kept is ok" grep -q "^ok:virgl runs with QEMU's big lock" \
   <<<"$(verdict 'OmacVM: info: virtio-gpu: virgl runs with the BQL')"
 check "check.sh: asked but fences polled warns" grep -q "^warn:" \
   <<<"$(verdict 'OmacVM: warning: virtio-gpu: virgl runs with the BQL (fences polled: no unlocked runs)')"

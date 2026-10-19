@@ -165,7 +165,7 @@ Rules:
 - Head windows (one per extra display) share the main view's GL context
   (`gl_view_ctx`); all their drawing happens under the same rules.
 
-With `gpuOffMainLoop` (ADR 0046, experimental, off by default;
+With `gpuOffMainLoop` (ADR 0046, on by default after 3.1.25;
 `OMACVM_GPU_UNLOCKED=1`) the main loop still makes every vrend call, but runs
 the commands that touch only virglrenderer (SUBMIT_3D, resource create,
 transfers, contexts, capsets) without the BQL, holding the GPU lock
@@ -541,8 +541,8 @@ Patches (all in `app/runtime/patches`, one per concern):
   frame clock runs a few ms late, so frames waited a refresh more and FIFO
   windows ran at 45-50 fps on 60 Hz (vkcube; 59-60 without it, as through
   Xwayland). The fifo-v1 barrier still paces them.
-- `virgl-vulkan-windows-iosurface.patch` (ADR 0047, experimental switch
-  `vkWindowsNoCopy`, KosmicKrisp only): the window's buffer is an IOSurface
+- `virgl-vulkan-windows-iosurface.patch` (ADR 0047, switch
+  `vkWindowsNoCopy`, on by default after 3.1.25, KosmicKrisp only): the window's buffer is an IOSurface
   of 16 KiB rows imported into KosmicKrisp as host memory
   (`VIRGL_RESOURCE_IOSURFACE`); vrend binds it as a RECTANGLE texture and the
   blitter's context re-strides it into the window's texture on the GPU (4-byte

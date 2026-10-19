@@ -1,6 +1,7 @@
 # 0046: The VM's GPU work lets go of the BQL, then leaves the main loop
 
-Status: accepted, built (`gpu-thread`), off by default (`gpuOffMainLoop`).
+Status: accepted, built (`gpu-thread`), on by default after 3.1.25
+(`gpuOffMainLoop`; off and experimental from 3.1.18 to 3.1.25).
 Option 2 not built. Builds on [0011](0011-async-fences.md),
 [0026](0026-fence-tests-off-the-render-threads-lock.md),
 [0036](0036-sound-main-loop-qos.md) and [0045](0045-sound-own-thread.md).
@@ -96,7 +97,7 @@ Option 1's rules:
   breaks on either path, worst vCPU wait 301 -> 1.2 ms. 20 rounds of GPU
   process kills, desktop restarts, VM resets and shutdowns under load: all
   came back.
-- Off by default; the user decides after their own test.
+- On by default after 3.1.25; the switch and GPU safe mode go back.
 - One BQL drop/take and at most one extra queue notification per run.
 - The guest may rewrite a command while QEMU reads it twice; the type (and a
   blob's kind) a run picked a command for is checked again where it runs, so
