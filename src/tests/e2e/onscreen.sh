@@ -119,6 +119,13 @@ has_launcher() { [[ -n $(launcher_pid) ]]; }
 has_window() { [[ -n $(win_of "$LP") ]]; }
 updating() { psall | grep -v grep | grep -qF "update-vm.sh $VMD"; }
 onoff() { [[ $1 == 1 || $1 == true ]] && echo on || echo off; }
+# "Graphics without QEMU's lock" as the app reads it (1 or 0): its key, or without one the app's own
+# default (off up to 3.1.25, on after it), from the app's settings dump.
+gpu_lock() {
+  defaults read "$DOM" gpuOffMainLoop 2>/dev/null && return
+  "$APP/Contents/MacOS/OmacVM" --settings-dump > "$OUT/saved/dump.json" 2>/dev/null
+  [[ $(plutil -extract app.gpuOffMainLoop raw -o - "$OUT/saved/dump.json" 2>/dev/null) == true ]] && echo 1 || echo 0
+}
 wid() { awk '{printf "%.0f", $3}' <<<"$1"; }
 guest_up() { gssh true 2>/dev/null; }
 win_of() { "$T" win "$1" 2>/dev/null | cut -d' ' -f1-4; }
@@ -152,7 +159,7 @@ log "onscreen: $APP ($VER, $COMMIT, $DOM), VM $VMD, macOS $(sw_vers -productVers
 e2e_settings_save "$DOM" "$OUT/saved" $KEYS || exit 2
 defaults write "$DOM" startFullScreen -bool false
 defaults write "$DOM" closeAction shutdown
-GPU0=$(defaults read "$DOM" gpuOffMainLoop 2>/dev/null || echo 0)
+GPU0=$(gpu_lock)
 HELPERS0=$(helpers | tr '\n' ' ')
 GC0=$(feature gpu-compute); cp "$VMD/omacvm-version" "$OUT/saved/omacvm-version" 2>/dev/null
 
@@ -238,7 +245,7 @@ start_in_window() {   # N: Start clicked in the window; the VM's window up, the 
   waitfor 30 is_full "$QP" 0 >/dev/null
   waitfor 240 guest_up >/dev/null || { res "start-$n" FAIL "$r; the guest did not come up in 4 min"; shot "start-$n"; return 1; }
   sleep 12   # the desktop and its pointer
-  res "start-$n" ok "QEMU $QP, window $(win_of "$QP"), Graphics without QEMU's lock $(onoff "$(defaults read "$DOM" gpuOffMainLoop 2>/dev/null)")"
+  res "start-$n" ok "QEMU $QP, window $(win_of "$QP"), Graphics without QEMU's lock $(onoff "$(gpu_lock)")"
 }
 
 switch_applied() {   # N: the start applied the switch
@@ -292,7 +299,7 @@ in_vm() {   # X Y X2 Y2: a pointer move inside our VM's window
 row_pointer() {   # N
   PT_N=$1; PT_OK=""; PT_BAD=""
   local f x y w h cx cy finder mode
-  mode="Graphics without QEMU's lock $(onoff "$(defaults read "$DOM" gpuOffMainLoop 2>/dev/null)")"
+  mode="Graphics without QEMU's lock $(onoff "$(gpu_lock)")"
   finder=$(pgrep -x Finder | head -1)
   onscreen_ok || return
   [[ $("$T" front "$QP") == front ]] || { res "pointer-$1" FAIL "the VM did not come to the front"; return; }
@@ -330,9 +337,9 @@ quit_left() {   # ROW: the app quit (as Command-Q), nothing of it runs on
 
 gpu_lock_switch() {   # "Graphics without QEMU's lock" switched in the window (VM stopped)
   local r before after
-  before=$(defaults read "$DOM" gpuOffMainLoop 2>/dev/null || echo 0)
+  before=$(gpu_lock)
   "$T" front "$LP" >/dev/null; posted; r=$("$T" click "$LP" AXCheckBox "Graphics without QEMU's lock" 2>&1); sleep 1.5
-  after=$(defaults read "$DOM" gpuOffMainLoop 2>/dev/null || echo 0)
+  after=$(gpu_lock)
   [[ $after != "$before" ]] && res gpu-lock-switch ok "$r; gpuOffMainLoop $before -> $after" || res gpu-lock-switch FAIL "$r; gpuOffMainLoop stays $before"
 }
 
