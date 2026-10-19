@@ -180,6 +180,7 @@ if [[ -e $T/pages ]]; then
   gum input --placeholder "Name" && echo answered >> "$T/calls"
 fi
 [[ -e $T/update-hangs ]] && exec sleep 20
+[[ -e $T/update-slow ]] && sleep 1
 [[ -e $T/sudoers-seen ]] && ls "$T/etc/sudoers.d" >> "$T/calls" 2>&1
 [[ -e $T/mirror ]] && cp "$T/mirror" "$T/sync"
 [[ -e $T/mirrors-behind ]] || rm -f "$T/mirrors-gone"
@@ -282,8 +283,13 @@ cat > "$T/bin/systemctl" <<'EOF2'
 #!/bin/bash
 alive() { [[ -s $T/unit.pid ]] && kill -0 "$(cat "$T/unit.pid")" 2>/dev/null; }
 echo "systemctl $*" >> "$T/units"
+# The update re-executes systemd: away for the first queries while it runs.
+if [[ $1 == is-active || $1 == show ]] && [[ -e $T/bus-away && -s $T/unit.pid ]] && (( $(wc -l < "$T/bus-away") < 3 )); then
+  echo x >> "$T/bus-away"; echo "Failed to connect to system scope bus via local transport: Connection refused" >&2; exit 1
+fi
 case $1 in
   is-active) alive; exit ;;
+  show) if alive; then echo active; else echo inactive; fi ;;
   stop) if alive; then c=$(cat "$T/unit.cmd"); kill $c $(/usr/bin/pgrep -P "$c"); while alive; do sleep 0.1; done; fi ;;
 esac
 exit 0
@@ -303,6 +309,14 @@ out=$(unit); rc=$?; rm -f "$T/sudoers-seen" "$T/orphans"
    $out == *"up to date"* ]] &&
   pass "system-update unit: sudo only while it runs, a time limit, the session's Hyprland, its exit status" ||
   fail "system-update unit: rc $rc, calls '$(tr '\n' ' ' < "$T/calls")', left '$(left)', units '$(tr '\n' ' ' < "$T/units")', said '$out'"
+
+vm; : > "$T/bus-away"; : > "$T/update-slow"
+out=$(unit); rc=$?; rm -f "$T/update-slow"
+[[ $rc == 0 && $(wc -l < "$T/bus-away") -ge 3 && $(grep -c '== omarchy update exit 0' "$T/system-update.log") -ge 1 &&
+   $(awk '$1 == "mesa"' "$T/db") == "mesa 1:26.2.4-1" && $out == *"up to date"* ]] &&
+  pass "system-update unit: systemd away for a moment (re-executed by the update): waits, never cuts it off" ||
+  fail "system-update, systemd away: rc $rc, bus '$(wc -l < "$T/bus-away")', units '$(tr '\n' ' ' < "$T/units")', said '$out'"
+rm -f "$T/bus-away"
 
 vm; : > "$T/pacman/db.lck"; : > "$T/pacman-running"
 ( sleep 1; rm -f "$T/pacman/db.lck" "$T/pacman-running" ) &
