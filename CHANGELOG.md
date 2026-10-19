@@ -5,6 +5,10 @@ in more words.
 
 ## Unreleased
 
+- **`omacvm apply` writes your `~/.ssh` in the VM as you.** It added the VM folder's SSH key to
+  the desktop user's `~/.ssh/authorized_keys` as root and followed links there: a program
+  running as that user could point `~/.ssh` at a system file and take it over at the next apply
+  (and with it, root). That part now runs as the user; root's own key file is written as before.
 - **Deleted files give their space back sooner.** What you delete in the VM goes back to the
   Mac by itself within about two minutes (OmacVM.app: disk.img gets smaller, and still grows up
   to the size you set). Files deleted outside your home folder stayed as long as one of

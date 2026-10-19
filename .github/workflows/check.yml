@@ -201,6 +201,9 @@ jobs:
       - name: Freeing disk space (2 update snapshots kept, a trim at apply, omacvm check's line)
         run: src/tests/disk-space.sh
 
+      - name: apply's SSH key in the VM (the user's ~/.ssh written as the user)
+        run: src/tests/ssh-key.sh
+
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
@@ -654,6 +657,9 @@ jobs:
 
       - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
         run: src/tests/touchid-client.sh
+
+      - name: apply's SSH key in the VM never follows the user's links (a real user, as root)
+        run: sudo src/tests/ssh-key.sh
 
       - name: The guest's udev rules parse (udevadm verify)
         run: udevadm verify --resolve-names=never src/vdec/guest/70-omacvm-vdec.rules src/ime/guest/70-omacvm-ime.rules
