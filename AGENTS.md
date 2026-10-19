@@ -675,6 +675,17 @@ The less obvious ones, with causes and where the fix lives, are in
   An Omarchy-styled password field on the Mac would be fake.
 - Never edit `/usr/share/omarchy` (updates replace it); extend through plugins,
   `~/.config`, and `/usr/local/bin` replacements (remember the shell's PATH).
+- Root never writes into the desktop user's home itself, not even with
+  `chown` after it. The guest scripts run as root at every apply, and a link
+  the user put in the home (`~/.config/hypr -> /etc`) would point root's
+  write, `install -d -o`, `chown`, `sed -i`, `rm -rf` or mount at a system
+  file: root for any program running as the user. Use
+  `src/guest/home-files.sh` (`home_put`, `home_append`, `home_mkdir`,
+  `home_run`, ... as the user, through `setpriv`; content read as the user
+  too) and `src/tests/home-links.sh`, which fails on any `chown`/`install -o`
+  left and, as root on Linux, plants links and runs the scripts. Root
+  daemons read the user's files only as their own plain files (`O_NOFOLLOW`,
+  owner checked) or through a child running as the user.
 - Only one agent should edit the guest's Hyprland config at a time.
 - Do not switch the user's macOS Spaces or Mission Control in tests.
 - Do not start a VM from a command that only reads or lists (features,

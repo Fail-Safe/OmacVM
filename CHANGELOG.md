@@ -83,6 +83,13 @@ in more words.
   safe mode. OmacVM's own build of hyprpicker, which freezes the screen for screenshots, did not
   delete its files when it stopped. It does now, and Update VM removes what was left. `omacvm
   check` warns when that folder is over 80 % full.
+- **OmacVM writes your home in the VM as you, everywhere.** After `~/.ssh`, the rest of the VM
+  side did the same: `omacvm apply` wrote Hyprland's config, the Bridge's token, the bar's plugin
+  folders and its own markers in the desktop user's home as root, following links there, so a
+  program running as that user could point one at a system file and get root at the next apply.
+  All of that is now written as the user, and root reads the user's files only as the user's
+  own. The Mac folder is mounted at `~/Mac` only when that is a real folder, never through a
+  link. `omacvm apply` sends the VM folder's SSH key on stdin again, not inside a command.
 
 ## 3.1.24
 
