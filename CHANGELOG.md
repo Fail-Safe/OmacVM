@@ -3,6 +3,22 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **OmacVM writes your home in the VM as you, everywhere.** After `~/.ssh`, the rest of the VM
+  side did the same: `omacvm apply` wrote Hyprland's config, the Bridge's token, the bar's plugin
+  folders and its own markers in the desktop user's home as root, following links there, so a
+  program running as that user could point one at a system file and get root at the next apply.
+  All of that is now written as the user, and root reads the user's files only as the user's
+  own. The Mac folder is mounted at `~/Mac` only when that is a real folder, never through a
+  link. `omacvm apply` sends the VM folder's SSH key on stdin again, not inside a command.
+- **Update VM's SSH messages name the right key.** They say "this VM folder's key" (it said
+  "this Mac's key"), and a VM that had the key already but still turns OmacVM away says so. The
+  command for the VM's terminal also goes into the update's log, so Show Log still has it after
+  Back. A VM folder whose `ssh-key.pub` went missing gets it back from its `ssh-key` instead of a
+  new key the VM does not know. Without a guest agent, a feature switched while the VM was
+  stopped gives up after about 10 minutes again (up to 20 with the SSH repair before it).
+
 ## 3.1.25
 
 - **App VMs that know only another Mac's SSH key get this VM folder's key.** A VM set up on another Mac
@@ -13,12 +29,6 @@ in more words.
   not answer, Update VM stops with a **Copy Command** button (and an (i) that says what the command
   does) for a terminal in the VM. A VM that turns the key down now shuts down cleanly, and
   `omacvm apply` points to the same fix.
-- **Update VM's SSH messages name the right key.** They say "this VM folder's key" (it said
-  "this Mac's key"), and a VM that had the key already but still turns OmacVM away says so. The
-  command for the VM's terminal also goes into the update's log, so Show Log still has it after
-  Back. A VM folder whose `ssh-key.pub` went missing gets it back from its `ssh-key` instead of a
-  new key the VM does not know. Without a guest agent, a feature switched while the VM was
-  stopped gives up after about 10 minutes again (up to 20 with the SSH repair before it).
 - **`omacvm apply` writes your `~/.ssh` in the VM as you.** It added the VM folder's SSH key to
   the desktop user's `~/.ssh/authorized_keys` as root and followed links there: a program
   running as that user could point `~/.ssh` at a system file and take it over at the next apply
@@ -83,13 +93,6 @@ in more words.
   safe mode. OmacVM's own build of hyprpicker, which freezes the screen for screenshots, did not
   delete its files when it stopped. It does now, and Update VM removes what was left. `omacvm
   check` warns when that folder is over 80 % full.
-- **OmacVM writes your home in the VM as you, everywhere.** After `~/.ssh`, the rest of the VM
-  side did the same: `omacvm apply` wrote Hyprland's config, the Bridge's token, the bar's plugin
-  folders and its own markers in the desktop user's home as root, following links there, so a
-  program running as that user could point one at a system file and get root at the next apply.
-  All of that is now written as the user, and root reads the user's files only as the user's
-  own. The Mac folder is mounted at `~/Mac` only when that is a real folder, never through a
-  link. `omacvm apply` sends the VM folder's SSH key on stdin again, not inside a command.
 
 ## 3.1.24
 
