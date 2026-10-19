@@ -664,6 +664,9 @@ jobs:
       - name: The 10-bit virtio-gpu driver's loader and builder on Linux (GNU tools, as in the VM)
         run: src/tests/virtio-gpu-load.sh
 
+      - name: OmacVM.app's hyprpicker patch applies and leaves no buffer files in the runtime folder
+        run: src/tests/hyprpicker-patch.sh
+
       - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
         run: src/tests/touchid-client.sh
 

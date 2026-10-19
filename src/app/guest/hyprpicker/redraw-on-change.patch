@@ -19,7 +19,7 @@ index 3243cc8..aa247fc 100644
  
  void CLayerSurface::sendFrame() {
 diff --git a/src/hyprpicker.cpp b/src/hyprpicker.cpp
-index 2f03fdc..7d581fd 100644
+index 2f03fdc..b388e60 100644
 --- a/src/hyprpicker.cpp
 +++ b/src/hyprpicker.cpp
 @@ -14,6 +14,10 @@
@@ -59,7 +59,22 @@ index 2f03fdc..7d581fd 100644
          ls->markDirty();
      }
  }
-@@ -774,7 +794,10 @@ void CHyprpicker::initMouse() {
+@@ -333,6 +353,14 @@ int CHyprpicker::createPoolFile(size_t size, std::string& name) {
+         g_pHyprpicker->finish(1);
+     }
+ 
++    // No name left in XDG_RUNTIME_DIR (OmacVM): the descriptor is all the
++    // compositor needs. The signal handler above leaves with _Exit, so the
++    // buffers' destructors never unlink their files: each screenshot left 3
++    // a display there (59 MB each for a 5K one) until the tmpfs was full and
++    // Hyprland and apps died of SIGBUS.
++    unlink(name.c_str());
++    name.clear();
++
+     if (!setCloexec(FD)) {
+         close(FD);
+         Debug::log(CRIT, "createPoolFile: !setCloexec");
+@@ -774,7 +802,10 @@ void CHyprpicker::initMouse() {
  
          m_vLastCoords = {x, y};
  
