@@ -33,8 +33,11 @@ expect "... an ed25519 key" "yes" "$(grep -q '^ssh-ed25519 ' "$V/ssh-key.pub" &&
 before=$(cat "$V/ssh-key.pub")
 lib 'app_ssh_key "$1"' "$V" >/dev/null
 expect "... kept as it is when there" "$before" "$(cat "$V/ssh-key.pub")"
-rm -f "$V/ssh-key.pub"; lib 'app_ssh_key "$1"' "$V" >/dev/null
-expect "... made again when half of it is gone" "yes" "$([[ -f $V/ssh-key.pub && $(cat "$V/ssh-key.pub") != "$before" ]] && echo yes)"
+priv=$(cat "$V/ssh-key"); rm -f "$V/ssh-key.pub"; chmod 644 "$V/ssh-key"; lib 'app_ssh_key "$1"' "$V" >/dev/null
+expect "... .pub gone: made again from the key, the key kept (the VM may know it)" "yes yes -rw-------" \
+  "$([[ $(cat "$V/ssh-key.pub") == "$before" ]] && echo yes) $([[ $(cat "$V/ssh-key") == "$priv" ]] && echo yes) $(stat -f %Sp "$V/ssh-key")"
+rm -f "$V/ssh-key"; lib 'app_ssh_key "$1"' "$V" >/dev/null
+expect "... the key gone: a new one" "yes" "$([[ -f $V/ssh-key && $(cat "$V/ssh-key.pub") != "$before" ]] && echo yes)"
 
 expect "gssh to an app VM: the folder's key first, then the Mac's" "$V/ssh-key $H/.ssh/omacvm " \
   "$(lib 'vm_pin "Copied VM" app; gssh 127.0.0.1:52998 true')"

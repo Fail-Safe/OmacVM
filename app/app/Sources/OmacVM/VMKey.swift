@@ -5,27 +5,39 @@ import OmacVMWindow
 /// (SSHRepair has the rules): at each window start (Runner) and in Update VM
 /// when SSH turns the key down (Creator).
 enum VMKey {
-    /// The folder's public key line, made first when ssh-key or ssh-key.pub
-    /// is missing (the same arguments as app_ssh_key). nil: no usable key.
+    /// The folder's public key line (app_ssh_key does the same). A missing
+    /// ssh-key.pub comes from ssh-key (ssh-keygen -y): the VM may know that
+    /// key, so it is never replaced while it is there. Only without ssh-key
+    /// is a new one made (ssh-keygen writes it 600 itself). nil: no usable key.
     static func keyLine(folder: URL) -> String? {
         let key = folder.appendingPathComponent("ssh-key"), pub = folder.appendingPathComponent("ssh-key.pub")
         let fm = FileManager.default
+        if fm.fileExists(atPath: key.path), !fm.fileExists(atPath: pub.path) {
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: key.path)   // ssh-keygen refuses an open key
+            if let out = keygen(["-y", "-f", key.path]), SSHRepair.keyLine(pub: out) != nil {
+                try? out.write(to: pub, options: .atomic)
+            }
+        }
         if !fm.fileExists(atPath: key.path) || !fm.fileExists(atPath: pub.path) {
             try? fm.removeItem(at: key)
             try? fm.removeItem(at: pub)
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen")
-            p.arguments = ["-t", "ed25519", "-N", "", "-C", "omacvm-vm", "-f", key.path, "-q"]
-            p.standardInput = FileHandle.nullDevice
-            p.standardOutput = FileHandle.nullDevice
-            p.standardError = FileHandle.nullDevice
-            let old = umask(0o077)
-            defer { umask(old) }
-            guard (try? p.run()) != nil else { return nil }
-            p.waitUntilExit()
-            guard p.terminationStatus == 0 else { return nil }
+            guard keygen(["-t", "ed25519", "-N", "", "-C", "omacvm-vm", "-f", key.path, "-q"]) != nil else { return nil }
         }
         return (try? Data(contentsOf: pub)).flatMap(SSHRepair.keyLine)
+    }
+
+    /// ssh-keygen ARGS: its output, nil when it failed.
+    private static func keygen(_ args: [String]) -> Data? {
+        let p = Process(), out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen")
+        p.arguments = args
+        p.standardInput = FileHandle.nullDevice
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return p.terminationStatus == 0 ? data : nil
     }
 
     /// The by-hand command with the folder's key (Copy Command). Reads the

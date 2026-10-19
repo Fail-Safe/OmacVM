@@ -253,7 +253,12 @@ app_touchid_port() {
 # adds no reach: the disk image beside it is just as readable.
 app_ssh_key() {
   local k=$1/ssh-key
-  [[ -f $k && -f $k.pub ]] || { rm -f "$k" "$k.pub"; (umask 077; ssh-keygen -t ed25519 -N "" -C omacvm-vm -f "$k" -q) || return 1; }
+  # A missing .pub comes from the key, which the VM may know: never a new key
+  # while it is there (VMKey.keyLine in the app does the same).
+  if [[ -f $k && ! -f $k.pub ]]; then
+    chmod 600 "$k"; ssh-keygen -y -f "$k" > "$k.pub" 2>/dev/null < /dev/null || rm -f "$k.pub"
+  fi
+  [[ -f $k && -s $k.pub ]] || { rm -f "$k" "$k.pub"; (umask 077; ssh-keygen -t ed25519 -N "" -C omacvm-vm -f "$k" -q) || return 1; }
   chmod 600 "$k"
   echo "$k"
 }

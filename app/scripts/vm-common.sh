@@ -112,7 +112,11 @@ vm_load() {
   # into the VM, and vssh offers it first, so a VM copied from another Mac
   # is reached here too.
   VM_KEY=$VM_DIR/ssh-key
-  if [[ ! -f $VM_KEY || ! -f $VM_KEY.pub ]]; then
+  # A missing .pub comes from the key, which the VM may know (app_ssh_key).
+  if [[ -f $VM_KEY && ! -f $VM_KEY.pub ]]; then
+    chmod 600 "$VM_KEY"; ssh-keygen -y -f "$VM_KEY" > "$VM_KEY.pub" 2>/dev/null < /dev/null || rm -f "$VM_KEY.pub"
+  fi
+  if [[ ! -f $VM_KEY || ! -s $VM_KEY.pub ]]; then
     rm -f "$VM_KEY" "$VM_KEY.pub"
     (umask 077; ssh-keygen -t ed25519 -N "" -C omacvm-vm -f "$VM_KEY" -q)
     # A finished VM does not know a new key yet (the app adds it in the VM).
