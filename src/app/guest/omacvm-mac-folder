@@ -24,7 +24,7 @@ home=$(getent passwd "$user" | cut -d: -f6)
 # mac_dir umount [rmdir] | mount FSTYPE SOURCE OPTIONS
 mac_dir() {
   python3 -I - "$home" "$user" "$@" <<'PY'
-import os, pwd, stat, subprocess, sys
+import ctypes, os, pwd, stat, subprocess, sys
 home, user, what = sys.argv[1:4]
 pw = pwd.getpwnam(user)
 P = os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -45,8 +45,11 @@ def opened():   # ~/Mac without following a link, and the path a child reaches i
 
 if what == "umount":
     if mounted:
+        # umount2 itself: umount(8) looks /proc/self/fd/N up in the mount table and stops there.
         fd, p = opened()
-        subprocess.run(["umount", "--no-canonicalize", p], pass_fds=[fd])
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.umount2(p.encode(), 0) != 0:
+            print(f"omacvm-mac-folder: {home}/Mac: {os.strerror(ctypes.get_errno())}")
     if sys.argv[4:] == ["rmdir"]:
         try:
             os.rmdir("Mac", dir_fd=h)   # only an empty folder; never through a link
