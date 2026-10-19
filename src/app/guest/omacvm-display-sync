@@ -753,15 +753,19 @@ apply_preferred_modes() {
     # The notch strip is the main window's (full screen on the built-in display).
     if [[ $output == Virtual-1 ]]; then
       notch_bar "$mode" "$scale"
-      # Before the output goes PQ, so no frame is tone-mapped.
-      hdr_tonemap "$hdr"
     fi
     digest=$(cksum <<<"$rule" | cut -d' ' -f1)
-    # 1: Hyprland shows it already (keep it for a reload), 2: held.
+    # 1: Hyprland shows it already (keep it for a reload), 2: held (the tone
+    # map too: it goes with the output's rule).
     follow_check "$output" "$digest" "$mode" "$scale" "$position" "$hdr" "$shown" || {
-      (($? == 1)) && keep_rule "$output" "$rule"
+      if (($? == 1)); then
+        keep_rule "$output" "$rule"
+        [[ $output != Virtual-1 ]] || hdr_tonemap "$hdr"
+      fi
       continue
     }
+    # Before the output goes PQ, so no frame is tone-mapped.
+    [[ $output != Virtual-1 ]] || hdr_tonemap "$hdr"
     if ! response=$(hyprctl eval "$rule" 2>&1); then
       printf 'omacvm-display-sync: failed to apply %s to %s: %s\n' \
         "$mode" "$output" "$response" >&2

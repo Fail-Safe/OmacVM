@@ -661,6 +661,33 @@ class HDR(SyncCase):
         self.run_sync()
         self.assertEqual(self.window_rules(), [self.CLAMP])
 
+    def test_tone_map_held_with_the_output(self):
+        self.layout(2)
+        self.run_sync()
+        sent = len(self.evals())
+        (self.state / "Virtual-1.hold").write_text(f"{time.time() + 60}\n")
+        self.layout(0)                                   # PQ ends while held
+        self.run_sync()
+        self.assertEqual(len(self.evals()), sent)
+        self.assertEqual(self.window_rules(), [self.CLAMP])
+        (self.state / "Virtual-1.hold").unlink()         # the hold ends
+        self.run_sync()
+        self.assertIn('cm = "srgb"', self.evals()[-1])
+        self.assertEqual(self.window_rules(), [self.CLAMP, self.DEFAULT])
+
+    def test_update_into_a_running_pq_output(self):
+        # An older display-sync (3.1.25) set the PQ rule and no tone map;
+        # Hyprland shows the rule already, so only the window rule is sent.
+        self.layout(1)
+        self.run_sync()
+        sent = len(self.evals())
+        (self.state / "tonemap").unlink()
+        (self.hypr / "window_rules").unlink()
+        self.run_sync()
+        self.assertEqual(len(self.evals()), sent)
+        self.assertEqual(self.window_rules(), [self.CLAMP])
+
+
 
 class Placement(unittest.TestCase):
     """Where the outputs go (output_positions) and in which order the rules
