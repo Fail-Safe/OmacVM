@@ -14,6 +14,7 @@ cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user> on|off [vm-type]}; WANT=${2:?on|off}; TYPE=${3:-}
 PORT_RULE=/etc/udev/rules.d/70-omacvm-control.rules
 H=$(getent passwd "$U" | cut -d: -f6)
+source ../../guest/home-files.sh   # the home is written as the user
 SHARE=/usr/local/share/omacvm
 MENU=$H/.config/omarchy/extensions/omarchy-menu.jsonc
 user_ctl() { systemctl --user -M "$U@" "$@"; }
@@ -24,11 +25,11 @@ as_user() {
 
 # The menu row: two lines (a marker comment, then the row) in the user's own
 # extension file, right after its opening brace; the rest of the file stays
-# theirs. Omarchy strips only whole-line comments and trailing commas.
+# theirs. Omarchy strips only whole-line comments and trailing commas. As the user.
 menu_line() {
   [[ -f $MENU || $1 == on ]] || return 0
-  install -d -o "$U" -g "$U" "$(dirname "$MENU")"
-  python3 - "$MENU" "$1" <<'PY'
+  home_mkdir "$(dirname "$MENU")"
+  home_run python3 - "$MENU" "$1" <<'PY'
 import os, sys
 path, want = sys.argv[1], sys.argv[2]
 mark = "  // OmacVM control centre, the next line (on the Mac: omacvm disable control-centre)"
@@ -55,7 +56,6 @@ if new != old:
         f.write(new)
     os.replace(tmp, path)
 PY
-  chown "$U:$U" "$MENU"
 }
 
 # The window rule: omacvm_cc.lua, required from the user's hyprland.lua (a
@@ -67,18 +67,17 @@ window_rule() {
   [[ -f $HY/hyprland.lua ]] || return 0   # not Omarchy 4's Lua config: nothing to add to
   local run sig
   if [[ $1 == on ]]; then
-    if cmp -s omacvm_cc.lua "$HY/omacvm_cc.lua" && grep -qxF "$CC_LINE" "$HY/hyprland.lua"; then return 0; fi
-    install -o "$U" -g "$U" -m644 omacvm_cc.lua "$HY/.omacvm_cc.lua.new"
-    mv -f "$HY/.omacvm_cc.lua.new" "$HY/omacvm_cc.lua"
-    grep -qxF "$CC_LINE" "$HY/hyprland.lua" ||
-      { printf -- '%s\n%s\n' "$CC_MARK" "$CC_LINE" >> "$HY/hyprland.lua"; chown "$U:$U" "$HY/hyprland.lua"; }
+    if home_same "$HY/omacvm_cc.lua" omacvm_cc.lua && home_grep "$HY/hyprland.lua" -qxF "$CC_LINE"; then return 0; fi
+    home_put "$HY/omacvm_cc.lua" < omacvm_cc.lua
+    home_grep "$HY/hyprland.lua" -qxF "$CC_LINE" ||
+      printf -- '%s\n%s\n' "$CC_MARK" "$CC_LINE" | home_append "$HY/hyprland.lua"
   else
-    grep -qxF "$CC_LINE" "$HY/hyprland.lua" || [[ -f $HY/omacvm_cc.lua ]] || return 0
+    home_grep "$HY/hyprland.lua" -qxF "$CC_LINE" || [[ -f $HY/omacvm_cc.lua ]] || return 0
     # Only these two whole lines go; the file keeps its owner and mode.
     local keep; keep=$(mktemp)
-    grep -vxF -e "$CC_MARK" -e "$CC_LINE" "$HY/hyprland.lua" > "$keep" || true
-    cat "$keep" > "$HY/hyprland.lua"; rm -f "$keep"
-    rm -f "$HY/omacvm_cc.lua"
+    grep -vxF -e "$CC_MARK" -e "$CC_LINE" < <(home_cat "$HY/hyprland.lua") > "$keep" || true
+    home_write "$HY/hyprland.lua" < "$keep"; rm -f "$keep"
+    home_run rm -f "$HY/omacvm_cc.lua"
   fi
   # A running Hyprland picks it up now (no session yet, e.g. during a build: nothing to reload).
   run=/run/user/$(id -u "$U")
@@ -101,7 +100,7 @@ textual() {
     # finished set is never unpacked again by itself, so once more here (the
     # control centre's repair runs this).
     [[ $try == 1 && $out == "$H/.cache/omacvm/python/"* && $out != *..* && -d $out ]] || break
-    rm -rf "$out"
+    home_run rm -rf "$out"
   done
   echo "  Textual is not ready (omacvm shows a plain table until it is): $(tail -n1 <<<"$why" | cut -c1-200)"
   return 1
@@ -127,8 +126,8 @@ if [[ $WANT == on ]]; then
   install -m644 omacvm-notify.service omacvm-notify.timer /etc/systemd/user/
   user_ctl daemon-reload 2>/dev/null || true
   user_ctl enable --now omacvm-notify.timer >/dev/null 2>&1 ||
-    { install -d -o "$U" -g "$U" "$H/.config/systemd/user/timers.target.wants"
-      ln -sf /etc/systemd/user/omacvm-notify.timer "$H/.config/systemd/user/timers.target.wants/"; }
+    { home_mkdir "$H/.config/systemd/user/timers.target.wants"
+      home_run ln -sf /etc/systemd/user/omacvm-notify.timer "$H/.config/systemd/user/timers.target.wants/"; }
   menu_line on
   window_rule on
   ../../lib/install-plugin.sh "$U" ../plugins/omacvm.control
@@ -140,20 +139,23 @@ else
   rm -f /usr/local/share/applications/omacvm.desktop
   if [[ -f $PORT_RULE ]]; then rm -f "$PORT_RULE"; udevadm control --reload 2>/dev/null || true; fi
   user_ctl disable --now omacvm-notify.timer >/dev/null 2>&1 || true
-  rm -f /etc/systemd/user/omacvm-notify.service /etc/systemd/user/omacvm-notify.timer "$H/.config/systemd/user/timers.target.wants/omacvm-notify.timer"
+  rm -f /etc/systemd/user/omacvm-notify.service /etc/systemd/user/omacvm-notify.timer
+  home_run rm -f "$H/.config/systemd/user/timers.target.wants/omacvm-notify.timer"
   menu_line off
   window_rule off
   if [[ -d $H/.config/omarchy/plugins/omacvm.control ]]; then
     # Without a running shell, out of its bar settings by hand (it reads them when it starts).
     C=$H/.config/omarchy/shell.json
     if ! as_user omarchy plugin disable omacvm.control >/dev/null 2>&1 && [[ -f $C ]]; then
-      tmp=$(mktemp "$C.XXXXXX")
-      if jq '(.bar.layout[]?) |= map(select(.id != "omacvm.control")) | (.plugins // empty) |= map(select(.id != "omacvm.control"))' "$C" > "$tmp"; then
-        chmod --reference="$C" "$tmp"; chown "$U:$U" "$tmp"; mv -f "$tmp" "$C"
-      else rm -f "$tmp"; fi
+      tmp=$(mktemp)
+      if jq '(.bar.layout[]?) |= map(select(.id != "omacvm.control")) | (.plugins // empty) |= map(select(.id != "omacvm.control"))' \
+           < <(home_cat "$C") > "$tmp"; then
+        home_write "$C" < "$tmp"
+      fi
+      rm -f "$tmp"
     fi
-    rm -rf "$H/.config/omarchy/plugins/omacvm.control"
-    sed -i '/^omacvm\.control$/d' "$H/.local/state/omacvm/pending-plugins" 2>/dev/null || true
+    home_run rm -rf "$H/.config/omarchy/plugins/omacvm.control"
+    home_run sed -i '/^omacvm\.control$/d' "$H/.local/state/omacvm/pending-plugins" 2>/dev/null || true
   fi
-  rm -rf "$H/.cache/omacvm"
+  home_run rm -rf "$H/.cache/omacvm"
 fi

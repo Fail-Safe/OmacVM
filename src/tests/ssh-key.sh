@@ -70,8 +70,17 @@ out=$(run "$K" FAKE_RUNUSER=none)
 expect "root writes nothing in the user's home: all of it goes through runuser" "no" "$([[ -e $T/home/me/.ssh ]] && echo yes || echo no)"
 out=$(run "$K" FAKE_RUNUSER=fail)
 expect "the user's part fails: a warning, apply goes on" "yes" "$([[ $out == *"warning: the key did not go into me's"*"rc=0" ]] && echo yes || echo "$out")"
-expect "apply sends this script with the user and the key as arguments" "1" \
-  "$(grep -c "gssh \"\$IP\" \"bash -s -- '\$U' '\$pubkey'\" < \"\$R/src/guest/ssh-key.sh\"" "$R/src/cmd/apply.sh")"
+# apply: the key on stdin, its first line, taken by read (no shell parses it),
+# then this script for bash -s. Run here as the VM's root shell would.
+remote=$(sed -n "s/^  { printf '%s\\\\n' \"\$pubkey\"; cat \"\$R\/src\/guest\/ssh-key.sh\"; } | gssh \"\$IP\" \"\(.*\)\"$/\1/p" "$R/src/cmd/apply.sh")
+expect "apply sends the key, then this script, on stdin" 'IFS= read -r k && exec bash -s -- '"'"'$U'"'"' \"\$k\"' "$remote"
+remote=${remote//\\\"/\"}; remote=${remote//\\\$/\$}; remote=${remote//\'\$U\'/me}
+rm -rf "$T/root" "$T/home/me/.ssh" "$T/pwned"
+odd="ssh-ed25519 AAAA\$(touch $T/pwned)\`touch $T/pwned\`'\"; touch $T/pwned"
+out=$({ printf '%s\n' "$odd"; cat "$T/ssh-key.sh"; } | env PATH="$T/bin:$PATH" FAKE_DIR="$T" /bin/bash -c "$remote" 2>&1; echo "rc=$?")
+expect "... a key with shell characters goes in as it is, nothing runs" "rc=0 no $odd" \
+  "${out##*$'\n'} $([[ -e $T/pwned ]] && echo yes || echo no) $(cat "$T/root/.ssh/authorized_keys")"
+rm -rf "$T/root" "$T/home/me/.ssh"
 
 # ---------- Linux as root: a real user, real links ----------
 if [[ $(id -u) != 0 || $(uname) != Linux ]] || ! command -v useradd >/dev/null || ! command -v runuser >/dev/null; then

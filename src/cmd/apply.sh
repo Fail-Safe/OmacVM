@@ -134,6 +134,8 @@ fi
 probe=$(vm_probe "$IP")
 [[ -n $U ]] || U=$(sed -n 's/^OMACVM_USER=//p' <<<"$probe")
 [[ -n $U ]] || die "no desktop user in '$VM' (pass --user NAME)"
+# It goes into commands for the VM's shell: a plain user name only.
+[[ $U =~ ^[a-z_][a-z0-9_-]*$ ]] || die "the desktop user $U is no plain user name (pass --user NAME)"
 had=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
 now=$(cat "$R/src/VERSION")
 # Never an older OmacVM over a newer one by mistake (an old checkout's omacvm
@@ -371,31 +373,40 @@ fi
 # stopped at "Adding OmacVM to the VM". The Bridge installed later keeps it.
 # The VM folder's own SSH key, for root and the user, beside this Mac's key
 # (never into an image: --image has no token). The user's ~/.ssh is written
-# as the user (guest/ssh-key.sh). The key goes in quoted: one printable line
-# without a single quote.
+# as the user (guest/ssh-key.sh). The key goes in on stdin, its first line,
+# which read takes as it is (no shell reads it); the script follows it.
 if (( TOKEN )) && [[ -n ${OMA_VM_KEY:-} && -s ${OMA_VM_KEY:-}.pub ]]; then
   log "the VM folder's SSH key -> $IP"
   pubkey=$(head -1 "$OMA_VM_KEY.pub"); re='^ssh-ed25519 [[:print:]]+$'
-  [[ $pubkey =~ $re && $pubkey != *\'* ]] || die "$OMA_VM_KEY.pub: not one ssh-ed25519 key line"
-  gssh "$IP" "bash -s -- '$U' '$pubkey'" < "$R/src/guest/ssh-key.sh"
+  [[ $pubkey =~ $re ]] || die "$OMA_VM_KEY.pub: not one ssh-ed25519 key line"
+  { printf '%s\n' "$pubkey"; cat "$R/src/guest/ssh-key.sh"; } | gssh "$IP" "IFS= read -r k && exec bash -s -- '$U' \"\$k\""
 fi
+# vm_user_file NAME < FILE: FILE as the desktop user's
+# ~/.config/omacvm-bridge/NAME in the VM (600, the folder 700), written as the
+# user: root's install -d -o there followed a link the user put in its place
+# (~/.config/omacvm-bridge -> /etc: /etc became the user's). The commands are
+# fixed text; the content only goes through cat. Before OmacVM's own copy is
+# in the VM: nothing of src/ can be used here.
+vm_user_file() {
+  gssh "$IP" "set -e; u='$U'; H=\$(getent passwd \"\$u\" | cut -d: -f6); [ -n \"\$H\" ] && [ -d \"\$H\" ] || exit 1; cd /
+    exec setpriv --reuid=\"\$u\" --regid=\"\$(id -g \"\$u\")\" --init-groups -- env HOME=\"\$H\" /bin/sh -c '
+      umask 077; d=\$1/.config/omacvm-bridge; mkdir -p \"\$d\" && chmod 700 \"\$d\" || exit 1
+      t=\$(mktemp \"\$d/.\$2.XXXXXX\") || exit 1
+      cat > \"\$t\" && mv -f \"\$t\" \"\$d/\$2\" || { rm -f \"\$t\"; exit 1; }' sh \"\$H\" '$1'"
+}
 if (( TOKEN )) && { on gestures || needs_bridge; }; then bridge_token_ensure; fi
 if (( ! TOKEN )); then
   :
 elif [[ -f $T ]]; then
   log "bridge token -> $IP"
-  gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
-    install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
-    install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/token\"" < "$T"
+  vm_user_file token < "$T"
 elif needs_bridge; then
   die "no bridge token yet: the Mac side did not install (run omacvm apply without --no-mac)"
 fi
 # The VM's own key for the control centre (vm_key_ensure in lib/mac.sh).
 if (( TOKEN && NAMED )) && on control-centre; then
   vk=$(vm_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
-  gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
-    install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
-    install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/vm-key\"" < "$vk"
+  vm_user_file vm-key < "$vk"
 fi
 # Touch ID (ADR 0041): its own key, root's alone in the VM (PAM asks as
 # root), and for Parallels/UTM/Fusion the Bridge token (they reach the Bridge

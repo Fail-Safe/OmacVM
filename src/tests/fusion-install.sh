@@ -26,15 +26,15 @@ done
 # mac-display --scale), 2 without it; the scale chosen in Omarchy's menu stays.
 # Up to 3.0.4 it was 2 only from 3000 px wide: a MacBook Air (2940 px) got 1.
 t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
-sed -n '/^M=\$H\/.config\/hypr\/monitors.lua/,/^if cmp -s/p' $f > "$t/block.sh"
-check "monitors.lua block found" "grep -q '^if cmp -s' $t/block.sh"
+sed -n '/^M=\$H\/.config\/hypr\/monitors.lua/,/^home_same "\$M"/p' $f > "$t/block.sh"
+check "monitors.lua block found" "grep -q '^home_same \"\$M\"' $t/block.sh"
 omarchy_lua() {   # Omarchy's own monitors.lua, scale "auto" or a number
   printf -- '-- See https://wiki.hypr.land/Configuring/Basics/Monitors/\nlocal omarchy_monitor_scale = %s\nhl.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })\nlocal omarchy_gdk_scale = 2\nhl.env("GDK_SCALE", tostring(omarchy_gdk_scale))\n' "$1"
 }
 run_block() {   # MODE [SCALE]: run the block on $t/home, print "scale gdk mode"
   # shellcheck disable=SC2034  # read by block.sh
   ( set -euo pipefail; H=$t/home U=nobody MODE=$1 DSCALE=${2:-}
-    chown() { :; }
+    source src/guest/home-files.sh
     source "$t/block.sh" )
   printf '%s %s %s\n' "$(sed -n 's/^local omarchy_monitor_scale = //p' "$t/home/.config/hypr/monitors.lua")" \
     "$(sed -n 's/^local omarchy_gdk_scale = //p' "$t/home/.config/hypr/monitors.lua")" \

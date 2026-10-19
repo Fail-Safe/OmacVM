@@ -72,7 +72,8 @@ as_u cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/
   as_u cmake --build build -j"$(nproc)" >> "$W/build.log" 2>&1 ||
   { tail -20 "$W/build.log" >&2; fail "the build failed, full log: $W/build.log"; }
 [[ -x build/hyprpicker ]] || fail "no hyprpicker binary after the build"
-build/hyprpicker --help >/dev/null 2>&1 || fail "the built hyprpicker does not start"
+# Started as the user who built it, never as root: the user can change the build tree meanwhile.
+as_u build/hyprpicker --help >/dev/null 2>&1 || fail "the built hyprpicker does not start"
 install -o root -g root -m755 build/hyprpicker "$OUT"
 echo "$pkg $(sum "$OUT") $(sum "$here/redraw-on-change.patch")" > "$STATE"
 cd /; rm -rf "$W/src"

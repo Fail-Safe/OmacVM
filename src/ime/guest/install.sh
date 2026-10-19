@@ -18,6 +18,7 @@ U=${1:?usage: install.sh USER on|off|--status}; ACTION=${2:?usage: install.sh US
 ROOT=${OMACVM_IME_ROOT:-}
 H=$ROOT$(getent passwd "$U" 2>/dev/null | cut -d: -f6 || true)
 [[ $H != "$ROOT" ]] || H=$ROOT/home/$U
+source ../../guest/home-files.sh   # the home is written as the user
 PKG=omacvm-fcitx5-ime
 PACKAGER="OmacVM <omacvm@users.noreply.github.com>"
 INFO=$ROOT/usr/lib/omacvm-ime/build-info
@@ -59,51 +60,43 @@ DROPIN_TEXT='# OmacVM mac-ime: GTK apps keep GTK_IM_MODULE (environment.d/90-oma
 [Service]
 UnsetEnvironment=GTK_IM_MODULE'
 
-user_dir() {   # DIR under $H: made with each missing level owned by the user
-  local d=$H p IFS=/
-  for p in ${1#"$H"/}; do
-    d+=/$p
-    [[ -d $d ]] || { mkdir "$d" && chown "$U:$U" "$d" 2>/dev/null || true; }
-  done
-}
-
 dropin_on() {
-  [[ $(cat "$DROPIN" 2>/dev/null) != "$DROPIN_TEXT" ]] || return 0
-  user_dir "$(dirname "$DROPIN")"
-  printf '%s\n' "$DROPIN_TEXT" > "$DROPIN"
-  chown "$U:$U" "$DROPIN" 2>/dev/null || true
+  [[ $(home_cat "$DROPIN") != "$DROPIN_TEXT" ]] || return 0
+  home_mkdir "$(dirname "$DROPIN")"
+  printf '%s\n' "$DROPIN_TEXT" | home_put "$DROPIN"
   systemctl --user -M "$U@" daemon-reload >/dev/null 2>&1 || true
 }
 
 dropin_off() {
   [[ -f $DROPIN ]] || return 0
-  rm -f "$DROPIN"
-  rmdir "$(dirname "$DROPIN")" 2>/dev/null || true
+  home_run rm -f "$DROPIN"
+  home_run rmdir "$(dirname "$DROPIN")" 2>/dev/null || true
   systemctl --user -M "$U@" daemon-reload >/dev/null 2>&1 || true
 }
 
 flags_on() {
   local f
-  install -d -o "$U" -g "$U" "$(dirname "$MARK")" 2>/dev/null || mkdir -p "$(dirname "$MARK")"
+  home_mkdir "$(dirname "$MARK")"
   for f in "$H/.config/chromium-flags.conf" "$H/.config/chrome-flags.conf" "$H/.config/brave-flags.conf" "$H/.config/electron-flags.conf"; do
     [[ -f $f ]] || continue
-    grep -qxF -- "$FLAG" "$f" && continue
-    printf '%s\n' "$FLAG" >> "$f"
-    grep -qxF "$f" "$MARK" 2>/dev/null || echo "$f" >> "$MARK"
+    home_grep "$f" -qxF -- "$FLAG" && continue
+    printf '%s\n' "$FLAG" | home_append "$f"
+    home_grep "$MARK" -qxF "$f" || echo "$f" | home_append "$MARK"
   done
-  [[ ! -f $MARK ]] || chown "$U:$U" "$MARK" 2>/dev/null || true
 }
 
 flags_off() {
-  local f
+  local f keep
   [[ -f $MARK ]] || return 0
+  keep=$(mktemp)
   while IFS= read -r f; do
     [[ -f $f ]] || continue
-    # The file without our line (owner and mode kept; no sed -i: GNU and BSD differ).
-    { grep -vxF -- "$FLAG" "$f" || true; } > "$f.omacvm-new"
-    cat "$f.omacvm-new" > "$f"; rm -f "$f.omacvm-new"
-  done < "$MARK"
-  rm -f "$MARK"
+    # The file without our line (owner and mode kept), read whole before it is written.
+    { grep -vxF -- "$FLAG" < <(home_cat "$f") || true; } > "$keep"
+    home_write "$f" < "$keep"
+  done < <(home_cat "$MARK")
+  rm -f "$keep"
+  home_run rm -f "$MARK"
 }
 
 case $ACTION in
@@ -121,7 +114,7 @@ if [[ $ACTION == off ]]; then
     changed=1
   fi
   if [[ -f $RULE ]]; then rm -f "$RULE"; udevadm control --reload >/dev/null 2>&1 || true; fi
-  rm -f "$ENVD"
+  home_run rm -f "$ENVD"
   dropin_off
   flags_off
   (( ! changed )) || restart_fcitx
@@ -138,10 +131,9 @@ fi
 # GTK apps (ghostty, Nautilus) through Fcitx5's own GTK module: it gives the
 # caret's place; Wayland's text-input does not. Chromium and Electron reach
 # an input method only with this flag. Both from the next login.
-if [[ ! -f $ENVD ]] || ! grep -qxF 'GTK_IM_MODULE=fcitx' "$ENVD"; then
-  mkdir -p "$(dirname "$ENVD")"
-  printf '# OmacVM mac-ime: GTK apps type through Fcitx5 (omacvm disable mac-ime removes this file).\nGTK_IM_MODULE=fcitx\n' > "$ENVD"
-  chown -R "$U:$U" "$H/.config/environment.d" 2>/dev/null || true
+if [[ ! -f $ENVD ]] || ! home_grep "$ENVD" -qxF 'GTK_IM_MODULE=fcitx'; then
+  home_mkdir "$(dirname "$ENVD")"
+  printf '# OmacVM mac-ime: GTK apps type through Fcitx5 (omacvm disable mac-ime removes this file).\nGTK_IM_MODULE=fcitx\n' | home_put "$ENVD"
 fi
 dropin_on
 flags_on

@@ -114,7 +114,8 @@ printf '#!/bin/sh\n:\n' > "$B/chown"
 printf '#!/bin/sh\necho reload >> "%s/reloads"\n' "$T" > "$B/sudo"
 printf '#!/bin/sh\necho 1000\n' > "$B/id"
 chmod +x "$B"/*
-G=$T/glide; cp -R "$R/src/gestures/guest" "$G"
+G=$T/src/gestures/guest; mkdir -p "$T/src/gestures" "$T/src/guest"; cp -R "$R/src/gestures/guest" "$G"
+cp "$R/src/guest/home-files.sh" "$T/src/guest/"
 sed -i.bak "s|^RUN=/run/user/\$(id -u \"\$U\")|RUN=$T/run|" "$G/glide.sh"
 glide() { PATH="$B:$PATH" bash "$G/glide.sh" u "$1" >/dev/null 2>&1; echo $?; }
 reloads() { [[ -f $T/reloads ]] && wc -l < "$T/reloads" | tr -d ' ' || echo 0; }

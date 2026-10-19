@@ -19,6 +19,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
+source ../../guest/home-files.sh   # the home is written as the user
 as_user() { sudo -u "$U" env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" "$@"; }
 
 # python: omacvm-bridge checks the Bridge's proof with it (no key on a command line).
@@ -57,8 +58,11 @@ for p in ../plugins/*/; do [[ -f $p/manifest.json ]] && ../../lib/install-plugin
 # had, so turning the Bridge off puts it back (../../guest/off.sh).
 pkill -x hyprsunset 2>/dev/null || true
 MARK=$H/.local/state/omacvm/nightlight-indicator
-install -d -o "$U" -g "$U" "$(dirname "$MARK")"
-./nightlight-indicator.sh "$H/.config/omarchy/shell.json" "$MARK" >/dev/null || echo "night light indicator: shell.json left as it is"
-for f in "$MARK" "$MARK.set"; do [[ ! -f $f ]] || chown "$U:$U" "$f"; done
+home_mkdir "$(dirname "$MARK")"
+# All of it in the home: run as the user. Marker files root left there go first
+# (the user could not write them: up to 3.1.24 this ran as root).
+for f in "$MARK" "$MARK.set"; do [[ ! -f $f ]] || home_run test -w "$f" || home_put "$f" < <(home_cat "$f"); done
+home_run "$PWD/nightlight-indicator.sh" "$H/.config/omarchy/shell.json" "$MARK" >/dev/null < /dev/null ||
+  echo "night light indicator: shell.json left as it is"
 
 echo "omacvm-bridge guest side installed for $U"

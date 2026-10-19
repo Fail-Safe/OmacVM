@@ -8,8 +8,10 @@
 # user) to choose its spot in the bar.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-U=${1:?usage: install-plugin.sh <desktop-user> <plugin-folder>}; dir=${2%/}
+U=${1:?usage: install-plugin.sh <desktop-user> <plugin-folder>}; dir=$(cd "${2%/}" && pwd)
 H=$(getent passwd "$U" | cut -d: -f6)
+# shellcheck source=../guest/home-files.sh
+source "$here/../guest/home-files.sh"   # the home is written as the user
 # Omarchy's commands need its environment (OMARCHY_PATH, ...), which a root
 # shell does not have: load Omarchy's own bootstrap first.
 as_user() {
@@ -19,31 +21,33 @@ as_user() {
 
 id=$(jq -r .id "$dir/manifest.json")
 dest=$H/.config/omarchy/plugins/$id
-install -d -o "$U" -g "$U" "$H/.config/omarchy/plugins"
+# The user copies it: from a copy the user can read (the caller's folder may
+# be root's alone, as the app's display widget's temp folder).
+pub=$(mktemp -d); trap 'rm -rf "$pub"' EXIT
+cp -R "$dir/." "$pub/"; chmod -R a+rX,go-w "$pub"; dir=$pub
+home_mkdir "$H/.config/omarchy/plugins"
 # A running shell keeps the plugin it loaded: note real changes so
 # guest/install.sh restarts the shell once at the end.
-if [[ -d $dest ]] && ! diff -rq "$dir" "$dest" >/dev/null 2>&1; then
-  install -d -o "$U" -g "$U" "$H/.local/state/omacvm"
-  touch "$H/.local/state/omacvm/restart-shell"
+if [[ -d $dest ]] && ! home_run diff -rq "$dir" "$dest" >/dev/null 2>&1 < /dev/null; then
+  home_mkdir "$H/.local/state/omacvm"
+  home_put "$H/.local/state/omacvm/restart-shell" < /dev/null
 fi
-rm -rf "$dest"
-cp -r "$dir" "$dest"
-chown -R "$U:$U" "$dest"
+home_run rm -rf "$dest"
+home_run cp -r "$dir" "$dest"
 as_user omarchy plugin validate "$dest" >/dev/null
 
 install -m755 "$here/omacvm-plugins" /usr/local/bin/omacvm-plugins
 install -m644 "$here/omacvm-plugins.service" /etc/systemd/user/omacvm-plugins.service
 Q=$H/.local/state/omacvm/pending-plugins
-install -d -o "$U" -g "$U" "$(dirname "$Q")"
-grep -qx "$id" "$Q" 2>/dev/null || echo "$id" >> "$Q"
+home_mkdir "$(dirname "$Q")"
+home_grep "$Q" -qx "$id" || echo "$id" | home_append "$Q"
 # On again before a disable queued at the next login ran: not disabled.
-if [[ -f $Q-off ]]; then grep -vxF "$id" "$Q-off" > "$Q-off.new" || true; mv -f "$Q-off.new" "$Q-off"; chown "$U:$U" "$Q-off"; fi
-chown "$U:$U" "$Q"
+if [[ -f $Q-off ]]; then { grep -vxF "$id" < <(home_cat "$Q-off") || true; } | home_put "$Q-off"; fi
 if as_user omarchy-shell shell ping >/dev/null 2>&1; then
   as_user /usr/local/bin/omacvm-plugins
 else
   systemctl --user -M "$U@" enable omacvm-plugins.service >/dev/null 2>&1 ||
-    { install -d -o "$U" -g "$U" "$H/.config/systemd/user/graphical-session.target.wants"
-      ln -sf /etc/systemd/user/omacvm-plugins.service "$H/.config/systemd/user/graphical-session.target.wants/"; }
+    { home_mkdir "$H/.config/systemd/user/graphical-session.target.wants"
+      home_run ln -sf /etc/systemd/user/omacvm-plugins.service "$H/.config/systemd/user/graphical-session.target.wants/"; }
   echo "plugin $id installed (enabled at the next login)"
 fi

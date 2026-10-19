@@ -8,15 +8,78 @@
 # once; cache=loose would make small files and git faster but shows old
 # content after the Mac changes a file. msize=512000 is the most this
 # kernel's virtio transport takes.
+# ~/Mac is in the user's home, and this runs as root: it is never reached
+# through a link (one there would put the Mac folder, and the user as its
+# owner, on a folder of the system, or unmount one). It is opened from the
+# home without following links, and mount and umount go through that open
+# folder (/proc/self/fd/N), never through the path again (mac_dir below).
+# Tests (src/tests/home-links.sh): OMACVM_MAC_FOLDER_USER another user,
+# OMACVM_MAC_FOLDER_FS another file system instead of the Mac's ("tmpfs").
 set -uo pipefail
 TAG=omacvm-mac
-user=$(getent passwd 1000 | cut -d: -f1)
-home=$(getent passwd 1000 | cut -d: -f6)
+user=${OMACVM_MAC_FOLDER_USER:-$(getent passwd 1000 | cut -d: -f1)}
+home=$(getent passwd "$user" | cut -d: -f6)
 [[ -n $user && -d $home ]] || { echo "omacvm-mac-folder: no desktop user (uid 1000)"; exit 0; }
-M=$home/Mac
+
+# mac_dir umount [rmdir] | mount FSTYPE SOURCE OPTIONS
+mac_dir() {
+  python3 -I - "$home" "$user" "$@" <<'PY'
+import ctypes, os, pwd, stat, sys
+home, user, what = sys.argv[1:4]
+pw = pwd.getpwnam(user)
+P = os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC
+h = os.open(home, P | os.O_DIRECTORY)
+top = os.fstat(h)
+try:
+    st = os.stat("Mac", dir_fd=h, follow_symlinks=False)
+except FileNotFoundError:
+    st = None
+if st is not None and not stat.S_ISDIR(st.st_mode):
+    print(f"omacvm-mac-folder: {home}/Mac is no folder (a link or a file): left alone")
+    sys.exit(0)
+mounted = st is not None and st.st_dev != top.st_dev
+
+def opened():   # ~/Mac without following a link, and the path a child reaches it by
+    fd = os.open("Mac", P | os.O_DIRECTORY, dir_fd=h)
+    return fd, f"/proc/self/fd/{fd}"
+
+# mount(2) and umount2(2) themselves, on /proc/self/fd/N: umount(8) looks that
+# path up in the mount table and stops, and newer mount(8)s (move_mount) do not
+# follow it; the system calls do, to the folder opened above.
+libc = ctypes.CDLL(None, use_errno=True)
+
+if what == "umount":
+    if mounted:
+        # MNT_DETACH: the open folder itself keeps the mount busy; it goes when that closes.
+        fd, p = opened()
+        if libc.umount2(p.encode(), 2) != 0:
+            print(f"omacvm-mac-folder: {home}/Mac: {os.strerror(ctypes.get_errno())}")
+    if sys.argv[4:] == ["rmdir"]:
+        try:
+            os.rmdir("Mac", dir_fd=h)   # only an empty folder; never through a link
+        except OSError:
+            pass
+elif what == "mount":
+    if mounted:
+        sys.exit(0)
+    if st is None:
+        os.mkdir("Mac", 0o755, dir_fd=h)
+        fd = os.open("Mac", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=h)
+        os.fchown(fd, pw.pw_uid, pw.pw_gid)
+        os.close(fd)
+    fd, p = opened()
+    if os.fstat(fd).st_uid != pw.pw_uid:
+        print(f"omacvm-mac-folder: {home}/Mac is not {user}'s own folder: not mounted")
+        sys.exit(0)
+    fstype, source, options = sys.argv[4:7]
+    if libc.mount(source.encode(), p.encode(), fstype.encode(), 0, options.encode()) != 0:
+        sys.exit(f"omacvm-mac-folder: mount on {home}/Mac: {os.strerror(ctypes.get_errno())}")
+PY
+}
 
 shared() {
   local f
+  [[ -z ${OMACVM_MAC_FOLDER_FS:-} ]] || return 0
   for f in /sys/bus/virtio/drivers/9pnet_virtio/virtio*/mount_tag; do
     [[ -r $f && $(tr -d '\0\n' < "$f") == "$TAG" ]] && return 0
   done
@@ -24,7 +87,7 @@ shared() {
 }
 
 if [[ ${1:-} == --stop ]]; then
-  mountpoint -q "$M" && umount "$M"
+  mac_dir umount
   exit 0
 fi
 # A 9p device at all (virtio id 9)? Then its driver binds right after the
@@ -34,12 +97,13 @@ if grep -qx 0x0009 /sys/bus/virtio/devices/*/device 2>/dev/null; then
   for _ in 1 2 3 4 5 6 7 8 9 10; do shared && break; sleep 0.2; done
 fi
 if ! shared; then
-  mountpoint -q "$M" && umount "$M"
-  rmdir "$M" 2>/dev/null || true
+  mac_dir umount rmdir
   exit 0
 fi
-mountpoint -q "$M" && exit 0
-install -d -o "$user" -g "$user" -m755 "$M"
 # access=client: the VM checks permissions itself, on the owners QEMU shows
 # (the Mac user's files as the desktop user's).
-exec mount -t 9p -o "trans=virtio,version=9p2000.L,access=client,msize=512000,cache=mmap" "$TAG" "$M"
+if [[ -n ${OMACVM_MAC_FOLDER_FS:-} ]]; then
+  mac_dir mount "$OMACVM_MAC_FOLDER_FS" none size=1m
+else
+  mac_dir mount 9p "$TAG" "trans=virtio,version=9p2000.L,access=client,msize=512000,cache=mmap"
+fi

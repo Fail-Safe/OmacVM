@@ -71,12 +71,14 @@ pam_remove() {
 # have the theme (Touch ID was off, the Bridge is new), so "on" sends it again at once.
 user_units() {   # on|off [first: Touch ID was off before]
   [[ -n $U && -z $ROOT ]] || return 0
-  local uc=(systemctl --user -M "$U@") home
-  home=$(getent passwd "$U" | cut -d: -f6) || true
-  [[ $home == /* ]] && rm -f "$home/.local/state/omacvm/touchid-theme-sent"
+  local uc=(systemctl --user -M "$U@") H
+  H=$(getent passwd "$U" | cut -d: -f6) || true
+  # shellcheck source=../../guest/home-files.sh
+  source "$HERE/../../guest/home-files.sh"   # the home is written as the user
+  [[ $H == /* ]] && home_run rm -f "$H/.local/state/omacvm/touchid-theme-sent"
   if [[ $1 == on ]]; then
     # Turned on now: the app hints may show again (once each).
-    if [[ ${2:-} == first && -n $home ]]; then rm -f "$home"/.local/state/omacvm/touchid-hint-*; fi
+    if [[ ${2:-} == first && $H == /* ]]; then home_run rm -f "$H"/.local/state/omacvm/touchid-hint-*; fi
     "${uc[@]}" daemon-reload 2>/dev/null || true
     # shellcheck disable=SC2086
     "${uc[@]}" enable omacvm-touchid-theme.path omacvm-touchid-theme.service $APP_UNITS >/dev/null 2>&1 || true

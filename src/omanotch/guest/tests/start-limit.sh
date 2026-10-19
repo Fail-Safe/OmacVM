@@ -130,7 +130,7 @@ sed -n '/^say "installing the notchcast service"/,$p' "$G/install.sh" > "$T/inst
 # guest/install.sh: the drop-in it writes, and what follows it for Omanotch.
 gi=$src/guest/install.sh
 sed -n '/notchcast.service.d"$/,/omacvm-host.conf"$/p' "$gi" | sed '1d' > "$T/dropin.sh"
-sed -n '/^  chown .*omacvm-host.conf"$/,/^  # Notifications right under the strip/p' "$gi" | sed '1d;$d' > "$T/repair.sh"
+sed -n '/home_put .*omacvm-host.conf"$/,/^  # Notifications right under the strip/p' "$gi" | sed '1d;$d' > "$T/repair.sh"
 for f in install-tail dropin repair; do
   [[ -s $T/$f.sh ]] || { echo "FAIL: cannot find the $f part in the scripts"; exit 1; }
 done
@@ -161,7 +161,8 @@ fresh() {  # fresh <name>
   export PATH=$T/bin:/usr/bin:/bin
 }
 run_dropin() {  # as guest/install.sh writes it (paths into this HOME)
-  H=$HOME HOST=192.168.64.1 TYPE=app U=$USER bash -c "chown() { :; }; $(cat "$T/dropin.sh")"
+  # home-files.sh as guest/install.sh has it (not root here: as this user)
+  H=$HOME HOST=192.168.64.1 TYPE=app U=$USER bash -c "source '$src/guest/home-files.sh'; $(cat "$T/dropin.sh")"
 }
 run_repair() {
   H=$HOME U=$USER bash -c "user_ctl() { systemctl --user \"\$@\"; }; $(cat "$T/repair.sh")"

@@ -14,6 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user> <WxH@Hz>}; MODE=${2:?display mode}
 H=$(getent passwd "$U" | cut -d: -f6)
+source ../../guest/home-files.sh   # the home is written as the user
 ../../guest/pkg-add spice-vdagent qemu-guest-agent wl-clipboard python
 systemctl enable --now qemu-guest-agent spice-vdagentd >/dev/null 2>&1 || true
 install -m755 omacvm-vdagent /usr/local/bin/omacvm-vdagent
@@ -42,10 +43,10 @@ if [[ -f $L ]]; then grep -qx "$L" /etc/ld.so.preload 2>/dev/null || echo "$L" >
 ../../app/guest/venus/mpv.sh || echo "UTM: mpv's defaults are not set; mpv may stop drawing after ~17 s of video" >&2
 
 M=$H/.config/hypr/monitors.lua
-scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
+scale=$(home_grep "$M" -m1 '^local omarchy_monitor_scale = ' | sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' || true)
 # Written next to it and moved into place, only when it changes: Hyprland
 # reloads on every write.
-tmp=$(mktemp "$M.XXXXXX")
+tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
 cat > "$tmp" <<LUA
 -- OmacVM, UTM: the Mac's built-in display below the notch, fixed from boot.
 -- UTM's virtio-gpu (virgl) goes blank when the mode changes while running, so
@@ -73,18 +74,21 @@ WantedBy=multi-user.target
 UNIT
 cat > /usr/local/bin/omacvm-utm-display <<'SH'
 #!/bin/sh
-for f in /home/*/.config/hypr/monitors.lua.pending; do
-  [ -f "$f" ] && mv -f "$f" "${f%.pending}"
+# Moved by the home's owner, not root: a link in the home must not make root
+# move a file of the system.
+for h in /home/*; do
+  f=$h/.config/hypr/monitors.lua.pending
+  [ -f "$f" ] || continue
+  u=$(stat -c %U "$h") && [ "$u" != root ] || continue
+  setpriv --reuid="$u" --regid="$(id -g "$u")" --init-groups -- mv -f "$f" "${f%.pending}" < /dev/null
 done
 exit 0
 SH
 chmod 755 /usr/local/bin/omacvm-utm-display
 systemctl enable -q omacvm-utm-display.service 2>/dev/null || true
 when=now
-if cmp -s "$tmp" "$M"; then rm -f "$tmp"; rm -f "$M.pending"
-else
-  chmod 644 "$tmp"; chown "$U:$U" "$tmp"
-  if [[ -n $(ls -A "/run/user/$(id -u "$U")/hypr" 2>/dev/null) ]]; then mv -f "$tmp" "$M.pending"; when="from the next boot"
-  else mv -f "$tmp" "$M"; fi
+if home_same "$M" "$tmp"; then home_run rm -f "$M.pending"
+elif [[ -n $(ls -A "/run/user/$(id -u "$U")/hypr" 2>/dev/null) ]]; then home_put "$M.pending" < "$tmp"; when="from the next boot"
+else home_put "$M" < "$tmp"
 fi
 echo "UTM: guest tools, virtio-gpu settings, browser GPU, display $MODE ($when)"
