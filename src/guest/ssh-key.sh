@@ -24,4 +24,4 @@ add /root/.ssh "$k"
 H=$(getent passwd "$U" | cut -d: -f6) || H=""
 [[ -n $H && -d $H && $U != root ]] || exit 0
 runuser -u "$U" -- /bin/bash -c "$(declare -f add); add \"\$@\"" add "$H/.ssh" "$k" ||
-  echo "warning: the key did not go into $U's ~/.ssh/authorized_keys (not writable by $U)" >&2
+  echo "warning: the key did not go into $U's ~/.ssh/authorized_keys: that user may not write there" >&2
