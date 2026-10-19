@@ -137,8 +137,16 @@ without a window) run headless. `src/tests/e2e-onscreen.sh` tests the checks
 offline (CI).
 
 ```bash
-# the caller holds the Mac's VM lock; a stopped test VM in the test app's VMs folder
-src/tests/e2e/onscreen.sh --app "PATH/OmacVM Test.app" --vm "OmacVM M-e2e" [--only pointer,vm-size]
+# the release zip as the test identity; a lane's own id keeps another test app's settings apart
+OMACVM_SIGN_ID=<Developer ID> src/tests/e2e/relabel.sh OmacVM-X.Y.Z.zip ~/e2e/app org.omacvm.app.test.e2e
+A=~/e2e/app/"OmacVM Test.app"
+defaults write org.omacvm.app.test.e2e vmsRoot ~/e2e/vms
+# a stopped test VM from the prebuilt image (a few minutes), in that VMs folder
+OMACVM_TEST_IDENTITY=1 OMACVM_APP_ID=org.omacvm.app.test.e2e OMACVM_PASSWORD=<any> "$A/Contents/Resources/omacvm/omacvm" \
+  build --yes --prebuilt --no-mac --vm-type app --vm-name "OmacVM M-e2e" --cpus 4 --memory-gb 4 --disk-gb 64 \
+  --user omtest --full-name "OmacVM Test" --hostname omacvm-e2e --feature autologin=on --feature no-idle-lock=on
+# the caller holds the Mac's VM lock; run it from a copy of the checkout (bash reads a script as it runs)
+src/tests/e2e/onscreen.sh --app "$A" --vm "OmacVM M-e2e" [--only pointer,vm-size] [--headless]
 ```
 
 About 10 minutes (two starts, Update VM). Results: `summary.tsv` (ok, FAIL,
