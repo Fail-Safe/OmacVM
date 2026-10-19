@@ -22,6 +22,15 @@ in more words.
   Back. A VM folder whose `ssh-key.pub` went missing gets it back from its `ssh-key` instead of a
   new key the VM does not know. Without a guest agent, a feature switched while the VM was
   stopped gives up after about 10 minutes again (up to 20 with the SSH repair before it).
+- **Graphics without QEMU's lock and Vulkan windows without a copy are on by default.** Both
+  switches in the VM window's General section were off and marked experimental (since 3.1.18 and
+  3.1.24). With them on, the VM's CPUs no longer wait while its graphics work runs, so there are
+  fewer short freezes while apps open or pages draw, and Vulkan apps' frames reach the screen
+  without a copy on QEMU's main loop (macOS 26 and newer; with MoltenVK on macOS 15 they are
+  copied as before, and `omacvm check` no longer warns about that). Tested with both on in long
+  runs on a Mac mini M4 and a MacBook Air M2 with macOS 27: no GPU restart, no crash, no memory
+  growth. Not soaked on macOS 15. A switch you set yourself stays as you set it, and GPU safe
+  mode still turns both off.
 
 ## 3.1.25
 
