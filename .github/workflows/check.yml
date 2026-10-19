@@ -204,6 +204,9 @@ jobs:
       - name: apply's SSH key in the VM (the user's ~/.ssh written as the user)
         run: src/tests/ssh-key.sh
 
+      - name: Root writes nothing into the VM user's home itself (the guest scripts)
+        run: src/tests/home-links.sh
+
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
@@ -672,6 +675,9 @@ jobs:
 
       - name: apply's SSH key in the VM never follows the user's links (a real user, as root)
         run: sudo src/tests/ssh-key.sh
+
+      - name: The guest scripts never follow the user's links in the home (a real user, as root)
+        run: sudo src/tests/home-links.sh
 
       - name: The guest's udev rules parse (udevadm verify)
         run: udevadm verify --resolve-names=never src/vdec/guest/70-omacvm-vdec.rules src/ime/guest/70-omacvm-ime.rules
