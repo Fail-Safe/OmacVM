@@ -691,6 +691,11 @@ if [[ $grub_old != "$grub_in" ]] && command -v grub-mkconfig >/dev/null; then
   if grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1; then grub_ok=$(grub_digest); else grub_ok=; fi
 fi
 printf 'initramfs %s\ngrub %s\n' "$init_ok" "$grub_ok" | install -Dm644 /dev/stdin $BOOT_STAMP
+# What the VM frees goes back to the Mac: 2 update snapshots kept, a trim now.
+if system; then
+  r=$(bash "$R/guest/disk-space.sh" 2>&1) || true
+  [[ -z $r ]] || log "disk space: $r"
+fi
 [[ $TYPE == fusion ]] && "$R/fusion/guest/dns.sh" off   # back to Fusion's DNS, which follows the Mac's
 for f in ${SOFT[@]+"${SOFT[@]}"}; do
   if [[ $STRICT == ",all," || $STRICT == *",$f,"* ]]; then
