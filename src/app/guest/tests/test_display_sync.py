@@ -657,9 +657,12 @@ class HDR(SyncCase):
         r = self.run_sync()
         self.assertIn("rejected tonemap clamp", r.stderr)
         self.assertIn('cm = "hdr"', self.evals()[-1])    # the output still follows
+        r = self.run_sync()                              # tried again, logged once
+        self.assertNotIn("rejected", r.stderr)
         (self.hypr / "refuse-window-rule").unlink()
         self.run_sync()
         self.assertEqual(self.window_rules(), [self.CLAMP])
+        self.assertFalse((self.state / "tonemap.refused").exists())
 
     def test_tone_map_held_with_the_output(self):
         self.layout(2)
@@ -686,7 +689,6 @@ class HDR(SyncCase):
         self.run_sync()
         self.assertEqual(len(self.evals()), sent)
         self.assertEqual(self.window_rules(), [self.CLAMP])
-
 
 
 class Placement(unittest.TestCase):

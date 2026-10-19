@@ -338,6 +338,7 @@ PY
 # tone-mapped either way. After PQ the same rule says Hyprland's default
 # ("on"): 0.56 keeps a rule's tone map on open windows when the rule is
 # gone. omacvm_app.lua sets it again after a config reload.
+# A refused rule is logged once; the file "tonemap" is for omacvm check.
 hdr_tonemap() {
   local want=on had response
   [[ $1 == *'cm = "hdr"'* ]] && want=clamp
@@ -347,8 +348,10 @@ hdr_tonemap() {
   response=$(hyprctl eval "hl.window_rule({ name = \"omacvm-hdr\", match = { class = \".*\" }, tonemap = \"$want\" })" 2>&1) || true
   if [[ $response == ok ]]; then
     printf '%s\n' "$want" > "$state_dir/tonemap"
-  else
+    rm -f "$state_dir/tonemap.refused"
+  elif [[ ! -e $state_dir/tonemap.refused ]]; then
     printf 'omacvm-display-sync: Hyprland rejected tonemap %s: %s\n' "$want" "$response" >&2
+    : > "$state_dir/tonemap.refused"
   fi
 }
 

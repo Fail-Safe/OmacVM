@@ -585,11 +585,15 @@ app)
   FEATURE=""
   # HDR and 10-bit colour (the app's switch, ADR 0049): this start asked for it
   # (omacvm.deepcolor=1); the 10-bit driver's loader says which driver runs.
+  # While PQ, display-sync's window rule keeps Hyprland from tone-mapping
+  # windows (Chrome looked gray): its file "tonemap" says clamp.
   if grep -qx 'OMACVM_DEEPCOLOR=1' /run/omacvm/host.env 2>/dev/null; then
     st=$(cat /run/omacvm/virtio-gpu 2>/dev/null)
     out=$(as_user hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.name == "Virtual-1") | "\(.currentFormat) \(.colorManagementPreset)"' 2>/dev/null)
     case "$st|$out" in
-      omacvm*"|XRGB2101010 hdr"|omacvm*"|XBGR2101010 hdr") ok "HDR output" "10-bit, HDR (PQ) on the main window's display" ;;
+      omacvm*"|XRGB2101010 hdr"|omacvm*"|XBGR2101010 hdr")
+        if [[ $(cat "$RUN/omacvm/display-sync/tonemap" 2>/dev/null) == clamp ]]; then ok "HDR output" "10-bit, HDR (PQ) on the main window's display"
+        else warn "HDR output" "Virtual-1 is HDR (PQ), but Hyprland tone-maps the windows (pages look gray): no tonemap = \"clamp\" window rule from omacvm-display-sync"; fi ;;
       omacvm*"|XRGB2101010 "*|omacvm*"|XBGR2101010 "*) ok "HDR output" "10-bit colour (${out#* }); HDR where the app's window shows it" ;;
       omacvm*) warn "HDR output" "the 10-bit driver runs, but Virtual-1 is ${out:-not known} (an own rule for it in monitors.lua?)" ;;
       *) warn "HDR output" "the app asked for 10-bit colour, but the stock driver runs: ${st#stock }$( [[ -z $st ]] && echo "no word from omacvm-virtio-gpu-load (omacvm apply, then restart the VM)")" ;;
