@@ -570,14 +570,14 @@ if ! guest_install "${FV[@]}" 2>&1 | tee "$GI_LOG"; then
     GI_ARGS=""; [[ -n $ONLY ]] && GI_ARGS=" --only $ONLY"
     guest_install "${PREV[@]}" || die "the VM side failed, and going back failed too: run omacvm apply --vm \"$VM\" again"
     if [[ $had != "$now" ]]; then
-      echo "omacvm apply: rolled back: '$VM' has OmacVM $had and its features again; this Mac keeps OmacVM $now. To go on: turn off or repair what failed, or omacvm apply --vm \"$VM\" again" >&2
+      echo "omacvm apply: rolled back: ${OMA_FAILED:+$OMA_FAILED; }'$VM' has OmacVM $had and its features again; this Mac keeps OmacVM $now. To go on: turn off or repair what failed, or omacvm apply --vm \"$VM\" again" >&2
     else
-      echo "omacvm apply: rolled back: '$VM' has its features from before again (what failed is above)" >&2
+      echo "omacvm apply: rolled back: ${OMA_FAILED:+$OMA_FAILED; }'$VM' has its features from before again" >&2
     fi
     exit 4
   fi
   gssh "$IP" "rm -rf $S.old" < /dev/null || true
-  die "the VM side failed (see above)"
+  die "the VM side failed${OMA_FAILED:+: $OMA_FAILED}"
 fi
 gssh "$IP" "rm -rf $S.old" < /dev/null || true
 step finish "finishing"
