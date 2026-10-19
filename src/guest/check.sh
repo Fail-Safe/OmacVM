@@ -728,7 +728,7 @@ d=""
 systemctl is-enabled -q fstrim.timer 2>/dev/null && d="${d:+$d, }weekly trim"
 n=$(sed -n 's/^NUMBER_LIMIT="\([0-9]*\)"$/\1/p' /etc/snapper/configs/root 2>/dev/null)
 if [[ -z $d ]]; then bad "freeing disk space" "nothing trims: deleted files keep their space (omacvm apply)"
-elif [[ $n == 5 && ! -e /var/lib/omacvm/update-snapshots ]]; then warn "freeing disk space" "$d; 5 update snapshots keep deleted system files (omacvm apply keeps 2)"
+elif [[ $n == 5 && ! -e /var/lib/omacvm/update-snapshots ]]; then warn "freeing disk space" "$d; 5 update snapshots keep deleted system files (omacvm apply keeps fewer)"
 else ok "freeing disk space" "$d${n:+; $n update snapshots}"; fi
 if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH from the Mac" "firewall rule"
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi

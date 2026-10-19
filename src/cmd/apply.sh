@@ -634,6 +634,14 @@ if ! guest_install "${FV[@]}" 2>&1 | tee "$GI_LOG"; then
   die "the VM side failed${OMA_FAILED:+: $OMA_FAILED}"
 fi
 gssh "$IP" "rm -rf $S.old" < /dev/null || true
+# What the VM frees goes back to the Mac: fewer update snapshots (once), the
+# cleaner, a trim (guest/disk-space.sh, up to about a minute). Only after
+# the VM side worked, as update snapshots are the way back to a system that
+# worked, and not for a repair (--only).
+if [[ -z $ONLY ]]; then
+  r=$(gssh "$IP" "bash $S/guest/disk-space.sh" < /dev/null 2>&1) || true
+  [[ -z $r ]] || info "disk space: $r"
+fi
 step finish "finishing"
 # What it has now, per part (src/release/parts.tsv): the control centre
 # compares it with an update's manifest.

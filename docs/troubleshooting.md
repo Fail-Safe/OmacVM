@@ -1018,13 +1018,14 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   - UTM, Parallels and Fusion: the VM trims the same way; whether their
     disk file gets smaller is up to the app.
 - **Fix:** Update VM (or `omacvm apply`): 2 update snapshots instead of 5,
-  the extra ones go at once, then a trim. `omacvm check` shows it as
+  the extra ones go once the VM side worked, then a trim (it waits up to a
+  minute for btrfs to free them and for the trim to finish). `omacvm check` shows it as
   "freeing disk space". OmacVM changes omarchy-mac's 5 once; a number you
   set afterwards stays:
   `sudo snapper -c root set-config NUMBER_LIMIT=N NUMBER_LIMIT_IMPORTANT=N`.
   To free the space at once: `sudo snapper list`, then
   `sudo snapper delete N` for the snapshots you no longer need.
-- **Where:** `src/guest/disk-space.sh` (run by `src/guest/install.sh`),
+- **Where:** `src/guest/disk-space.sh` (run by `src/cmd/apply.sh`),
   `src/guest/check.sh`; test `src/tests/disk-space.sh`;
   [ADR 0048](adr/0048-freed-space-back-to-the-mac.md).
 

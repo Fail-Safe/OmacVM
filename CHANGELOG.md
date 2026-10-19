@@ -33,14 +33,16 @@ in more words.
   and GPU compute was not set up: Omarchy's package list is older than the mirrors (omarchy update
   first)". `omacvm check` shows a FAIL row for WebGPU and GPU compute when it is on but its
   packages are missing, instead of "off: Graphics gives this VM OpenGL only".
-- **Deleted files give their space back sooner.** What you delete in the VM goes back to the
-  Mac by itself within about two minutes (OmacVM.app: disk.img gets smaller, and still grows up
+- **Deleted files give their space back sooner.** In an OmacVM.app VM, what you delete goes
+  back to the Mac by itself within about two minutes (disk.img gets smaller, and still grows up
   to the size you set). Files deleted outside your home folder stayed as long as one of
   omarchy-mac's update snapshots held them, and it keeps 5, one per `omarchy update`. VMs now
-  keep the last 2: the older ones go at the next Update VM, which also trims the disk once.
-  A number you set yourself stays. On a test VM with 5 update snapshots, Update VM gave back
-  2.4 GB on the Mac, and each update after it gives back what its oldest snapshot held (before:
-  nothing). `omacvm check` shows a "freeing disk space" line.
+  keep the last 2: the older ones go once the next Update VM has updated the VM (a failed one
+  leaves them), and the disk is trimmed then. A number you set yourself stays. On a test VM
+  with 5 update snapshots, this step followed at once by a shutdown, as Update VM does it, gave
+  back 1.9 GiB on the Mac before the VM was off (part of it the VM's first trim, which comes
+  once). Each update after it gives back what its oldest snapshot held (before: nothing).
+  `omacvm check` shows a "freeing disk space" line.
 - **No second pointer over the VM.** The Mac's arrow could show up next to Omarchy's pointer and
   stay until you switched out of the VM and back. The app hid the Mac's cursor once when the VM
   took the pointer, but other programs and macOS can show it again (OmacVM Gestures also hid and
