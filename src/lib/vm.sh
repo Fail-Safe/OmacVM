@@ -166,7 +166,12 @@ vm_boot() {   # NAME TYPE
 }
 
 # The SSH access OmacVM needs, for a VM that was not built by OmacVM (an
-# Omarchy installed by hand from omarchy-mac): one command to run in the VM.
+# Omarchy installed by hand from omarchy-mac) or that knows another Mac's key:
+# one command to run in the VM.
+#   ssh_setup_command TYPE [PUBLIC_KEY_FILE]   (default: this Mac's key; an app
+#   VM's folder key for app VMs). OmacVM.app's Copy Command builds the same
+#   (SSHRepair.manualCommand). The sshd restart clears its PerSourcePenalties
+#   for the Mac's earlier tries.
 ssh_setup_command() {
   local net h
   case $1 in
@@ -175,8 +180,8 @@ ssh_setup_command() {
     fusion) h=$(fusion_host) || return 1; net=${h%.*}.0/24 ;;
     app) net=10.0.2.0/24 ;;
   esac
-  printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && { pacman -Q openssh >/dev/null 2>&1 || pacman -S --noconfirm openssh >/dev/null; } && systemctl enable --now sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
-    "$(cat "${OMA_KEY:-$HOME/.ssh/omacvm}.pub")" "$net"
+  printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && { pacman -Q openssh >/dev/null 2>&1 || pacman -S --noconfirm openssh >/dev/null; } && systemctl enable sshd && systemctl restart sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
+    "$(head -1 "${2:-${OMA_KEY:-$HOME/.ssh/omacvm}.pub}")" "$net"
 }
 
 # resolve_vm [start|soft]: VM (name) -> TYPE and IP. No name: "Omarchy", else

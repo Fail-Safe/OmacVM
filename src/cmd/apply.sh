@@ -111,8 +111,15 @@ vm_network_ok "$TYPE" "$IP" || exit 3
 ssh_ok=0; (wait_ssh "$IP" 120) >/dev/null 2>&1 || ssh_ok=$?
 (( ssh_ok != 3 )) || { hostkey_error; exit 3; }
 if (( ssh_ok )); then
-  printf '\033[1;31merror:\033[0m no SSH access to %s (%s).\n' "$VM" "$IP" >&2
-  printf 'If OmacVM did not build this VM, open a terminal in it and run this once (it lets\nOmacVM in with its own key, from the Mac only), then run omacvm apply again:\n\n  %s\n\n' "$(ssh_setup_command "$TYPE")" >&2
+  if [[ $TYPE == app && -n ${OMA_VM_KEY:-} && -s ${OMA_VM_KEY:-}.pub ]]; then
+    # OmacVM.app adds the folder's key through the guest agent as the VM starts.
+    printf "\033[1;31merror:\033[0m %s doesn't let this Mac in over SSH (%s).\n" "$VM" "$IP" >&2
+    printf "Start it once in OmacVM.app (the app adds this VM folder's key as it starts), or open a\nterminal in the VM and run this once, then run omacvm apply again:\n\n  %s\n\n" \
+      "$(ssh_setup_command app "$OMA_VM_KEY.pub")" >&2
+  else
+    printf '\033[1;31merror:\033[0m no SSH access to %s (%s).\n' "$VM" "$IP" >&2
+    printf 'If OmacVM did not build this VM, or built it on another Mac, open a terminal in it and run\nthis once (it lets OmacVM in with its own key, from the Mac only), then run omacvm apply again:\n\n  %s\n\n' "$(ssh_setup_command "$TYPE")" >&2
+  fi
   exit 3
 fi
 [[ $TYPE == utm || $TYPE == fusion ]] && [[ -z $MODE ]] && MODE=$(mac_tool mac-display)
