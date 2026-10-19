@@ -211,6 +211,11 @@ commit 82927e9. Changes here:
   times a second. `OMACVM_IDLE_REFRESH=0` keeps the display's rate. The build
   tests the rate logic, taken from the patched `ui/cocoa.m`
   (`Tests/display/test-idle-refresh.c`). Numbers: the idle-power PR
+- `patches/mesa-kosmickrisp-*.patch`: changes to KosmicKrisp, applied by
+  `build-kosmickrisp.sh` in name order (their hash is in its stamp).
+  `mesa-kosmickrisp-shared-align.patch` declares a compute shader's shared
+  memory 16-byte aligned; as a plain char array the MSL compiler made every
+  access to it slow (WebGPU matmul in a VM on an M2: ~256 -> ~757 GFLOPS, MoltenVK ~895)
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked

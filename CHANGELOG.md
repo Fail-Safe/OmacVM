@@ -63,6 +63,10 @@ in more words.
   stops drawing after about 17 s of 60 fps video. UTM VMs now get the same `vo=gpu` line in the
   system-wide mpv.conf as app VMs at their next `omacvm apply`; a `vo` line in your own
   `~/.config/mpv/mpv.conf` still wins. `omacvm check` shows the mpv line in UTM VMs.
+- **WebGPU and GPU compute in the VM are faster on macOS 26 and newer.** KosmicKrisp, the Vulkan
+  driver the app uses there, kept a compute shader's shared memory in a byte array, and Metal's
+  compiler made every access to it slow. It is now 16-byte aligned: a WebGPU matrix multiply in a
+  VM on a MacBook Air M2 went from about 256 to about 757 GFLOPS (MoltenVK: about 895).
 
 ## 3.1.24
 

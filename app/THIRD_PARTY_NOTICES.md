@@ -40,7 +40,8 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   `LICENSE.vulkan.txt` in the licences folder has the Apache-2.0 text and
   the cereal and cJSON notices. When the app carries KosmicKrisp, Mesa's
   Vulkan driver on Metal, Venus uses it on macOS 26 and newer. It is built
-  from a pinned Mesa commit and is mostly MIT. Other parts: BSD-2-Clause
+  from a pinned Mesa commit (with OmacVM's patches,
+  `app/runtime/patches/mesa-kosmickrisp-*.patch`) and is mostly MIT. Other parts: BSD-2-Clause
   (xxHash), BSD-3-Clause (Berkeley SoftFloat), BSL-1.0 (the C11 threads code),
   BLAKE3 (CC0-1.0 / Apache-2.0, used under Apache-2.0), and the Khronos
   headers under Apache-2.0 and SGI-B-2.0. `LICENSE.mesa-kosmickrisp.txt` in
