@@ -158,6 +158,9 @@ python3 -m venv "$work/venv"
 
 src="$work/$mesa_root"
 for p in ${mesa_patches[@]+"${mesa_patches[@]}"}; do
+  pinned=$(awk -v n="$(basename "$p")" '$2 == n { print $1 }' "$native_dir/patches/SHA256SUMS")
+  [[ -n $pinned && $(shasum -a 256 "$p" | cut -d' ' -f1) == "$pinned" ]] ||
+    die "$(basename "$p") is not pinned in patches/SHA256SUMS"
   log "patch $(basename "$p")"
   patch -s -p1 -d "$src" < "$p" || die "$(basename "$p") does not apply to Mesa $mesa_commit"
 done
