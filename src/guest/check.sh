@@ -506,6 +506,12 @@ app)
     else
       skip "WebGPU in Chromium" "after OmacVM's Venus driver build ($(pacman -Q vulkan-virtio 2>/dev/null || echo "no vulkan-virtio") now; the VM builds it after its next start)"
     fi
+  elif [[ ${OMACVM_GRAPHICS:-} == vulkan ]]; then
+    # Graphics Vulkan and gpu-compute on, but venus/opencl.sh did not get
+    # through (its packages: an old package list on a VM not updated for a while).
+    FEATURE=gpu-compute
+    why=$(missing_pkgs opencl-mesa clinfo)
+    bad "WebGPU and GPU compute" "on, but not set up: ${why:-r on this row (omacvm apply; its log says why)}"
   else skip "Vulkan, WebGPU, GPU compute" "off: Graphics gives this VM OpenGL only (omacvm graphics; macOS 15: omacvm enable vulkan)"; fi
   # mpv: vo=gpu, with OpenGL while the VM has Venus (Graphics Vulkan or the vulkan feature: venus/mpv.sh).
   FEATURE=""
