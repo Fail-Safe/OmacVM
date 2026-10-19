@@ -82,8 +82,9 @@ local function keep_display_rules()
         hl.monitor(rule)
         -- HDR: windows only clipped at max_luminance, not tone-mapped (Chrome
         -- looked gray; display-sync's hdr_tonemap says why). A reload drops it.
+        -- pcall: the other outputs' rules still come back if this fails.
         if output == "Virtual-1" and rule.cm == "hdr" then
-          hl.window_rule({ name = "omacvm-hdr", match = { class = ".*" }, tonemap = "clamp" })
+          pcall(hl.window_rule, { name = "omacvm-hdr", match = { class = ".*" }, tonemap = "clamp" })
         end
       end
     end
