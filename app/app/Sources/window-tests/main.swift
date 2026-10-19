@@ -360,7 +360,8 @@ for (name, script) in [("grow", DiskSize.growScript), ("compact", DiskSize.compa
 
 expect(WindowSize.width == 800 && WindowSize.sidebar == 200 && WindowSize.minHeight == 500, "800 pt wide, 200 pt sidebar, 500 pt at least")
 expect(WindowSize.defaultHeight(visible: WindowSize.smallScreenVisible) == 760, "13-inch MacBook Air: 760 pt (as tall as before 3.1)")
-expect(WindowSize.defaultHeight(visible: 1400) == 1368, "a 5K display: its whole height less the margins")
+expect(WindowSize.defaultHeight(visible: 1400) == 800, "a 5K display: 800 pt at most, centred (it looked stretched as tall as the screen)")
+expect(WindowSize.defaultHeight(visible: 830) == 798, "a screen a little taller than the Air's: its height less the margins")
 expect(WindowSize.defaultHeight(visible: 400) == 500, "a tiny screen: never below 500 pt")
 // Fill (title-bar double-click) made the window 1920 pt wide on a 1920 pt display: back to 800, centred.
 expect(WindowSize.fixedWidth(x: 0, width: 1920) == (560, 800), "a filled window: 800 pt wide again, in the middle")

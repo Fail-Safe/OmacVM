@@ -3,14 +3,16 @@ import Foundation
 /// The app's window (docs/design/settings-3.1): 800 pt wide, a sidebar of
 /// 200 pt and the content beside it. Only the height can change (500 pt at
 /// least); it opens as tall as the screen shows below the menu bar and above
-/// the Dock, less a margin, so as many settings as possible are in view. The
-/// settings scroll inside it.
+/// the Dock, less a margin, but no taller than 800 pt: on a large display a
+/// window as tall as the screen looked stretched. The settings scroll inside it.
 public enum WindowSize {
     public static let width: Double = 800
     public static let sidebar: Double = 200
     public static let minHeight: Double = 500
     /// Kept free above and below the window on its screen.
     public static let margin: Double = 16
+    /// The tallest it opens; the user can still drag it taller.
+    public static let maxDefaultHeight: Double = 800
 
     /// A 13-inch MacBook Air at its default resolution, with the menu bar and
     /// the Dock, shows about this much: the window pictures are drawn at its
@@ -20,7 +22,7 @@ public enum WindowSize {
     /// The height the window opens with on a screen whose visible frame is
     /// `visible` tall.
     public static func defaultHeight(visible: Double) -> Double {
-        max(minHeight, (visible - 2 * margin).rounded(.down))
+        max(minHeight, min(maxDefaultHeight, (visible - 2 * margin).rounded(.down)))
     }
 
     /// The window's frame (x, width) after something made it wider or
