@@ -59,7 +59,7 @@ S=$OUT/summary.tsv; : > "$S"
 exec > >(tee -a "$OUT/run.log") 2>&1
 T=$OUT/bin/onscreen-tool
 xcrun swiftc -O "$E/onscreen-tool.swift" -o "$T" >"$OUT/bin/build.log" 2>&1 || { echo "onscreen: the tool did not build ($OUT/bin/build.log)"; exit 2; }
-T0=$(date +%s); LAST=0; GONE=""
+T0=$(date +%s); GONE=""
 
 log() { echo "== $(date +%H:%M:%S) $*"; }
 res() { printf '%s\t%s\t%s\t%s\n' "$(date +%T)" "$1" "$2" "$3" >> "$S"; printf '%-8s %-22s %s\n' "$2" "$1" "$3"; }
@@ -71,7 +71,9 @@ jump() { pgrep -f 'JumpConnect.*(rtcproxy|desktopproxy)' | wc -l | tr -d ' '; }
 locked() { ioreg -n Root -d1 -k IOConsoleUsers 2>/dev/null | grep -q '"CGSSessionScreenIsLocked"=Yes' && echo Yes || echo No; }
 away() { os_away "$(hid_idle)" "$(jump)" "$(locked)" "$LAST" "$(date +%s)"; }
 who() { echo "HID idle $(hid_idle) s, Jump sessions $(jump), screen locked $(locked)"; }
-posted() { LAST=$(date +%s); }
+# Our own last event, also of a run before (HID idle counts ours as input): LASTF keeps it.
+LASTF=$HOME/Library/Caches/omacvm-e2e-last-input
+posted() { LAST=$(date +%s); echo "$LAST" > "$LASTF" 2>/dev/null; }
 # On screen from here on only while nobody else uses the Mac; else remembers why and says no.
 onscreen_ok() {
   [[ -z $GONE ]] || return 1
@@ -117,7 +119,7 @@ feature() { grep -o "^$1=[a-z]*" "$VMD/features" 2>/dev/null | tail -1 | cut -d=
 pending() { tr -d '\n' < "$VMD/$1-pending" 2>/dev/null; }
 
 # --- settings this run changes: saved, put back at the end
-KEYS="startFullScreen gpuOffMainLoop closeAction"
+KEYS="startFullScreen gpuOffMainLoop closeAction skipInstallPaths"
 cleanup() {
   local p
   p=$(qemu_pid); [[ -n $p ]] && { gssh systemctl poweroff >/dev/null 2>&1; waitfor 90 no_qemu >/dev/null || log "the VM did not shut down"; }
@@ -129,6 +131,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+LAST=$(cat "$LASTF" 2>/dev/null || echo 0); [[ $LAST =~ ^[0-9]+$ ]] || LAST=0
 log "onscreen: $APP ($VER, $COMMIT, $DOM), VM $VMD, macOS $(sw_vers -productVersion), $(who)"
 [[ -z $(qemu_pid) ]] || { echo "onscreen: $VM runs: shut it down first"; exit 2; }
 [[ -z $(launcher_pid) ]] || { echo "onscreen: $APP runs: quit it first"; exit 2; }
@@ -142,25 +145,22 @@ GC0=$(feature gpu-compute); cp "$VMD/omacvm-version" "$OUT/saved/omacvm-version"
 # --- rows
 
 row_window() {   # the launcher's window (VM stopped)
-  local p f s pr a f2 f3 x y w h
+  local p f s pr f2 f3 x y w h
   p=$LP; f=$(win_of "$p"); [[ -n $f ]] || { res window FAIL "no window"; shot window; return; }
   read -r x y w h <<<"$f"
   s=$("$T" screen $(( x + w / 2 )) $(( y + h / 2 )))
   pr=$(os_window_problems "$f" "$s" | tr '\n' ';')
   [[ -z $pr ]] && res window ok "frame $f on the display's visible $s" || { res window FAIL "frame $f on the display's visible $s: $pr"; shot window-open; }
-  a=$(defaults read -g AppleActionOnDoubleClick 2>/dev/null || echo "Fill (default)")
-  case $a in Minimize|None) res window-title-click skip "a title-bar double-click is set to '$a' on this Mac"; return ;; esac
+  # The green button: the window has no full screen, so it zooms, as a title-bar double-click does when
+  # set to Zoom. (A double-click posted as HID events does not reach the title bar on macOS 15: tried.)
   onscreen_ok || return
-  [[ $("$T" front "$p") == front ]] || { res window-title-click FAIL "the window did not come to the front"; return; }
-  # The title bar's middle, above the header's controls.
-  posted; "$T" dclick "$p" $(( x + w / 2 )) $(( y + 6 )) >/dev/null || { res window-title-click FAIL "no double-click: the point is not the window's"; return; }
+  [[ $("$T" front "$p") == front ]] || { res window-zoom FAIL "the window did not come to the front"; return; }
+  posted; "$T" zoom "$p" >/dev/null || { res window-zoom FAIL "no zoom button"; return; }
   sleep 2; f2=$(win_of "$p")
-  read -r x y w h <<<"$f2"
-  posted; "$T" dclick "$p" $(( x + w / 2 )) $(( y + 6 )) >/dev/null; sleep 2; f3=$(win_of "$p")
-  if [[ $f2 == "$f" && $f3 == "$f" ]]; then res window-title-click skip "the double-clicks changed nothing ($a): frame $f"
-  elif (( $(wid "$f2") >= 799 && $(wid "$f2") <= 801 && $(wid "$f3") >= 799 && $(wid "$f3") <= 801 )); then
-    res window-title-click ok "$a: $f -> $f2 -> $f3"
-  else res window-title-click FAIL "$a: $f -> $f2 -> $f3 (not 800 wide)"; shot window-title-click; fi
+  posted; "$T" zoom "$p" >/dev/null; sleep 2; f3=$(win_of "$p")
+  if (( $(wid "$f2") >= 799 && $(wid "$f2") <= 801 && $(wid "$f3") >= 799 && $(wid "$f3") <= 801 )); then
+    res window-zoom ok "$f -> $f2 -> $f3"
+  else res window-zoom FAIL "$f -> $f2 -> $f3 (not 800 wide)"; shot window-zoom; fi
 }
 
 row_update_vm() {   # Update VM in the window: the VM's OmacVM made older first (before the window opened)
@@ -307,8 +307,17 @@ open_window() {
   open -n --env OMACVM_POINTER_DEBUG=1 "$APP" --args --vm "$VM"
   waitfor 30 has_launcher >/dev/null || return 1
   LP=$(launcher_pid)
-  waitfor 30 has_window
+  waitfor 30 has_window >/dev/null || return 1
+  sleep 2
+  # A copy outside the Applications folders asks to be installed first; never Install here (it
+  # would replace the test app there).
+  if "$T" find "$LP" AXButton "Run Without Installing" >/dev/null 2>&1; then
+    "$T" front "$LP" >/dev/null; posted; log "install question: $("$T" click "$LP" AXButton "Run Without Installing")"
+    waitfor 10 has_start >/dev/null
+  fi
+  has_start
 }
+has_start() { "$T" find "$LP" AXButton Start >/dev/null 2>&1; }
 
 headless_leftovers() {
   qmark

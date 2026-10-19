@@ -9,14 +9,16 @@
 //   screen X Y               the visible frame of the display with X,Y: X Y W H (points, top left)
 //   full PID on|off          AXFullScreen of that window (as its green button and View > Exit Full Screen)
 //   close PID                presses that window's close button
+//   zoom PID                 presses its zoom button (the green one of a window without full screen)
 //   front PID                PID's app to the front (no input events): front | not front
 //   frontpid                 the pid of the app in front
 //   quit PID                 asks PID's app to quit (as Command-Q)
 //   texts PID                the static texts of PID's windows, one a line
+//   dump PID                 every element of PID's windows: role, subrole, names, frame
+//   hit X Y                  the element at X,Y: pid, role, subrole, names
 //   find PID ROLE LABEL      enabled=0|1 value=V frame=X Y W H of the first ROLE named LABEL (title,
 //                            description, identifier, value, or a static text inside it)
 //   click PID ROLE LABEL     a real click at its centre
-//   dclick PID X Y           a real double-click at X,Y
 //   move X1 Y1 X2 Y2 N MS    N+1 pointer moves from X1,Y1 to X2,Y2, MS ms apart
 // A click goes out only when PID is in front and the element under the point is PID's (exit 3
 // otherwise: nothing pressed). Exit 0 done, 1 not found / refused, 2 usage, 3 not ours / not front.
@@ -140,11 +142,15 @@ func ensureOurs(_ pid: pid_t, _ p: CGPoint) {
 func click(_ p: CGPoint, count: Int) {
     post(.mouseMoved, p)
     usleep(150_000)
+    // One source for the whole click: the window server counts a double-click from it as from a mouse.
+    let src = CGEventSource(stateID: .hidSystemState)
     for n in 1...count {
-        post(.leftMouseDown, p, clicks: Int64(n))
-        usleep(50_000)
-        post(.leftMouseUp, p, clicks: Int64(n))
-        usleep(90_000)
+        for t in [CGEventType.leftMouseDown, .leftMouseUp] {
+            guard let e = CGEvent(mouseEventSource: src, mouseType: t, mouseCursorPosition: p, mouseButton: .left) else { continue }
+            e.setIntegerValueField(.mouseEventClickState, value: Int64(n))
+            e.post(tap: .cghidEventTap)
+            usleep(t == .leftMouseDown ? 40_000 : 70_000)
+        }
     }
 }
 
@@ -189,6 +195,11 @@ case "close":
     let r = AXUIElementPerformAction(b as! AXUIElement, kAXPressAction as CFString)
     say(r == .success ? "closed" : "close refused: \(r.rawValue)")
     exit(r == .success ? 0 : 1)
+case "zoom":
+    guard let w = mainWindow(pidArg()), let b = attr(w, kAXZoomButtonAttribute) else { say("no zoom button"); exit(1) }
+    let r = AXUIElementPerformAction(b as! AXUIElement, kAXPressAction as CFString)
+    say(r == .success ? "zoomed" : "zoom refused: \(r.rawValue)")
+    exit(r == .success ? 0 : 1)
 case "front":
     let pid = pidArg()
     let ok = NSRunningApplication(processIdentifier: pid)?.activate(options: []) ?? false
@@ -205,6 +216,22 @@ case "texts":
         let v = str(e, kAXValueAttribute)
         if !v.isEmpty { say(v) }
     }
+case "dump":
+    for w in windows(pidArg()) {
+        var out: [AXUIElement] = []
+        walk(w, &out)
+        for e in out {
+            say([str(e, kAXRoleAttribute), str(e, kAXSubroleAttribute), names(e).joined(separator: " / "),
+                 frame(e).map(fmt) ?? ""].joined(separator: " | "))
+        }
+    }
+case "hit":
+    var hit: AXUIElement?
+    AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(num(2)), Float(num(3)), &hit)
+    guard let hit else { say("nothing"); exit(1) }
+    var hp: pid_t = 0
+    AXUIElementGetPid(hit, &hp)
+    say("pid \(hp) | \(str(hit, kAXRoleAttribute)) | \(str(hit, kAXSubroleAttribute)) | \(names(hit).joined(separator: " / "))")
 case "find", "click":
     let pid = pidArg()
     guard args.count >= 5, let e = find(pid, args[3], args[4]) else { say("NOT FOUND"); exit(1) }
@@ -222,12 +249,6 @@ case "find", "click":
     ensureOurs(pid, p)
     click(p, count: 1)
     say("clicked at \(Int(p.x)),\(Int(p.y))")
-case "dclick":
-    let pid = pidArg()
-    let p = CGPoint(x: num(3), y: num(4))
-    ensureOurs(pid, p)
-    click(p, count: 2)
-    say("double-clicked at \(Int(p.x)),\(Int(p.y))")
 case "move":
     let a = CGPoint(x: num(2), y: num(3)), b = CGPoint(x: num(4), y: num(5))
     let n = max(0, Int(num(6))), ms = num(7)

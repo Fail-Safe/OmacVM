@@ -66,7 +66,7 @@ same "result: a FAIL does not pass" "False 1 12 3.1.24" "$(/usr/bin/python3 -c '
 printf '10:00:00\twindow\tok\tframe\n10:00:01\tpointer\tBLOCKED\tsomeone\n' > "$T/s.tsv"
 os_result_json "$T/s.tsv" omacvm-e2e-onscreen "$T/r.json" >/dev/null
 same "result: BLOCKED does not pass" False "$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pass"])' "$T/r.json")"
-printf '10:00:00\twindow\tok\tframe\n10:00:01\twindow-title-click\tskip\tNone\n' > "$T/s.tsv"
+printf '10:00:00\twindow\tok\tframe\n10:00:01\twindow-zoom\tskip\tnone\n' > "$T/s.tsv"
 os_result_json "$T/s.tsv" omacvm-e2e-onscreen "$T/r.json" >/dev/null
 same "result: ok and skip pass" True "$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pass"])' "$T/r.json")"
 

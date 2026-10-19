@@ -114,7 +114,7 @@ saw any of them.
 
 | Row | What a person does | What is checked |
 |---|---|---|
-| window | opens the app on the VM; double-clicks the title bar, twice | 800 pt wide, at most 800 tall, centred on its display; still 800 wide after each double-click (macOS's Fill) |
+| window | opens the app on the VM (Run Without Installing when it asks); the green button, twice | 800 pt wide, at most 800 tall, centred on its display; still 800 wide after each zoom (a title-bar double-click posted as events does nothing on macOS 15, so the button stands in for it) |
 | update-vm | Update VM in the window (the VM's OmacVM made older first) | `UPDATED`, the VM's OmacVM is the app's; a kernel question gets Later |
 | switch-stopped | WebGPU and GPU compute with the VM stopped, then Start in the window | the switch can be used; record and pending file; qemu.log "switched while the VM was stopped: set up in the VM"; the second start switches it back |
 | vm-size | the VM's window to full screen and back, twice | the same size after each |
@@ -122,7 +122,7 @@ saw any of them.
 | leftovers | shuts the VM down from inside, closes its window, quits the app | no QEMU of the VM, nothing from the app (but its helpers) or on the VM's folder |
 
 On screen only while nobody uses the Mac: no input for 300 s but the test's
-own, no Jump Desktop session, the screen unlocked; it stops when someone
+own (its last event, also a run's before, in `~/Library/Caches/omacvm-e2e-last-input`), no Jump Desktop session, the screen unlocked; it stops when someone
 comes back. Otherwise (or `--headless`) those rows are BLOCKED and
 update-vm (update-vm.sh, as the window runs it) and leftovers (a start
 without a window) run headless. `src/tests/e2e-onscreen.sh` tests the checks
