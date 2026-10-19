@@ -1,6 +1,6 @@
 # 0021: Colour-tagged frames, deep colour and HDR through the IOSurface present
 
-Status: accepted, amended by [0048](0048-hdr-guest-tone-maps.md) (the app's
+Status: accepted, amended by [0049](0049-hdr-guest-tone-maps.md) (the app's
 switch, the guest tone-maps, the driver loaded per start). Built on
 `pacing-hdr` (`qemu-cocoa-gl-present-color.patch`, guest
 `src/app/guest/virtio-gpu/`). HDR is off by default.
@@ -35,7 +35,7 @@ switch, the guest tone-maps, the driver loaded per start). Built on
 
 ## Decision
 
-1 always, 2 when the scanout is 10-bit, 3a now (`OMACVM_GL_HDR=1`; 0048 replaces it with the display's headroom from QEMU), 3b/3c
+1 always, 2 when the scanout is 10-bit, 3a now (`OMACVM_GL_HDR=1`; 0049 replaces it with the display's headroom from QEMU), 3b/3c
 later. The guest driver change is small and upstreamable
 (`linux-virtio-gpu-deep-color.patch`: 10-bit formats on the primary plane
 when virgl 3D is on); until a stock kernel has it, OmacVM builds the module

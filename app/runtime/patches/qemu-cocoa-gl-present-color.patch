@@ -14,7 +14,7 @@ display like the 8-bit ones). With OMACVM_GL_HDR=1 that output is taken as
 BT.2100 PQ (Hyprland's cm "hdr"): the surfaces are tagged PQ and the layer
 asks for EDR headroom, so HDR in the guest shows as HDR on the Mac. The
 app sets OMACVM_GL_HDR=1 only when a display has EDR headroom
-(amended by omacvm-cocoa-hdr-headroom.patch, ADR 0048: the app's switch
+(amended by omacvm-cocoa-hdr-headroom.patch, ADR 0049: the app's switch
 sets OMACVM_GL_EDR=1, only GL_RGB10_A2 is PQ, macOS does not tone-map
 again and the guest is told the display's headroom). If
 half-float surfaces cannot be made, the frames go to 8-bit surfaces, the

@@ -1,5 +1,5 @@
 #!/bin/bash
-# HDR: the headroom the guest tone-maps into (ADR 0048,
+# HDR: the headroom the guest tone-maps into (ADR 0049,
 # omacvm-cocoa-hdr-headroom-logic.patch, omacvm-cocoa-hdr-headroom.patch):
 # the logic patch makes ui/omacvm-edr.h in an empty folder and
 # test-hdr-headroom.c runs its rules. With ui/cocoa.m as argument (the

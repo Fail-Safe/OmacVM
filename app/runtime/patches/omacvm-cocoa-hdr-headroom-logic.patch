@@ -5,7 +5,7 @@ What: a header with no AppKit in it: the HDR headroom QEMU gives the guest
 (the window's display's EDR headroom now, at least 1 = SDR white, at most
 the display's potential and 16) and when a new value goes out (the first
 one, PQ starting or stopping, a move of 10 % or more). Used by
-omacvm-cocoa-hdr-headroom.patch (which explains the why; ADR 0048).
+omacvm-cocoa-hdr-headroom.patch (which explains the why; ADR 0049).
 
 Why its own file: so the rules are tested without QEMU or a window
 (app/runtime/Tests/display/test-hdr-headroom.sh applies this patch to an
@@ -19,7 +19,7 @@ Test: app/runtime/Tests/display/test-hdr-headroom.c.
 +++ b/ui/omacvm-edr.h
 @@ -0,0 +1,65 @@
 +/*
-+ * OmacVM, HDR (ADR 0048): the headroom QEMU gives the guest to tone-map
++ * OmacVM, HDR (ADR 0049): the headroom QEMU gives the guest to tone-map
 + * into. No AppKit in here, so it is tested on its own
 + * (app/runtime/Tests/display/test-edr.c); ui/cocoa.m feeds it NSScreen's
 + * values.

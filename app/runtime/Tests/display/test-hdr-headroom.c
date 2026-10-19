@@ -1,5 +1,5 @@
 /*
- * The headroom the guest tone-maps into (ui/omacvm-edr.h, ADR 0048):
+ * The headroom the guest tone-maps into (ui/omacvm-edr.h, ADR 0049):
  * clamped to SDR at least, the display's potential and 16 at most; a new
  * value goes out only for the first one, PQ starting or stopping, or a move
  * of 10 % or more. Run by test-hdr-headroom.sh.

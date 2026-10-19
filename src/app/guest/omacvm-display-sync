@@ -277,7 +277,7 @@ raise SystemExit(1)
 PY
 }
 
-# OmacVM.app, HDR and 10-bit colour (the app's switch; ADR 0048): this start
+# OmacVM.app, HDR and 10-bit colour (the app's switch; ADR 0049): this start
 # asked for it (omacvm.deepcolor=1 from the Mac) and the 10-bit virtio-gpu
 # driver runs (omacvm-virtio-gpu-load says "omacvm"): the main window's
 # output runs at 10 bits. In BT.2100 PQ while QEMU shows PQ, which it says

@@ -542,7 +542,7 @@ the 8-bit path.
   Chromium show HDR video as SDR for now.
 - Only the main window; windows on other displays stay 8-bit.
 - GPU safe mode turns it off. `omacvm check` has an "HDR" line.
-- How it works: [ADR 0048](../adr/0048-hdr-guest-tone-maps.md).
+- How it works: [ADR 0049](../adr/0049-hdr-guest-tone-maps.md).
 
 ## Fast network (experimental, off by default)
 

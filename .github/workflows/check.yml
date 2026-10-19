@@ -453,7 +453,7 @@ jobs:
       - name: Display changes settle before the VM's windows follow (locked unplug, issue 428; the old rules fail it)
         run: app/runtime/Tests/display/test-display-settle.sh
 
-      - name: HDR's headroom for the guest (ADR 0048; the checks catch code without it)
+      - name: HDR's headroom for the guest (ADR 0049; the checks catch code without it)
         run: app/runtime/Tests/display/test-hdr-headroom.sh
 
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)

@@ -577,7 +577,7 @@ app)
     else warn "Vulkan windows' pacing" "this Mesa ignores MESA_VK_WSI_DEBUG=nowlts: FIFO windows may run below the display's rate"; fi
   fi
   FEATURE=""
-  # HDR and 10-bit colour (the app's switch, ADR 0048): this start asked for it
+  # HDR and 10-bit colour (the app's switch, ADR 0049): this start asked for it
   # (omacvm.deepcolor=1); the 10-bit driver's loader says which driver runs.
   if grep -qx 'OMACVM_DEEPCOLOR=1' /run/omacvm/host.env 2>/dev/null; then
     st=$(cat /run/omacvm/virtio-gpu 2>/dev/null)

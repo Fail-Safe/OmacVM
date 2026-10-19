@@ -1,4 +1,4 @@
-# 0048: HDR and 10-bit colour: the guest tone-maps into the Mac's headroom
+# 0049: HDR and 10-bit colour: the guest tone-maps into the Mac's headroom
 
 Status: accepted, built (`hdr`), behind the app's experimental switch
 "HDR and 10-bit colour" (`hdr`, off). Amends

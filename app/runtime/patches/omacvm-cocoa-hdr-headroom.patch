@@ -61,7 +61,7 @@ and omacvm-cocoa-hdr-headroom-logic.patch.
  static int present_color = -1;
  static int present_hdr = -1;
 +/*
-+ * OmacVM, HDR (ADR 0048): OMACVM_GL_EDR=1 (the app's switch; OMACVM_GL_HDR=1
++ * OmacVM, HDR (ADR 0049): OMACVM_GL_EDR=1 (the app's switch; OMACVM_GL_HDR=1
 + * from an app before it) asks for PQ. Only a GL_RGB10_A2 scanout (the
 + * guest's 10-bit driver) is PQ; if half-float surfaces cannot be made, PQ
 + * stops for the run and the guest is told (omacvm_edr_now).
@@ -148,7 +148,7 @@ and omacvm-cocoa-hdr-headroom-logic.patch.
  }
  
 +/*
-+ * OmacVM, HDR (ADR 0048): while QEMU shows the guest's 10-bit frames as PQ,
++ * OmacVM, HDR (ADR 0049): while QEMU shows the guest's 10-bit frames as PQ,
 + * the main output's entry in the layout carries "edr": the headroom of the
 + * window's display now (1 = SDR white; omacvm-edr.h), which the guest
 + * tone-maps into (omacvm-display-sync); 0 = PQ cannot be shown this run
