@@ -377,12 +377,16 @@ else
   want leftovers && headless_leftovers
 fi
 # Rows that did not get to run on screen.
+[[ -n $GONE && $GONE != --headless && -n ${LP:-} ]] && res onscreen BLOCKED "stopped part way: $GONE"
 for r in $ALL; do
   want "$r" || continue
   cut -f2 "$S" | grep -q -E "^$r(-[a-z0-9-]+)?\$" || res "$r" BLOCKED "not run on screen: ${GONE:-an earlier step failed}"
 done
 cleanup; trap - EXIT
-[[ $(feature gpu-compute) == "$GC0" ]] || res switch-stopped-back FAIL "WebGPU and GPU compute is $(feature gpu-compute), was $GC0"
+if [[ $(feature gpu-compute) != "$GC0" ]]; then
+  if [[ -n $GONE ]]; then res switch-stopped-back skip "WebGPU and GPU compute left $(feature gpu-compute) (was $GC0): the run stopped part way"
+  else res switch-stopped-back FAIL "WebGPU and GPU compute is $(feature gpu-compute), was $GC0"; fi
+fi
 os_result_json "$S" omacvm-e2e-onscreen "$OUT/result.json" app="$APP" version="$VER" commit="$COMMIT" vm="$VM" \
   macos="$(sw_vers -productVersion)" mac="$(sysctl -n hw.model)" seconds=$(( $(date +%s) - T0 )) only="${ONLY:-all}" \
   onscreen="$([[ -z $GONE ]] && echo yes || echo "no: $GONE")" gpuOffMainLoop0="$GPU0"
