@@ -202,7 +202,8 @@ def from_bridge(feeder: Feeder, said: set[str]) -> int:
     (it checks the Bridge's proof before it sends the token)."""
     user = env_value(ENV_FILE.read_text(), "OMACVM_USER")
     try:
-        home = pwd.getpwnam(user).pw_dir
+        pw = pwd.getpwnam(user)
+        home = pw.pw_dir
     except KeyError:
         say(said, f"no desktop user ({user!r}) in {ENV_FILE}")
         return 1
@@ -211,7 +212,10 @@ def from_bridge(feeder: Feeder, said: set[str]) -> int:
         say(said, f"no Bridge token yet ({token}; omacvm apply puts it there)")
         return 1
     env = dict(os.environ, HOME=home, OMACVM_BRIDGE_TOKEN_FILE=token)
-    proc = subprocess.Popen([CLIENT, "events"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    # The client runs as the desktop user: it reads the token in the user's
+    # home, where a link must not hand this root daemon a file of the system.
+    as_user = dict(user=pw.pw_uid, group=pw.pw_gid, extra_groups=[], cwd="/") if os.geteuid() == 0 else {}
+    proc = subprocess.Popen([CLIENT, "events"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **as_user)
     event, buffer, seen = "", b"", time.monotonic()
     try:
         while True:
