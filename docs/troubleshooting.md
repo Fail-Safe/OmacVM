@@ -16,7 +16,8 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   never updates one package alone (a partial update can leave a black screen,
   [27](#27-all-routes-black-screen-after-an-update-or-an-omacvm-job)). Update
   the VM's system first with omarchy update (the control centre offers it:
-  y, or U then o), then switch the feature on again.
+  y, or U then o), then switch the feature on again. A VM made from a
+  prebuilt image gets this update once at its setup (from 3.1.25).
 - **The Mac's menu bar stays over the full-screen VM**: macOS is set to always
   show it. System Settings › Menu Bar (on older macOS: Control Center) ›
   Automatically hide and show the menu bar: **In Full Screen Only** (or Always).
@@ -733,9 +734,10 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   the mirrors (a prebuilt VM a day later) runs the whole update first
   (`src/guest/system-update`: `omarchy update -y` as the desktop user, then
   `gbm-guard test`), never `pacman -Sy` alone. `omacvm graphics` asks first
-  (the control centre asks in its own dialog); `omacvm apply` never runs it.
-  An update that shows nothing new for 10 minutes or runs over 40 is
-  stopped.
+  (the control centre asks in its own dialog). `omacvm apply` runs it only
+  once, for a VM fresh from a prebuilt image (`src/prebuilt/guest/first-update`,
+  3.1.25), before any feature installs a package. An update that shows
+  nothing new for 10 minutes or runs over 40 is stopped.
 - **Where:** `src/guest/pkg-add`, `src/guest/gbm-guard`,
   `src/guest/system-update`, `src/guest/install.sh` (runs both),
   `src/tests/pkg-safe.sh`.

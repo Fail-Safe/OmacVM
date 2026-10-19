@@ -19,7 +19,8 @@
 # and the sudoers file goes with it. One run at a time (a lock). Progress
 # lines on stdout; the update's output in /var/log/omacvm-system-update.log.
 # Called only when someone asked for it: Graphics -> Vulkan (omacvm graphics,
-# the control centre), never omacvm apply. Tests: src/tests/pkg-safe.sh
+# the control centre), and by omacvm apply once for a VM fresh from a
+# prebuilt image (prebuilt/guest/first-update). Tests: src/tests/pkg-safe.sh
 # (OMACVM_SYSTEM_UPDATE_RUN stands in for the unit; a copy with stand-ins for
 # systemd tests the unit's way).
 set -uo pipefail
