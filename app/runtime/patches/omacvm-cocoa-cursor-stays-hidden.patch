@@ -31,7 +31,7 @@ Test: app/runtime/Tests/display/test-pointer-start.sh (the image rules and
 a model of the window server's side, also the 3.1.24 behaviour);
 src/tests/pointer-reveal-vm.sh (a test app and VM: a background show and
 hide around QEMU's hide, then moves; the cursor shows nothing over the VM).
-Applies after omacvm-cocoa-no-app-nap.patch.
+Applies before omacvm-cocoa-no-app-nap.patch, which stays the last cocoa patch.
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
 --- a/ui/cocoa.m
