@@ -13,8 +13,11 @@ VM (2 starts per driver, 3 runs each). computeBoids (60 fps) and vkpeak
 1,135 against MoltenVK 1,630 on the same page. Only the array's own alignment
 changes; the offsets and the access types stay as they were.
 Upstream: not sent yet (a draft is in the kk-webgpu track notes).
-Tests: dEQP-VK groups on KosmicKrisp before/after (work/kk-webgpu), WebGPU
-matmul and computeBoids in a VM, the native harness work/kk-webgpu/harness.
+Tests: Vulkan CTS 1.4.7.0 on KosmicKrisp before and after (all compute
+pipeline cases but cooperative_matrix, all memory_model, all spirv_assembly
+compute, glsl loops/arrays/indexing, graphicsfuzz, samples of subgroups and
+tessellation/geometry): 50,788 cases, the same result for every case. WebGPU
+matmul, computeBoids and vkpeak in a VM (numbers above).
 --- a/src/kosmickrisp/compiler/nir_to_msl.c
 +++ b/src/kosmickrisp/compiler/nir_to_msl.c
 @@ -127,7 +127,10 @@
