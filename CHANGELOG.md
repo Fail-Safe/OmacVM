@@ -5,6 +5,10 @@ in more words.
 
 ## Unreleased
 
+- **Chrome no longer looks gray with HDR on.** With the experimental HDR switch on, Chrome and
+  Chromium draw their whole window as HDR, and the VM dimmed all of it to fit, so pages and white
+  looked gray. Their normal content now looks exactly like any other app's, and HDR video still
+  goes brighter than white as far as the display can show.
 - **OmacVM writes your home in the VM as you, everywhere.** After `~/.ssh`, the rest of the VM
   side did the same: `omacvm apply` wrote Hyprland's config, the Bridge's token, the bar's plugin
   folders and its own markers in the desktop user's home as root, following links there, so a
