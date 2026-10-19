@@ -5,7 +5,7 @@ in more words.
 
 ## Unreleased
 
-- **App VMs that know only another Mac's SSH key get this Mac's.** A VM set up on another Mac
+- **App VMs that know only another Mac's SSH key get this VM folder's key.** A VM set up on another Mac
   (or before 3.0.12) let only that Mac in over SSH: Update VM waited 5 minutes and then said the
   VM "did not come up", and feature switches failed. The app now adds the VM folder's own key
   through the VM's guest agent, without SSH: quietly at each start, and in Update VM within
@@ -13,6 +13,12 @@ in more words.
   not answer, Update VM stops with a **Copy Command** button (and an (i) that says what the command
   does) for a terminal in the VM. A VM that turns the key down now shuts down cleanly, and
   `omacvm apply` points to the same fix.
+- **Update VM's SSH messages name the right key.** They say "this VM folder's key" (it said
+  "this Mac's key"), and a VM that had the key already but still turns OmacVM away says so. The
+  command for the VM's terminal also goes into the update's log, so Show Log still has it after
+  Back. A VM folder whose `ssh-key.pub` went missing gets it back from its `ssh-key` instead of a
+  new key the VM does not know. Without a guest agent, a feature switched while the VM was
+  stopped gives up after about 10 minutes again (up to 20 with the SSH repair before it).
 - **`omacvm apply` writes your `~/.ssh` in the VM as you.** It added the VM folder's SSH key to
   the desktop user's `~/.ssh/authorized_keys` as root and followed links there: a program
   running as that user could point `~/.ssh` at a system file and take it over at the next apply
