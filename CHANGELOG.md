@@ -71,6 +71,12 @@ in more words.
   driver the app uses there, kept a compute shader's shared memory in a byte array, and Metal's
   compiler made every access to it slow. It is now 16-byte aligned: a WebGPU matrix multiply in a
   VM on a MacBook Air M2 went from about 256 to about 757 GFLOPS (MoltenVK: about 895).
+- **Screenshots no longer crash the desktop (OmacVM.app).** Each screenshot left about 180 MB
+  (on a 5K display) in a small memory folder of the VM, `/run/user/1000`. After a handful it was
+  full, and Hyprland and apps such as Electron apps crashed (SIGBUS) and Hyprland came back in
+  safe mode. OmacVM's own build of hyprpicker, which freezes the screen for screenshots, did not
+  delete its files when it stopped. It does now, and Update VM removes what was left. `omacvm
+  check` warns when that folder is over 80 % full.
 
 ## 3.1.24
 

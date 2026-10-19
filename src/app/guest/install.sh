@@ -148,6 +148,13 @@ install -Dm755 hyprpicker/build.sh /usr/local/lib/omacvm/hyprpicker/build.sh
 install -Dm644 hyprpicker/redraw-on-change.patch /usr/local/lib/omacvm/hyprpicker/redraw-on-change.patch
 install -Dm644 hyprpicker/95-omacvm-hyprpicker.hook /etc/pacman.d/hooks/95-omacvm-hyprpicker.hook
 hyprpicker/build.sh "$U" || true
+# What that build left up to 3.1.24: 3 buffer files per display per screenshot
+# in the runtime folder (/run/user/UID, a tmpfs of 10 % of the VM's memory),
+# until it was full and Hyprland and apps died of SIGBUS. A restart clears them
+# too. Only while no hyprpicker runs (a screenshot being taken keeps its own).
+if ! pgrep -x hyprpicker >/dev/null; then
+  find /run/user -mindepth 2 -maxdepth 2 -type f -name '.hyprpicker_*' -delete 2>/dev/null || true
+fi
 # Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
 # nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
 # Without the VM's GPU (Update VM's run) the flags stay as they are; each

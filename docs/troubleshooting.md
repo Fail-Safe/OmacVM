@@ -1054,3 +1054,25 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `app/scripts/update-vm.sh`, `app/scripts/vm-common.sh` (`wait_ssh ...
   refused`), `src/lib/vm.sh` (`ssh_setup_command`); tests
   `src/tests/update-vm-watch.sh`, `swift run window-tests`.
+
+## 39. app: Hyprland and apps crash after a few screenshots (SIGBUS)
+
+- **Symptom:** the desktop restarts (Hyprland in safe mode), and apps such as
+  Electron apps and hypridle die at the same moment. `coredumpctl` shows
+  SIGBUS, Hyprland's in `createTexture` while it reads a window's buffer.
+- **Cause:** the desktop user's runtime folder (`/run/user/1000`) is full. It
+  is a tmpfs of 10 % of the VM's memory (about 1 GB with 10 GB), and apps keep
+  their shared-memory buffers there: when nothing fits, touching one is
+  SIGBUS. Up to 3.1.24 OmacVM.app's hyprpicker (the frozen screen of
+  screenshots) left its buffers there each time: 3 files per display, 59 MB
+  each on a 5K display, so a handful of screenshots filled 1 GB (on a test
+  VM with 3 GB, 17 did). hyprpicker's own release deletes them when it
+  stops; OmacVM's build stops with `_Exit` and skipped that.
+- **Fix:** Update VM (or `omacvm apply`): the build now deletes each file's
+  name as soon as it has made the file, so nothing stays whatever way it
+  stops, and the leftovers go (only while no hyprpicker runs). A restart
+  empties the folder too. `omacvm check` shows "runtime folder" and warns
+  above 80 %.
+- **Where:** `src/app/guest/hyprpicker/redraw-on-change.patch` (built by
+  `build.sh`), `src/app/guest/install.sh`, `src/guest/check.sh`; test
+  `src/tests/hyprpicker-patch.sh`.

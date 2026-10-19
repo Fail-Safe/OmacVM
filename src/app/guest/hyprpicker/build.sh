@@ -6,7 +6,11 @@
 # uploads the whole screen to the Mac's GPU through QEMU's main loop (21.6 MB a
 # frame for a 2940x1840 display), which also runs the VM's sound. The patched
 # build draws each display once and again only when the pointer enters or
-# leaves it (or, with the zoom, when it moves).
+# leaves it (or, with the zoom, when it moves). It stops on SIGTERM with _Exit,
+# which skips the code that deleted its buffer files in XDG_RUNTIME_DIR, so it
+# deletes each file's name as soon as the file is made. Up to 3.1.24 they
+# stayed, 3 per display per screenshot, until that tmpfs was full and Hyprland
+# died of SIGBUS (2026-10-19).
 # Run as root inside the VM:
 #   build.sh [--hook] [desktop-user]
 # Builds the release of the installed hyprpicker package (its version's tag,
