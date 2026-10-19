@@ -356,8 +356,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             centring = CentredWindow(w, followsResize: false)
         }
         // Each time it opens (first open, after closing it, after the VM): as
-        // tall as the screen it opens on shows, centred on the built-in
-        // display. Left where the user put it (and as tall) while it stays
+        // tall as the screen it opens on shows, at most 800 pt
+        // (WindowSize.defaultHeight), centred on the built-in display. Left where the user put it (and as tall) while it stays
         // open, sits in the Dock, or the app was hidden (Cmd-H).
         if let w = window, let c = centring, c.needsPlace, !w.isMiniaturized {
             w.setContentSize(NSSize(width: WindowSize.width, height: Self.defaultHeight))

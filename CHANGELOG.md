@@ -5,6 +5,8 @@ in more words.
 
 ## Unreleased
 
+- **The app's window opens at most 800 pt tall,** centred. On a large display it used to open as
+  tall as the screen; you can still drag it taller.
 - **mpv keeps playing in UTM VMs too.** UTM's VM draws OpenGL with virgl as well, with the same
   Mesa and mpv, so mpv's default output (gpu-next) keeps one open file per frame there too and
   stops drawing after about 17 s of 60 fps video. UTM VMs now get the same `vo=gpu` line in the
