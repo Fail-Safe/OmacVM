@@ -54,8 +54,14 @@ What happens:
    has no keyrings), sets the rest from the seed and disables itself. SSH host keys and the machine
    id are new.
 6. On the Mac: `omacvm apply` with your features (Parallels: also Parallels
-   Tools from your own Parallels Desktop). Then the VM shuts down once, the
-   seed is detached and deleted, and the VM starts again.
+   Tools from your own Parallels Desktop). Before the features, once, it
+   brings the VM's system up to date with Omarchy's own update
+   (`src/prebuilt/guest/first-update`: `omarchy update`, then the graphics
+   test), and restarts the VM when that brought a new kernel. The image's
+   package list is as old as the image, and Arch Linux ARM's mirrors keep
+   only the newest version of each package: without the update, a feature
+   that installs a package would not find it. Then the VM shuts down once,
+   the seed is detached and deleted, and the VM starts again.
 
 OmacVM takes the newest image with its own major version and a version up to
 its own (OmacVM 2.5.0 uses a 2.4.0 image when there is no newer one): the

@@ -21,10 +21,12 @@ step() {   # NAME TEXT
 
 # failed_part PART TEXT [SIDE]: what failed in a job (PART a feature, or
 # empty; SIDE vm, the default, or mac), for the person and, as a JSON line,
-# for the control centre.
+# for the control centre. OMA_FAILED keeps the last TEXT (apply's rollback
+# line names it: OmacVM.app shows only a job's last line).
 failed_part() {
   local t
   t=$(printf '%s' "$2" | tr '\000-\037' ' ' | cut -c1-160)
+  OMA_FAILED=$t
   info "what failed: $t"
   [[ ${OMACVM_PROGRESS:-} == json ]] || return 0
   t=${t//\\/\\\\}; t=${t//\"/\\\"}

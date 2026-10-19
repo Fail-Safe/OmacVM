@@ -149,9 +149,11 @@ features_read_env "$probe"
 PREV=("${FV[@]}")   # what the VM has now: --transaction goes back to it
 # New to OmacVM (or a prebuilt VM before its first apply): the defaults,
 # Omanotch with a notch.
-FRESH=0
+FRESH=0 PREBUILT_FRESH=0
 if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
   FRESH=1
+  # Its system is updated first (step update, below).
+  grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe" && { PREBUILT_FRESH=1; OMA_STEPS=$((OMA_STEPS + 1)); }
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 fi
 # OmacVM.app: the VM's record (its features file) over the VM's copy.
@@ -428,6 +430,51 @@ COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build --exclude __pycac
               tar --no-same-owner -C $S.new -xzf - 2>/dev/null
               if [ -d $S ]; then mv $S $S.old; fi; mv $S.new $S" ||
   die "OmacVM did not get into the VM (see above): nothing changed there"
+# A VM fresh from a prebuilt image: its whole system up to date, once, before
+# any feature installs a package (prebuilt/guest/first-update says why), and
+# restarted when that brought a new kernel. Not updated: the apply goes on,
+# and a feature whose packages the mirrors no longer have says so.
+vm_restart() {   # the VM restarted and back on SSH (a new boot id) within 10 minutes
+  local b now n
+  b=$(gssh "$IP" "cat /proc/sys/kernel/random/boot_id" < /dev/null) || return 1
+  gssh "$IP" "systemctl reboot" < /dev/null > /dev/null 2>&1 || true
+  for ((n = 0; n < 120; n++)); do
+    sleep 5
+    now=$(gssh "$IP" "cat /proc/sys/kernel/random/boot_id" < /dev/null 2> /dev/null) || continue
+    [[ -n $now && $now != "$b" ]] && return 0
+  done
+  return 1
+}
+if (( PREBUILT_FRESH )); then
+  step update "the VM's system up to date (once, for a VM from a prebuilt image)"
+  log "the VM's system up to date with omarchy update (once, for a VM from a prebuilt image)"
+  ulog=$(mktemp -t omacvm-update)
+  urc=0
+  gssh "$IP" "$S/prebuilt/guest/first-update" < /dev/null 2>&1 | tee "$ulog" |
+    while IFS= read -r l; do [[ -z $l ]] || log "${l#OmacVM: }"; done || urc=$?
+  restart=$(grep -c '^OmacVM: restart: ' "$ulog") || restart=0
+  why=$(grep '^OmacVM: ' "$ulog" | tail -1) || why=""
+  rm -f "$ulog"
+  # Updated, but the desktop's graphics would not start: a restart (the
+  # setup's last step) would end at a black screen.
+  if (( urc == 2 )); then
+    failed_part "" "${why#OmacVM: }"
+    die "the VM's system update left its graphics unable to start: do not restart the VM (see above)"
+  fi
+  # The connection dropped: the update goes on in its own unit (up to 40 minutes).
+  if (( urc == 255 )); then
+    log "the connection to the VM dropped: waiting for its update to end"
+    for ((n = 0; n < 250; n++)); do
+      gssh "$IP" "case \$(systemctl show -p ActiveState --value omacvm-system-update 2>/dev/null) in inactive|failed) exit 1 ;; esac" < /dev/null 2> /dev/null || break
+      sleep 10
+    done
+  fi
+  (( urc == 0 )) || info "the VM's system was not updated (see above): a feature whose packages the mirrors no longer have says so"
+  if (( restart )); then
+    log "restarting the VM into its new kernel"
+    vm_restart || die "the VM did not come back after its restart: start it, then omacvm apply --vm \"$VM\" again"
+  fi
+fi
 # guest_install VALUE...: guest/install.sh with these features (one on|off per
 # FN), and GI_ARGS. KNOWN: the feature names the VM's copy knows (a copy of an
 # older OmacVM, when going back), all when empty.
@@ -577,14 +624,14 @@ if ! guest_install "${FV[@]}" 2>&1 | tee "$GI_LOG"; then
     GI_ARGS=""; [[ -n $ONLY ]] && GI_ARGS=" --only $ONLY"
     guest_install "${PREV[@]}" || die "the VM side failed, and going back failed too: run omacvm apply --vm \"$VM\" again"
     if [[ $had != "$now" ]]; then
-      echo "omacvm apply: rolled back: '$VM' has OmacVM $had and its features again; this Mac keeps OmacVM $now. To go on: turn off or repair what failed, or omacvm apply --vm \"$VM\" again" >&2
+      echo "omacvm apply: rolled back: ${OMA_FAILED:+$OMA_FAILED; }'$VM' has OmacVM $had and its features again; this Mac keeps OmacVM $now. To go on: turn off or repair what failed, or omacvm apply --vm \"$VM\" again" >&2
     else
-      echo "omacvm apply: rolled back: '$VM' has its features from before again (what failed is above)" >&2
+      echo "omacvm apply: rolled back: ${OMA_FAILED:+$OMA_FAILED; }'$VM' has its features from before again" >&2
     fi
     exit 4
   fi
   gssh "$IP" "rm -rf $S.old" < /dev/null || true
-  die "the VM side failed (see above)"
+  die "the VM side failed${OMA_FAILED:+: $OMA_FAILED}"
 fi
 gssh "$IP" "rm -rf $S.old" < /dev/null || true
 step finish "finishing"

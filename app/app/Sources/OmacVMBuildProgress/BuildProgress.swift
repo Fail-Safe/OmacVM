@@ -183,7 +183,10 @@ public enum StepTimes {
         case (.build, 2): t = (45, 240)          // pacstrap: ~180 packages
         case (.build, 3): t = (10, 60)
         case (.build, 4): t = (300, 1200)        // omarchy-mac: ~1100 packages
-        case (.build, 5), (.prebuilt, 5): t = (60, 300)
+        case (.build, 5): t = (60, 300)
+        // The system update first (an image some days old: 200 packages, 2.5 min
+        // on the Air on 2026-10-19), a restart for a new kernel, then OmacVM.
+        case (.prebuilt, 5): t = (120, 900)
         case (.build, 6), (.prebuilt, 6): t = (45, 240)   // Swift builds of the Mac helpers
         case (.build, 7), (.prebuilt, 7): t = (5, 60)
         case (.prebuilt, 1): t = (2, 20)

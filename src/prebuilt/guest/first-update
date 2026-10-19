@@ -1,0 +1,31 @@
+#!/bin/bash
+# first-update (root, in a VM fresh from a prebuilt image): its whole system
+# up to date, once, before omacvm apply installs anything (cmd/apply.sh runs
+# it). The image's package list is as old as the image, and Arch Linux ARM's
+# mirrors keep only the newest version of each package: what a feature
+# installs is no longer there (guest/pkg-add: "older than the mirrors"), and
+# pacman -Sy alone would be a partial update. A VM built here ends up to date
+# (vm/omarchy-install.sh); this brings one from an image to the same point,
+# the way Omarchy updates (guest/system-update: omarchy update -y, then the
+# GBM test). omarchy-targets.sh goes first: on an image from before it,
+# omarchy update stops at hyprtoolkit (omacom/omarchy-mac#741).
+#   first-update   exit 0 up to date, 1 not updated (or not all: an update
+#                  stopped part way), 2 updated but the graphics would not
+#                  start (system-update's line says why: no restart then).
+#                  With 0 or 1 the last line is "OmacVM: restart: ..." when
+#                  the running kernel was replaced (its modules are gone:
+#                  DKMS and Parallels Tools build for the kernel that runs,
+#                  so the VM restarts first)
+# Tests: src/tests/pkg-safe.sh (stand-ins for both scripts and the modules).
+set -uo pipefail
+G=$(cd "$(dirname "$0")/../../guest" && pwd)
+TARGETS=${OMACVM_OMARCHY_TARGETS:-$G/omarchy-targets.sh}
+UPDATE=${OMACVM_SYSTEM_UPDATE:-$G/system-update}
+MODULES=${OMACVM_MODULES:-/usr/lib/modules}
+r=$(bash "$TARGETS" --hook 2>&1) ||
+  echo "OmacVM: Omarchy's ARM package targets not fixed ($(tail -1 <<<"$r")): omarchy update may stop at hyprtoolkit"
+"$UPDATE"; rc=$?
+(( rc == 2 )) && exit 2
+k=$(uname -r)
+[[ -d $MODULES/$k/kernel ]] || echo "OmacVM: restart: the update replaced the running kernel ($k)"
+exit "$rc"

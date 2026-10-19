@@ -19,7 +19,8 @@
 # and the sudoers file goes with it. One run at a time (a lock). Progress
 # lines on stdout; the update's output in /var/log/omacvm-system-update.log.
 # Called only when someone asked for it: Graphics -> Vulkan (omacvm graphics,
-# the control centre), never omacvm apply. Tests: src/tests/pkg-safe.sh
+# the control centre), and by omacvm apply once for a VM fresh from a
+# prebuilt image (prebuilt/guest/first-update). Tests: src/tests/pkg-safe.sh
 # (OMACVM_SYSTEM_UPDATE_RUN stands in for the unit; a copy with stand-ins for
 # systemd tests the unit's way).
 set -uo pipefail
@@ -118,7 +119,11 @@ run_unit() {   # -> the update's exit status
     -p "ExecStopPost=+/bin/rm -f $SUDOERS $TMPF" \
     "${env[@]}" "$RUN/run" "$cmd" -y || { rm -f "$SUDOERS" "$TMPF"; say "could not start omarchy update" >&2; return 1; }
   local t=0 p n size="" seen=$SECONDS
-  while [[ ! -s $RUN/rc ]] && systemctl is-active -q "$UNIT"; do
+  # Only a unit systemd reports as ended ends the wait. While the update
+  # re-executes systemd, systemctl cannot reach it for a moment ("Failed to
+  # connect to system scope bus"): 2026-10-19 that ended the wait, and the
+  # stop below cut omarchy update off in the middle of its pacman run.
+  while [[ ! -s $RUN/rc ]] && [[ ! $(systemctl show -p ActiveState --value "$UNIT" 2>/dev/null) =~ ^(inactive|failed)$ ]]; do
     sleep 5; t=$((t + 5))
     n=$(wc -c < "$LOG" 2>/dev/null) || n=0
     if [[ $n != "$size" ]]; then size=$n; seen=$SECONDS; fi

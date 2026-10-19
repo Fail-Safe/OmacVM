@@ -154,7 +154,7 @@ guest_log "cat /var/log/omacvm-firstboot.log" | grep '^==>' | head -n 100 || tru
 log "first boot done in $(( $(date +%s) - t0 )) s"
 
 # ---------- 5. OmacVM in the VM ----------
-step 5 "Adding OmacVM to the VM"
+step 5 "Updating the VM's system, adding OmacVM"
 # New host keys from the first boot: forget an earlier VM's of this name.
 OMA_PIN_RESET=1 run_logged "$LOG/omacvm-install.log" "$HERE/apply-vm.sh" "$VM_DIR" --no-mac ||
   die "OmacVM did not install (log: $LOG/omacvm-install.log)"

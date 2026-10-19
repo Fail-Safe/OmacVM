@@ -123,8 +123,9 @@ VM runs, and goes back by itself when a new version does not start
   system the way `omarchy update` does
   ([`src/guest/system-update`](../../src/guest/system-update), then the GBM
   test; in a terminal `omacvm graphics` asks first) and stop with the
-  reason if the update fails. `omacvm apply` and `omacvm update` never
-  update the VM's system: they say to run `omarchy update` first. Arch's
+  reason if the update fails. `omacvm apply` and `omacvm update` do not
+  update the VM's system (they say to run `omarchy update` first), except
+  once for a VM fresh from a prebuilt image, at its setup. Arch's
   own builds of 26.2.4 do not replace it; a newer Mesa from Arch does
   (Vulkan keeps working, WebGPU in Chrome waits for OmacVM's next build of
   it; the check says so). VMs from 3.0.0 rebuild it once, after the next

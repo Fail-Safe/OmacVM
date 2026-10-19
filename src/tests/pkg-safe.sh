@@ -180,6 +180,7 @@ if [[ -e $T/pages ]]; then
   gum input --placeholder "Name" && echo answered >> "$T/calls"
 fi
 [[ -e $T/update-hangs ]] && exec sleep 20
+[[ -e $T/update-slow ]] && sleep 1
 [[ -e $T/sudoers-seen ]] && ls "$T/etc/sudoers.d" >> "$T/calls" 2>&1
 [[ -e $T/mirror ]] && cp "$T/mirror" "$T/sync"
 [[ -e $T/mirrors-behind ]] || rm -f "$T/mirrors-gone"
@@ -282,8 +283,13 @@ cat > "$T/bin/systemctl" <<'EOF2'
 #!/bin/bash
 alive() { [[ -s $T/unit.pid ]] && kill -0 "$(cat "$T/unit.pid")" 2>/dev/null; }
 echo "systemctl $*" >> "$T/units"
+# The update re-executes systemd: away for the first queries while it runs.
+if [[ $1 == is-active || $1 == show ]] && [[ -e $T/bus-away && -s $T/unit.pid ]] && (( $(wc -l < "$T/bus-away") < 3 )); then
+  echo x >> "$T/bus-away"; echo "Failed to connect to system scope bus via local transport: Connection refused" >&2; exit 1
+fi
 case $1 in
   is-active) alive; exit ;;
+  show) if alive; then echo active; else echo inactive; fi ;;
   stop) if alive; then c=$(cat "$T/unit.cmd"); kill $c $(/usr/bin/pgrep -P "$c"); while alive; do sleep 0.1; done; fi ;;
 esac
 exit 0
@@ -303,6 +309,14 @@ out=$(unit); rc=$?; rm -f "$T/sudoers-seen" "$T/orphans"
    $out == *"up to date"* ]] &&
   pass "system-update unit: sudo only while it runs, a time limit, the session's Hyprland, its exit status" ||
   fail "system-update unit: rc $rc, calls '$(tr '\n' ' ' < "$T/calls")', left '$(left)', units '$(tr '\n' ' ' < "$T/units")', said '$out'"
+
+vm; : > "$T/bus-away"; : > "$T/update-slow"
+out=$(unit); rc=$?; rm -f "$T/update-slow"
+[[ $rc == 0 && $(wc -l < "$T/bus-away") -ge 3 && $(grep -c '== omarchy update exit 0' "$T/system-update.log") -ge 1 &&
+   $(awk '$1 == "mesa"' "$T/db") == "mesa 1:26.2.4-1" && $out == *"up to date"* ]] &&
+  pass "system-update unit: systemd away for a moment (re-executed by the update): waits, never cuts it off" ||
+  fail "system-update, systemd away: rc $rc, bus '$(wc -l < "$T/bus-away")', units '$(tr '\n' ' ' < "$T/units")', said '$out'"
+rm -f "$T/bus-away"
 
 vm; : > "$T/pacman/db.lck"; : > "$T/pacman-running"
 ( sleep 1; rm -f "$T/pacman/db.lck" "$T/pacman-running" ) &
@@ -432,7 +446,78 @@ out=$(vv "venus=1 blob_alignment=16384"); rc=$?
 [[ $rc == 4 && $(grep -c 'omarchy update' "$T/calls") == 0 && $out == *"older than the mirrors"*"omarchy update"* ]] &&
   pass "boot timer (no --want): no system update on its own, says what to do" ||
   fail "boot timer, stale list: rc $rc, calls '$(cat "$T/calls")', said '$out'"
-unset OMACVM_SYSTEM_UPDATE_RUN
+
+# prebuilt/guest/first-update: a VM fresh from a prebuilt image is brought up
+# to date once, before apply installs anything (2026-10-19: WebGPU and GPU
+# compute could not install opencl-mesa on a VM from the 11-day-old 3.0.8 image).
+FU=src/prebuilt/guest/first-update
+printf '#!/bin/bash\necho "omarchy-targets $*" >> "$T/calls"\n' > "$T/bin/omarchy-targets"; chmod +x "$T/bin/omarchy-targets"
+mkdir -p "$T/modules/$(uname -r)/kernel"
+export OMACVM_OMARCHY_TARGETS=$T/bin/omarchy-targets OMACVM_SYSTEM_UPDATE=$PWD/$S OMACVM_MODULES=$T/modules
+image() {   # the image's system and package list; the mirrors have moved on (404s)
+  vm; grep -vE '^(opencl-mesa|lldb) ' "$T/sync" | sed 's/^mesa 1:26.2.4-1/mesa 1:26.2.3-1/; s/^llvm-libs 23.1.1-1/llvm-libs 22.1.8-2/' > "$T/sync.n"
+  printf '%s\n' "opencl-mesa 1:26.2.3-1 mesa llvm-libs" "clinfo 3.0.25-1" >> "$T/sync.n"; mv "$T/sync.n" "$T/sync"
+  { cat "$T/sync"; } | sed 's/^opencl-mesa 1:26.2.3-1/opencl-mesa 1:26.2.4-1/; s/^mesa 1:26.2.3-1/mesa 1:26.2.4-1/; s/^llvm-libs 22.1.8-2/llvm-libs 23.1.1-1/' > "$T/mirror"
+  : > "$T/mirrors-gone"
+}
+image
+out=$("$P" opencl-mesa clinfo 2>&1); rc=$?
+[[ $rc == 3 && $out == *"older than the mirrors"* ]] && pass "fresh prebuilt VM: opencl-mesa is a 404 before the update (exit 3)" ||
+  fail "fresh prebuilt, before: rc $rc, said '$out'"
+image
+out=$("$FU" 2>&1); rc=$?
+[[ $rc == 0 && $(tr '\n' ' ' < "$T/calls") == "omarchy-targets --hook omarchy update -y " && $out != *restart:* &&
+   $(awk '$1 == "mesa"' "$T/db") == "mesa 1:26.2.4-1" ]] &&
+  pass "first-update: ARM targets fixed, then omarchy update -y; same kernel: no restart" ||
+  fail "first-update: rc $rc, calls '$(tr '\n' ' ' < "$T/calls")', said '$out'"
+out=$("$P" opencl-mesa clinfo 2>&1); rc=$?
+[[ $rc == 0 && $(awk '$1 == "opencl-mesa"' "$T/db") == "opencl-mesa 1:26.2.4-1" ]] &&
+  pass "fresh prebuilt VM after first-update: opencl-mesa installs (the mirrors' version)" ||
+  fail "after first-update: rc $rc, db '$(tr '\n' ' ' < "$T/db")', said '$out'"
+image; rm -rf "$T/modules/$(uname -r)/kernel"
+out=$("$FU" 2>&1); rc=$?
+[[ $rc == 0 && $(tail -1 <<<"$out") == "OmacVM: restart: "* ]] &&
+  pass "first-update: a new kernel: says to restart (last line)" || fail "first-update, new kernel: rc $rc, said '$out'"
+image; : > "$T/update-fails"
+out=$("$FU" 2>&1); rc=$?; rm -f "$T/update-fails"
+[[ $rc == 1 && $(tail -1 <<<"$out") == "OmacVM: restart: "* && $out == *"omarchy update stopped"* ]] &&
+  pass "first-update: the update fails: exit 1, and still says when the kernel was replaced" ||
+  fail "first-update fails: rc $rc, said '$out'"
+image; : > "$T/update-mesa-only"
+out=$("$FU" 2>&1); rc=$?; rm -f "$T/update-mesa-only"
+[[ $rc == 2 && $out == *"do not restart"* && $out != *"OmacVM: restart:"* ]] &&
+  pass "first-update: graphics broken after it: exit 2, no restart" || fail "first-update, GBM broken: rc $rc, said '$out'"
+mkdir -p "$T/modules/$(uname -r)/kernel"
+# cmd/apply.sh's update step (its block; stand-ins for SSH and the restart).
+ab=$(awk '/^if \(\( PREBUILT_FRESH \)\); then$/ {on = 1} on {print} on && /^fi$/ {exit}' src/cmd/apply.sh)
+astep() {   # RC LINE...: what the block does when first-update says LINEs and exits RC
+  ( FU_RC=$1; shift; FU_OUT=$(printf '%s\n' "$@"); PREBUILT_FRESH=1 IP=ip S=/s VM=vm
+    gssh() { case $2 in */first-update) echo "$FU_OUT"; return "$FU_RC" ;; *) return 1 ;; esac; }
+    step() { :; }; log() { echo "log $*"; }; info() { echo "info $*"; }; sleep() { :; }
+    failed_part() { echo "failed $2"; }; die() { echo "die $*"; exit 1; }; vm_restart() { echo restarted; }
+    set -euo pipefail; eval "$ab" ) 2>&1
+}
+[[ $ab == *first-update* ]] || fail "apply.sh: its update step not found"
+out=$(astep 0 "OmacVM: the VM's system is up to date (GBM opens)")
+[[ $out == *"log the VM's system is up to date"* && $out != *restarted* && $out != *info* ]] &&
+  pass "apply: fresh prebuilt VM: updated, no restart" || fail "apply, updated: said '$out'"
+out=$(astep 0 "OmacVM: the VM's system is up to date" "OmacVM: restart: the update replaced the running kernel (6.1)")
+[[ $out == *"log restarting the VM"*restarted ]] && pass "apply: a new kernel: the VM restarts before the VM side" ||
+  fail "apply, new kernel: said '$out'"
+out=$(astep 1 "OmacVM: omarchy update stopped (exit 1)")
+[[ $out == *"info the VM's system was not updated"* && $out != *die* && $out != *restarted* ]] &&
+  pass "apply: not updated: goes on, says a feature may say why" || fail "apply, not updated: said '$out'"
+out=$(astep 2 "OmacVM: /usr/lib/gbm/dri_gbm.so needs libLLVM.so.23.1 (not installed): do not restart the VM")
+[[ $out == *"failed /usr/lib/gbm/dri_gbm.so needs libLLVM"*"die "*"do not restart"* && $out != *restarted* ]] &&
+  pass "apply: graphics broken by the update: stops, no restart" || fail "apply, GBM broken: said '$out'"
+out=$(astep 255)
+[[ $out == *"log the connection to the VM dropped"*"info the VM's system was not updated"* && $out != *die* ]] &&
+  pass "apply: the connection drops without a word: waits for the update's unit, goes on" ||
+  fail "apply, connection dropped: said '$out'"
+grep -q "grep -q '^OMACVM_PREBUILT_FRESH=1' <<<\"\$probe\" && { PREBUILT_FRESH=1" src/cmd/apply.sh &&
+  [[ $(grep -c 'first-update' src/cmd/apply.sh) == 2 ]] &&
+  pass "apply runs first-update only for a VM fresh from a prebuilt image" || fail "apply runs first-update elsewhere"
+unset OMACVM_SYSTEM_UPDATE_RUN OMACVM_OMARCHY_TARGETS OMACVM_SYSTEM_UPDATE OMACVM_MODULES
 
 # Wired in, and no other way to pacman -S in guest code.
 grep -q '"$R/guest/gbm-guard" begin && GBM_GUARD=1' src/guest/install.sh &&
