@@ -46,9 +46,10 @@ def opened():   # ~/Mac without following a link, and the path a child reaches i
 if what == "umount":
     if mounted:
         # umount2 itself: umount(8) looks /proc/self/fd/N up in the mount table and stops there.
+        # MNT_DETACH: the open folder itself keeps the mount busy; it goes when that closes.
         fd, p = opened()
         libc = ctypes.CDLL(None, use_errno=True)
-        if libc.umount2(p.encode(), 0) != 0:
+        if libc.umount2(p.encode(), 2) != 0:
             print(f"omacvm-mac-folder: {home}/Mac: {os.strerror(ctypes.get_errno())}")
     if sys.argv[4:] == ["rmdir"]:
         try:
