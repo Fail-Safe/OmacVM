@@ -445,6 +445,23 @@ struct SetupView: View {
     }
 }
 
+/// Copies a command for the VM's terminal; says "Copied" for 2 s.
+struct CopyCommandButton: View {
+    let command: String
+    @State private var copied = false
+
+    var body: some View {
+        Button(copied ? "Copied" : "Copy Command") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+            copied = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
+        }
+        .help("The command to run once in a terminal in the VM")
+        .layoutProbe("copy-command")
+    }
+}
+
 struct BuildView: View {
     @ObservedObject var state: AppState
     @ObservedObject var creator: Creator
@@ -459,6 +476,10 @@ struct BuildView: View {
                 AppIconButton()
             } trailing: {
                 if creator.failed != nil {
+                    if let cmd = creator.manualKeyCommand {
+                        CopyCommandButton(command: cmd)
+                        InfoButton(topic: "SSH access", text: SSHRepair.info)
+                    }
                     Button("Show Log") {
                         NSWorkspace.shared.open(creator.log ?? state.config.folder.appendingPathComponent("create.log"))
                     }

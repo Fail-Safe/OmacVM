@@ -1,5 +1,6 @@
 import Foundation
 import OmacVMBuildProgress
+import OmacVMWindow
 
 /// Runs scripts/create-vm.sh (or prebuilt-vm.sh: the VM from a prebuilt image)
 /// and turns its output into progress for the UI. Both take the same vm.env
@@ -63,6 +64,42 @@ final class Creator: ObservableObject {
         try? answers?.write(contentsOf: Data((build ? "build\n" : "later\n").utf8))
     }
 
+    /// Update VM: SSH turned the folder's key down and the app could not add
+    /// it (update-vm.sh's "SSHKEY refused"). The failed screen offers the
+    /// command for the VM's terminal, built from the folder's key.
+    @Published private(set) var manualKeyCommand: String?
+    private var keyLines = SSHRepair.Lines()
+    /// The VM of the update that runs (its folder and guest agent socket).
+    private var updating: VMConfig?
+
+    /// update-vm.sh's "FIX ssh-key": the folder's key into the VM through
+    /// the guest agent (the update's QEMU has its port where the window's
+    /// has it), off the main thread; the answer goes back on its stdin.
+    private func fixKey() {
+        guard let c = updating, let p = process else { return }
+        let id = run, folder = c.folder, agent = c.agentSocket.path
+        Thread.detachNewThread { [weak self] in
+            let r = VMKey.ensure(folder: folder, agentPath: agent, pingWait: 120, running: { p.isRunning })
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, id == self.run else { return }
+                    try? self.answers?.write(contentsOf: Data((SSHRepair.answer(r) + "\n").utf8))
+                }
+            }
+        }
+    }
+
+    /// The window pictures (RenderVMWindow): Update VM after SSH turned the
+    /// key down and the guest agent did not answer (update-vm.sh's words).
+    func showForRendering(keyRefused vm: VMConfig) {
+        job = .update; step = 1; steps = 3; title = "Starting \(vm.name) without a window"; kernelQuestion = nil
+        detail = "\(vm.name) only knows another Mac's SSH key: adding this one"
+        failed = "\(vm.name) doesn't let this Mac in over SSH, and OmacVM could not add its key (the VM's guest agent did not answer). "
+            + "Add the key once by hand: start the VM, open a terminal in it, paste the command (Copy Command) and enter your password. "
+            + "Then click Update VM again."
+        manualKeyCommand = VMKey.keyLine(folder: vm.folder).flatMap(SSHRepair.manualCommand)   // makes the folder's key
+    }
+
     /// The window pictures (RenderVMWindow): Update VM at its kernel question.
     func showForRendering(kernel q: KernelQuestion) {
         job = .update; failed = nil; step = 1; steps = 3
@@ -93,6 +130,7 @@ final class Creator: ObservableObject {
     /// settings stay as they are.
     func update(config: VMConfig) {
         reset(.update, folder: config.folder, route: .build)
+        updating = config
         // A VM from a bigger Mac runs at this Mac's Best tier (vm-common.sh vm_load).
         let fit = config.forThisMac
         let size = fit == config ? [:] : ["OMACVM_START_CPUS": "\(fit.cpus)", "OMACVM_START_MEM_MB": "\(fit.memoryMB)"]
@@ -113,6 +151,7 @@ final class Creator: ObservableObject {
         reader?.readabilityHandler = nil
         reader = nil; run += 1; buffer = ""; exitStatus = nil
         try? answers?.close(); answers = nil; kernelQuestion = nil
+        keyLines = SSHRepair.Lines(); manualKeyCommand = nil; updating = nil
         title = "Preparing"
     }
 
@@ -225,7 +264,12 @@ final class Creator: ObservableObject {
 
     private func handle(_ line: String) {
         if !line.isEmpty { lastOutput = Date() }
-        if let u = ProgressUpdate.parse(line) {
+        if let e = keyLines.take(line, update: job == .update, step: step) {
+            switch e {
+            case .fix: fixKey()
+            case .refused: manualKeyCommand = updating.flatMap { VMKey.manualCommand(folder: $0.folder) }
+            }
+        } else if let u = ProgressUpdate.parse(line) {
             progress(u)
         } else if let q = KernelQuestion.parse(line) {
             kernelQuestion = q
