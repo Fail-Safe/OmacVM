@@ -258,5 +258,28 @@ int main(void) {
   check(tapPort && lastPlace == kCGHeadInsertEventTap, "shareKeyboard \"no\" (a string): at the head");
   CFPreferencesSetAppValue(CFSTR("shareKeyboard"), NULL, SHARE_KEYBOARD_DOMAIN);
   CFPreferencesAppSynchronize(SHARE_KEYBOARD_DOMAIN);
+
+  // The Mac's pointer over a full-screen VM: hidden here for Parallels, UTM and
+  // VMware Fusion, never for OmacVM.app's VMs, whose QEMU hides it itself (a
+  // second hider showed it again over QEMU's hide, 2026-10-19).
+  cursorControl = 0;   // never the real pointer in the test
+  cursorTimer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 1e9, 1.0 / 120, 0, 0, updateCursor, NULL);
+#define LOOKING() (CFRunLoopTimerGetNextFireDate(cursorTimer) < CFAbsoluteTimeGetCurrent() + 1e8)
+  frontChanged(500, -1, 0, "", 0, 0);
+  check(!LOOKING() && !frontPid, "no VM in front: no pointer check");
+  frontChanged(2000, 0, 1, "Omarchy", 0, 0);
+  check(LOOKING() && frontPid == 2000, "a full-screen Parallels VM: the pointer check runs");
+  frontChanged(2100, NET_APP, 1, "Omarchy", 0, 0);
+  check(!LOOKING() && !frontPid && !cursorHidden,
+        "straight to a full-screen OmacVM.app VM: no pointer check (its QEMU hides the pointer)");
+  frontChanged(2200, NET_UTM, 1, "Omarchy", 0, 0);
+  check(LOOKING() && frontPid == 2200, "a full-screen UTM VM: the pointer check runs");
+  frontChanged(2300, NET_APP, 0, "", 0, 0);
+  check(!LOOKING() && !frontPid, "an OmacVM.app VM in a window: none");
+  frontChanged(2300, NET_APP, 1, "Omarchy", 0, 0);
+  check(!LOOKING() && !frontPid, "... nor when it goes full screen");
+#undef LOOKING
+  CFRelease(cursorTimer);
+  cursorTimer = NULL;
   return fail;
 }
