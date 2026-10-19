@@ -24,13 +24,14 @@ in more words.
   stopped gives up after about 10 minutes again (up to 20 with the SSH repair before it).
 - **Graphics without QEMU's lock and Vulkan windows without a copy are on by default.** Both
   switches in the VM window's General section were off and marked experimental (since 3.1.18 and
-  3.1.24). With them on, the VM's CPUs no longer wait while its graphics work runs, so there are
-  fewer short freezes while apps open or pages draw, and Vulkan apps' frames reach the screen
-  without a copy on QEMU's main loop (macOS 26 and newer; with MoltenVK on macOS 15 they are
-  copied as before, and `omacvm check` no longer warns about that). Tested with both on in long
-  runs on a Mac mini M4 and a MacBook Air M2 with macOS 27: no GPU restart, no crash, no memory
-  growth. Not soaked on macOS 15. A switch you set yourself stays as you set it, and GPU safe
-  mode still turns both off.
+  3.1.24). With them on, graphics work that only touches the GPU runs without QEMU's lock, so the
+  VM's CPUs wait less for it (Mac mini, new Chromium windows: longest stop 107 ms -> 1 ms), and
+  on macOS 26 and newer Vulkan apps' frames reach the screen without a copy. With MoltenVK
+  (macOS 15) they are copied as before: the switch says so there, and `omacvm check` no longer
+  warns about it. 10- and 25-minute runs with both on, on a Mac mini M4 and a MacBook Air M2
+  with macOS 27: no GPU restart, no crash, no memory growth. Not tested on macOS 15. A switch
+  you set in the VM window stays as you set it; if you went back in 3.1.18 with
+  `defaults delete`, switch it off in the window. GPU safe mode still turns both off.
 
 ## 3.1.25
 
