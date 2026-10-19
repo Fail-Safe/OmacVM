@@ -30,6 +30,8 @@ enum RenderVMWindow {
         var section: String? = nil
         var sheet: ReadyView.ReadySheet? = nil
         var magicMouse: Bool? = false
+        /// A display that can show HDR (the HDR row).
+        var hdr: Bool? = false
         /// macOS keeps the menu bar in full screen (#356).
         var menuBar: Bool? = false
         /// Disk › Change… open: what Omarchy needs, the size chosen.
@@ -109,6 +111,7 @@ enum RenderVMWindow {
         var allOn = usual
         allOn.keyNote = .needsUser
         allOn.magicMouse = true
+        allOn.hdr = true
         page("page-3-all-on", state, allOn)
         // USB devices on, Vendor HID devices on under it.
         allOn.section = "sharing"

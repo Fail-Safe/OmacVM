@@ -448,6 +448,16 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     "Vulkan windows are copied"*) warn "Vulkan windows" "vkWindowsNoCopy is on, but they are copied this run: $(grep -o 'no IOSurfaces: [^)]*' "$miclog" | tail -1)" ;;
   esac
 fi
+# HDR and 10-bit colour this run (experimental: the app's hdr switch). The app
+# says "on (...)" or, with the switch on, "off (why)"; nothing when it is off.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  hdrline=$(sed -n 's/^OmacVM: HDR: //p' "$miclog" | tail -1)
+  hdrwhy=$(printf '%s\n' "$hdrline" | sed -n 's/^o[nf]* (\(.*\))$/\1/p')
+  case $hdrline in
+    "on "*) ok "HDR" "$hdrwhy (experimental)" ;;
+    "off "*) warn "HDR" "HDR is on, but this start got none: $hdrwhy" ;;
+  esac
+fi
 # OmacVM.app's Graphics setting: what this start got (the app says so in
 # qemu.log), and whether the next start gets something else.
 if [[ $TYPE == app ]] && gd=$(app_dir "$VM" 2>/dev/null); then

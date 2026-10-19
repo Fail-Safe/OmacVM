@@ -31,6 +31,7 @@ MainActor.assumeIsolated {
         case "gpuOffMainLoop": Settings.gpuOffMainLoop = value == "true"
         case "shareKeyboard": Settings.shareKeyboard = value == "true"
         case "vkWindowsNoCopy": Settings.vkWindowsNoCopy = value == "true"
+        case "hdr": Settings.hdr = value == "true"
         case "closeAction": Settings.closeAction = CloseAction.parse(value)
         case "appIconTheme": AppIcon.set(IconTheme.choice(stored: value))
         case "escapeSwipe": EscapeSetting.set(EscapeSetting.Choice(rawValue: value) ?? .pointer)
