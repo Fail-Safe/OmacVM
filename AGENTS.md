@@ -687,6 +687,11 @@ The less obvious ones, with causes and where the fix lives, are in
   ("detritus not allowed"), and the Dock keeps showing the old icon of a
   pinned app until it restarts (macOS 27, 2026-10-13). The Dock tile plug-in
   draws the look instead.
+- Do not leave files in the desktop user's runtime folder (`/run/user/UID`,
+  `XDG_RUNTIME_DIR`): it is a tmpfs of 10 % of the VM's memory, and when it is
+  full, Hyprland and apps die of SIGBUS on their shared-memory buffers there
+  (2026-10-19: OmacVM.app's hyprpicker left 3 buffer files per display per
+  screenshot; fixed in `src/app/guest/hyprpicker/`, check line "runtime folder").
 - Do not put personal data in this repo.
 
 ## 9. Conventions
