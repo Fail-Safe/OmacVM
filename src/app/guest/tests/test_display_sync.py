@@ -90,6 +90,14 @@ if args[:2] == ["-j", "monitors"]:
     print(open(mons).read()); raise SystemExit(0)
 if args and args[0] == "eval":
     rule = args[1]
+    with open(os.path.join(state, "calls"), "a") as f:
+        f.write(rule + "\n")
+    if rule.startswith("hl.window_rule("):    # kept apart: the tests count the monitor rules
+        if os.path.exists(os.path.join(state, "refuse-window-rule")):
+            print("error: refused"); raise SystemExit(0)
+        with open(os.path.join(state, "window_rules"), "a") as f:
+            f.write(rule + "\n")
+        print("ok"); raise SystemExit(0)
     with open(os.path.join(state, "evals"), "a") as f:
         f.write(rule + "\n")
     if os.path.exists(os.path.join(state, "refuse")):
@@ -596,6 +604,91 @@ class HDR(SyncCase):
         self.host_env.write_text("OMACVM_HDR=1\n")
         self.run_sync()
         self.assertIn("max_luminance = 1600,", self.evals()[-1])
+
+    # Windows on the PQ output are clipped at max_luminance, not tone-mapped:
+    # Chrome draws its whole window in PQ with max 1000 nits, and Hyprland's
+    # curve put its SDR white at about half (gray pages).
+    CLAMP = 'hl.window_rule({ name = "omacvm-hdr", match = { class = ".*" }, tonemap = "clamp" })'
+    DEFAULT = 'hl.window_rule({ name = "omacvm-hdr", match = { class = ".*" }, tonemap = "on" })'
+
+    def window_rules(self) -> list[str]:
+        try:
+            return (self.hypr / "window_rules").read_text().splitlines()
+        except FileNotFoundError:
+            return []
+
+    def test_windows_clipped_while_pq(self):
+        self.layout(1)
+        self.run_sync()
+        self.assertEqual(self.window_rules(), [self.CLAMP])
+        calls = (self.hypr / "calls").read_text().splitlines()
+        self.assertEqual(calls[0], self.CLAMP)          # before the output goes PQ
+        self.assertIn('cm = "hdr"', calls[1])
+        for edr in (1, 2, 3):                            # the headroom moves: sent once
+            self.layout(edr)
+            self.run_sync()
+        self.assertEqual(self.window_rules(), [self.CLAMP])
+
+    def test_tone_map_back_when_pq_ends(self):
+        self.layout(2)
+        self.run_sync()
+        self.layout(0)                                   # QEMU cannot show PQ now
+        self.run_sync()
+        self.assertIn('cm = "srgb"', self.evals()[-1])
+        self.assertEqual(self.window_rules(), [self.CLAMP, self.DEFAULT])
+        self.run_sync()
+        self.assertEqual(self.window_rules(), [self.CLAMP, self.DEFAULT])
+        self.layout(1.5)                                 # PQ again
+        self.run_sync()
+        self.assertEqual(self.window_rules(), [self.CLAMP, self.DEFAULT, self.CLAMP])
+
+    def test_no_window_rule_without_pq(self):
+        for edr in (None, 0):
+            self.layout(edr)
+            self.run_sync()
+        self.host_env.write_text("")                     # this start did not ask for HDR
+        self.layout(2)
+        self.run_sync()
+        self.assertEqual(self.window_rules(), [])
+
+    def test_refused_window_rule_is_sent_again(self):
+        self.layout(2)
+        (self.hypr / "refuse-window-rule").write_text("")
+        r = self.run_sync()
+        self.assertIn("rejected tonemap clamp", r.stderr)
+        self.assertIn('cm = "hdr"', self.evals()[-1])    # the output still follows
+        r = self.run_sync()                              # tried again, logged once
+        self.assertNotIn("rejected", r.stderr)
+        (self.hypr / "refuse-window-rule").unlink()
+        self.run_sync()
+        self.assertEqual(self.window_rules(), [self.CLAMP])
+        self.assertFalse((self.state / "tonemap.refused").exists())
+
+    def test_tone_map_held_with_the_output(self):
+        self.layout(2)
+        self.run_sync()
+        sent = len(self.evals())
+        (self.state / "Virtual-1.hold").write_text(f"{time.time() + 60}\n")
+        self.layout(0)                                   # PQ ends while held
+        self.run_sync()
+        self.assertEqual(len(self.evals()), sent)
+        self.assertEqual(self.window_rules(), [self.CLAMP])
+        (self.state / "Virtual-1.hold").unlink()         # the hold ends
+        self.run_sync()
+        self.assertIn('cm = "srgb"', self.evals()[-1])
+        self.assertEqual(self.window_rules(), [self.CLAMP, self.DEFAULT])
+
+    def test_update_into_a_running_pq_output(self):
+        # An older display-sync (3.1.25) set the PQ rule and no tone map;
+        # Hyprland shows the rule already, so only the window rule is sent.
+        self.layout(1)
+        self.run_sync()
+        sent = len(self.evals())
+        (self.state / "tonemap").unlink()
+        (self.hypr / "window_rules").unlink()
+        self.run_sync()
+        self.assertEqual(len(self.evals()), sent)
+        self.assertEqual(self.window_rules(), [self.CLAMP])
 
 
 class Placement(unittest.TestCase):

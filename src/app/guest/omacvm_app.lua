@@ -78,7 +78,15 @@ local function keep_display_rules()
     if f then
       local rule = parse_rule(f:read("a"))
       f:close()
-      if rule and rule.output == output and not user_rule(output) then hl.monitor(rule) end
+      if rule and rule.output == output and not user_rule(output) then
+        hl.monitor(rule)
+        -- HDR: windows only clipped at max_luminance, not tone-mapped (Chrome
+        -- looked gray; display-sync's hdr_tonemap says why). A reload drops it.
+        -- pcall: the other outputs' rules still come back if this fails.
+        if output == "Virtual-1" and rule.cm == "hdr" then
+          pcall(hl.window_rule, { name = "omacvm-hdr", match = { class = ".*" }, tonemap = "clamp" })
+        end
+      end
     end
   end
 end

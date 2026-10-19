@@ -34,8 +34,10 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
    cm = "hdr", max_luminance = 203 x edr, sdr_max_luminance = 203`
    (Hyprland applies luminance changes without a modeset), or `bitdepth =
    10, cm = "srgb"` without a headroom. SDR content is exactly the Mac's
-   white; HDR highlights are compressed by Hyprland into what the panel can
-   show now. QEMU is the single source of truth; the guest follows.
+   white. HDR windows are clipped at `max_luminance`, not tone-mapped by
+   Hyprland (amended 2026-10-19, below): Chrome and Chromium fit HDR into
+   the headroom themselves; a client that does not is clipped there
+   (below). QEMU is the single source of truth; the guest follows.
 2. **The 10-bit driver is dormant until a start asks for it.** `omacvm
    apply` builds it on every app VM (7 s; downloaded, patched and built as
    a user id of its own, root only installs it) into `/usr/local/lib/omacvm/virtio-gpu/K`,
@@ -70,8 +72,28 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
   the levels of the 8-bit path (dark ramp 117 vs 58 distinct levels).
 - Few Linux apps send HDR (October 2026): GStreamer's `waylandsink` does;
   mpv 0.41 on OpenGL does not (mpv's master does, with `vo=gpu-next`; app
-  VMs use `vo=gpu`), Chromium clips CSS PQ at SDR white, Firefox only for
-  video behind a pref. Their HDR video shows as SDR, correctly.
+  VMs use `vo=gpu`), Firefox only for video behind a pref. Their HDR video
+  shows as SDR, correctly.
+- Chrome and Chromium (amended 2026-10-19, user report on a MacBook Air): on
+  the HDR output they draw the whole window in PQ, SDR white at 203 nits and
+  HDR video already tone-mapped into the headroom, and tag it `luminances(0,
+  1000, 203)`. Hyprland 0.56 tone-maps any window above `max_luminance` with
+  a curve that also lowers SDR white (`tonemap.glsl`: 0.52 of it at headroom
+  1, 0.64 at 2): every page looked gray. So while Virtual-1 is PQ,
+  `omacvm-display-sync` gives all windows the rule `tonemap = "clamp"` (back
+  to `"on"`, Hyprland's default, when PQ ends; `omacvm_app.lua` sets it
+  again after a config reload). Measured on the scanout: Chrome's white 203
+  nits as an SDR client's (was 105), a 1000-nit video bar 390 nits with
+  `max_luminance` 406 (headroom 2; was 206). SDR windows are not tone-mapped
+  either way; mpv (`gpu-next`) tags the output's own maximum and is not
+  touched; Obsidian 1.14.4 (Electron) draws SDR. Every window, not a list of
+  browser names: any app on a recent Chromium does the same. Lost: a client
+  that sends raw PQ above the headroom (GStreamer's `waylandsink`) is
+  clipped there instead of compressed; its SDR white is now right (it was at
+  half too). The rule is on every display: such a client on another Mac
+  display (8-bit SDR) while the main window is HDR is clipped at that
+  display's SDR white (Chrome and mpv draw SDR there). Notes:
+  work/tracks/hdr-chrome.md.
 - Only the main window: the other displays' windows stay 8-bit SDR
   (CAOpenGLLayer).
 - macOS 26 deprecates `wantsExtendedDynamicRangeContent` for

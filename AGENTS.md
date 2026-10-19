@@ -496,7 +496,7 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 | Skip the notch (with a notch; its (i) has a picture) | `notch-skip`: `on` (`omacvm notch --skip on\|off`, the control centre); the VM gets it at each start (SMBIOS `omacvm.notchskip=1`) and while it runs (guest agent: `/run/omacvm/notch-skip`) | off (no file) | VM |
 | (no row) The guest's scale, for Full screen including notch's next start | `fullpanel-scale`: 1/120 steps, written by QEMU from the VM's display agent (#355) | none (the panel's own size) | VM |
 | Keep the Dock and hot corners away | `keepDockAway` (bool) | `true` | app |
-| HDR and 10-bit colour (experimental; only shown with a display that can show HDR) | `hdr` (bool, the key it had while hidden; `gpuSafeMode` keeps it off; read at each start: with a display that can show HDR, SMBIOS `omacvm.deepcolor=1` and QEMU env `OMACVM_GL_EDR=1`; qemu.log `OmacVM: HDR: on\|off (why)`) | `false` | app |
+| HDR and 10-bit colour (experimental; only shown with a display that can show HDR) | `hdr` (bool, the key it had while hidden; `gpuSafeMode` keeps it off; read at each start: with a display that can show HDR, SMBIOS `omacvm.deepcolor=1` and QEMU env `OMACVM_GL_EDR=1`; qemu.log `OmacVM: HDR: on\|off (why)`; in the VM `omacvm-display-sync` runs Virtual-1 PQ and gives every window `tonemap = "clamp"`, else Chrome looked gray, ADR 0049) | `false` | app |
 | Escape combo | Gestures `EscapeSwipe`: `pointer`, `all` (also the control centre, `omacvm gestures`) | `pointer` (Focused monitor) | app |
 | Magic Mouse swipe (with a Magic Mouse) | Gestures `MouseSwipeFingers`: 3, 4 | 4 | app |
 | Keyboard access | macOS: Accessibility ("control the computer") for the app | asked | Mac |

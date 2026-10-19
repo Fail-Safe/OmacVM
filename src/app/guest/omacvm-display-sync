@@ -329,6 +329,35 @@ PY
   fi
 }
 
+# hdr_tonemap HDR: Virtual-1's tone map for windows. On an HDR output Chrome
+# and Chromium draw the whole window in PQ (SDR white at 203 nits, HDR video
+# already fitted into the headroom by the browser) and say max 1000 nits.
+# Hyprland 0.56 tone-maps a window above the output's max_luminance with a
+# curve that also lowers SDR white (to about half at headroom 1): every page
+# looked gray. So while Virtual-1 runs PQ, windows are only clipped at
+# max_luminance (tonemap "clamp"). SDR windows are not tone-mapped either
+# way. The rule is for every window, also on the other Mac displays (8-bit
+# SDR): a client that always sends PQ there is clipped at that display's
+# SDR white. Chrome and mpv draw SDR there. After PQ the same rule says
+# Hyprland's default ("on"): 0.56 keeps a rule's tone map on open windows
+# when the rule is gone. omacvm_app.lua sets it again after a config reload.
+# A refused rule is logged once; the file "tonemap" is for omacvm check.
+hdr_tonemap() {
+  local want=on had response
+  [[ $1 == *'cm = "hdr"'* ]] && want=clamp
+  had=$(cat "$state_dir/tonemap" 2>/dev/null || true)
+  # Unchanged, or never on: nothing to send.
+  [[ $want == "$had" || ($want == on && -z $had) ]] && return 0
+  response=$(hyprctl eval "hl.window_rule({ name = \"omacvm-hdr\", match = { class = \".*\" }, tonemap = \"$want\" })" 2>&1) || true
+  if [[ $response == ok ]]; then
+    printf '%s\n' "$want" > "$state_dir/tonemap"
+    rm -f "$state_dir/tonemap.refused"
+  elif [[ ! -e $state_dir/tonemap.refused ]]; then
+    printf 'omacvm-display-sync: Hyprland rejected tonemap %s: %s\n' "$want" "$response" >&2
+    : > "$state_dir/tonemap.refused"
+  fi
+}
+
 # A rule in monitors.lua that names OUTPUT (not in a comment).
 user_rule() {
   [[ -r $monitor_config ]] &&
@@ -732,11 +761,17 @@ apply_preferred_modes() {
       notch_bar "$mode" "$scale"
     fi
     digest=$(cksum <<<"$rule" | cut -d' ' -f1)
-    # 1: Hyprland shows it already (keep it for a reload), 2: held.
+    # 1: Hyprland shows it already (keep it for a reload), 2: held (the tone
+    # map too: it goes with the output's rule).
     follow_check "$output" "$digest" "$mode" "$scale" "$position" "$hdr" "$shown" || {
-      (($? == 1)) && keep_rule "$output" "$rule"
+      if (($? == 1)); then
+        keep_rule "$output" "$rule"
+        [[ $output != Virtual-1 ]] || hdr_tonemap "$hdr"
+      fi
       continue
     }
+    # Before the output goes PQ, so no frame is tone-mapped.
+    [[ $output != Virtual-1 ]] || hdr_tonemap "$hdr"
     if ! response=$(hyprctl eval "$rule" 2>&1); then
       printf 'omacvm-display-sync: failed to apply %s to %s: %s\n' \
         "$mode" "$output" "$response" >&2
