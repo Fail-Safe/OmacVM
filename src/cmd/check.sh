@@ -446,7 +446,7 @@ fi
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   case $(grep -o 'Vulkan windows are [a-zA-Z]*.*' "$miclog" | tail -1) in
     "Vulkan windows are IOSurfaces"*) ok "Vulkan windows" "without a copy (IOSurfaces; vkWindowsNoCopy)" ;;
-    *"driver is not KosmicKrisp"*) ok "Vulkan windows" "copied (MoltenVK has no IOSurface import; KosmicKrisp needs macOS 26)" ;;
+    *"driver is not KosmicKrisp"*) ok "Vulkan windows" "copied (the Vulkan driver is MoltenVK)" ;;
     "Vulkan windows are copied"*) warn "Vulkan windows" "vkWindowsNoCopy is on, but they are copied this run: $(grep -o 'no IOSurfaces: [^)]*' "$miclog" | tail -1)" ;;
   esac
 fi
