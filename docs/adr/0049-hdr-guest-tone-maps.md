@@ -35,9 +35,9 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
    (Hyprland applies luminance changes without a modeset), or `bitdepth =
    10, cm = "srgb"` without a headroom. SDR content is exactly the Mac's
    white. HDR windows are clipped at `max_luminance`, not tone-mapped by
-   Hyprland (amended 2026-10-19, below): the apps that send HDR fit it into
-   the headroom themselves. QEMU is the single source of truth; the guest
-   follows.
+   Hyprland (amended 2026-10-19, below): Chrome and Chromium fit HDR into
+   the headroom themselves; a client that does not is clipped there
+   (below). QEMU is the single source of truth; the guest follows.
 2. **The 10-bit driver is dormant until a start asks for it.** `omacvm
    apply` builds it on every app VM (7 s; downloaded, patched and built as
    a user id of its own, root only installs it) into `/usr/local/lib/omacvm/virtio-gpu/K`,
@@ -90,7 +90,10 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
   browser names: any app on a recent Chromium does the same. Lost: a client
   that sends raw PQ above the headroom (GStreamer's `waylandsink`) is
   clipped there instead of compressed; its SDR white is now right (it was at
-  half too). Notes: work/tracks/hdr-chrome.md.
+  half too). The rule is on every display: such a client on another Mac
+  display (8-bit SDR) while the main window is HDR is clipped at that
+  display's SDR white (Chrome and mpv draw SDR there). Notes:
+  work/tracks/hdr-chrome.md.
 - Only the main window: the other displays' windows stay 8-bit SDR
   (CAOpenGLLayer).
 - macOS 26 deprecates `wantsExtendedDynamicRangeContent` for

@@ -331,13 +331,16 @@ PY
 
 # hdr_tonemap HDR: Virtual-1's tone map for windows. On an HDR output Chrome
 # and Chromium draw the whole window in PQ (SDR white at 203 nits, HDR video
-# already fitted into the headroom by the browser) and say max 1000 nits. Hyprland 0.56 tone-maps a window above the output's
-# max_luminance with a curve that also lowers SDR white (to about half at
-# headroom 1): every page looked gray. So while Virtual-1 runs PQ, windows
-# are only clipped at max_luminance (tonemap "clamp"). SDR windows are not
-# tone-mapped either way. After PQ the same rule says Hyprland's default
-# ("on"): 0.56 keeps a rule's tone map on open windows when the rule is
-# gone. omacvm_app.lua sets it again after a config reload.
+# already fitted into the headroom by the browser) and say max 1000 nits.
+# Hyprland 0.56 tone-maps a window above the output's max_luminance with a
+# curve that also lowers SDR white (to about half at headroom 1): every page
+# looked gray. So while Virtual-1 runs PQ, windows are only clipped at
+# max_luminance (tonemap "clamp"). SDR windows are not tone-mapped either
+# way. The rule is for every window, also on the other Mac displays (8-bit
+# SDR): a client that always sends PQ there is clipped at that display's
+# SDR white. Chrome and mpv draw SDR there. After PQ the same rule says
+# Hyprland's default ("on"): 0.56 keeps a rule's tone map on open windows
+# when the rule is gone. omacvm_app.lua sets it again after a config reload.
 # A refused rule is logged once; the file "tonemap" is for omacvm check.
 hdr_tonemap() {
   local want=on had response
