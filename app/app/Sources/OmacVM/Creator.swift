@@ -39,6 +39,8 @@ final class Creator: ObservableObject {
     private var reader: FileHandle?
     private var exitStatus: Int32?
     private var logURL: URL?
+    /// That log, written from the script's output (and Copy Command's line).
+    private var logFile: SharedLog?
     /// An update's stdin: the answer to its question goes there.
     private var answers: FileHandle?
 
@@ -96,8 +98,8 @@ final class Creator: ObservableObject {
     /// key down and the guest agent did not answer (update-vm.sh's words).
     func showForRendering(keyRefused vm: VMConfig) {
         job = .update; step = 1; steps = 3; title = "Starting \(vm.name) without a window"; kernelQuestion = nil
-        detail = "\(vm.name) only knows another Mac's SSH key: adding this one"
-        failed = "\(vm.name) doesn't let this Mac in over SSH, and OmacVM could not add its key (the VM's guest agent did not answer). "
+        detail = "\(vm.name) doesn't know this VM folder's SSH key: adding it"
+        failed = "\(vm.name) doesn't let this Mac in over SSH, and OmacVM could not add this VM folder's key (the VM's guest agent did not answer). "
             + "Add the key once by hand: start the VM, open a terminal in it, paste the command (Copy Command) and enter your password. "
             + "Then click Update VM again."
         manualKeyCommand = VMKey.keyLine(folder: vm.folder).flatMap(SSHRepair.manualCommand)   // makes the folder's key
@@ -177,7 +179,8 @@ final class Creator: ObservableObject {
         let logURL = folder.appendingPathComponent(logFile)
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         self.logURL = logURL
-        let log = try? FileHandle(forWritingTo: logURL)
+        let log = SharedLog(logURL)
+        self.logFile = log
         // The main queue keeps the output in order, and the end of the output
         // after it: a failed build's last line (its ERROR:) is read before
         // the build counts as done.
@@ -270,7 +273,12 @@ final class Creator: ObservableObject {
         if let e = keyLines.take(line, update: job == .update, step: step) {
             switch e {
             case .fix: fixKey()
-            case .refused: manualKeyCommand = updating.flatMap { VMKey.manualCommand(folder: $0.folder) }
+            case .refused:
+                manualKeyCommand = updating.flatMap { VMKey.manualCommand(folder: $0.folder) }
+                // In the log too: after Back, Show Log still has it.
+                if let c = manualKeyCommand {
+                    logFile?.write(Data("OmacVM: the command for a terminal in the VM (Copy Command): \(c)\n".utf8))
+                }
             }
         } else if let u = ProgressUpdate.parse(line) {
             progress(u)
@@ -432,5 +440,23 @@ struct PrebuiltImage: Equatable {
             else { return nil }
             return PrebuiltImage(release: String(f[0]), bytes: bytes, omarchy: String(f[2]))
         }.value
+    }
+}
+
+/// A build's or update's log: the output's reader thread and the main
+/// thread both write to it, one write at a time.
+private final class SharedLog: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+
+    init?(_ url: URL) {
+        guard let h = try? FileHandle(forWritingTo: url) else { return nil }
+        handle = h
+    }
+
+    func write(_ data: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        handle.write(data)
     }
 }
