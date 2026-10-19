@@ -17,6 +17,7 @@
 //   texts PID                the static texts of PID's windows, one a line
 //   dump PID                 every element of PID's windows: role, subrole, names, frame
 //   hit X Y                  the element at X,Y: pid, role, subrole, names
+//   ours PID X Y             exit 0 when the element at X,Y is PID's (no other window over it)
 //   find PID ROLE LABEL      enabled=0|1 value=V frame=X Y W H of the first ROLE named LABEL (title,
 //                            description, identifier, value, or a static text inside it)
 //   click PID ROLE LABEL     a real click at its centre
@@ -134,6 +135,11 @@ func post(_ t: CGEventType, _ p: CGPoint, clicks: Int64 = 1) {
 }
 /// Exit 3 unless PID is in front and the element at P is PID's.
 func ensureOurs(_ pid: pid_t, _ p: CGPoint) {
+    // Something else came to the front meanwhile (a system prompt that just appeared): once more.
+    if !front(pid) {
+        NSRunningApplication(processIdentifier: pid)?.activate(options: [])
+        for _ in 0..<10 where !front(pid) { usleep(100_000) }
+    }
     guard front(pid) else { say("NOT FRONT (front: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"))"); exit(3) }
     var hit: AXUIElement?
     AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(p.x), Float(p.y), &hit)
@@ -229,6 +235,13 @@ case "dump":
                  frame(e).map(fmt) ?? ""].joined(separator: " | "))
         }
     }
+case "ours":
+    var hit: AXUIElement?
+    AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(num(3)), Float(num(4)), &hit)
+    var hp: pid_t = 0
+    if let hit { AXUIElementGetPid(hit, &hp) }
+    say(hp == pidArg() ? "ours" : "pid \(hp)")
+    exit(hp == pidArg() ? 0 : 1)
 case "hit":
     var hit: AXUIElement?
     AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(num(2)), Float(num(3)), &hit)

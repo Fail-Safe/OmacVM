@@ -263,6 +263,23 @@ row_vm_size() {
   [[ -z $bad ]] && res vm-size ok "$f0 kept over 2 full screens" || { res vm-size FAIL "before $f0: $bad"; shot vm-size; }
 }
 
+# A point in PID's window with nothing else over it (a system prompt can sit over the middle), with room
+# around it for the moves: sets x y w h (the window) and cx cy.
+spot_in() {
+  local fx fy
+  read -r x y w h <<<"$(win_of "$1")"
+  for fx in 50 30 70 25 75; do for fy in 50 70 30 80; do
+    cx=$(( x + w * fx / 100 )); cy=$(( y + h * fy / 100 ))
+    "$T" ours "$1" "$cx" "$cy" >/dev/null && "$T" ours "$1" $(( cx + 30 )) $(( cy + 20 )) >/dev/null &&
+      "$T" ours "$1" $(( cx - 40 )) "$cy" >/dev/null && return 0
+  done; done
+  return 1
+}
+# What is in front, and the words of a system prompt (UserNotificationCenter) if one is up.
+cover() {
+  local u; u=$(pgrep -x UserNotificationCenter | head -1)
+  echo "front pid $("$T" frontpid)${u:+; system prompt: $("$T" texts "$u" 2>/dev/null | head -2 | tr '\n' ' ')}"
+}
 PT_BAD=""
 look() {   # STEP: the Mac shows no cursor over the VM now
   local s; s=$("$T" cursor)
@@ -279,7 +296,7 @@ row_pointer() {   # N
   finder=$(pgrep -x Finder | head -1)
   onscreen_ok || return
   [[ $("$T" front "$QP") == front ]] || { res "pointer-$1" FAIL "the VM did not come to the front"; return; }
-  read -r x y w h <<<"$(win_of "$QP")"; cx=$(( x + w / 2 )); cy=$(( y + h / 2 ))
+  spot_in "$QP" || { res "pointer-$1" BLOCKED "another window covers the VM's window ($(cover))"; return; }
   posted; "$T" move $(( x - 12 )) "$cy" "$cx" "$cy" 20 10 >/dev/null; sleep 1.5; look "window: in"
   "$T" bg-show >/dev/null; in_vm "$cx" "$cy" $(( cx + 30 )) $(( cy + 20 )); look "window: a background program showed it"
   onscreen_ok || return
@@ -287,7 +304,7 @@ row_pointer() {   # N
   "$T" front "$QP" >/dev/null; sleep 1; in_vm $(( cx + 30 )) $(( cy + 20 )) "$cx" "$cy"; look "window: Finder and back"
   onscreen_ok || return
   "$T" full "$QP" on >/dev/null; waitfor 15 is_full "$QP" 1 >/dev/null; sleep 2
-  read -r x y w h <<<"$(win_of "$QP")"; cx=$(( x + w / 2 )); cy=$(( y + h / 2 ))
+  spot_in "$QP" || { res "pointer-$1" BLOCKED "another window covers the VM in full screen ($(cover))"; "$T" full "$QP" off >/dev/null; return; }
   in_vm $(( cx - 40 )) "$cy" "$cx" "$cy"; look "full screen: in"
   "$T" bg-show >/dev/null; in_vm "$cx" "$cy" $(( cx + 30 )) $(( cy + 20 )); look "full screen: a background program showed it"
   onscreen_ok || return
