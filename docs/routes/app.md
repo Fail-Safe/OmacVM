@@ -525,6 +525,25 @@ The Mac's input methods type in Omarchy (feature `mac-ime`; what it does:
   step), `app/runtime/Tests/keys/test-ime.sh` (the window code's rules and
   hooks), `swift run features-tests` (the port only with the record's on).
 
+## HDR and 10-bit colour (experimental, off by default)
+
+On a Mac with an HDR display (a MacBook Pro's XDR panel, an HDR monitor),
+the VM window's Display settings have **HDR and 10-bit colour**. From the
+next start of the VM its main window runs at 10 bits: smoother gradients,
+and HDR highlights from Linux apps that send HDR. White stays the Mac's
+white; brighter parts go as far as the display can show at its current
+brightness. Macs without an HDR display do not show the switch and keep
+the 8-bit path.
+
+- The VM's 10-bit graphics driver: Update VM builds it (internet once, a
+  few seconds); the VM loads it only for a start with the switch on, else
+  the standard driver.
+- Which Linux apps send HDR (October 2026): GStreamer does; mpv and
+  Chromium show HDR video as SDR for now.
+- Only the main window; windows on other displays stay 8-bit.
+- GPU safe mode turns it off. `omacvm check` has an "HDR" line.
+- How it works: [ADR 0048](../adr/0048-hdr-guest-tone-maps.md).
+
 ## Fast network (experimental, off by default)
 
 `omacvm enable fast-network --vm NAME`, or the **Fast network

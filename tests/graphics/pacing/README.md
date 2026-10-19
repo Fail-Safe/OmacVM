@@ -43,8 +43,8 @@ guest on a variable-refresh screen (the MacBook panel).
 Colour: open `colors.html` full screen in the guest, then `./snapcolor <id>`.
 With tagged surfaces guest red is Display P3 (234,51,35); untagged (255,0,0).
 
-HDR: guest at 10 bits with `cm = "hdr"` (see ADR 0021), QEMU with
-`OMACVM_GL_HDR=1`, then `./snaphdr <id>`: values above 1.0 are HDR, and the
+HDR: the app's "HDR and 10-bit colour" switch (ADR 0048: the guest at 10
+bits with `cm = "hdr"`, QEMU with `OMACVM_GL_EDR=1`), then `./snaphdr <id>`: values above 1.0 are HDR, and the
 built-in screen's "edr now" rises above 1.0. Use a client that sends a PQ
 image description, e.g. `gst-launch-1.0 filesrc location=hdr10-bars.mkv !
 matroskademux ! h265parse ! avdec_h265 ! videoconvert !
