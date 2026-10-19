@@ -8,8 +8,9 @@ Ctrl+Alt+G until the pointer left), and when the Mac's cursor is hidden over
 the VM (only once the guest draws its own pointer: its display agent said
 hello since the last reset). Used by omacvm-cocoa-pointer-start.patch (which
 explains the why). Also the image QEMU gives the Mac's cursor (an empty one
-while hidden, the arrow again after) and when a motion sets it again; used
-by omacvm-cocoa-cursor-stays-hidden.patch.
+while hidden, the arrow again after) and when
+a motion or the watch while hidden sets it again; used by
+omacvm-cocoa-cursor-stays-hidden.patch.
 
 Why its own file: so the logic is tested against the start, reboot, focus
 and let-go sequences without QEMU or a display
@@ -21,10 +22,10 @@ Test: app/runtime/Tests/display/test-pointer-start.c.
 
 diff --git a/ui/omacvm-pointer-start.h b/ui/omacvm-pointer-start.h
 new file mode 100644
-index 0000000..b26ffa1
+index 0000000..6be1735
 --- /dev/null
 +++ b/ui/omacvm-pointer-start.h
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,171 @@
 +/*
 + * OmacVM: when the VM's window takes the pointer by itself, when the
 + * Mac's cursor is hidden over it, and its image then.
@@ -157,6 +158,13 @@ index 0000000..b26ffa1
 +/* How often a motion may ask the window server whether the hidden cursor shows. */
 +#define OMACVM_POINTER_LOOK_S 0.1
 +
++/*
++ * While QEMU has the cursor hidden it also asks every OMACVM_POINTER_WATCH_S
++ * without a motion: a show while the pointer rests (the user types) left
++ * the arrow over the VM until the next move. Only while hidden.
++ */
++#define OMACVM_POINTER_WATCH_S 0.5
++
 +/* A motion: ask the window server now? (*last: when it was asked last; seconds) */
 +static inline bool omacvm_pointer_look_due(double now, double *last)
 +{
@@ -168,8 +176,8 @@ index 0000000..b26ffa1
 +}
 +
 +/*
-+ * A motion over the VM with QEMU's image in place (want not APPKIT): set
-+ * it again? appkit_has_it: AppKit's current cursor is that image; AppKit
++ * A motion over the VM, or the watch while hidden, with QEMU's image in
++ * place (want not APPKIT): set it again? appkit_has_it: AppKit's current cursor is that image; AppKit
 + * puts its own back (at a window's edge), and then it is set again at
 + * once. hidden: QEMU hid the cursor; looked: the window server was asked
 + * (omacvm_pointer_look_due), shown: its answer. A show by another process

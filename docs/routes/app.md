@@ -460,9 +460,10 @@ the VM's SSH on `127.0.0.1:<port>`.
 - While the VM has the pointer, the Mac's cursor is hidden and its picture
   is an empty one too. Other programs and macOS can show a hidden cursor
   again (a background helper, an app or Space switch); then it shows
-  nothing over the VM. A motion over the VM sets the empty picture again
-  when the window server says the hidden cursor shows after all; QEMU's log
-  then says "cocoa: the hidden Mac cursor showed over the VM"
+  nothing over the VM. A motion over the VM, and while it is hidden a look
+  every 0.5 s without one, sets the empty picture again when the window
+  server says the hidden cursor shows after all; QEMU's log then says
+  "cocoa: the hidden Mac cursor showed over the VM"
   (`omacvm-cocoa-cursor-stays-hidden.patch`; in a VM:
   `src/tests/pointer-reveal-vm.sh`). OmacVM Gestures leaves the Mac's
   pointer over the app's VMs to QEMU.

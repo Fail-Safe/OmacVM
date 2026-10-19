@@ -973,13 +973,15 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-virgl-unlo
 grep -q 'getenv("OMACVM_GPU_UNLOCKED")' "$source_dir/hw/display/virtio-gpu-virgl.c" || \
   die "hw/display/virtio-gpu-virgl.c: the unlocked runs are missing (virtio-gpu-virgl-unlocked patch)"
 # OmacVM: the Mac's cursor stays hidden over the VM: an empty image while
-# hidden, set again on motion when another process or macOS showed it (the
-# Mac's arrow over the guest's pointer, 2026-10-19). Rules and test: the
-# pointer-start logic patch and test-pointer-start.sh above.
+# hidden, set again on motion, and every 0.5 s while hidden, when another
+# process or macOS showed it (the Mac's arrow over the guest's pointer,
+# 2026-10-19). Rules and test: the pointer-start logic patch and
+# test-pointer-start.sh above.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-cursor-stays-hidden.patch"
 grep -q 'omacvm_cursor_image(omacvm_pointer_image(hw, omacvm_hwc_visible(&omacvm_hwc), hide));' "$source_dir/ui/cocoa.m" && \
-  [[ $(grep -c '^    omacvm_cursor_motion();$' "$source_dir/ui/cocoa.m") == 2 ]] || \
-  die "ui/cocoa.m: the hidden Mac cursor needs its empty image, set again on motion (cursor-stays-hidden patch)"
+  [[ $(grep -c '^    omacvm_cursor_again();$' "$source_dir/ui/cocoa.m") == 2 ]] && \
+  grep -q '^    omacvm_cursor_watch(hide && !omacvm_test_pointer);$' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the hidden Mac cursor needs its empty image, set again on motion and while hidden (cursor-stays-hidden patch)"
 # OmacVM, HDR (ADR 0049): the guest tone-maps into the window's display's
 # headroom, which QEMU tells it over the display port; macOS does not tone-map
 # again (PQ 203 nits stays the Mac's white). Its rules' test, then the wiring.
