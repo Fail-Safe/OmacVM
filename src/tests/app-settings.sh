@@ -88,6 +88,13 @@ for i in 0 1; do
   expect "fresh $n: Mac input off" false "$(val vms.$i.macIME)"
   expect "fresh $n: resources as built" "4 8 64" "$(val vms.$i.cpus) $(val vms.$i.memoryGB) $(val vms.$i.diskGB)"
 done
+# The ways back while both graphics switches are on by default: GPU safe mode turns both off,
+# gpuMainLoop the lock one, vkWindowsCopy the copy one.
+for k in gpuSafeMode gpuMainLoop vkWindowsCopy; do
+  defaults write "$D" $k -bool true; dump; defaults delete "$D" $k
+  case $k in gpuSafeMode) want="false false" ;; gpuMainLoop) want="false true" ;; vkWindowsCopy) want="true false" ;; esac
+  expect "fresh + $k: gpuOffMainLoop vkWindowsNoCopy" "$want" "$(val app.gpuOffMainLoop) $(val app.vkWindowsNoCopy)"
+done
 
 # (b) Changes as the window makes them, read by the next launches; (c) per VM.
 mkdir -p "$H/Shared"
