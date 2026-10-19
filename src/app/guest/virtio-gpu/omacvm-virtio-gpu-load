@@ -1,0 +1,46 @@
+#!/bin/bash
+# OmacVM.app, 10-bit colour: modprobe runs this for virtio_gpu (the install
+# rule in /etc/modprobe.d/omacvm-virtio-gpu.conf, from omacvm-virtio-gpu-build),
+# at boot from udev, as root. It loads OmacVM's 10-bit driver only when this
+# start asks for it (SMBIOS omacvm.deepcolor=1 from the app's switch, or
+# omacvm.hdr=1 from an older app's hidden one) and it is built for the running
+# kernel; else, and on any failure, the stock driver. The VM never goes
+# without one. /run/omacvm/virtio-gpu says which: "omacvm" or "stock WHY".
+#   omacvm-virtio-gpu-load [module options]
+set -u
+umask 022
+# Tests only: a made-up file system under this folder, stand-ins on the PATH.
+P=${OMACVM_VIRTIO_GPU_TEST_ROOT:-}
+[[ -n $P ]] || PATH=/usr/bin:/usr/sbin:/bin:/sbin
+here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+root=$P/usr/local/lib/omacvm/virtio-gpu
+status=$P/run/omacvm/virtio-gpu
+kernel=$(uname -r)
+ko=$root/$kernel/virtio-gpu.ko
+
+say() {
+  { mkdir -p "${status%/*}" && printf '%s\n' "$1" > "$status.tmp" && mv -f "$status.tmp" "$status"; } 2>/dev/null
+}
+
+# The strings follow the SMBIOS structure's formatted area (omacvm-smbios
+# skips it; a grep over the raw bytes would miss the first string).
+if ! host=$(python3 -I "$here/../omacvm-smbios" "$P/sys/firmware/dmi/entries" 2>/dev/null); then
+  why="SMBIOS strings unreadable"
+elif ! grep -qxE 'OMACVM_(DEEPCOLOR|HDR)=1' <<< "$host"; then
+  why="not asked for this start"
+elif [[ ! -f $ko ]]; then
+  why="not built for $kernel"
+elif [[ $(cat "$root/$kernel/stamp" 2>/dev/null) != "$(sha256sum 2>/dev/null < "$root/linux-virtio-gpu-deep-color.patch" | cut -d' ' -f1) $kernel" ]]; then
+  why="stamp out of date"
+else
+  for dep in $(modinfo -F depends "$ko" 2>/dev/null | tr ',' ' '); do
+    modprobe -q "$dep" 2>/dev/null
+  done
+  if err=$(insmod "$ko" "$@" 2>&1); then
+    say omacvm
+    exit 0
+  fi
+  why="insmod failed: $(printf '%s\n' "$err" | head -1)"
+fi
+say "stock $why"
+exec modprobe --ignore-install virtio_gpu "$@"

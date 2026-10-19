@@ -1,0 +1,26 @@
+#!/usr/bin/python3
+"""OmacVM.app: what the Mac tells the VM at start, QEMU's SMBIOS OEM strings
+"omacvm.KEY=VALUE" (type 11) -> OMACVM_KEY=VALUE lines. Values are numbers or
+sizes (digits, x and .); anything else is left out. Read by omacvm-app-host
+(host.env) and omacvm-virtio-gpu-load (at boot, as root).
+  omacvm-smbios [DIR]   DIR: /sys/firmware/dmi/entries
+"""
+import glob
+import os
+import sys
+
+entries = sys.argv[1] if len(sys.argv) > 1 else "/sys/firmware/dmi/entries"
+for raw in sorted(glob.glob(os.path.join(entries, "11-*", "raw"))):
+    try:
+        data = open(raw, "rb").read()
+    except OSError:
+        continue
+    if len(data) < 2:
+        continue
+    # The strings follow the formatted area, whose length is byte 1.
+    for s in data[data[1]:].split(b"\0"):
+        s = s.decode("ascii", "replace")
+        if s.startswith("omacvm.") and "=" in s:
+            k, v = s[7:].split("=", 1)
+            if k.replace("_", "").isalnum() and v.replace("x", "").replace(".", "").isdigit():
+                print(f"OMACVM_{k.upper()}={v}")

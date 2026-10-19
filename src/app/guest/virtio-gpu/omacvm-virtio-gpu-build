@@ -1,74 +1,206 @@
 #!/bin/bash
-# OmacVM.app, HDR (optional, off by default): build the guest's virtio-gpu
-# module with 10-bit scanout formats (linux-virtio-gpu-deep-color.patch) and
-# install it into /lib/modules/<kernel>/updates. Needs linux-aarch64-headers.
-# The driver sources are the upstream stable release of the kernel's version,
-# from kernel.org.
+# OmacVM.app, 10-bit colour (HDR): the guest's virtio-gpu driver with 10-bit
+# scanout formats (linux-virtio-gpu-deep-color.patch), built for each kernel
+# into /usr/local/lib/omacvm/virtio-gpu/<kernel>/, where depmod does not see
+# it. It stays dormant: the modprobe rule written here hands virtio_gpu to
+# omacvm-virtio-gpu-load, which loads it only for a VM start with the app's
+# switch on. omacvm apply runs this on every app VM, the pacman hook after
+# kernel updates. Needs the kernel's headers. The driver's sources are the
+# upstream stable release of the kernel's version, from kernel.org; download,
+# patch and build run as nobody, root only installs the result.
 # Usage (root):
 #   omacvm-virtio-gpu-build             build for the running kernel
-#   omacvm-virtio-gpu-build --kernel V  build for kernel V (pacman hook)
-#   omacvm-virtio-gpu-build --hook      build for every installed kernel that
-#                                       has headers, if HDR was turned on
-#   omacvm-virtio-gpu-build --remove    back to the stock driver
+#   omacvm-virtio-gpu-build --kernel K  build for kernel K
+#   omacvm-virtio-gpu-build --hook      every installed kernel with headers;
+#                                       drops the builds of removed kernels
+#   omacvm-virtio-gpu-build --status    one line: built for the running kernel
+#                                       or why not (exit 1), and this start's driver
+#   omacvm-virtio-gpu-build --remove    the builds and the modprobe rule go
+# A kernel without headers is skipped; a build whose stamp (the patch's sha256
+# and the kernel) is current is not built again.
 set -euo pipefail
-marker=/etc/omacvm/virtio-gpu-deep-color
-here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
-patch_file=${OMACVM_VIRTIO_GPU_PATCH:-$here/linux-virtio-gpu-deep-color.patch}
+# Tests only: a made-up file system under this folder, stand-ins on the PATH.
+P=${OMACVM_VIRTIO_GPU_TEST_ROOT:-}
+self=$(readlink -f "$0")
+root=$P/usr/local/lib/omacvm/virtio-gpu
+mods=$P/lib/modules
+rule=$P/etc/modprobe.d/omacvm-virtio-gpu.conf
+patch_file=$root/linux-virtio-gpu-deep-color.patch
+budget=300   # seconds for all builds of one run: the pacman hook holds kernel updates
+work="" stage=""
+trap 'rm -rf ${work:+"$work"} ${stage:+"$stage"}' EXIT
 
-build() {
-  local kernel=$1
-  local updates=/lib/modules/$kernel/updates/virtio-gpu.ko
-  local version=${kernel%%-*}
-  [[ $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "omacvm-virtio-gpu: unexpected kernel version $kernel" >&2; return 1; }
-  [[ -d /lib/modules/$kernel/build ]] || { echo "omacvm-virtio-gpu: no headers for $kernel (pacman -S linux-aarch64-headers)" >&2; return 1; }
-  local work
-  work=$(mktemp -d)
-  trap 'rm -rf "$work"' RETURN
-  local src=$work/drivers/gpu/drm/virtio
+say() { echo "omacvm-virtio-gpu: $*"; }
+
+stamp_for() { echo "$(sha256sum 2>/dev/null < "$patch_file" | cut -d' ' -f1) $1"; }
+
+current() {   # KERNEL: built, and from this patch
+  [[ -f $root/$1/virtio-gpu.ko && $(cat "$root/$1/stamp" 2>/dev/null) == "$(stamp_for "$1")" ]]
+}
+
+failed() {   # KERNEL WHY: said, and kept for --status
+  say "$1: not built: $2"
+  { mkdir -p "$root/$1" && printf '%s\n' "$2" > "$root/$1/error"; } 2>/dev/null || true
+}
+
+# As nobody, in its own WORK folder: fetch, patch, build. The module goes to
+# stdout, everything else to stderr.
+fetch_and_make() {   # KERNEL VERSION WORK
+  local kernel=$1 version=$2 src=$3/drivers/gpu/drm/virtio f
+  local base=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/drivers/gpu/drm/virtio
+  exec 3>&1 1>&2
   mkdir -p "$src"
-  local base="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/drivers/gpu/drm/virtio"
-  local f
   for f in Makefile virtgpu_debugfs.c virtgpu_display.c virtgpu_drv.c virtgpu_drv.h \
            virtgpu_fence.c virtgpu_gem.c virtgpu_ioctl.c virtgpu_kms.c virtgpu_object.c \
            virtgpu_plane.c virtgpu_prime.c virtgpu_submit.c virtgpu_trace.h \
            virtgpu_trace_points.c virtgpu_vq.c virtgpu_vram.c; do
-    curl --fail --silent --show-error --location --proto '=https' --retry 3 \
-      -o "$src/$f" "$base/$f?h=v$version"
+    curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+      --connect-timeout 10 --max-time 60 --retry 2 -o "$src/$f" "$base/$f?h=v$version"
   done
-  patch -s -d "$work" -p1 -f -i "$patch_file"
+  patch -s -d "$3" -p1 -f -i "$patch_file"
   # Out of tree: the trace header sits next to the sources.
   sed -i 's|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH .|' "$src/virtgpu_trace.h"
   echo 'CFLAGS_virtgpu_trace_points.o := -I$(src)' >> "$src/Makefile"
-  make -s -C "/lib/modules/$kernel/build" M="$src" CONFIG_DRM_VIRTIO_GPU=m modules
-  install -Dm644 "$src/virtio-gpu.ko" "$updates"
-  depmod -a "$kernel"
-  echo "omacvm-virtio-gpu: installed $updates (10-bit scanout)"
+  make -s -j"$(nproc)" -C "$mods/$kernel/build" M="$src" CONFIG_DRM_VIRTIO_GPU=m modules
+  cat "$src/virtio-gpu.ko" >&3
+}
+
+build() {   # KERNEL: 0 = built, current or no headers; 1 = failed
+  local kernel=$1 version left rc=0 v keep why
+  if [[ ! $kernel =~ ^[A-Za-z0-9._+-]+$ || $kernel == .* ]]; then
+    say "not a kernel name: $kernel"; return 1
+  fi
+  if [[ ! -d $mods/$kernel/build ]]; then
+    say "$kernel: no kernel headers ($mods/$kernel/build), skipped"; return 0
+  fi
+  if current "$kernel"; then say "$kernel: up to date"; return 0; fi
+  version=${kernel%%-*}
+  [[ $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { failed "$kernel" "unexpected kernel version"; return 1; }
+  if [[ $version == *.*.0 ]]; then version=${version%.0}; fi   # tag v7.2, not v7.2.0
+  [[ -f $patch_file ]] || { failed "$kernel" "no $patch_file"; return 1; }
+  left=$((budget - SECONDS))
+  (( left > 10 )) || { failed "$kernel" "no time left in this run (${budget} s for all kernels)"; return 1; }
+  if ! { work=$(mktemp -d "$P/tmp/omacvm-virtio-gpu.XXXXXX") && stage=$(mktemp -d "$P/tmp/omacvm-virtio-gpu.XXXXXX") &&
+         chown nobody:nobody "$work"; }; then
+    failed "$kernel" "no work folder for nobody"; return 1
+  fi
+  # A clean environment, but the proxy (the Mac's, from the build) stays.
+  keep=(PATH=/usr/local/bin:/usr/bin:/bin "HOME=$work" LC_ALL=C)
+  for v in http_proxy https_proxy all_proxy no_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY; do
+    [[ -z ${!v:-} ]] || keep+=("$v=${!v}")
+  done
+  timeout --kill-after=10 "$left" setpriv --reuid=nobody --regid=nobody --clear-groups --no-new-privs -- \
+    env -i "${keep[@]}" "$self" --unprivileged "$kernel" "$version" "$work" \
+    > "$stage/virtio-gpu.ko" 2> "$stage/log" || rc=$?
+  if (( rc != 0 )); then
+    cat "$stage/log" >&2
+    why=$(grep -v '^[[:space:]]*$' "$stage/log" | tail -n1 | cut -c1-200) || true
+    (( rc != 124 && rc != 137 )) || why="timed out after $left s"
+    failed "$kernel" "${why:-exit $rc}"
+  elif [[ $(modinfo -F vermagic "$stage/virtio-gpu.ko" 2>/dev/null) != "$kernel "* ]]; then
+    failed "$kernel" "the build is not a module for $kernel"; rc=1
+  # The stamp last: a module without its stamp is never loaded.
+  elif ! { install -d -o root -g root -m 0755 "$root/$kernel" && rm -f "$root/$kernel/stamp" "$root/$kernel/error" &&
+           install -o root -g root -m 0644 "$stage/virtio-gpu.ko" "$root/$kernel/virtio-gpu.ko" &&
+           stamp_for "$kernel" | install -o root -g root -m 0644 /dev/stdin "$root/$kernel/stamp"; }; then
+    failed "$kernel" "could not install it into $root/$kernel"; rc=1
+  else
+    say "$kernel: built (loaded only when the app's 10-bit switch starts the VM)"
+  fi
+  rm -rf "$work" "$stage"; work="" stage=""
+  return $(( rc != 0 ))
+}
+
+# The by-hand install of earlier versions went into /lib/modules/K/updates,
+# where it was always loaded: it goes.
+migrate() {
+  local f k
+  for f in "$mods"/*/updates/virtio-gpu.ko; do
+    [[ -e $f ]] || continue
+    k=${f#"$mods"/}; k=${k%%/*}
+    rm -f "$f"
+    depmod -a "$k" 2>/dev/null || true
+    say "$k: removed the build in updates/ (by hand, always loaded)"
+  done
+  rm -f "$P/etc/omacvm/virtio-gpu-deep-color"
+}
+
+rule_text() {
+  cat <<'EOF'
+# OmacVM.app (omacvm-virtio-gpu-build): virtio_gpu goes through
+# omacvm-virtio-gpu-load, which loads the 10-bit driver only for a start with
+# the app's switch on, else the stock one. Without the loader (in the
+# initramfs) the stock driver loads.
+install virtio_gpu [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ] && /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS
+EOF
+}
+
+# The modprobe rule, once a build for some kernel is there.
+write_rule() {
+  local d
+  for d in "$root"/*/; do
+    if [[ ! -d $d ]] || ! current "$(basename "$d")"; then continue; fi
+    [[ $(rule_text) == "$(cat "$rule" 2>/dev/null)" ]] && return 0
+    mkdir -p "${rule%/*}"
+    rule_text > "$rule.tmp" && chmod 644 "$rule.tmp" && mv -f "$rule.tmp" "$rule"
+    return 0
+  done
+}
+
+status() {
+  local k now why
+  k=$(uname -r)
+  now=$(cat "$P/run/omacvm/virtio-gpu" 2>/dev/null) || now="stock, loaded without omacvm-virtio-gpu-load"
+  if current "$k"; then echo "built for $k (this start: $now)"; return 0; fi
+  if [[ ! -d $mods/$k/build ]]; then why="no kernel headers"
+  elif [[ -s $root/$k/error ]]; then why="build failed: $(head -n1 "$root/$k/error")"
+  elif [[ -f $root/$k/virtio-gpu.ko ]]; then why="out of date (another patch)"
+  else why="not built yet"; fi
+  echo "not built for $k: $why (this start: $now)"
+  return 1
 }
 
 case ${1:-} in
+  --status|--unprivileged) ;;
+  *) [[ $EUID == 0 || -n $P ]] || { echo "omacvm-virtio-gpu: run as root" >&2; exit 2; } ;;
+esac
+case ${1:-} in
+  --status)
+    status
+    ;;
   --remove)
-    rm -f /lib/modules/*/updates/virtio-gpu.ko "$marker"
-    depmod -a "$(uname -r)"
-    echo "omacvm-virtio-gpu: removed; the stock driver loads after a reboot"
+    migrate
+    for d in "$root"/*/; do [[ -d $d ]] && rm -rf "$d"; done
+    rm -f "$rule"
+    say "removed; the stock driver loads at the next start"
     ;;
   --hook)
-    # After a kernel update: only if HDR was turned on before.
-    [[ -e $marker ]] || exit 0
-    for d in /lib/modules/*/build; do
-      k=$(basename "$(dirname "$d")")
-      [[ -e /lib/modules/$k/updates/virtio-gpu.ko ]] || build "$k" || true
+    migrate
+    for d in "$mods"/*/; do
+      [[ -d $d ]] && build "$(basename "$d")" || true
     done
+    for d in "$root"/*/; do
+      [[ -d $d ]] || continue
+      k=$(basename "$d")
+      [[ -d $mods/$k/kernel ]] || { rm -rf "$d"; say "$k: removed (the kernel is gone)"; }
+    done
+    write_rule || true
+    exit 0   # never fails the kernel update
     ;;
-  --kernel)
-    build "${2:?--kernel needs a version}"
+  --kernel|"")
+    k=$(uname -r)
+    [[ ${1:-} != --kernel ]] || k=${2:?--kernel needs a version}
+    migrate
+    rc=0; build "$k" || rc=1
+    write_rule
+    exit $rc
     ;;
-  "")
-    build "$(uname -r)"
-    install -Dm644 /dev/null "$marker"
-    echo "omacvm-virtio-gpu: takes effect after a reboot"
+  --unprivileged)
+    [[ $EUID != 0 ]] || { echo "omacvm-virtio-gpu: --unprivileged is not for root" >&2; exit 2; }
+    fetch_and_make "$2" "$3" "$4"
     ;;
   *)
-    echo "usage: omacvm-virtio-gpu-build [--kernel VERSION | --hook | --remove]" >&2
+    echo "usage: omacvm-virtio-gpu-build [--kernel VERSION | --hook | --status | --remove]" >&2
     exit 2
     ;;
 esac
