@@ -301,11 +301,23 @@ struct VKWindowsNoCopyRow: View {
 
     static let info = "Vulkan apps' windows reach the Mac's screen without a copy. QEMU copied every frame of a Vulkan window on its main loop: 2.5 ms a frame for a 1816 x 870 window on a Mac mini, while the VM's CPUs waited for it. With this on, the Vulkan driver writes each frame into memory the Mac's OpenGL can read, and the GPU puts it in place: 0.3 ms of QEMU's time a frame. Frame rates stay the same; the pictures are bit for bit the same. Only on macOS 26 and newer (KosmicKrisp); with MoltenVK the frames are copied as before. On by default; GPU safe mode always copies. Counts from the next start of the VM."
 
+    /// Only KosmicKrisp can do it; with MoltenVK (macOS 15, or an app without
+    /// KosmicKrisp) the frames are copied whatever the stored setting says.
+    static var usable: Bool {
+        Graphics.vulkanDriver(macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                              kosmicKrisp: Runner.runtimeHasKosmicKrisp,
+                              environment: ProcessInfo.processInfo.environment).hasPrefix("KosmicKrisp")
+    }
+
     var body: some View {
+        let usable = Self.usable
         SettingRow(title: "Vulkan windows without a copy",
-                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Less work for QEMU on each frame of a Vulkan app (macOS 26 and newer).",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on."
+                       : usable ? "Less work for QEMU on each frame of a Vulkan app (macOS 26 and newer)."
+                       : "Not on this Mac: needs macOS 26 (KosmicKrisp); Vulkan windows are copied.",
                    info: Self.info, probe: "vk-windows-no-copy") {
-            RowSwitch(title: "Vulkan windows without a copy", isOn: $on, enabled: !Settings.gpuSafeMode)
+            RowSwitch(title: "Vulkan windows without a copy", isOn: usable ? $on : .constant(false),
+                      enabled: usable && !Settings.gpuSafeMode)
         }
         .onChange(of: on) { _, v in if v != Settings.vkWindowsNoCopy { Settings.vkWindowsNoCopy = v } }
         .onChange(of: tick) { _, _ in on = Settings.vkWindowsNoCopy }
