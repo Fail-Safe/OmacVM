@@ -71,7 +71,8 @@ want() { [[ -z $ONLY || $ONLY == *" $1 "* ]]; }
 # --- the Mac and its user
 hid_idle() { ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'; }
 jump() { pgrep -f 'JumpConnect.*(rtcproxy|desktopproxy)' | wc -l | tr -d ' '; }
-locked() { ioreg -n Root -d1 -k IOConsoleUsers 2>/dev/null | grep -q '"CGSSessionScreenIsLocked"=Yes' && echo Yes || echo No; }
+# No `ioreg | grep -q`: grep ends ioreg early, and under pipefail its SIGPIPE always made it No.
+locked() { [[ $(ioreg -n Root -d1 -k IOConsoleUsers 2>/dev/null) == *'"CGSSessionScreenIsLocked"=Yes'* ]] && echo Yes || echo No; }
 away() { os_away "$(hid_idle)" "$(jump)" "$(locked)" "$LAST" "$(date +%s)"; }
 who() { echo "HID idle $(hid_idle) s, Jump sessions $(jump), screen locked $(locked)"; }
 # Our own last event, also of a run before (HID idle counts ours as input): LASTF keeps it.
