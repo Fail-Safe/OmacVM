@@ -619,23 +619,26 @@ final class Runner {
         // from another Mac, or from before 3.0.12), and only after that the
         // feature switches made while the VM was stopped: their apply goes
         // over SSH. Nothing on screen; qemu.log says it when the key was added.
+        // One wait for the guest agent for all of them: ten minutes from now.
         let pid = p.processIdentifier
         let folder = c.folder
+        let agentDeadline = Date().addingTimeInterval(600)
         Thread.detachNewThread { [weak self] in
             GuestAgent.hold(socketPath: agentPath)
-            let r = VMKey.ensure(folder: folder, agentPath: agentPath, pingWait: 600, running: { kill(pid, 0) == 0 })
+            let r = VMKey.ensure(folder: folder, agentPath: agentPath, pingWait: agentDeadline.timeIntervalSinceNow,
+                                 running: { kill(pid, 0) == 0 })
             if let line = SSHRepair.logLine(r, stillRunning: kill(pid, 0) == 0) {
                 Task { @MainActor in self?.appendLog(line) }
             }
             if let on = imePending {
                 FeatureStart.run(config: c, switch: MacIME.switchState, what: "Mac input methods", on: on, agentPath: agentPath,
-                                 running: { kill(pid, 0) == 0 }) { [weak self] line in
+                                 until: agentDeadline, running: { kill(pid, 0) == 0 }) { [weak self] line in
                     Task { @MainActor in self?.appendLog(line) }
                 }
             }
             if let on = gpuComputePending {
                 FeatureStart.run(config: c, switch: GPUCompute.switchState, what: "WebGPU and GPU compute", on: on, agentPath: agentPath,
-                                 running: { kill(pid, 0) == 0 }) { [weak self] line in
+                                 until: agentDeadline, running: { kill(pid, 0) == 0 }) { [weak self] line in
                     Task { @MainActor in self?.appendLog(line) }
                 }
             }

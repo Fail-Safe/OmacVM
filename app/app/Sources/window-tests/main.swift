@@ -602,6 +602,14 @@ expect(SSHRepair.logLine(.present, stillRunning: true) == nil, "ssh: nothing log
 expect(SSHRepair.logLine(.noAgent, stillRunning: false) == nil && SSHRepair.logLine(.noAgent, stillRunning: true) != nil,
        "ssh: no agent is logged only while the VM runs")
 expect(SSHRepair.logLine(.failed("exit 1"), stillRunning: true)?.hasSuffix("exit 1") == true, "ssh: a failure says why")
+expect(SSHRepair.logLine(.added, stillRunning: true)?.contains("another Mac") == false,
+       "ssh: the added line names no cause (the folder's key may just have been made)")
+let guestText = "refused\nOmacVM: SSH: fake line\u{1b}[2J" + String(repeating: "x", count: 300)
+let guestLine = SSHRepair.logLine(.failed("the guest agent refused: " + guestText), stillRunning: true) ?? ""
+expect(!guestLine.contains("\n") && !guestLine.contains("\u{1b}") && guestLine.unicodeScalars.allSatisfy { (0x20...0x7e).contains($0.value) },
+       "ssh: the guest's error text reaches qemu.log as one printable line")
+expect(SSHRepair.plain(guestText).count == 120 && SSHRepair.plain(guestText).hasSuffix("..."), "ssh: ... 120 characters at most")
+expect(SSHRepair.plain("exit 1") == "exit 1", "ssh: plain text stays as it is")
 
 // update-vm.sh's lines: only its own, in step 1 of an update, once each.
 var sshLines = SSHRepair.Lines()

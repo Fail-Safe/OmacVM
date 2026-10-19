@@ -223,7 +223,7 @@ rc=$(srun denied added)
 expect "turned down, the app adds the key: the update goes on" "0" "$rc"
 expect "... the app was asked once (FIX ssh-key)" "1" "$(grep -c '^FIX ssh-key$' "$T/out")"
 expect "... says so, then that SSH works again" "yes" \
-  "$(grep -q "^==> Copied only knows another Mac's SSH key: adding this one" "$T/out" && grep -q '^==> SSH works again.' "$T/out" && echo yes)"
+  "$(grep -q "^==> Copied doesn't know this VM folder's SSH key: adding it" "$T/out" && grep -q '^==> SSH works again.' "$T/out" && echo yes)"
 expect "... and ends UPDATED" "UPDATED Copied" "$(grep '^UPDATED' "$T/out")"
 expect "... the folder had no key: a new one, said once" "1" "$(grep -c '^==> this VM folder had no SSH key: made a new one' "$T/out")"
 agent=$(cat "$T/qga-path" 2>/dev/null)
@@ -233,16 +233,19 @@ s=$(date +%s); rc=$(srun denied none)
 expect "no answer from the app (no guest agent): stops (exit 1)" "1" "$rc"
 expect "... SSHKEY refused, for Copy Command" "1" "$(grep -c '^SSHKEY refused$' "$T/out")"
 expect "... the error says what to do" "yes" \
-  "$(grep -q "^ERROR: Copied doesn't let this Mac in over SSH, and OmacVM could not add its key (the VM's guest agent did not answer).*Copy Command.*Update VM again" "$T/out" && echo yes || grep '^ERROR' "$T/out")"
+  "$(grep -q "^ERROR: Copied doesn't let this Mac in over SSH, and OmacVM could not add this VM folder's key (the VM's guest agent did not answer).*Copy Command.*Update VM again" "$T/out" && echo yes || grep '^ERROR' "$T/out")"
 expect "... the VM goes off by its power button, no QMP quit" "powerdown" "$(paste -sd ' ' "$T/qmp.log" 2>/dev/null)"
 expect "... within 20 s" "yes" "$( (( $(date +%s) - s < 20 )) && echo yes || echo "$(( $(date +%s) - s )) s")"
 rc=$(srun denied failed)
 expect "the app could not add it: stops, says so" "1 yes" \
-  "$rc $(grep -q "could not add its key (adding it in the VM failed)" "$T/out" && grep -q '^SSHKEY refused$' "$T/out" && echo yes)"
+  "$rc $(grep -q "could not add this VM folder's key (adding it in the VM failed)" "$T/out" && grep -q '^SSHKEY refused$' "$T/out" && echo yes)"
 rc=$(srun denied-always added)
 expect "added, but SSH still turns it down: stops" "1" "$rc"
-expect "... says the VM's SSH settings may have changed" "yes" "$(grep -q "^ERROR: OmacVM added this Mac's key in Copied, but its SSH still turns OmacVM away" "$T/out" && echo yes)"
+expect "... says the VM's SSH settings may have changed" "yes" "$(grep -q "^ERROR: OmacVM added this VM folder's key in Copied, but its SSH still turns OmacVM away" "$T/out" && echo yes)"
 expect "... no Copy Command there (it would not help)" "0" "$(grep -c '^SSHKEY refused' "$T/out")"
+rc=$(srun denied-always present)
+expect "there already, but SSH still turns it down: stops, says it was there" "1 yes" \
+  "$rc $(grep -q "^ERROR: Copied already has this VM folder's key, but its SSH still turns OmacVM away" "$T/out" && echo yes)"
 rc=$(srun ok none)
 expect "a VM that lets us in: no FIX line, UPDATED" "0 0 UPDATED Copied" "$rc $(grep -c '^FIX' "$T/out") $(grep '^UPDATED' "$T/out")"
 expect "... and no new key" "0" "$(grep -c 'made a new one' "$T/out")"
