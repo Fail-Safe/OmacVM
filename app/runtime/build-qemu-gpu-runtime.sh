@@ -972,6 +972,14 @@ grep -q 'bpp = qatomic_read(&gl_ctx_bpp);' "$source_dir/ui/cocoa.m" || \
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-virgl-unlocked.patch"
 grep -q 'getenv("OMACVM_GPU_UNLOCKED")' "$source_dir/hw/display/virtio-gpu-virgl.c" || \
   die "hw/display/virtio-gpu-virgl.c: the unlocked runs are missing (virtio-gpu-virgl-unlocked patch)"
+# OmacVM: the Mac's cursor stays hidden over the VM: an empty image while
+# hidden, set again on motion when another process or macOS showed it (the
+# Mac's arrow over the guest's pointer, 2026-10-19). Rules and test: the
+# pointer-start logic patch and test-pointer-start.sh above.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-cursor-stays-hidden.patch"
+grep -q 'omacvm_cursor_image(omacvm_pointer_image(hw, omacvm_hwc_visible(&omacvm_hwc), hide));' "$source_dir/ui/cocoa.m" && \
+  [[ $(grep -c '^    omacvm_cursor_motion();$' "$source_dir/ui/cocoa.m") == 2 ]] || \
+  die "ui/cocoa.m: the hidden Mac cursor needs its empty image, set again on motion (cursor-stays-hidden patch)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"

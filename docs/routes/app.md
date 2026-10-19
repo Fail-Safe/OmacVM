@@ -456,6 +456,15 @@ the VM's SSH on `127.0.0.1:<port>`.
   `src/tests/pointer-start-vm.sh`). QEMU's log says which way it takes
   ("cocoa: pointer: ..."). Off (QEMU's own way, on entering the window or a
   click): `defaults write org.omacvm.app pointerStart -bool false`.
+- While the VM has the pointer, the Mac's cursor is hidden and its picture
+  is an empty one too. Other programs and macOS can show a hidden cursor
+  again (a background helper, an app or Space switch); then it shows
+  nothing over the VM. A motion over the VM sets the empty picture again
+  when the window server says the hidden cursor shows after all; QEMU's log
+  then says "cocoa: the hidden Mac cursor showed over the VM"
+  (`omacvm-cocoa-cursor-stays-hidden.patch`; in a VM:
+  `src/tests/pointer-reveal-vm.sh`). OmacVM Gestures leaves the Mac's
+  pointer over the app's VMs to QEMU.
 - Mac pointer for the VM (experimental, off, no switch in the window yet:
   `defaults write org.omacvm.app macPointer -bool true`, from the VM's
   next start): Omarchy is asked to put its pointer on virtio-gpu's cursor

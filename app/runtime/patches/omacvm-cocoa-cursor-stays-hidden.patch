@@ -1,0 +1,256 @@
+From: OmacVM
+Subject: [PATCH] cocoa: the Mac's cursor stays hidden over the VM
+
+What: while QEMU hides the Mac's cursor over the VM (the guest draws its
+own pointer), the cursor's image is an empty one too, and the arrow comes
+back when QEMU shows the cursor again (Ctrl+Option+G, the pointer leaving
+the VM, another app in front, a guest reset). Each motion over the VM sets
+the empty image again when AppKit put its own cursor back, or, at most
+every 0.1 s, when the window server says the hidden cursor shows after
+all. One [NSCursor hide] and one unhide per change, as before: the hide
+count stays balanced. The image rules are in ui/omacvm-pointer-start.h
+(omacvm_pointer_image, omacvm_pointer_image_again); this patch also takes
+over the hardware cursor's image code (omacvm-cocoa-hw-cursor.patch), which
+set the guest's image or an empty one the same way.
+
+Why: whether the cursor is hidden belongs to the window server, and other
+processes and macOS undo it: a background show (OmacVM Gestures hid and
+showed the cursor over full-screen VMs from the background as well), or an
+app or Space switch. QEMU still counted it hidden and never hid it again,
+so the Mac's arrow sat over the guest's pointer until the user switched
+out of the VM and back (user, 2026-10-19: "duplicate mac os cursor", on
+3.1.22 and 3.1.24). Reproduced on a MacBook Air: a background show after
+QEMU's hide brought the arrow back, and it stayed through moves. With an
+empty image, a cursor shown by someone else shows nothing over the VM.
+The window server is asked with CGCursorIsVisible (deprecated, still
+answers on macOS 15 and 27); a show between motions is caught at the next
+motion.
+
+Upstream: not sent (OmacVM's pointer policy).
+Test: app/runtime/Tests/display/test-pointer-start.sh (the image rules and
+a model of the window server's side, also the 3.1.24 behaviour);
+src/tests/pointer-reveal-vm.sh (a test app and VM: a background show and
+hide around QEMU's hide, then moves; the cursor shows nothing over the VM).
+Applies before omacvm-cocoa-no-app-nap.patch, which stays the last cocoa patch.
+
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -1040,17 +1040,26 @@
+ static bool omacvm_pointer_debug;        /* OMACVM_POINTER_DEBUG=1 or the test */
+ /*
+  * The guest's pointer as the Mac's cursor (ui/omacvm-hw-cursor.h; main
+- * thread): the guest's last image as a Mac cursor, an empty one for while
+- * the guest hides its pointer, and whether one of them is set now (the
+- * arrow comes back when that ends). omacvm_hwc_seq: only the newest queued
+- * image update makes a cursor (atomic; QEMU's thread counts).
++ * thread): the guest's last image as a Mac cursor. omacvm_hwc_seq: only
++ * the newest queued image update makes a cursor (atomic; QEMU's thread
++ * counts).
+  */
+ static OmacVMHwCursor omacvm_hwc;
+ static NSCursor *omacvm_hwc_cursor;
+-static NSCursor *omacvm_hwc_empty;
+-static bool omacvm_hwc_ours;
+ static unsigned omacvm_hwc_seq;
+-static void omacvm_hwc_apply(bool active);
++/*
++ * The image QEMU gives the Mac's cursor over the VM (main thread;
++ * ui/omacvm-pointer-start.h): the one it wants now, the cursor it set last
++ * (nil: none of its own, AppKit's), and two empty ones, so one can be set
++ * again over the other (AppKit skips the cursor it has).
++ */
++static OmacVMCursorImage omacvm_cur_want;
++static NSCursor *omacvm_cur_set;
++static NSCursor *omacvm_cur_empty[2];
++static int omacvm_cur_flip;
++static unsigned omacvm_cur_hides;       /* how often QEMU hid the cursor */
++static void omacvm_cursor_image(OmacVMCursorImage want);
++static void omacvm_cursor_motion(void);
+ static bool omacvm_hwc_on_ours(void);
+ static bool omacvm_guard_place;          /* this event's place is the guard's */
+ /* The displays and our windows the guard last saw (main thread). */
+@@ -1356,11 +1365,16 @@
+         hide = hold < 0;
+     }
+ 
+-    omacvm_hwc_apply(hw);
++    /*
++     * The image first: while hidden it is an empty one too, so a show by
++     * another process or by macOS shows nothing over the VM.
++     */
++    omacvm_cursor_image(omacvm_pointer_image(hw, omacvm_hwc_visible(&omacvm_hwc), hide));
+     if (hide == omacvm_mac_cursor_hidden) {
+         return;
+     }
+     omacvm_mac_cursor_hidden = hide;
++    omacvm_cur_hides += hide;
+     if (omacvm_pointer_debug) {
+         info_report("omacvm-pointer: Mac cursor %s", hide ? "hidden" : "shown");
+     }
+@@ -2605,9 +2619,7 @@
+     if (isAbsoluteEnabled && !omacvm_test_pointer) {
+         omacvm_guard_corners(event);
+     }
+-    if (omacvm_hwc_ours) {
+-        omacvm_hwc_apply(true);
+-    }
++    omacvm_cursor_motion();
+ 
+     with_bql(^{
+         if (isAbsoluteEnabled &&
+@@ -3028,9 +3040,7 @@
+     if (isAbsoluteEnabled) {
+         omacvm_guard_corners(event);
+     }
+-    if (omacvm_hwc_ours) {
+-        omacvm_hwc_apply(true);
+-    }
++    omacvm_cursor_motion();
+     with_bql(^{
+         if (button >= 0) {
+             qemu_input_queue_btn(dcl.con, button, down);
+@@ -5679,47 +5689,115 @@
+     [cocoaView updateCursorLayout];     /* QEMU's layer hides now */
+ }
+ 
+-/*
+- * The Mac's cursor while it carries the guest's pointer: the guest's image,
+- * or an empty one while the guest hides its pointer; the arrow again when
+- * that ends (main thread). Set again on each motion: AppKit puts its own
+- * cursor back at a window's edge. Test mode never sets the real cursor.
+- */
+-static void omacvm_hwc_apply(bool active)
++/* An empty cursor: a transparent 16x16 picture (AppKit wants a real one). */
++static NSCursor *omacvm_cursor_empty_new(void)
+ {
+-    static NSCursor *logged;
+-    NSCursor *want = nil;
++    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
++        initWithBitmapDataPlanes:NULL pixelsWide:16 pixelsHigh:16 bitsPerSample:8
++                 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
++                  colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:16 * 4 bitsPerPixel:32];
++    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(16, 16)];
++    NSCursor *cursor;
+ 
+-    if (active) {
+-        if (!omacvm_hwc_empty) {
+-            NSImage *none = [[NSImage alloc] initWithSize:NSMakeSize(1, 1)];
+-            omacvm_hwc_empty = [[NSCursor alloc] initWithImage:none hotSpot:NSZeroPoint];
+-            [none release];
+-        }
+-        want = omacvm_hwc_visible(&omacvm_hwc) && omacvm_hwc_cursor ?
+-               omacvm_hwc_cursor : omacvm_hwc_empty;
++    memset([rep bitmapData], 0, 16 * 16 * 4);
++    [image addRepresentation:rep];
++    cursor = [[NSCursor alloc] initWithImage:image hotSpot:NSZeroPoint];
++    [image release];
++    [rep release];
++    return cursor;
++}
++
++/* The cursor for an image (nil: AppKit's own). */
++static NSCursor *omacvm_cursor_for(OmacVMCursorImage want)
++{
++    if (want == OMACVM_CURSOR_APPKIT) {
++        return nil;
+     }
+-    if (!want && !omacvm_hwc_ours) {
+-        return;
++    if (want == OMACVM_CURSOR_GUEST && omacvm_hwc_cursor) {
++        return omacvm_hwc_cursor;
++    }
++    if (!omacvm_cur_empty[omacvm_cur_flip]) {
++        omacvm_cur_empty[omacvm_cur_flip] = omacvm_cursor_empty_new();
+     }
++    return omacvm_cur_empty[omacvm_cur_flip];
++}
++
++/*
++ * The Mac's cursor image over the VM (main thread; ui/omacvm-pointer-start.h
++ * says which): the guest's pointer (hardware cursor), an empty one (hidden,
++ * or the guest hides its pointer), or the arrow again once QEMU had set one
++ * of its own. Not over another app's window (Omanotch's strip sets its
++ * own). Test mode never sets the real cursor.
++ */
++static void omacvm_cursor_image(OmacVMCursorImage want)
++{
++    static OmacVMCursorImage logged;
++    NSCursor *c = omacvm_cursor_for(want);
++
+     if (omacvm_pointer_debug && want != logged) {
+-        info_report("omacvm-pointer: Mac cursor is %s", !want ? "the arrow again" :
+-                    want == omacvm_hwc_empty ? "empty (the guest hides its pointer)" :
+-                    "the guest's pointer");
++        info_report("omacvm-pointer: Mac cursor is %s",
++                    want == OMACVM_CURSOR_APPKIT ? "the arrow again" :
++                    want == OMACVM_CURSOR_GUEST ? "the guest's pointer" : "empty");
+         logged = want;
+     }
+-    omacvm_hwc_ours = want != nil;
++    omacvm_cur_want = want;
+     if (omacvm_test_pointer) {
+         return;     /* test: never the real cursor (the user works meanwhile) */
+     }
+-    if (!want) {
+-        [[NSCursor arrowCursor] set];
+-    } else if ([NSCursor currentCursor] != want && omacvm_hwc_on_ours()) {
+-        /* Not over another app's window (Omanotch's strip sets its own). */
+-        [want set];
++    if (!c) {
++        if (omacvm_cur_set) {
++            omacvm_cur_set = nil;
++            [[NSCursor arrowCursor] set];
++        }
++    } else if ([NSCursor currentCursor] != c && omacvm_hwc_on_ours()) {
++        [c set];
++        omacvm_cur_set = c;
+     }
+ }
+ 
++/*
++ * A motion over the VM (main thread): QEMU's image again when AppKit put
++ * its own back (at a window's edge), or, while QEMU has the cursor hidden,
++ * when the window server shows it after all (another process's show, or
++ * macOS's around a Space or app switch; AppKit sees neither). The window
++ * server is asked at most every OMACVM_POINTER_LOOK_S.
++ */
++static void omacvm_cursor_motion(void)
++{
++    static double last;
++    static unsigned logged_hide, logged;
++    bool has, looked = false, shown = false;
++
++    if (omacvm_cur_want == OMACVM_CURSOR_APPKIT || omacvm_test_pointer) {
++        return;
++    }
++    has = [NSCursor currentCursor] == omacvm_cursor_for(omacvm_cur_want);
++    if (has && omacvm_mac_cursor_hidden &&
++        omacvm_pointer_look_due(CACurrentMediaTime(), &last)) {
++        looked = true;
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wdeprecated-declarations"
++        shown = CGCursorIsVisible();
++#pragma clang diagnostic pop
++    }
++    if (!omacvm_pointer_image_again(omacvm_cur_want, has, omacvm_mac_cursor_hidden,
++                                    looked, shown)) {
++        return;
++    }
++    if (has) {
++        /* AppKit has the empty one already: the other, so it reaches the window server. */
++        omacvm_cur_flip ^= 1;
++        if (logged_hide != omacvm_cur_hides && logged < 20) {
++            logged_hide = omacvm_cur_hides;
++            logged++;
++            info_report("cocoa: the hidden Mac cursor showed over the VM (another app or "
++                        "macOS showed it): an empty one there now%s",
++                        logged == 20 ? " (not logged again)" : "");
++        }
++    }
++    omacvm_cursor_image(omacvm_cur_want);
++}
++
+ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *cursor)
+ {
+     unsigned seq = omacvm_hwc.on ? qatomic_fetch_inc(&omacvm_hwc_seq) + 1 : 0;

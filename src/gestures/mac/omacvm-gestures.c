@@ -228,7 +228,7 @@ static const char *escKeys = "ctrl-opt";
 #define PINCH_RATIO 1.3f            // ... and it must exceed the centroid movement by this much
 
 static volatile int frontIsVM, escaped, capturing;
-static pid_t frontPid;   // the full-screen VM app in front, else 0
+static pid_t frontPid;   // the full-screen VM app in front whose pointer we hide (not OmacVM.app's), else 0
 // The escape combo's way out and back: the last app in front that was no VM
 // app, and the last full-screen VM, each with its front window.
 static pid_t otherPid, vmPid, appPid;   // appPid: the app in front at the last check
@@ -656,7 +656,8 @@ static CGWindowID frontWindow(pid_t pid) {
 
 // The capture check runs every 0.2 s while a VM app is in front (to see its
 // window go full screen), else every 2 s plus on every app switch. The pointer
-// check runs only while a full-screen VM is in front: at 120 Hz while the
+// check runs only while a full-screen VM is in front (not OmacVM.app's, whose
+// QEMU hides the pointer itself): at 120 Hz while the
 // pointer moves; once it has rested a second, every 0.5 s with the rest tap
 // armed (its first move wakes the check at once), else at 20 Hz
 // (cursor-rest.h).
@@ -1097,8 +1098,12 @@ static void frontChanged(pid_t pid, int net, int front, const char *title, CGWin
   // Where the way out of the next full-screen VM goes back to.
   if (!front) noteCameFrom(pid != appPid);
   appPid = pid;
-  frontPid = front ? pid : 0;
-  cursorTimerOn(front && !inputPaused);
+  // OmacVM.app's QEMU hides the Mac's pointer over its VM itself (Omanotch
+  // leaves it alone too, #260): a second hider here showed it again in the
+  // background over QEMU's hide, and the Mac's arrow sat over the VM's own
+  // pointer until the user switched out and back (2026-10-19).
+  frontPid = front && net != NET_APP ? pid : 0;
+  cursorTimerOn(frontPid && !inputPaused);
   if (!front && escaped) escaped = 0;   // re-arm once the VM is left
   frontIsVM = front;
   // No capture without the tap and trackpads (a permission taken away).
@@ -1364,7 +1369,8 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
 // Parallels and UTM only hide the macOS pointer over their window when it comes
 // in from their own window; from the Omanotch strip or another app it can stay
 // on top of the guest's pointer. So it is hidden here whenever the window under
-// it is the front VM's full-screen window. A background process may only
+// it is the front VM's full-screen window (Parallels, UTM, VMware Fusion; not
+// OmacVM.app's, see frontChanged). A background process may only
 // do that with the window server's "SetsCursorInBackground" (private, but
 // stable for many macOS releases); without it this does nothing.
 static int cursorHidden, cursorControl = -1;
