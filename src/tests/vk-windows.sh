@@ -44,8 +44,10 @@ verdict() {   # LOG_LINE -> the status check.sh prints
   rm -f "$miclog"; echo "$out"
 }
 check "check.sh: IOSurfaces are ok" grep -q "^ok:without a copy" <<<"$(verdict 'vkr: Vulkan windows are IOSurfaces (OMACVM_VK_WINDOWS=iosurface)')"
-check "check.sh: asked but copied warns with the reason" grep -q "^warn:.*no IOSurfaces: the Vulkan driver is not KosmicKrisp" \
+check "check.sh: copied on MoltenVK is ok (macOS 15, nothing to fix)" grep -q "^ok:copied (MoltenVK" \
   <<<"$(verdict 'vkr: Vulkan windows are copied (no IOSurfaces: the Vulkan driver is not KosmicKrisp)')"
+check "check.sh: copied for another reason warns with it" grep -q "^warn:.*no IOSurfaces: the Vulkan driver has no vkGetMemoryHostPointerPropertiesEXT" \
+  <<<"$(verdict 'vkr: Vulkan windows are copied (no IOSurfaces: the Vulkan driver has no vkGetMemoryHostPointerPropertiesEXT)')"
 check "check.sh: switch off prints nothing" test -z "$(verdict 'context 8 (Hyprland) shows a Vulkan image by CPU copy')"
 
 echo "vk-windows: $((N - FAIL))/$N ok"
