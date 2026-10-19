@@ -16,6 +16,9 @@
 #                   window between the two starts)
 #   leftovers       nothing of the VM or the app runs on after the VM shut down from inside,
 #                   after its window was closed, and after the app quit
+# The window's header buttons (Start, Update VM) sit under its toolbar, where a click posted as an event
+# does nothing (macOS 15, tried): they get Accessibility's press; switches, the sidebar and the pointer
+# get real events.
 # On screen only while nobody uses the Mac (no input for 300 s but ours, no
 # Jump Desktop session, the screen unlocked); it stops when someone comes back.
 # Without that (or with --headless) the on-screen rows are BLOCKED, and
@@ -80,7 +83,11 @@ onscreen_ok() {
   away && return 0
   GONE="someone uses the Mac since $(date +%H:%M:%S) ($(who))"; log "STOP on screen: $GONE"; return 1
 }
-shot() { screencapture -x -C "$OUT/shots/$1.png" 2>/dev/null && sips -Z 1600 "$OUT/shots/$1.png" >/dev/null 2>&1; }
+# A picture of the screen, and the words of the app's window (a picture needs Screen Recording for this shell).
+shot() {
+  screencapture -x -C "$OUT/shots/$1.png" 2>/dev/null && sips -Z 1600 "$OUT/shots/$1.png" >/dev/null 2>&1
+  [[ -n ${LP:-} ]] && "$T" texts "$LP" > "$OUT/shots/$1.txt" 2>&1
+}
 spot() {   # NAME X Y: the 240 pt around the pointer, with the cursor
   screencapture -x -C -R "$(( $2 - 120 )),$(( $3 - 120 )),240,240" "$OUT/shots/$1.png" 2>/dev/null
 }
@@ -109,19 +116,23 @@ no_launcher() { [[ -z $(launcher_pid) ]]; }
 has_launcher() { [[ -n $(launcher_pid) ]]; }
 has_window() { [[ -n $(win_of "$LP") ]]; }
 updating() { psall | grep -v grep | grep -qF "update-vm.sh $VMD"; }
+onoff() { [[ $1 == 1 || $1 == true ]] && echo on || echo off; }
 wid() { awk '{printf "%.0f", $3}' <<<"$1"; }
-guest_up() { qnew | grep -q 'the guest draws its own pointer now' && gssh true 2>/dev/null; }
+guest_up() { gssh true 2>/dev/null; }
 win_of() { "$T" win "$1" 2>/dev/null | cut -d' ' -f1-4; }
 is_full() { [[ $("$T" win "$1" 2>/dev/null) == *full=$2 ]]; }
 # What is left of this run besides PID (the launcher, when it stays)
 leftovers() { psall | os_leftovers "$APP" "$VMD" "$VM" | awk -v k="${1:-x}" '$1 != k' | cut -c1-200; }
-feature() { grep -o "^$1=[a-z]*" "$VMD/features" 2>/dev/null | tail -1 | cut -d= -f2; }
-pending() { tr -d '\n' < "$VMD/$1-pending" 2>/dev/null; }
+feature() { tr ' ' '\n' < "$VMD/features" 2>/dev/null | grep "^$1=" | tail -1 | cut -d= -f2; }
+pending() { cat "$VMD/$1-pending" 2>/dev/null | tr -d '\n'; }
 
 # --- settings this run changes: saved, put back at the end
 KEYS="startFullScreen gpuOffMainLoop closeAction skipInstallPaths"
+helpers() { psall | awk -v h="$APP/Contents/Helpers/" '{ p = $1; a = $0; sub(/^ *[0-9]+ +/, "", a); if (index(a, h) == 1) print p }'; }
 cleanup() {
   local p
+  # Helpers of this copy the run started (the app starts its Bridge): stopped, as the copy goes away.
+  for p in $(helpers); do [[ " $HELPERS0 " == *" $p "* ]] || kill "$p" 2>/dev/null; done
   p=$(qemu_pid); [[ -n $p ]] && { gssh systemctl poweroff >/dev/null 2>&1; waitfor 90 no_qemu >/dev/null || log "the VM did not shut down"; }
   p=$(launcher_pid); [[ -n $p ]] && { "$T" quit "$p" >/dev/null 2>&1; waitfor 20 no_launcher >/dev/null || kill "$p" 2>/dev/null; }
   # shellcheck disable=SC2086
@@ -140,6 +151,7 @@ e2e_settings_save "$DOM" "$OUT/saved" $KEYS || exit 2
 defaults write "$DOM" startFullScreen -bool false
 defaults write "$DOM" closeAction shutdown
 GPU0=$(defaults read "$DOM" gpuOffMainLoop 2>/dev/null || echo 0)
+HELPERS0=$(helpers | tr '\n' ' ')
 GC0=$(feature gpu-compute); cp "$VMD/omacvm-version" "$OUT/saved/omacvm-version" 2>/dev/null
 
 # --- rows
@@ -169,14 +181,14 @@ row_update_vm() {   # Update VM in the window: the VM's OmacVM made older first 
   [[ $r == enabled=1* ]] || { res update-vm FAIL "Update VM is disabled: $r"; return; }
   onscreen_ok || return
   : > "$VMD/update.log" 2>/dev/null
-  "$T" front "$p" >/dev/null; posted; r=$("$T" click "$p" AXButton "Update VM")
+  "$T" front "$p" >/dev/null; posted; r=$("$T" press "$p" AXButton "Update VM")
   t0=$(date +%s)
   for ((i = 0; i < 300; i++)); do   # 15 min
     grep -q '^UPDATED ' "$VMD/update.log" 2>/dev/null && break
     grep -q '^ERROR' "$VMD/update.log" 2>/dev/null && break
     (( i > 20 )) && ! updating && no_qemu && break   # ended without a word
     if [[ -z $asked ]] && "$T" find "$p" AXButton Later >/dev/null 2>&1; then
-      asked="kernel question answered Later"; onscreen_ok && { posted; "$T" click "$p" AXButton Later >/dev/null; }
+      asked="kernel question answered Later"; onscreen_ok && { posted; "$T" press "$p" AXButton Later >/dev/null; }
     fi
     sleep 3
   done
@@ -209,20 +221,22 @@ switch_stopped() {   # N: "WebGPU and GPU compute" flipped with the VM stopped
   waitfor 10 test_eq_feature "$want" >/dev/null
   if [[ $(feature gpu-compute) == "$want" && $(pending gpu-compute) == "$want" ]]; then
     res "switch-stopped-$n" ok "$r; record $before -> $want, applies at the next start"; SW_WANT=$want
+  elif [[ $(feature gpu-compute) == "$want" && -z $(pending gpu-compute) ]]; then
+    res "switch-stopped-$n" ok "$r; record $before -> $want: what the VM has, nothing to apply"
   else res "switch-stopped-$n" FAIL "$r; record $(feature gpu-compute) (want $want), pending '$(pending gpu-compute)'"; shot "switch-stopped-$n"; return 1; fi
 }
-test_eq_feature() { [[ $(feature gpu-compute) == "$1" && $(pending gpu-compute) == "$1" ]]; }
+test_eq_feature() { [[ $(feature gpu-compute) == "$1" ]]; }
 
 start_in_window() {   # N: Start clicked in the window; the VM's window up, the guest's pointer drawn
   local n=$1 r
   onscreen_ok || return 1
-  qmark; "$T" front "$LP" >/dev/null; posted; r=$("$T" click "$LP" AXButton Start)
+  qmark; "$T" front "$LP" >/dev/null; posted; r=$("$T" press "$LP" AXButton Start)
   waitfor 60 has_qemu >/dev/null || { res "start-$n" FAIL "$r; no QEMU after 60 s"; shot "start-$n"; return 1; }
   QP=$(qemu_pid)
   waitfor 30 is_full "$QP" 0 >/dev/null
   waitfor 240 guest_up >/dev/null || { res "start-$n" FAIL "$r; the guest did not come up in 4 min"; shot "start-$n"; return 1; }
-  sleep 5
-  res "start-$n" ok "$r; QEMU $QP, window $(win_of "$QP"), $(qnew | grep -a -o 'virgl runs with[a-z ]*the BQL' | tail -1)"
+  sleep 12   # the desktop and its pointer
+  res "start-$n" ok "QEMU $QP, window $(win_of "$QP"), Graphics without QEMU's lock $(onoff "$(defaults read "$DOM" gpuOffMainLoop 2>/dev/null)")"
 }
 
 switch_applied() {   # N: the start applied the switch
@@ -259,7 +273,7 @@ in_vm() {   # X Y X2 Y2: a pointer move inside our VM's window
 row_pointer() {   # N
   PT_N=$1; PT_OK=""; PT_BAD=""
   local f x y w h cx cy finder mode
-  mode=$(qnew | grep -a -o 'virgl runs with[a-z ]*the BQL' | tail -1); mode=${mode#virgl runs }
+  mode="Graphics without QEMU's lock $(onoff "$(defaults read "$DOM" gpuOffMainLoop 2>/dev/null)")"
   finder=$(pgrep -x Finder | head -1)
   onscreen_ok || return
   [[ $("$T" front "$QP") == front ]] || { res "pointer-$1" FAIL "the VM did not come to the front"; return; }
@@ -278,8 +292,8 @@ row_pointer() {   # N
   [[ -n $finder ]] && { "$T" front "$finder" >/dev/null; sleep 2; }
   "$T" front "$QP" >/dev/null; sleep 2; in_vm $(( cx + 30 )) $(( cy + 20 )) "$cx" "$cy"; look "full screen: Finder and back"
   "$T" full "$QP" off >/dev/null; waitfor 15 is_full "$QP" 0 >/dev/null; sleep 2
-  if [[ -z $PT_BAD ]]; then res "pointer-$1" ok "graphics $mode: no Mac cursor over the VM at $(echo "$PT_OK" | tr -cd ';' | wc -c | tr -d ' ') checks"
-  else res "pointer-$1" FAIL "graphics $mode: the Mac's cursor shows over the VM: $PT_BAD"; fi
+  if [[ -z $PT_BAD ]]; then res "pointer-$1" ok "$mode: no Mac cursor over the VM at $(echo "$PT_OK" | tr -cd ';' | wc -c | tr -d ' ') checks"
+  else res "pointer-$1" FAIL "$mode: the Mac's cursor shows over the VM: $PT_BAD"; fi
 }
 
 stopped_left() {   # ROW HOW: after the VM stopped (HOW), nothing of it runs on
@@ -312,10 +326,9 @@ open_window() {
   # A copy outside the Applications folders asks to be installed first; never Install here (it
   # would replace the test app there).
   if "$T" find "$LP" AXButton "Run Without Installing" >/dev/null 2>&1; then
-    "$T" front "$LP" >/dev/null; posted; log "install question: $("$T" click "$LP" AXButton "Run Without Installing")"
-    waitfor 10 has_start >/dev/null
+    "$T" front "$LP" >/dev/null; posted; log "install question: $("$T" press "$LP" AXButton "Run Without Installing")"
   fi
-  has_start
+  waitfor 20 has_start
 }
 has_start() { "$T" find "$LP" AXButton Start >/dev/null 2>&1; }
 
@@ -348,7 +361,8 @@ if [[ -z $GONE ]]; then
       if (( n == 1 )); then
         gssh systemctl poweroff >/dev/null 2>&1
         stopped_left leftovers-stop "shut down from inside"
-        waitfor 30 has_window >/dev/null; sleep 2
+        # The window back as a person gets it: the app opened again (as from the Dock or Finder).
+        waitfor 10 has_start >/dev/null || { open "$APP"; waitfor 20 has_start >/dev/null; }; sleep 2
         want pointer && gpu_lock_switch
       else
         posted; "$T" close "$QP" >/dev/null

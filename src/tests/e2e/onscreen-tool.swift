@@ -19,6 +19,7 @@
 //   find PID ROLE LABEL      enabled=0|1 value=V frame=X Y W H of the first ROLE named LABEL (title,
 //                            description, identifier, value, or a static text inside it)
 //   click PID ROLE LABEL     a real click at its centre
+//   press PID ROLE LABEL     its Accessibility press action (as VoiceOver or Switch Control press it)
 //   move X1 Y1 X2 Y2 N MS    N+1 pointer moves from X1,Y1 to X2,Y2, MS ms apart
 // A click goes out only when PID is in front and the element under the point is PID's (exit 3
 // otherwise: nothing pressed). Exit 0 done, 1 not found / refused, 2 usage, 3 not ours / not front.
@@ -232,13 +233,18 @@ case "hit":
     var hp: pid_t = 0
     AXUIElementGetPid(hit, &hp)
     say("pid \(hp) | \(str(hit, kAXRoleAttribute)) | \(str(hit, kAXSubroleAttribute)) | \(names(hit).joined(separator: " / "))")
-case "find", "click":
+case "find", "click", "press":
     let pid = pidArg()
     guard args.count >= 5, let e = find(pid, args[3], args[4]) else { say("NOT FOUND"); exit(1) }
     let en = (attr(e, kAXEnabledAttribute) as? Bool) ?? true
     guard var f = frame(e) else { say("NO FRAME"); exit(1) }
     if args[1] == "find" { say("enabled=\(en ? 1 : 0) value=\(str(e, kAXValueAttribute)) frame=\(fmt(f))"); exit(0) }
     guard en else { say("DISABLED"); exit(1) }
+    if args[1] == "press" {
+        let r = AXUIElementPerformAction(e, kAXPressAction as CFString)
+        say(r == .success ? "pressed" : "press refused: \(r.rawValue)")
+        exit(r == .success ? 0 : 1)
+    }
     // Scrolled out of the window: brought into view first, as a person scrolls.
     if let w = mainWindow(pid), let wf = frame(w), !wf.contains(CGPoint(x: f.midX, y: f.midY)) {
         AXUIElementPerformAction(e, "AXScrollToVisible" as CFString)
