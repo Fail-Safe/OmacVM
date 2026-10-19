@@ -526,16 +526,17 @@ enum Settings {
     /// The VM's GPU work without QEMU's big lock (ADR 0046): virgl's
     /// commands that touch only the GPU run without the BQL, so the VM's
     /// CPUs and the window do not wait while an app opens or a page draws.
-    /// Off by default (experimental). The VM window's switch (GPUOffMainLoopRow)
-    /// or defaults write org.omacvm.app gpuOffMainLoop -bool true;
-    /// gpuMainLoop -bool true keeps today's path whatever the default, and
+    /// On by default (3.1.18 to 3.1.25: off, experimental). The VM window's
+    /// switch (GPUOffMainLoopRow) or
+    /// defaults write org.omacvm.app gpuOffMainLoop -bool false;
+    /// gpuMainLoop -bool true keeps the old path whatever the default, and
     /// GPU safe mode always does. The switch writes the choice and drops
     /// gpuMainLoop: the person chose.
     static var gpuOffMainLoop: Bool {
         get {
             let d = UserDefaults.standard
             if gpuSafeMode || d.bool(forKey: "gpuMainLoop") { return false }
-            return d.object(forKey: "gpuOffMainLoop") as? Bool ?? false
+            return d.object(forKey: "gpuOffMainLoop") as? Bool ?? true
         }
         set {
             UserDefaults.standard.removeObject(forKey: "gpuMainLoop")
@@ -545,16 +546,17 @@ enum Settings {
     /// Vulkan windows without a copy (ADR 0047): a Vulkan app's frames are
     /// written into IOSurface memory that macOS OpenGL reads, instead of
     /// being copied by QEMU's main loop. KosmicKrisp (macOS 26 and newer)
-    /// only; QEMU's virglrenderer decides and logs it. Off by default
-    /// (experimental). The VM window's switch (VKWindowsNoCopyRow) or
-    /// defaults write org.omacvm.app vkWindowsNoCopy -bool true;
+    /// only; QEMU's virglrenderer decides and logs it (MoltenVK: the copy).
+    /// On by default (3.1.24 and 3.1.25: off, experimental). The VM
+    /// window's switch (VKWindowsNoCopyRow) or
+    /// defaults write org.omacvm.app vkWindowsNoCopy -bool false;
     /// vkWindowsCopy -bool true keeps the copy whatever the default, and
     /// GPU safe mode always does. Read at each start of the VM.
     static var vkWindowsNoCopy: Bool {
         get {
             let d = UserDefaults.standard
             if gpuSafeMode || d.bool(forKey: "vkWindowsCopy") { return false }
-            return d.object(forKey: "vkWindowsNoCopy") as? Bool ?? false
+            return d.object(forKey: "vkWindowsNoCopy") as? Bool ?? true
         }
         set {
             UserDefaults.standard.removeObject(forKey: "vkWindowsCopy")

@@ -1,7 +1,8 @@
 # 0047: Vulkan windows at the display's rate, and without a copy on the Mac
 
-Status: accepted. Pacing: on for every app VM with Vulkan. No copy: behind
-the experimental app switch `vkWindowsNoCopy` (off). Builds on
+Status: accepted. Pacing: on for every app VM with Vulkan. No copy: the app
+switch `vkWindowsNoCopy`, on by default after 3.1.25 (off and experimental
+in 3.1.24 and 3.1.25). Builds on
 [0010](0010-iosurface-present.md), [0012](0012-venus-in-process.md),
 [0035](0035-graphics-setting.md) and [0046](0046-gpu-off-the-main-loop.md).
 Notes and numbers: work/tracks/vulkan-zero-copy.md (sections 3 and 7).

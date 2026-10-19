@@ -256,15 +256,15 @@ struct SoundThreadRow: View {
 }
 
 /// The VM's GPU work without QEMU's big lock (Settings.gpuOffMainLoop,
-/// 3.1.18, experimental, off by default): read by each start of the VM.
+/// 3.1.18, on by default after 3.1.25): read by each start of the VM.
 struct GPUOffMainLoopRow: View {
     var tick = 0
     @State private var on = Settings.gpuOffMainLoop
 
-    static let info = "Fewer short freezes in the VM. While an app opens or a page draws new things, the VM's graphics held QEMU's lock for up to 100-350 ms, and the VM's CPUs, its sound and typing waited that long. With this on, graphics work that only touches the GPU runs without that lock. Measured on a Mac mini: the longest stop of the VM while Chromium windows opened 107 ms -> 1 ms, while a Vulkan app started 779 ms -> 14 ms; keys reach the screen as fast as before, and the GPU scores are the same. Experimental: tested on the Mac mini only so far. GPU safe mode always takes the old way. Counts from the next start of the VM."
+    static let info = "Fewer short freezes in the VM. While an app opens or a page draws new things, the VM's graphics held QEMU's lock for up to 100-350 ms, and the VM's CPUs, its sound and typing waited that long. With this on, graphics work that only touches the GPU runs without that lock. Measured on a Mac mini: the longest stop of the VM while Chromium windows opened 107 ms -> 1 ms, while a Vulkan app started 779 ms -> 14 ms; keys reach the screen as fast as before, and the GPU scores are the same. On by default; GPU safe mode always takes the old way. Counts from the next start of the VM."
 
     var body: some View {
-        SettingRow(title: "Graphics without QEMU's lock", badge: "experimental",
+        SettingRow(title: "Graphics without QEMU's lock",
                    subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Fewer short freezes while apps open or pages draw.",
                    info: Self.info, probe: "gpu-off-main-loop") {
             RowSwitch(title: "Graphics without QEMU's lock", isOn: $on, enabled: !Settings.gpuSafeMode)
@@ -294,15 +294,15 @@ struct ShareKeyboardRow: View {
 }
 
 /// Vulkan windows without a copy (Settings.vkWindowsNoCopy, ADR 0047,
-/// experimental, off by default): read by each start of the VM.
+/// on by default after 3.1.25): read by each start of the VM.
 struct VKWindowsNoCopyRow: View {
     var tick = 0
     @State private var on = Settings.vkWindowsNoCopy
 
-    static let info = "Vulkan apps' windows reach the Mac's screen without a copy. QEMU copied every frame of a Vulkan window on its main loop: 2.5 ms a frame for a 1816 x 870 window on a Mac mini, while the VM's CPUs waited for it. With this on, the Vulkan driver writes each frame into memory the Mac's OpenGL can read, and the GPU puts it in place: 0.3 ms of QEMU's time a frame. Frame rates stay the same; the pictures are bit for bit the same. Only on macOS 26 and newer (KosmicKrisp). Experimental: tested on the Mac mini only so far. GPU safe mode always copies. Counts from the next start of the VM."
+    static let info = "Vulkan apps' windows reach the Mac's screen without a copy. QEMU copied every frame of a Vulkan window on its main loop: 2.5 ms a frame for a 1816 x 870 window on a Mac mini, while the VM's CPUs waited for it. With this on, the Vulkan driver writes each frame into memory the Mac's OpenGL can read, and the GPU puts it in place: 0.3 ms of QEMU's time a frame. Frame rates stay the same; the pictures are bit for bit the same. Only on macOS 26 and newer (KosmicKrisp); with MoltenVK the frames are copied as before. On by default; GPU safe mode always copies. Counts from the next start of the VM."
 
     var body: some View {
-        SettingRow(title: "Vulkan windows without a copy", badge: "experimental",
+        SettingRow(title: "Vulkan windows without a copy",
                    subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Less work for QEMU on each frame of a Vulkan app (macOS 26 and newer).",
                    info: Self.info, probe: "vk-windows-no-copy") {
             RowSwitch(title: "Vulkan windows without a copy", isOn: $on, enabled: !Settings.gpuSafeMode)
