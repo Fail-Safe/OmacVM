@@ -256,10 +256,14 @@ virgl_source_root=virglrenderer-1.3.0
 virgl_archive_name="$virgl_source_root.tar.gz"
 virgl_url="https://gitlab.freedesktop.org/virgl/virglrenderer/-/archive/1.3.0/$virgl_archive_name"
 virgl_sha256=065bc56e89e6f631f96101cd62eba0748e48eb888b434edc86e89d05395e76f3
-virgl_tap_root=homebrew-virglrenderer-1.0.42
+# The tap's patches and tests at a commit, not its tag: v1.0.42 was moved on
+# 2026-10-18 (only its CI file and the formula's checksums changed, the
+# patches and tests are the same), and the tag's archive changed with it.
+virgl_tap_commit=de31b78a88b2f9eea04dff32438e6283b400edf7
+virgl_tap_root=homebrew-virglrenderer-$virgl_tap_commit
 virgl_tap_archive_name="$virgl_tap_root.tar.gz"
-virgl_tap_url="https://codeload.github.com/startergo/homebrew-virglrenderer/tar.gz/refs/tags/v1.0.42"
-virgl_tap_sha256=950273fbba46905b6112ee2bd0598c1da706c25319a7347058cbc52f04ba96dd
+virgl_tap_url="https://codeload.github.com/startergo/homebrew-virglrenderer/tar.gz/$virgl_tap_commit"
+virgl_tap_sha256=373db13456610847b97a2d442f1b7cd2ffa0c9a60c6850dc2185d40b09dfa5e4
 pyyaml_root=pyyaml-6.0.3
 pyyaml_archive_name="$pyyaml_root.tar.gz"
 pyyaml_url="https://files.pythonhosted.org/packages/05/8e/961c0007c59b8dd7729d542c61a4d537767a59645b82a0b521206e1e25c2/$pyyaml_archive_name"
