@@ -81,6 +81,19 @@ The e2e gate takes 1-2 hours on the test Mac: start it as soon as M exists
 (`release.sh X.Y.Z e2e` after `merge`, or `src/tests/e2e/remote.sh M OUT/e2e`
 by hand) and build, package and the image meanwhile.
 
+Before `publish`, every release also runs the on-screen test,
+`src/tests/e2e/onscreen.sh` ([src/tests/e2e/README.md](../src/tests/e2e/README.md#on-screen-before-every-publish-onscreensh)),
+on a test identity build of M (or `OmacVM-X.Y.Z.zip` relabeled with
+`src/tests/e2e/relabel.sh`) on each macOS there is a test Mac for (macOS 15,
+26, 27), with that Mac's VM lock held and nobody at it: the app's window
+size, Update VM, a switch with the VM stopped, the VM's window around full
+screen, the Mac's cursor over the VM, and nothing left running after stop
+and quit. About 15 minutes per Mac. Its `result.json` goes into
+`OUT/onscreen/<mac>/`; publish only when each says `pass`, or write down
+why a row could not run (a macOS without a Mac, BLOCKED because someone
+used it) in the release's notes for the maintainer. A FAIL stops the
+release like a failed step.
+
 After: close the PRs that shipped through the release PR, update the
 README cells that waited for the release, remove the worktrees
 (`release.sh X.Y.Z clean`).

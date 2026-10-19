@@ -102,6 +102,43 @@ lets the release go out without the gate. The reason, the time, M and who go
 into the release output folder's `e2e-override.log`; publish and after say
 it again.
 
+## On screen, before every publish (`onscreen.sh`)
+
+`onscreen.sh` clicks through OmacVM.app as a person does, with real pointer
+moves and clicks (HID events) and Accessibility on the app's own processes,
+and checks what the screen shows. Why: 3.1.24 shipped with the Mac's arrow
+over the VM next to Omarchy's pointer, the window was 20 pt smaller after
+full screen (#452), the app's window opened as tall as the display (#458),
+and a switch could not be used with the VM stopped (#445). No headless test
+saw any of them.
+
+| Row | What a person does | What is checked |
+|---|---|---|
+| window | opens the app on the VM; double-clicks the title bar, twice | 800 pt wide, at most 800 tall, centred on its display; still 800 wide after each double-click (macOS's Fill) |
+| update-vm | Update VM in the window (the VM's OmacVM made older first) | `UPDATED`, the VM's OmacVM is the app's; a kernel question gets Later |
+| switch-stopped | WebGPU and GPU compute with the VM stopped, then Start in the window | the switch can be used; record and pending file; qemu.log "switched while the VM was stopped: set up in the VM"; the second start switches it back |
+| vm-size | the VM's window to full screen and back, twice | the same size after each |
+| pointer | moves into the VM; a background program shows the cursor (as OmacVM Gestures did up to 3.1.24); Finder and back; the same in full screen; Graphics without QEMU's lock off, then on (switched in the window) | the Mac shows no cursor over the VM: `CGCursorIsVisible` false or an empty image; a picture of the spot when it does |
+| leftovers | shuts the VM down from inside, closes its window, quits the app | no QEMU of the VM, nothing from the app (but its helpers) or on the VM's folder |
+
+On screen only while nobody uses the Mac: no input for 300 s but the test's
+own, no Jump Desktop session, the screen unlocked; it stops when someone
+comes back. Otherwise (or `--headless`) those rows are BLOCKED and
+update-vm (update-vm.sh, as the window runs it) and leftovers (a start
+without a window) run headless. `src/tests/e2e-onscreen.sh` tests the checks
+offline (CI).
+
+```bash
+# the caller holds the Mac's VM lock; a stopped test VM in the test app's VMs folder
+src/tests/e2e/onscreen.sh --app "PATH/OmacVM Test.app" --vm "OmacVM M-e2e" [--only pointer,vm-size]
+```
+
+About 15 minutes (two starts, Update VM). Results: `summary.tsv` (ok, FAIL,
+BLOCKED, skip), `result.json` (`kind` omacvm-e2e-onscreen, `pass`, the app's
+version and commit, macOS), `shots/`, `run.log`. A release runs it on a test
+identity build of M (or the release zip relabeled, `relabel.sh`) on each
+macOS it has a Mac for (docs/releasing.md).
+
 ## Stale frames after focus changes (`stale-frames/`)
 
 `stale-frames/stale-frames.sh --vm NAME` checks #167 (window borders left
