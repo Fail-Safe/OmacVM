@@ -80,6 +80,7 @@ odd="ssh-ed25519 AAAA\$(touch $T/pwned)\`touch $T/pwned\`'\"; touch $T/pwned"
 out=$({ printf '%s\n' "$odd"; cat "$T/ssh-key.sh"; } | env PATH="$T/bin:$PATH" FAKE_DIR="$T" /bin/bash -c "$remote" 2>&1; echo "rc=$?")
 expect "... a key with shell characters goes in as it is, nothing runs" "rc=0 no $odd" \
   "${out##*$'\n'} $([[ -e $T/pwned ]] && echo yes || echo no) $(cat "$T/root/.ssh/authorized_keys")"
+rm -rf "$T/root" "$T/home/me/.ssh"
 
 # ---------- Linux as root: a real user, real links ----------
 if [[ $(id -u) != 0 || $(uname) != Linux ]] || ! command -v useradd >/dev/null || ! command -v runuser >/dev/null; then
