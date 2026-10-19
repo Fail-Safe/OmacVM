@@ -456,6 +456,9 @@ jobs:
       - name: Display changes settle before the VM's windows follow (locked unplug, issue 428; the old rules fail it)
         run: app/runtime/Tests/display/test-display-settle.sh
 
+      - name: HDR's headroom for the guest (ADR 0049; the checks catch code without it)
+        run: app/runtime/Tests/display/test-hdr-headroom.sh
+
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 
@@ -524,6 +527,9 @@ jobs:
 
       - name: Sound does not hang on Chromium's video decoder (WirePlumber rule, install order, off); its device starts the daemon
         run: src/tests/vdec-wireplumber.sh
+
+      - name: The 10-bit virtio-gpu driver loads only for a start that asks, else the stock one (loader, modprobe rule, builder; offline)
+        run: src/tests/virtio-gpu-load.sh
 
       - name: Chromium's no-AV1 extension survives an apply of other features (its place, 3.1.4's path moved, check)
         run: src/tests/chromium-no-av1.sh
@@ -654,6 +660,9 @@ jobs:
 
       - name: omarchy-mac's ARM package targets that Omarchy's repo has (bash 5, as in the VM)
         run: src/tests/omarchy-targets.sh
+
+      - name: The 10-bit virtio-gpu driver's loader and builder on Linux (GNU tools, as in the VM)
+        run: src/tests/virtio-gpu-load.sh
 
       - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
         run: src/tests/touchid-client.sh

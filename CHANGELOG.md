@@ -24,6 +24,14 @@ in more words.
   picture as well, so nothing shows when someone else shows it, and OmacVM Gestures leaves the
   app's VMs alone (Parallels, UTM and VMware Fusion as before). Ctrl+Option+G, leaving the VM and
   switching apps bring the arrow back as before.
+- **HDR and 10-bit colour (experimental, off by default).** A new switch in the app's Display
+  settings, shown on Macs with an HDR display (a MacBook Pro's XDR panel, an HDR monitor). With it
+  the VM's main window runs at 10 bits: smoother gradients (about twice the levels on screen), and
+  HDR highlights from Linux apps that send HDR. White stays the Mac's white; brighter parts go as
+  far as the display can show at its current brightness (the VM tone-maps, macOS does not do it a
+  second time, which made the desktop look dim). The VM loads its 10-bit graphics driver only for
+  a start with the switch on; Update VM builds it. Few Linux apps send HDR yet (GStreamer does;
+  mpv and Chromium show HDR video as SDR). Other displays' windows stay as they were.
 - **The app's window opens at most 800 pt tall,** centred. On a large display it used to open as
   tall as the screen; you can still drag it taller.
 - **mpv keeps playing in UTM VMs too.** UTM's VM draws OpenGL with virgl as well, with the same

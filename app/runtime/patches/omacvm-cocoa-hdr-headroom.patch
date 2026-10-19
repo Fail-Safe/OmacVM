@@ -1,0 +1,254 @@
+From: OmacVM
+Subject: [PATCH] cocoa: the guest tone-maps HDR into the display's headroom
+
+What: with the app's HDR switch (OMACVM_GL_EDR=1; OMACVM_GL_HDR=1 from an
+app before it), the main output's entry in the layout on OmacVM's display
+port carries "edr": the EDR headroom of the window's display now (1 = SDR
+white), looked at once a second on the main thread and sent when it moved
+by 10 % or more (ui/omacvm-edr.h); 0 when PQ cannot be shown this run
+(half-float surfaces failed, the CAOpenGLLayer path, or untagged surfaces). The guest's
+display sync runs Virtual-1 in PQ with max_luminance = 203 nits x that
+headroom, or at 10 bits in sRGB without one. The layer's toneMapMode is
+never while it shows PQ, so macOS does not tone-map again. Only a
+GL_RGB10_A2 scanout (the guest's 10-bit driver) is deep and PQ; a float
+scanout goes to 8-bit sRGB surfaces as any other.
+
+Why: macOS's own tone mapping (the default, automatic) maps PQ into the
+display's current headroom whenever that is below what the content could
+reach, and maps SDR white down with it: measured on the MacBook Pro's XDR
+panel at headroom 1, PQ 203 nits (BT.2408 SDR white) read 0.50 of the
+Mac's white with automatic or ifSupported, with or without
+kIOSurfaceContentHeadroom; with never it read 1.00. The guest's desktop
+looked dim whenever the panel was bright. The headroom follows the
+panel's brightness, so the guest is told when it moves. Before, QEMU
+trusted OMACVM_GL_HDR that every 10-bit frame was PQ and the guest never
+heard when PQ could not be shown.
+
+Threads: NSScreen is read on the main thread only (a dispatch timer on the
+main queue, started at the guest's hello, only with HDR wanted); the commit
+queue only sets the layer's properties (cocoa_gl_layer_follow).
+present_deep_failed is set on QEMU's thread and read on the main thread
+(qatomic).
+
+OMACVM_GL_EDR_HEADROOM=potential sends the display's most instead of its
+current headroom (if macOS kept the current headroom at 1 until content
+asks for more).
+
+Upstream: OmacVM only (OmacVM's display port, IOSurface present).
+Test: app/runtime/Tests/display/test-hdr-headroom.sh (rules, wiring);
+src/app/guest/tests/test_display_sync.py (the guest's side); on screen:
+work notes tracks/hdr.md (PQ bars, the 10-bit ramp, MacBook Pro XDR).
+A new surface depth (the output turning 10-bit) is made at once (at most
+one a second), not after
+the 0.5 s hold-off for window sizes, so the first PQ frames do not show
+in 8-bit sRGB surfaces.
+
+Applies after qemu-cocoa-gl-present-color.patch, omacvm-cocoa-displays.patch
+and omacvm-cocoa-hdr-headroom-logic.patch.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -54,6 +54,7 @@
+ #include "ui/omacvm-close.h"
+ #include "ui/omacvm-modifiers.h"
+ #include "ui/omacvm-display-settle.h"
++#include "ui/omacvm-edr.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -6911,6 +6912,13 @@
+  */
+ static int present_color = -1;
+ static int present_hdr = -1;
++/*
++ * OmacVM, HDR (ADR 0049): OMACVM_GL_EDR=1 (the app's switch; OMACVM_GL_HDR=1
++ * from an app before it) asks for PQ. Only a GL_RGB10_A2 scanout (the
++ * guest's 10-bit driver) is PQ; if half-float surfaces cannot be made, PQ
++ * stops for the run and the guest is told (omacvm_edr_now).
++ */
++static bool present_deep_failed;
+ static unsigned present_next;
+ static dispatch_queue_t present_queue;
+ static QEMUTimer *present_timer;
+@@ -7147,8 +7155,9 @@
+ static bool cocoa_gl_present_hdr_wanted(void)
+ {
+     if (present_hdr < 0) {
+-        const char *e = getenv("OMACVM_GL_HDR");
+-        present_hdr = e && !strcmp(e, "1");
++        const char *e = getenv("OMACVM_GL_EDR");
++        const char *old = getenv("OMACVM_GL_HDR");
++        present_hdr = (e && !strcmp(e, "1")) || (old && !strcmp(old, "1"));
+     }
+     return present_hdr == 1;
+ }
+@@ -7175,6 +7184,14 @@
+                present_color == 1 && cocoa_gl_present_hdr_wanted();
+     if ([layer wantsExtendedDynamicRangeContent] != hdr) {
+         [layer setWantsExtendedDynamicRangeContent:hdr];
++        /*
++         * The guest tone-maps into the headroom QEMU gives it (omacvm-edr.h);
++         * macOS's own tone mapping would map everything again whenever the
++         * panel's headroom is below what the content could reach, and SDR
++         * white would drop to half (measured at headroom 1: PQ 203 nits read
++         * 0.50; never: 1.00, the BT.2408 SDR white).
++         */
++        [layer setToneMapMode:hdr ? CAToneMapModeNever : CAToneMapModeAutomatic];
+     }
+ }
+ 
+@@ -7238,11 +7255,23 @@
+         if (w == present_w && h == present_h && deep == present_deep) {
+             return true;
+         }
+-        if (now - present_alloc_ns < PRESENT_REALLOC_NS) {
++        /*
++         * A new depth (the guest's output turning 10-bit, PQ) is made at
++         * once: in the old surfaces its frames would show in the wrong
++         * colours until the hold-off ends. It comes with a modeset, not in
++         * a stream of window sizes; a guest that flips it all the time
++         * still gets one remake a second at most.
++         */
++        static int64_t depth_ns;
++        bool depth_now = deep != present_deep && now - depth_ns >= NANOSECONDS_PER_SECOND;
++        if (now - present_alloc_ns < PRESENT_REALLOC_NS && !depth_now) {
+             present_realloc_due = true;
+             timer_mod(present_timer, present_alloc_ns + PRESENT_REALLOC_NS);
+             return true;
+         }
++        if (depth_now) {
++            depth_ns = now;
++        }
+     }
+     cocoa_gl_present_free();
+     present_alloc_ns = now;
+@@ -7355,9 +7384,8 @@
+         glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &ifmt);
+         glBindTexture(GL_TEXTURE_2D, 0);
+     }
+-    bool deep = ifmt == GL_RGB10_A2 || ifmt == GL_RGBA16F || ifmt == GL_RGB16F;
+-    static bool deep_failed;           /* half-float surfaces could not be made */
+-    deep = deep && !deep_failed;
++    bool deep = ifmt == GL_RGB10_A2;
++    deep = deep && !qatomic_read(&present_deep_failed);
+     static int deep_logged = -1;
+     if (src && deep != deep_logged) {
+         info_report("cocoa: scanout format 0x%x, %s surfaces%s", ifmt,
+@@ -7370,7 +7398,7 @@
+             CGLSetCurrentContext(prev);
+             return false;
+         }
+-        deep_failed = true;
++        qatomic_set(&present_deep_failed, true);
+         warn_report("cocoa: half-float surfaces failed, 8-bit from now on "
+                     "(no deep colour or HDR)");
+     }
+@@ -9994,9 +10022,81 @@
+             /* The guest is not reading (port closed): it asks again with hello. */
+             break;
+         }
++    }
++}
++
++/*
++ * OmacVM, HDR (ADR 0049): while QEMU shows the guest's 10-bit frames as PQ,
++ * the main output's entry in the layout carries "edr": the headroom of the
++ * window's display now (1 = SDR white; omacvm-edr.h), which the guest
++ * tone-maps into (omacvm-display-sync); 0 = PQ cannot be shown this run
++ * (half-float surfaces failed, the CAOpenGLLayer path, or untagged surfaces:
++ * OMACVM_GL_COLOR=native). Main thread: a
++ * look once a second while HDR is wanted and the guest's display agent is
++ * there (NSScreen's current headroom follows the panel's brightness, and
++ * QEMU's layer asks for EDR, so it reads the real value); a new value goes
++ * out when it moved by 10 % or more. OMACVM_GL_EDR_HEADROOM=potential sends
++ * the display's most instead of its current headroom.
++ */
++static double omacvm_edr_sent = -1;
++static dispatch_source_t omacvm_edr_timer;
++
++static double omacvm_edr_now(void)
++{
++    if (!cocoa_gl_present_hdr_wanted()) {
++        return -1;
++    }
++    if (!present_ctx || qatomic_read(&present_deep_failed) || present_color == 0) {
++        return 0;
++    }
++    NSScreen *s = [[cocoaView window] screen];
++    if (!s) {
++        return omacvm_edr_sent > 0 ? omacvm_edr_sent : 1;
++    }
++    const char *e = getenv("OMACVM_GL_EDR_HEADROOM");
++    return omacvm_edr_value([s maximumExtendedDynamicRangeColorComponentValue],
++                            [s maximumPotentialExtendedDynamicRangeColorComponentValue],
++                            e && !strcmp(e, "potential"));
++}
++
++/* What the layout carries from now on; true when it is new. */
++static bool omacvm_edr_set(double v)
++{
++    if (!omacvm_edr_moved(omacvm_edr_sent, v)) {
++        return false;
++    }
++    if (omacvm_edr_sent < 0 || (omacvm_edr_sent == 0) != (v == 0)) {
++        info_report("cocoa: HDR: %s", v > 0 ? "PQ, the guest tone-maps to the display's headroom"
++                                            : "PQ cannot be shown, the guest stays SDR");
++    }
++    omacvm_edr_sent = v;
++    return true;
++}
++
++static void omacvm_edr_look(void)
++{
++    if (omacvm_edr_set(omacvm_edr_now())) {
++        omacvm_send_layout();
+     }
+ }
+ 
++static void omacvm_edr_watch(void)
++{
++    if (omacvm_edr_timer || !cocoa_gl_present_hdr_wanted()) {
++        return;
++    }
++    omacvm_edr_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
++                                              dispatch_get_main_queue());
++    dispatch_source_set_timer(omacvm_edr_timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC),
++                              NSEC_PER_SEC, NSEC_PER_SEC / 2);
++    dispatch_source_set_event_handler(omacvm_edr_timer, ^{
++        if (omacvm_guest_ready) {
++            omacvm_edr_look();
++        }
++    });
++    dispatch_resume(omacvm_edr_timer);
++}
++
+ static void omacvm_send_layout(void)
+ {
+     NSMutableArray *outputs = [NSMutableArray array];
+@@ -10017,12 +10117,16 @@
+         if (s && !builtin && CGDisplayIsBuiltin(omacvm_screen_id(s))) {
+             builtin = name;
+         }
+-        [outputs addObject:@{
++        NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:@{
+             @"output": name,
+             @"x": @(lround(b.x)), @"y": @(lround(b.y)),
+             @"width": @(lround(b.w)), @"height": @(lround(b.h)),
+             @"scale": @(s ? [s backingScaleFactor] : [mw backingScaleFactor]),
+         }];
++        if (i == 0 && omacvm_edr_sent >= 0) {
++            entry[@"edr"] = @(omacvm_edr_sent);
++        }
++        [outputs addObject:entry];
+     }
+     NSMutableDictionary *msg = [NSMutableDictionary dictionaryWithDictionary:@{
+         @"layout": outputs,
+@@ -10210,6 +10314,8 @@
+             omacvm_guest_ready = true;
+             [omacvm_last_layout release];
+             omacvm_last_layout = nil;
++            omacvm_edr_set(omacvm_edr_now());
++            omacvm_edr_watch();
+             update = true;
+         }
+         if ([d[@"external"] isKindOfClass:[NSNumber class]] &&

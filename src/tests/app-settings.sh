@@ -69,6 +69,7 @@ expect "fresh: Sound on its own thread on" true "$(val app.audioThread)"
 expect "fresh: GPU work keeps QEMU's big lock (gpuOffMainLoop off)" false "$(val app.gpuOffMainLoop)"
 expect "fresh: Keyboard sharing apps off" false "$(val app.shareKeyboard)"
 expect "fresh: Vulkan windows are copied (vkWindowsNoCopy off)" false "$(val app.vkWindowsNoCopy)"
+expect "fresh: HDR and 10-bit colour off" false "$(val app.hdr)"
 expect "fresh: Closing the window shuts down" shutdown "$(val app.closeAction)"
 expect "fresh: OmacVM's own icon" default "$(val app.appIconTheme)"
 expect "fresh: escape combo: focused monitor" pointer "$(val app.escapeSwipe)"
@@ -90,7 +91,7 @@ done
 
 # (b) Changes as the window makes them, read by the next launches; (c) per VM.
 mkdir -p "$H/Shared"
-for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop true" "shareKeyboard true" "vkWindowsNoCopy true" "closeAction ask" "appIconTheme flexoki-light" \
+for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop true" "shareKeyboard true" "vkWindowsNoCopy true" "hdr true" "closeAction ask" "appIconTheme flexoki-light" \
           "escapeSwipe all" "mouseSwipeFingers 3" "swipeOut true" "updateChecks false"; do
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
@@ -106,6 +107,7 @@ for launch in 1 2; do
   expect "launch $launch: Graphics without QEMU's lock on" true "$(val app.gpuOffMainLoop)"
   expect "launch $launch: Keyboard sharing apps on" true "$(val app.shareKeyboard)"
   expect "launch $launch: Vulkan windows without a copy on" true "$(val app.vkWindowsNoCopy)"
+  expect "launch $launch: HDR and 10-bit colour on" true "$(val app.hdr)"
   expect "launch $launch: Closing the window asks" ask "$(val app.closeAction)"
   expect "launch $launch: icon Flexoki Light" flexoki-light "$(val app.appIconTheme)"
   expect "launch $launch: escape combo: all monitors" all "$(val app.escapeSwipe)"
@@ -131,6 +133,7 @@ expect "the sound switch is 3.1.16's key in the app's domain" 0 "$(defaults read
 expect "the graphics switch is 3.1.18's key in the app's domain" 1 "$(defaults read "$D" gpuOffMainLoop)"
 expect "the keyboard sharing switch is 3.0.18's key in the app's domain" 1 "$(defaults read "$D" shareKeyboard)"
 expect "the Vulkan windows switch is a key in the app's domain" 1 "$(defaults read "$D" vkWindowsNoCopy)"
+expect "the HDR switch is the hidden switch's key in the app's domain" 1 "$(defaults read "$D" hdr)"
 expect "update checks in the file the control centre shares" "false" \
   "$(plutil -extract update_checks raw -o - "$T/settings/settings.json")"
 

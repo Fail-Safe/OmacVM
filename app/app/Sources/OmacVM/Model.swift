@@ -585,11 +585,32 @@ enum Settings {
             FileHandle.standardError.write(Data("graphics: \(l)\n".utf8))
         }
     }
-    /// HDR: a 10-bit guest output is shown as BT.2100 PQ with the Mac's EDR,
-    /// and the guest's display sync turns HDR on once its 10-bit virtio-gpu
-    /// module runs (omacvm-virtio-gpu-build in the VM, then a restart).
-    /// Hidden: defaults write org.omacvm.app hdr -bool true
-    static var hdr: Bool { UserDefaults.standard.bool(forKey: "hdr") }
+    /// HDR and 10-bit colour (experimental, off by default): the VM's main
+    /// window runs at 10 bits, and QEMU shows the HDR the guest sends with
+    /// the Mac's EDR on a display that can show it. The VM loads its 10-bit
+    /// virtio-gpu driver for it (built by Update VM). Other displays' windows
+    /// stay 8-bit SDR. The VM window's switch (HDRRow) or
+    /// defaults write org.omacvm.app hdr -bool true (the key it had while it
+    /// was hidden). Read at each start of the VM (hdrStart).
+    static var hdr: Bool {
+        get { UserDefaults.standard.bool(forKey: "hdr") }
+        set { UserDefaults.standard.set(newValue, forKey: "hdr") }
+    }
+    /// HDR for one start of the VM: the switch on, a display that can show
+    /// HDR, and QEMU's IOSurface present (GPU safe mode's CAOpenGLLayer, or
+    /// OMACVM_GL_PRESENT=layer in the app's environment, is 8-bit and
+    /// untagged). Runner takes the guest's SMBIOS, QEMU's environment and
+    /// the qemu.log line from this one answer; why says why not (or what
+    /// it gets). Main thread (NSScreen).
+    @MainActor static func hdrStart() -> (on: Bool, why: String) {
+        if !hdr { return (false, "switch off") }
+        if !Mac.hasHDRDisplay { return (false, "no display can show HDR") }
+        if gpuSafeMode { return (false, "GPU safe mode") }
+        if ProcessInfo.processInfo.environment["OMACVM_GL_PRESENT"] == "layer" {
+            return (false, "OMACVM_GL_PRESENT=layer: frames in a CAOpenGLLayer")
+        }
+        return (true, "10-bit, HDR where the window's display can show it")
+    }
     /// macOS's own shortcuts (screenshots, Mission Control, Spotlight,
     /// Cmd+Tab ...) stay with macOS even while the VM has the keyboard: the
     /// default since RC11. Off (experimental): they all go to the VM while it
@@ -617,8 +638,6 @@ enum Settings {
         get { ShareKeyboard.isOn(.standard) }
         set { UserDefaults.standard.set(newValue, forKey: ShareKeyboard.key) }
     }
-    /// HDR as the VM gets it: only while a display can show it.
-    static var hdrActive: Bool { hdr && Mac.hasHDRDisplay }
     static var startFullScreen: Bool {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }

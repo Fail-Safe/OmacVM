@@ -110,7 +110,7 @@ on CGL, not on ANGLE.
 | Async ctrl queue (guest keeps encoding while the host runs) | planned | finding from `browser-gpu` |
 | Guest scanout textures as IOSurfaces (zero copy present) | planned | ADR 0010 option 3 |
 | Frames on the display's refresh (jitter buffer, display link thread) | built: `pacing-hdr` | `qemu-cocoa-gl-present-vsync.patch`, ADR 0020 |
-| Colour-tagged frames, 10-bit scanout, HDR (PQ, EDR) | built: `pacing-hdr`, HDR off by default | `qemu-cocoa-gl-present-color.patch`, `src/app/guest/virtio-gpu/`, ADR 0021 |
+| Colour-tagged frames, 10-bit scanout, HDR (PQ, EDR) | built: `pacing-hdr`, `hdr` (the app's switch, off by default; the guest tone-maps into the display's headroom) | `qemu-cocoa-gl-present-color.patch`, `omacvm-cocoa-hdr-headroom*.patch`, `src/app/guest/virtio-gpu/`, ADR 0021, 0049 |
 | Guest paced by the host's vsync | planned | ADR 0020 option 1 |
 
 ## 2. Processes and threads
@@ -725,8 +725,9 @@ falls back and logs once.
 | `OMACVM_GL_REFRESH=fixed` | follows the guest | display link at the screen's full rate while frames come | built (`pacing-hdr`) |
 | `OMACVM_IDLE_REFRESH=0` | on | QEMU's refresh tick stays at the display's rate; by default it slows to 2 s while it has nothing to do | built (`idle-power`) |
 | `OMACVM_GL_COLOR=native` | sRGB | untagged surfaces (old colours, oversaturated on P3) | built (`pacing-hdr`) |
-| `OMACVM_GL_HDR=1` | off (the app sets it only with an EDR display) | a 10-bit scanout is BT.2100 PQ: tag PQ, EDR on | built (`pacing-hdr`) |
-| `omacvm-virtio-gpu-build` (guest, root) | not installed | guest virtio-gpu with 10-bit planes; `--remove` goes back | built (`pacing-hdr`) |
+| `OMACVM_GL_EDR=1` | off (the app's "HDR and 10-bit colour" switch sets it for a start with an HDR display) | a 10-bit scanout is BT.2100 PQ: tag PQ, EDR on, `toneMapMode` never, the display's headroom to the guest (`"edr"` in the layout); `OMACVM_GL_HDR=1` (apps before the switch) the same | built (`hdr`, ADR 0049) |
+| `OMACVM_GL_EDR_HEADROOM=potential` | current | send the display's most headroom instead of its current one | built (`hdr`) |
+| `omacvm-virtio-gpu-build` (guest, root) | built by `omacvm apply` on app VMs, loaded only for a start with `omacvm.deepcolor=1` | guest virtio-gpu with 10-bit planes in `/usr/local/lib/omacvm/virtio-gpu/K`; `--status`, `--remove` | built (`hdr`, ADR 0049) |
 | `omacvm enable vulkan` (feature, per VM) | off | the VM folder's `vulkan` file: Venus device options for that VM; OmacVM's Mesa in the VM | built (`gpu-next`) |
 | Graphics setting (`graphics` file per VM) | auto (= OpenGL in 3.0.0) | Venus device options for that VM once `venus-ready`; replaces the hidden `venus` default (moved once, removed) | built (`vk300`, `vk-review-fixes`) |
 | `OMACVM_VULKAN_DRIVER` | by macOS version | force an ICD file | built |
@@ -921,18 +922,24 @@ bench lock and are indications only):
   single frames (pause and wake both on the main thread, so a frame never
   waits behind a paused link).
 - **Colour**: surfaces are tagged; Core Animation converts sRGB (or PQ) to
-  the display. HDR needs the guest at 10 bits (guest module) with Hyprland's
-  `cm = "hdr"` and QEMU's `OMACVM_GL_HDR=1`. The app's hidden switch
-  (`defaults write org.omacvm.app hdr -bool true`) sets QEMU's side and tells
-  the guest (SMBIOS `omacvm.hdr=1`), but only while a display has EDR
-  headroom (`NSScreen` potential EDR > 1); Macs with SDR displays only keep
-  the 8-bit path and `qemu.log` says so. `omacvm-display-sync` then adds the
-  HDR fields to the output's rule once the 10-bit module runs. ADR 0021.
+  the display. HDR and 10-bit colour is the app's experimental switch
+  (`hdr`, shown only while a display can show HDR; ADR 0049): a start with
+  it sends SMBIOS `omacvm.deepcolor=1` and `OMACVM_GL_EDR=1` (not in GPU
+  safe mode, and only with an EDR display: `Settings.hdrStart`, one
+  `OmacVM: HDR:` line in qemu.log). The guest loads its 10-bit virtio-gpu
+  driver for that start only (built ahead by `omacvm apply`; the stock one
+  otherwise and on any failure; `/run/omacvm/virtio-gpu` says which) and
+  `omacvm-display-sync` runs Virtual-1 at 10 bits: PQ with
+  `max_luminance = 203 x edr` while QEMU sends the window display's
+  headroom (`"edr"`, once a second, on a 10 % move), sRGB otherwise. The
+  layer's `toneMapMode` is never, so macOS does not tone-map again and PQ
+  203 nits is the Mac's white at any headroom (automatic put it at 0.50 at
+  headroom 1). Only a `GL_RGB10_A2` scanout is PQ.
 - **HDR clients**: an app must hand Hyprland a PQ image description
   (`wp_color_manager_v1`). GStreamer's `waylandsink` does; mpv 0.41 with
-  `--gpu-api=opengl` does not (it only reads the preferred description, its
-  hint needs a Vulkan swapchain), and Chrome 154 clips CSS `rec2100-pq` at
-  SDR white. Those show as SDR, correctly tone-mapped.
+  `--gpu-api=opengl` does not (mpv's master does, with `vo=gpu-next`; app
+  VMs use `vo=gpu`), and Chromium clips CSS `rec2100-pq` at SDR white.
+  Those show as SDR, correctly tone-mapped.
 - **Measuring** (`tests/graphics/pacing`):
   a pacing page draws its frame number as 16 bit cells; ScreenCaptureKit
   captures the VM window per WindowServer frame and counts how far the number

@@ -216,6 +216,26 @@ struct KeepDockAwayRow: View {
     }
 }
 
+/// HDR and 10-bit colour (Settings.hdr, experimental, off by default): read
+/// by each start of the VM (Settings.hdrStart). Shown only with a display
+/// that can show HDR.
+struct HDRRow: View {
+    var tick = 0
+    @State private var on = Settings.hdr
+
+    static let info = "The VM's main window shows 10-bit colour, for smoother gradients, and HDR highlights on this Mac's HDR display. White stays the Mac's white; brighter parts go as far as the display can show right now. Windows on other displays stay as before. Counts from the next start of the VM; the VM gets its 10-bit graphics driver with Update VM (needs internet once). Few Linux apps send HDR yet: GStreamer does; mpv and Chromium show HDR video as SDR for now. Uses a little more memory and battery. Experimental. GPU safe mode turns it off."
+
+    var body: some View {
+        SettingRow(title: "HDR and 10-bit colour", badge: "experimental",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Deeper colour, and HDR from Linux apps that send it. From the next start of the VM.",
+                   info: Self.info, probe: "hdr") {
+            RowSwitch(title: "HDR and 10-bit colour", isOn: $on, enabled: !Settings.gpuSafeMode)
+        }
+        .onChange(of: on) { _, v in if v != Settings.hdr { Settings.hdr = v } }
+        .onChange(of: tick) { _, _ in on = Settings.hdr }
+    }
+}
+
 /// The sound on its own thread (Settings.audioThread, on by default from
 /// 3.1.17): read by each start of the VM, so a change counts from the next one.
 struct SoundThreadRow: View {

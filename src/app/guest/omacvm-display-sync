@@ -277,24 +277,56 @@ raise SystemExit(1)
 PY
 }
 
-# OmacVM.app, HDR: with the app's HDR setting on (omacvm.hdr=1 from the Mac)
-# and the 10-bit virtio-gpu module loaded (omacvm-virtio-gpu-build), the
-# output runs at 10 bits in BT.2100 PQ; QEMU shows it as HDR on the Mac.
-# QEMU's EDID has no HDR block, so the output's HDR support is stated here.
-# SDR white is 203 nits (BT.2408), which the Mac shows as its SDR white.
-# Only the main window's output (Virtual-1): the other displays' windows
-# draw through an 8-bit layer without PQ (omacvm-cocoa-displays.patch).
+# OmacVM.app, HDR and 10-bit colour (the app's switch; ADR 0049): this start
+# asked for it (omacvm.deepcolor=1 from the Mac) and the 10-bit virtio-gpu
+# driver runs (omacvm-virtio-gpu-load says "omacvm"): the main window's
+# output runs at 10 bits. In BT.2100 PQ while QEMU shows PQ, which it says
+# with the headroom of the window's display ("edr" in the layout, >= 1):
+# the guest tone-maps into what the panel can show now (max_luminance =
+# 203 nits x headroom; QEMU does not let macOS tone-map again), and SDR
+# white is 203 nits (BT.2408), the Mac's SDR white. "edr" 0 (QEMU cannot
+# show PQ) or none (an older runtime): 10-bit sRGB. Before QEMU's first
+# layout the output stays as it is. QEMU's EDID has no HDR block, so the
+# output's HDR support is stated here. Only the main window's output: the
+# other displays' windows draw through an 8-bit layer without PQ
+# (omacvm-cocoa-displays.patch). An app before this switch (its hidden hdr
+# default: omacvm.hdr=1, QEMU tags 10-bit frames PQ by itself): PQ at 1600.
 hdr_fields() {
-  local OMACVM_HDR=""
+  local OMACVM_HDR="" OMACVM_DEEPCOLOR="" edr
   [[ ${1:-} == Virtual-1 ]] || return 0
-  [[ -r /run/omacvm/host.env ]] && source /run/omacvm/host.env
-  [[ $OMACVM_HDR == 1 ]] || return 0
-  # The running driver must be the 10-bit one (installed and booted): the
-  # stock one is in tree, ours is out of tree (taint O).
-  [[ $(modinfo -F filename virtio-gpu 2>/dev/null) == */updates/* ]] || return 0
-  [[ $(cat /sys/module/virtio_gpu/taint 2>/dev/null) == *O* ]] || return 0
-  printf ', bitdepth = 10, cm = "hdr", supports_wide_color = 1, supports_hdr = 1, max_luminance = %s, min_luminance = 0.0005, sdr_max_luminance = 203' \
-    "${OMACVM_HDRNITS:-1600}"
+  local host_env=${OMACVM_HOST_ENV:-/run/omacvm/host.env}
+  [[ -r $host_env ]] && source "$host_env"
+  [[ $OMACVM_DEEPCOLOR == 1 || $OMACVM_HDR == 1 ]] || return 0
+  # The running driver must be the 10-bit one: the loader says so, and it is
+  # out of tree (taint O).
+  [[ $(cat "${OMACVM_VIRTIO_GPU_STATUS:-/run/omacvm/virtio-gpu}" 2>/dev/null) == omacvm* ]] || return 0
+  [[ $(cat "${OMACVM_VIRTIO_GPU_TAINT:-/sys/module/virtio_gpu/taint}" 2>/dev/null) == *O* ]] || return 0
+  if [[ $OMACVM_DEEPCOLOR != 1 ]]; then
+    printf ', bitdepth = 10, cm = "hdr", supports_wide_color = 1, supports_hdr = 1, max_luminance = 1600, min_luminance = 0.0005, sdr_max_luminance = 203'
+    return 0
+  fi
+  edr=$(python3 - "$layout_file" <<'PY' 2>/dev/null
+import json, math, sys
+try:
+    layout = json.load(open(sys.argv[1]))["layout"]
+except (OSError, ValueError, KeyError, TypeError):
+    raise SystemExit(1)                       # no layout from QEMU yet
+for o in layout if isinstance(layout, list) else []:
+    if isinstance(o, dict) and o.get("output") == "Virtual-1":
+        v = o.get("edr")
+        # From QEMU, so a number; anything else counts as none.
+        ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        print(f"{min(max(v, 1.0), 16.0):.2f}" if ok and v >= 1 else "none")
+        raise SystemExit(0)
+print("none")
+PY
+) || return 0
+  if [[ $edr == none ]]; then
+    printf ', bitdepth = 10, cm = "srgb"'
+  else
+    printf ', bitdepth = 10, cm = "hdr", supports_wide_color = 1, supports_hdr = 1, max_luminance = %s, min_luminance = 0.0005, sdr_max_luminance = 203' \
+      "$(python3 -c 'import sys; print(round(203 * float(sys.argv[1])))' "$edr")"
+  fi
 }
 
 # A rule in monitors.lua that names OUTPUT (not in a comment).
@@ -505,6 +537,7 @@ except ValueError:
 for m in monitors if isinstance(monitors, list) else []:
     if not isinstance(m, dict) or m.get("name") != output or m.get("disabled"):
         continue
+    place = re.fullmatch(r"(-?\d+)x(-?\d+)", position)
     try:
         same = (
             width and m["width"] == width and m["height"] == height
@@ -513,13 +546,25 @@ for m in monitors if isinstance(monitors, list) else []:
                  else last_sent == digest)
             and shown_hdr == hdr
         )
-        place = re.fullmatch(r"(-?\d+)x(-?\d+)", position)
         if same and place:
             same = (m["x"], m["y"]) == (int(place[1]), int(place[2]))
     except (KeyError, TypeError, ValueError):
         same = False
     if same:
         raise SystemExit(1)
+    # Only the HDR part moved (QEMU's headroom follows the panel's
+    # brightness, at most once a second): send it, but it is no layout
+    # change, so it does not count towards the hold.
+    try:
+        if (width and m["width"] == width and m["height"] == height
+                and abs(float(m["refreshRate"]) - refresh) < 0.5
+                and (abs(float(m["scale"]) - want_scale) < 0.001 if want_scale is not None
+                     else True)
+                and shown_hdr is not None and shown_hdr != hdr
+                and (not place or (m["x"], m["y"]) == (int(place[1]), int(place[2])))):
+            raise SystemExit(0)
+    except (KeyError, TypeError, ValueError):
+        pass
 
 # Count it; hold the output if it keeps changing.
 history = d / f"{output}.history"

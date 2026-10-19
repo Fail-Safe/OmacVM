@@ -108,9 +108,11 @@ final class Runner {
         if notchSkip {
             a += ["-smbios", "type=11,value=\(NotchSkip.smbios)"]
         }
-        // HDR: the guest's display sync reads it (omacvm-app-host).
-        if Settings.hdrActive {
-            a += ["-smbios", "type=11,value=omacvm.hdr=1"]
+        // HDR and 10-bit colour (Settings.hdrStart): the guest loads its 10-bit
+        // virtio-gpu driver and runs Virtual-1 at 10 bits (omacvm-app-host).
+        // Not omacvm.hdr: an older guest takes that as PQ output.
+        if hdr.on {
+            a += ["-smbios", "type=11,value=omacvm.deepcolor=1"]
         }
         // Experimental: the guest's pointer on the cursor plane, shown by the
         // Mac's cursor (omacvm_app.lua reads it from host.env; QEMU: OMACVM_HW_CURSOR).
@@ -383,6 +385,8 @@ final class Runner {
                                         contentsOf: c.folder.appendingPathComponent("features"), encoding: .utf8)))
         if notchStart.fullPanel { links.omanotch = false }
         notchSkip = NotchSkip.read(folder: c.folder)
+        // HDR and 10-bit colour: one answer for the guest, QEMU and qemu.log.
+        hdr = Settings.hdrStart()
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
         env["OMACVM_PRODUCT_NAME"] = Product.name
@@ -459,8 +463,12 @@ final class Runner {
            let d = Runner.placement() {
             env["OMACVM_TEST_MAIN_DISPLAY"] = String(d)
         }
-        if Settings.hdrActive {
-            env["OMACVM_GL_HDR"] = "1"
+        // HDR (Settings.hdrStart): QEMU shows the window's 10-bit frames with
+        // the Mac's EDR (qemu-cocoa-gl-present-color.patch). Not OMACVM_GL_HDR:
+        // a runtime that reads it tags every 10-bit frame PQ, while the guest
+        // stays SDR until QEMU says it shows PQ.
+        if hdr.on {
+            env["OMACVM_GL_EDR"] = "1"
         }
         // QEMU puts its main loop (sound card timers, virgl) at user-interactive
         // QoS and logs which one it got; audioClassic keeps the default.
@@ -525,8 +533,9 @@ final class Runner {
         }
         log.write(Data("OmacVM: \(KeyAccess.record)\n".utf8))
         log.write(Data("OmacVM: \(DockIdentity.record(launch: launch, qemu: Paths.qemu.path))\n".utf8))
-        if Settings.hdr && !Mac.hasHDRDisplay {
-            log.write(Data("OmacVM: HDR is on, but no display here can show it: the VM gets the SDR path\n".utf8))
+        // HDR for omacvm check: on, or why not while the switch is on.
+        if hdr.on || Settings.hdr {
+            log.write(Data("OmacVM: HDR: \(hdr.on ? "on" : "off") (\(hdr.why))\n".utf8))
         }
         p.standardOutput = log
         p.standardError = log
@@ -662,6 +671,8 @@ final class Runner {
     private(set) var notchStart = NotchStart(fullPanel: false, record: "native")
     /// Skip the notch at this start (NotchSkip), set in start().
     private(set) var notchSkip = false
+    /// HDR and 10-bit colour at this start (Settings.hdrStart), set in start().
+    private(set) var hdr: (on: Bool, why: String) = (false, "switch off")
     private(set) var notchGeometry: NotchGeometry?
 
     /// omacvm-netd may still refuse QEMU (another build, the limit), vmnet

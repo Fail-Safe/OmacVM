@@ -1,0 +1,85 @@
+From: OmacVM
+Subject: [PATCH] ui: the headroom the guest tone-maps into, tested without AppKit
+
+What: a header with no AppKit in it: the HDR headroom QEMU gives the guest
+(the window's display's EDR headroom now, at least 1 = SDR white, at most
+the display's potential and 16) and when a new value goes out (the first
+one, PQ starting or stopping, a move of 10 % or more). Used by
+omacvm-cocoa-hdr-headroom.patch (which explains the why; ADR 0049).
+
+Why its own file: so the rules are tested without QEMU or a window
+(app/runtime/Tests/display/test-hdr-headroom.sh applies this patch to an
+empty folder; at build time and in CI).
+
+Upstream: OmacVM only (QEMU has no way to tell a guest a display's
+headroom; this goes over OmacVM's display port).
+Test: app/runtime/Tests/display/test-hdr-headroom.c.
+
+--- /dev/null
++++ b/ui/omacvm-edr.h
+@@ -0,0 +1,65 @@
++/*
++ * OmacVM, HDR (ADR 0049): the headroom QEMU gives the guest to tone-map
++ * into. No AppKit in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-edr.c); ui/cocoa.m feeds it NSScreen's
++ * values.
++ *
++ * macOS shows the guest's PQ frames without tone-mapping them again (the
++ * layer's toneMapMode is never), so the guest must keep its highlights
++ * within what the panel can show now: its EDR headroom (1.0 = SDR white,
++ * PQ 203 nits). The headroom follows the panel's brightness; a look once a
++ * second sends a new value only when it moved by 10 % or more.
++ */
++#ifndef OMACVM_EDR_H
++#define OMACVM_EDR_H
++
++#include <math.h>
++#include <stdbool.h>
++
++/* The most the guest is given: 16 x 203 nits, past every Mac panel's peak. */
++#define OMACVM_EDR_MAX 16.0
++
++/*
++ * The headroom for the guest from the window's display: its current EDR
++ * headroom (or, with use_potential, its most), at least 1 (SDR), at most
++ * the display's potential and OMACVM_EDR_MAX, in 1/100 steps.
++ */
++static inline double omacvm_edr_value(double current, double potential, bool use_potential)
++{
++    double v = use_potential ? potential : current;
++
++    if (!isfinite(v) || v < 1.0) {
++        v = 1.0;
++    }
++    if (isfinite(potential) && potential >= 1.0 && v > potential) {
++        v = potential;
++    }
++    if (v > OMACVM_EDR_MAX) {
++        v = OMACVM_EDR_MAX;
++    }
++    return round(v * 100.0) / 100.0;
++}
++
++/*
++ * Whether a new value goes to the guest: the first one, PQ starting or
++ * stopping (0 = PQ cannot be shown), or a move of 10 % or more. now < 0
++ * (HDR not wanted) never goes out.
++ */
++static inline bool omacvm_edr_moved(double sent, double now)
++{
++    if (now < 0) {
++        return false;
++    }
++    if (sent < 0) {
++        return true;
++    }
++    if ((sent == 0) != (now == 0)) {
++        return true;
++    }
++    if (sent == 0) {
++        return false;
++    }
++    return fabs(now - sent) >= 0.10 * sent - 1e-9;
++}
++
++#endif

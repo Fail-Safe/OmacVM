@@ -35,5 +35,6 @@ a new record replaces it and says so.
 | [0046](0046-gpu-off-the-main-loop.md) | The VM's GPU work lets go of the BQL, then leaves the main loop | accepted, built (`gpu-thread`), off by default |
 | [0047](0047-vulkan-windows-without-a-copy.md) | Vulkan windows at the display's rate (no Wayland commit timing), and without a CPU copy (IOSurface window buffers, GPU re-stride) | accepted; no copy built (`vulkan-zc`), off by default |
 | [0048](0048-freed-space-back-to-the-mac.md) | What the VM frees goes back to the Mac; 2 update snapshots instead of omarchy-mac's 5, a trim at every full apply | accepted, built (`disk`) |
+| [0049](0049-hdr-guest-tone-maps.md) | HDR and 10-bit colour: the guest tone-maps into the Mac's headroom, its 10-bit driver loaded only per start | accepted, built (`hdr`), off by default |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

@@ -515,6 +515,89 @@ def overlap(a, b) -> bool:
     return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
 
 
+class HDR(SyncCase):
+    """HDR and 10-bit colour (the app's switch): Virtual-1 at 10 bits only when
+    this start asked for it and the 10-bit driver runs; PQ only while QEMU says
+    it shows PQ ("edr", the headroom of the window's display)."""
+
+    def setUp(self):
+        super().setUp()
+        self.host_env = self.tmp / "host.env"
+        self.status = self.tmp / "virtio-gpu"
+        self.taint = self.tmp / "taint"
+        self.host_env.write_text("OMACVM_DEEPCOLOR=1\n")
+        self.status.write_text("omacvm\n")
+        self.taint.write_text("O\n")
+        self.set_window(5120, 2880)
+
+    def layout(self, edr=None):
+        main = {"output": "Virtual-1", "x": 0, "y": 0, "width": 1728, "height": 1117, "scale": 2}
+        if edr is not None:
+            main["edr"] = edr
+        (self.tmp / "no-layout.json").write_text(json.dumps({"layout": [main]}))
+
+    def run_sync(self) -> subprocess.CompletedProcess:
+        os.environ.update({"OMACVM_HOST_ENV": str(self.host_env),
+                           "OMACVM_VIRTIO_GPU_STATUS": str(self.status),
+                           "OMACVM_VIRTIO_GPU_TAINT": str(self.taint)})
+        try:
+            return super().run_sync()
+        finally:
+            for k in ("OMACVM_HOST_ENV", "OMACVM_VIRTIO_GPU_STATUS", "OMACVM_VIRTIO_GPU_TAINT"):
+                os.environ.pop(k, None)
+
+    def test_nothing_before_qemus_layout(self):
+        self.run_sync()
+        self.assertNotIn("bitdepth", self.evals()[-1])
+
+    def test_10_bit_sdr_without_pq(self):
+        for edr in (None, 0):       # an older runtime; QEMU cannot show PQ
+            self.layout(edr)
+            self.run_sync()
+            self.assertIn('bitdepth = 10, cm = "srgb"', self.evals()[-1])
+            self.assertNotIn("max_luminance", self.evals()[-1])
+
+    def test_pq_follows_the_headroom_without_hold(self):
+        self.layout(4)
+        self.run_sync()
+        self.assertIn('cm = "hdr"', self.evals()[-1])
+        self.assertIn("max_luminance = 812,", self.evals()[-1])
+        self.assertIn("sdr_max_luminance = 203", self.evals()[-1])
+        # The panel's brightness moves the headroom about once a second: each
+        # is sent, none counts towards the hold.
+        for i in range(14):
+            self.layout(1.5 + i * 0.5)
+            r = self.run_sync()
+            self.assertNotIn("keeping", r.stderr)
+        self.assertEqual(len(self.evals()), 15)
+        self.assertIn("max_luminance = 1624,", self.evals()[-1])
+        self.run_sync()                      # unchanged: not sent again
+        self.assertEqual(len(self.evals()), 15)
+
+    def test_headroom_is_clamped(self):
+        self.layout(40)
+        self.run_sync()
+        self.assertIn("max_luminance = 3248,", self.evals()[-1])
+        self.layout("4")                     # not a number: as none
+        self.run_sync()
+        self.assertIn('cm = "srgb"', self.evals()[-1])
+
+    def test_stock_driver_or_not_asked(self):
+        self.layout(4)
+        self.status.write_text("stock not built for this kernel\n")
+        self.run_sync()
+        self.assertNotIn("bitdepth", self.evals()[-1])
+        self.status.write_text("omacvm\n")
+        self.host_env.write_text("OMACVM_NOTCHPOINTER=1\n")
+        self.run_sync()
+        self.assertNotIn("bitdepth", self.evals()[-1])
+
+    def test_older_app_hidden_switch(self):
+        self.host_env.write_text("OMACVM_HDR=1\n")
+        self.run_sync()
+        self.assertIn("max_luminance = 1600,", self.evals()[-1])
+
+
 class Placement(unittest.TestCase):
     """Where the outputs go (output_positions) and in which order the rules
     are sent (apply_order): never one output over another, not even for one
