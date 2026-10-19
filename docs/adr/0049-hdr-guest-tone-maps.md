@@ -74,21 +74,23 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
   mpv 0.41 on OpenGL does not (mpv's master does, with `vo=gpu-next`; app
   VMs use `vo=gpu`), Firefox only for video behind a pref. Their HDR video
   shows as SDR, correctly.
-- Chrome, Chromium and Electron apps (amended 2026-10-19, user report on a
-  MacBook Air): on the HDR output they draw the whole window in PQ, SDR
-  white at 203 nits and HDR video already tone-mapped into the headroom,
-  and tag it `luminances(0, 1000, 203)`. Hyprland 0.56 tone-maps any
-  window above `max_luminance` with a curve that also lowers SDR white
-  (`tonemap.glsl`: 0.52 of it at headroom 1, 0.64 at 2): every page looked
-  gray. So while Virtual-1 is PQ, `omacvm-display-sync` gives all windows
-  the rule `tonemap = "clamp"` (back to `"on"`, Hyprland's default, when PQ
-  ends; `omacvm_app.lua` sets it again after a config reload). Measured on
-  the scanout: Chrome's white 203 nits as an SDR client's (was 105), a
-  1000-nit video bar 390 nits with `max_luminance` 406 (headroom 2; was 206). SDR windows are not tone-mapped either way;
-  mpv (`gpu-next`) tags the output's own maximum and is not touched. Lost:
-  a client that sends raw PQ above the headroom (GStreamer's `waylandsink`)
-  is clipped there instead of compressed; its SDR white is now right (it
-  was at half too). Notes: work/tracks/hdr-chrome.md.
+- Chrome and Chromium (amended 2026-10-19, user report on a MacBook Air): on
+  the HDR output they draw the whole window in PQ, SDR white at 203 nits and
+  HDR video already tone-mapped into the headroom, and tag it `luminances(0,
+  1000, 203)`. Hyprland 0.56 tone-maps any window above `max_luminance` with
+  a curve that also lowers SDR white (`tonemap.glsl`: 0.52 of it at headroom
+  1, 0.64 at 2): every page looked gray. So while Virtual-1 is PQ,
+  `omacvm-display-sync` gives all windows the rule `tonemap = "clamp"` (back
+  to `"on"`, Hyprland's default, when PQ ends; `omacvm_app.lua` sets it
+  again after a config reload). Measured on the scanout: Chrome's white 203
+  nits as an SDR client's (was 105), a 1000-nit video bar 390 nits with
+  `max_luminance` 406 (headroom 2; was 206). SDR windows are not tone-mapped
+  either way; mpv (`gpu-next`) tags the output's own maximum and is not
+  touched; Obsidian 1.14.4 (Electron) draws SDR. Every window, not a list of
+  browser names: any app on a recent Chromium does the same. Lost: a client
+  that sends raw PQ above the headroom (GStreamer's `waylandsink`) is
+  clipped there instead of compressed; its SDR white is now right (it was at
+  half too). Notes: work/tracks/hdr-chrome.md.
 - Only the main window: the other displays' windows stay 8-bit SDR
   (CAOpenGLLayer).
 - macOS 26 deprecates `wantsExtendedDynamicRangeContent` for
