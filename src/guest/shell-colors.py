@@ -24,12 +24,16 @@ PATH: files or folders (searched for *.qml, and Omanotch's unpatched copies
 Default: /usr/share/omarchy/shell and the desktop user's
 ~/.config/omarchy/plugins (clones of Omarchy's plugins); --user NAME, else
 OMACVM_USER from /etc/omacvm/env. Owner and mode of each file are kept.
+Run as root (apply, the pacman hook), the user's folder is read and written
+by a child process running as the user: a link the user put there must not
+point root's write at a file of the system.
 
 Prints one line: "patched N files (QtQuick X.Y)", "restored N files",
 "nothing to do (...)". --status writes nothing and prints "qtquick-color
 yes|no|unknown, patched N, to patch M, to restore K". Exit 1 when a file
 could not be written.
 """
+import json
 import os
 import pwd
 import re
@@ -111,6 +115,61 @@ def write(path, text):
         raise
 
 
+def as_user(user, fn):
+    """fn() in a child process running as user; its result (JSON) or None."""
+    pw = pwd.getpwnam(user)
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(r)
+            os.initgroups(user, pw.pw_gid)
+            os.setgid(pw.pw_gid)
+            os.setuid(pw.pw_uid)
+            os.chdir("/")
+            os.write(w, json.dumps(fn()).encode())
+            os._exit(0)
+        except BaseException as e:
+            print(f"shell-colors: as {user}: {e}", file=sys.stderr)
+            os._exit(1)
+    os.close(w)
+    data = b""
+    while chunk := os.read(r, 65536):
+        data += chunk
+    os.close(r)
+    _, status = os.waitpid(pid, 0)
+    return json.loads(data) if status == 0 and data else None
+
+
+def scan(paths, pin, mode):
+    """[patched, to patch, to restore, written, failed] for the files in paths."""
+    patched = todo = restore = written = failed = 0
+    for path in files(paths):
+        try:
+            text = open(path, encoding="utf-8").read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if PATCHED.search(text):
+            patched += 1
+        if pin == "keep":
+            continue
+        new = change(text, pin)
+        if new == text:
+            continue
+        if pin is None:
+            restore += 1
+        else:
+            todo += 1
+        if mode != "status":
+            try:
+                write(path, new)
+                written += 1
+            except OSError as e:
+                failed += 1
+                print(f"shell-colors: {path}: {e.strerror}", file=sys.stderr)
+    return [patched, todo, restore, written, failed]
+
+
 def default_paths(user):
     if not user:
         try:
@@ -119,10 +178,10 @@ def default_paths(user):
                     user = line.split("=", 1)[1].strip()
         except OSError:
             pass
-    paths = [OMARCHY_SHELL]
+    paths = [(OMARCHY_SHELL, None)]
     if user:
         try:
-            paths.append(os.path.join(pwd.getpwnam(user).pw_dir, ".config/omarchy/plugins"))
+            paths.append((os.path.join(pwd.getpwnam(user).pw_dir, ".config/omarchy/plugins"), user))
         except KeyError:
             pass
     return paths
@@ -145,7 +204,7 @@ def main(argv):
             print(__doc__.split("\n\n")[1], file=sys.stderr)
             return 2
         else:
-            paths.append(a)
+            paths.append((a, None))
     paths = paths or default_paths(user)
 
     color = qtquick_color(qmltypes)
@@ -156,37 +215,20 @@ def main(argv):
     else:
         pin = pin_for(color) if color else None
 
-    patched = todo = restore = failed = 0
-    changed = []
-    for path in files(paths):
-        try:
-            text = open(path, encoding="utf-8").read()
-        except (OSError, UnicodeDecodeError):
-            continue
-        if PATCHED.search(text):
-            patched += 1
-        if pin == "keep":
-            continue
-        new = change(text, pin)
-        if new == text:
-            continue
-        if pin is None:
-            restore += 1
+    # The user's folder as the user (root only; anyone else is that user already).
+    total = [0, 0, 0, 0, 0]
+    for path, owner in paths:
+        if owner and os.geteuid() == 0:
+            got = as_user(owner, lambda: scan([path], pin, mode)) or [0, 0, 0, 0, 1]
         else:
-            todo += 1
-        if mode != "status":
-            try:
-                write(path, new)
-                changed.append(path)
-            except OSError as e:
-                failed += 1
-                print(f"shell-colors: {path}: {e.strerror}", file=sys.stderr)
+            got = scan([path], pin, mode)
+        total = [a + b for a, b in zip(total, got)]
+    patched, todo, restore, n, failed = total
 
     if mode == "status":
         state = "unknown" if color == "unknown" else ("yes" if color else "no")
         print(f"qtquick-color {state}, patched {patched}, to patch {todo}, to restore {restore}")
         return 0
-    n = len(changed)
     if pin == "keep":
         print(f"nothing to do (QtQuick's types not found: {qmltypes})")
     elif n and pin is None:
