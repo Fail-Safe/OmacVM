@@ -329,6 +329,30 @@ PY
   fi
 }
 
+# hdr_tonemap HDR: Virtual-1's tone map for windows. On an HDR output Chrome,
+# Chromium and Electron apps draw the whole window in PQ (SDR white at 203
+# nits, HDR video already fitted into the headroom by the browser) and say
+# max 1000 nits. Hyprland 0.56 tone-maps a window above the output's
+# max_luminance with a curve that also lowers SDR white (to about half at
+# headroom 1): every page looked gray. So while Virtual-1 runs PQ, windows
+# are only clipped at max_luminance (tonemap "clamp"). SDR windows are not
+# tone-mapped either way. After PQ the same rule says Hyprland's default
+# ("on"): 0.56 keeps a rule's tone map on open windows when the rule is
+# gone. omacvm_app.lua sets it again after a config reload.
+hdr_tonemap() {
+  local want=on had response
+  [[ $1 == *'cm = "hdr"'* ]] && want=clamp
+  had=$(cat "$state_dir/tonemap" 2>/dev/null || true)
+  # Unchanged, or never on: nothing to send.
+  [[ $want == "$had" || ($want == on && -z $had) ]] && return 0
+  response=$(hyprctl eval "hl.window_rule({ name = \"omacvm-hdr\", match = { class = \".*\" }, tonemap = \"$want\" })" 2>&1) || true
+  if [[ $response == ok ]]; then
+    printf '%s\n' "$want" > "$state_dir/tonemap"
+  else
+    printf 'omacvm-display-sync: Hyprland rejected tonemap %s: %s\n' "$want" "$response" >&2
+  fi
+}
+
 # A rule in monitors.lua that names OUTPUT (not in a comment).
 user_rule() {
   [[ -r $monitor_config ]] &&
@@ -730,6 +754,8 @@ apply_preferred_modes() {
     # The notch strip is the main window's (full screen on the built-in display).
     if [[ $output == Virtual-1 ]]; then
       notch_bar "$mode" "$scale"
+      # Before the output goes PQ, so no frame is tone-mapped.
+      hdr_tonemap "$hdr"
     fi
     digest=$(cksum <<<"$rule" | cut -d' ' -f1)
     # 1: Hyprland shows it already (keep it for a reload), 2: held.

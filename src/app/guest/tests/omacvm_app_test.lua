@@ -8,10 +8,11 @@ local cfg = os.getenv("XDG_CONFIG_HOME")
 assert(modpath and rt and cfg and rt ~= "", "usage: see the top of this file")
 os.execute("mkdir -p '" .. rt .. "/omacvm/display-sync' '" .. cfg .. "/hypr'")
 
-local monitors, applied
+local monitors, applied, window_rules
 hl = {
   get_monitors = function() return monitors end,
   monitor = function(rule) applied[#applied + 1] = rule end,
+  window_rule = function(rule) window_rules[#window_rules + 1] = rule end,
   config = function() end,
   on = function() end,
   timer = function() end,
@@ -27,7 +28,7 @@ end
 local function rule_file(output, text) write(rt .. "/omacvm/display-sync/" .. output .. ".rule", text) end
 
 local function load_config(names)
-  monitors, applied = {}, {}
+  monitors, applied, window_rules = {}, {}, {}
   for _, n in ipairs(names) do monitors[#monitors + 1] = { name = n } end
   dofile(modpath)
   return applied
@@ -63,6 +64,35 @@ for _, r in ipairs(got) do if r.output == "Virtual-2" then v2 = r end end
 check("both outputs", #got == 2)
 check("external's place and HDR fields", v2 and v2.position == "-480x-1080" and v2.bitdepth == 10 and v2.cm == "hdr"
   and v2.max_luminance == 1600 and v2.min_luminance == 0.0005 and v2.sdr_max_luminance == 203)
+
+check("no window rule for an external's HDR fields", #window_rules == 0)
+
+-- The screen in PQ (HDR): windows clipped at max_luminance again, not
+-- tone-mapped (display-sync's hdr_tonemap); a reload dropped that rule.
+local HDR_RULE = 'hl.monitor({ output = "Virtual-1", mode = "' .. MODE .. '", position = "0x0", scale = "2", '
+  .. 'bitdepth = 10, cm = "hdr", supports_wide_color = 1, supports_hdr = 1, max_luminance = 406, '
+  .. 'min_luminance = 0.0005, sdr_max_luminance = 203 })\n'
+rule_file("Virtual-1", HDR_RULE)
+got = load_config({ "Virtual-1", "NOTCH" })
+local wr = window_rules[1]
+check("PQ screen: its rule", #got == 1 and got[1].cm == "hdr" and got[1].max_luminance == 406)
+check("PQ screen: windows clipped", #window_rules == 1 and wr.name == "omacvm-hdr" and wr.tonemap == "clamp"
+  and wr.match and wr.match.class == ".*")
+rule_file("Virtual-1", 'hl.monitor({ output = "Virtual-1", mode = "' .. MODE .. '", position = "0x0", scale = "2", '
+  .. 'bitdepth = 10, cm = "srgb" })\n')
+load_config({ "Virtual-1", "NOTCH" })
+check("10-bit sRGB screen: no window rule", #window_rules == 0)
+rule_file("Virtual-1", 'hl.monitor({ output = "Virtual-1", mode = "' .. MODE .. '", position = "0x0", scale = "2" })\n')
+load_config({ "Virtual-1", "NOTCH" })
+check("SDR screen: no window rule", #window_rules == 0)
+rule_file("Virtual-1", HDR_RULE)
+write(cfg .. "/hypr/monitors.lua",
+  'hl.monitor({ output = "Virtual-1", mode = "1920x1200@60", position = "0x0", scale = 1 })\n')
+load_config({ "Virtual-1", "NOTCH" })
+check("user's own rule for the screen: no window rule", #window_rules == 0)
+write(cfg .. "/hypr/monitors.lua",
+  'local omarchy_monitor_scale = 2\nhl.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })\n')
+rule_file("Virtual-1", 'hl.monitor({ output = "Virtual-1", mode = "' .. MODE .. '", position = "0x0", scale = "2" })\n')
 
 -- A display that left (the Mac's other screen left full screen): not set.
 got = load_config({ "Virtual-1", "NOTCH" })
