@@ -143,8 +143,8 @@ src/tests/e2e/onscreen.sh --app "PATH/OmacVM Test.app" --vm "OmacVM M-e2e" [--on
 
 About 10 minutes (two starts, Update VM). Results: `summary.tsv` (ok, FAIL,
 BLOCKED, skip), `result.json` (`kind` omacvm-e2e-onscreen, `pass`, the app's
-version and commit, macOS), `shots/` (with the window's words: over SSH a picture shows only the
-desktop without Screen Recording), `run.log`. A release runs it on a test
+version and commit, macOS), `shots/` (pictures when the shell may record the screen, else only the
+window's words), `run.log`. A release runs it on a test
 identity build of M (or the release zip relabeled, `relabel.sh`) on each
 macOS it has a Mac for (docs/releasing.md).
 

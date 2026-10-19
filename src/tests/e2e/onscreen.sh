@@ -84,12 +84,13 @@ onscreen_ok() {
   GONE="someone uses the Mac since $(date +%H:%M:%S) ($(who))"; log "STOP on screen: $GONE"; return 1
 }
 # A picture of the screen, and the words of the app's window (a picture needs Screen Recording for this shell).
+CAPTURE=$("$T" can-capture)
 shot() {
-  screencapture -x -C "$OUT/shots/$1.png" 2>/dev/null && sips -Z 1600 "$OUT/shots/$1.png" >/dev/null 2>&1
+  [[ $CAPTURE == yes ]] && screencapture -x -C "$OUT/shots/$1.png" 2>/dev/null && sips -Z 1600 "$OUT/shots/$1.png" >/dev/null 2>&1
   [[ -n ${LP:-} ]] && "$T" texts "$LP" > "$OUT/shots/$1.txt" 2>&1
 }
 spot() {   # NAME X Y: the 240 pt around the pointer, with the cursor
-  screencapture -x -C -R "$(( $2 - 120 )),$(( $3 - 120 )),240,240" "$OUT/shots/$1.png" 2>/dev/null
+  [[ $CAPTURE == yes ]] && screencapture -x -C -R "$(( $2 - 120 )),$(( $3 - 120 )),240,240" "$OUT/shots/$1.png" 2>/dev/null
 }
 
 # --- the app and the VM
@@ -103,9 +104,10 @@ qemu_pid() { local p; p=$(pid_of "$APP/Contents/MacOS/OmacVM-VM" " -name $VM"); 
 port() { sed -n "s/^SSH_PORT=//p" "$VMD/vm.env" | tr -d "'\"" | head -1; }
 gssh() { ssh -i "$VMD/ssh-key" -i "$HOME/.ssh/omacvm" -p "$(port)" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@127.0.0.1 "$@" </dev/null; }
-QLOG=$VMD/logs/qemu.log; QOFF=0
-qmark() { QOFF=$(stat -f %z "$QLOG" 2>/dev/null || echo 0); }
-qnew() { tail -c +$(( QOFF + 1 )) "$QLOG" 2>/dev/null | tr -d '\000'; }
+QLOG=$VMD/logs/qemu.log
+# qemu.log of this start only: the test VM's log so far is kept in OUT, then emptied before the start.
+qmark() { [[ -s $QLOG ]] && cat "$QLOG" >> "$OUT/qemu-before.log"; : > "$QLOG" 2>/dev/null; }
+qnew() { tr -d '\000' < "$QLOG" 2>/dev/null; }
 waitfor() {   # SECONDS COMMAND...: until COMMAND succeeds
   local n=$1 i; shift
   for ((i = 0; i < n; i++)); do "$@" && return 0; sleep 1; done; "$@"
@@ -143,7 +145,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 LAST=$(cat "$LASTF" 2>/dev/null || echo 0); [[ $LAST =~ ^[0-9]+$ ]] || LAST=0
-log "onscreen: $APP ($VER, $COMMIT, $DOM), VM $VMD, macOS $(sw_vers -productVersion), $(who)"
+log "onscreen: $APP ($VER, $COMMIT, $DOM), VM $VMD, macOS $(sw_vers -productVersion), $(who), pictures: $([[ $CAPTURE == yes ]] && echo yes || echo "no (no Screen Recording for this shell: the window's words only)")"
 [[ -z $(qemu_pid) ]] || { echo "onscreen: $VM runs: shut it down first"; exit 2; }
 [[ -z $(launcher_pid) ]] || { echo "onscreen: $APP runs: quit it first"; exit 2; }
 # shellcheck disable=SC2086
@@ -361,8 +363,12 @@ if [[ -z $GONE ]]; then
       if (( n == 1 )); then
         gssh systemctl poweroff >/dev/null 2>&1
         stopped_left leftovers-stop "shut down from inside"
-        # The window back as a person gets it: the app opened again (as from the Dock or Finder).
-        waitfor 10 has_start >/dev/null || { open "$APP"; waitfor 20 has_start >/dev/null; }; sleep 2
+        # The window back as a person gets it: the app quits with its VM (3.1.24), so it is opened
+        # again; one that stays is brought to the front (as from the Dock).
+        waitfor 10 no_launcher >/dev/null
+        if has_launcher; then LP=$(launcher_pid); waitfor 5 has_start >/dev/null || { open "$APP"; waitfor 20 has_start >/dev/null; }
+        else open_window || { res reopen FAIL "the app's window did not open again after the VM stopped"; break; }; fi
+        sleep 2
         want pointer && gpu_lock_switch
       else
         posted; "$T" close "$QP" >/dev/null

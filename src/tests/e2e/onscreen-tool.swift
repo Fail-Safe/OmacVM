@@ -5,6 +5,7 @@
 //   bg-show                  as a background helper that shows the cursor (window server property
 //                            SetsCursorInBackground, then CGDisplayShowCursor), as OmacVM Gestures did
 //                            over full-screen VMs up to 3.1.24; prints the cursor after it
+//   can-capture              yes when this process may take pictures of the screen (Screen Recording)
 //   win PID                  PID's biggest standard window: X Y W H full=0|1 (points, top left)
 //   screen X Y               the visible frame of the display with X,Y: X Y W H (points, top left)
 //   full PID on|off          AXFullScreen of that window (as its green button and View > Exit Full Screen)
@@ -174,6 +175,8 @@ case "bg-show":
     CGDisplayShowCursor(CGMainDisplayID())
     usleep(400_000)
     say("bg show: " + cursorState())
+case "can-capture":
+    say(CGPreflightScreenCaptureAccess() ? "yes" : "no")
 case "win":
     guard let w = mainWindow(pidArg()), let f = frame(w) else { say("none"); exit(1) }
     say("\(fmt(f)) full=\(((attr(w, "AXFullScreen") as? Bool) ?? false) ? 1 : 0)")
