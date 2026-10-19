@@ -730,6 +730,19 @@ n=$(sed -n 's/^NUMBER_LIMIT="\([0-9]*\)"$/\1/p' /etc/snapper/configs/root 2>/dev
 if [[ -z $d ]]; then bad "freeing disk space" "nothing trims: deleted files keep their space (omacvm apply)"
 elif [[ $n == 5 && ! -e /var/lib/omacvm/update-snapshots ]]; then warn "freeing disk space" "$d; 5 update snapshots keep deleted system files (omacvm apply keeps 2)"
 else ok "freeing disk space" "$d${n:+; $n update snapshots}"; fi
+# The desktop user's runtime folder (/run/user/UID), a tmpfs of 10 % of the
+# VM's memory: when it is full, Hyprland and apps that draw through shared
+# memory there die of SIGBUS (2026-10-19: OmacVM.app's hyprpicker up to 3.1.24
+# left 3 files per display per screenshot there).
+read -r rp rsz < <(df -h --output=pcent,size "$RUN" 2>/dev/null | awk 'NR == 2 { sub("%", "", $1); print $1, $2 }')
+if [[ ${rp:-} =~ ^[0-9]+$ ]]; then
+  hl=$(find "$RUN" -maxdepth 1 -type f -name '.hyprpicker_*' 2>/dev/null | wc -l)
+  if (( rp > 80 )); then
+    h="a restart empties it"
+    (( hl > 0 )) && [[ $TYPE == app ]] && h="Update VM (omacvm apply) removes its $hl screenshot leftovers, a restart empties it"
+    warn "runtime folder" "$rp % of $rsz full ($RUN): apps die when it is full; $h"
+  else ok "runtime folder" "$rp % of $rsz used"; fi
+fi
 if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH from the Mac" "firewall rule"
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi
 
