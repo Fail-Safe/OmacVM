@@ -96,7 +96,7 @@ WATCH=$!
 # more wait. The (i) and the Copy Command come from the app ("SSHKEY refused").
 rc=0; wait_ssh 300 refused || rc=$?
 if (( rc == 2 )); then
-  log "$NAME only knows another Mac's SSH key: adding this one"
+  log "$NAME doesn't know this VM folder's SSH key: adding it"
   echo "FIX ssh-key"
   fix=""; read -r -t "${OMACVM_FIX_SECONDS:-180}" -u 3 fix || fix=""
   rc=2
@@ -104,12 +104,14 @@ if (( rc == 2 )); then
   if (( rc == 0 )); then
     log "SSH works again."
   elif [[ $fix == added || $fix == present ]]; then
-    die "$(stopped_why "OmacVM added this Mac's key in $NAME, but its SSH still turns OmacVM away. Its SSH settings may have been changed in the VM (log: $LOG/update-console.log).")"
+    had="OmacVM added this VM folder's key in $NAME"
+    [[ $fix == added ]] || had="$NAME already has this VM folder's key"
+    die "$(stopped_why "$had, but its SSH still turns OmacVM away. Its SSH settings may have been changed in the VM (log: $LOG/update-console.log).")"
   else
     echo "SSHKEY refused"
     why="the VM's guest agent did not answer"
     [[ $fix != failed ]] || why="adding it in the VM failed"
-    die "$(stopped_why "$NAME doesn't let this Mac in over SSH, and OmacVM could not add its key ($why). Add the key once by hand: start the VM, open a terminal in it, paste the command (Copy Command) and enter your password. Then click Update VM again.")"
+    die "$(stopped_why "$NAME doesn't let this Mac in over SSH, and OmacVM could not add this VM folder's key ($why). Add the key once by hand: start the VM, open a terminal in it, paste the command (Copy Command) and enter your password. Then click Update VM again.")"
   fi
 elif (( rc != 0 )); then
   die "$(stopped_why "$NAME did not come up within 5 minutes (log: $LOG/update-console.log). Start it from the app to see what it shows.")"

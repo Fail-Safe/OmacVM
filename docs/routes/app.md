@@ -64,8 +64,9 @@ VM runs, and goes back by itself when a new version does not start
   start the VM. Then, with the VM running, set up this Mac's side (Bridge, Gestures, clock, token) with
   `bash ~/Applications/OmacVM.app/Contents/Resources/scripts/apply-vm.sh ~/OmacVM/<VM name>`
   (or `omacvm apply --vm "<VM name>" --vm-type app`). If it says there is no
-  SSH access, the VM does not know this Mac's key yet: `omacvm apply` prints
-  the one command to run in the VM's terminal.
+  SSH access, the VM does not know this VM folder's key yet: start it once in
+  the app (it adds the key through the guest agent), or run the one command
+  `omacvm apply` prints in the VM's terminal.
 - The build: the same steps as the other routes (try-omarchy as a temporary
   live system, Arch Linux ARM on btrfs with GRUB, Omarchy from omarchy-mac,
   OmacVM's VM side). 10 to 30 minutes (8 on an M4 Max), plus a 1.4 GB
