@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.26 (unreleased)
 
 - **Chrome no longer looks gray with HDR on.** With the experimental HDR switch on, Chrome and
   Chromium draw their whole window as HDR, and the VM dimmed all of it to fit, so pages and white
