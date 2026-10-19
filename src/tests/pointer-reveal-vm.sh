@@ -5,10 +5,11 @@
 #   B3  a background process shows it, as OmacVM Gestures did over full-screen
 #       VMs (SetsCursorInBackground), and the pointer moves over the VM;
 #   B5  it hides it, Finder comes to the front and the VM back, then it shows it.
-# Pass: the Mac shows no cursor over the VM (hidden, or an empty image) 0.1 s
-# after the first move and after it, after B3 also at rest; after B5 an arrow at
-# rest is only noted (QEMU's image set while another process hid the cursor did
-# not reach the screen: the first move fixes it). 3.1.24 showed its arrow in all.
+# Pass: the Mac shows no cursor over the VM (hidden, or an empty image) at rest
+# (after B5 within 1 s: QEMU looks every 0.5 s while it has the cursor hidden;
+# its image set while another process hid the cursor had not reached the
+# screen), 0.1 s after the first move and after moves. 3.1.24 showed its arrow
+# in all; the first fix (#460) after B5 at rest until the first move.
 # Also, nothing else changed: the boot (before the guest draws its pointer),
 # Ctrl+Option+G, the pointer leaving the window, Finder in front and coming back
 # show the arrow where they did. --gestures also runs the test app's own OmacVM
@@ -100,10 +101,6 @@ guard() {
 }
 post() { guard; LAST=$(date +%s); echo "$LAST" > "$STAMP"; "$T" "$@"; }
 state() { "$T" state; }
-# No cursor seen: hidden, or its image has no pixel.
-none_seen() { local s; s=$(state); [[ $s == visible=0* || $s == *" empty=1 "* ]]; }
-# The arrow (or another real image) is shown.
-arrow_seen() { local s; s=$(state); [[ $s == visible=1* && $s == *" empty=0 "* ]]; }
 check_none() { local s; s=$(state); if [[ $s == visible=0* || $s == *" empty=1 "* ]]; then ok "$1 ($s)"; else bad "$1: the Mac's cursor shows over the VM ($s)"; fi; }
 check_arrow() { local s; s=$(state); if [[ $s == visible=1* && $s == *" empty=0 "* ]]; then ok "$1 ($s)"; else bad "$1: no arrow ($s)"; fi; }
 # The app empties qemu.log at each start; emptied here too, so it is this start's.
@@ -177,7 +174,7 @@ moves; sleep 0.2; check_none "B3 ... after moves"
 # B5: a background hide, Finder and back, a background show.
 ( "$T" bg h 6 s >> "$OUT/bg.txt" ) & bp=$!
 sleep 1.2; open -a Finder; sleep 2.5; "$T" front "$QPID" >/dev/null; wait $bp
-sleep 0.5; s=$(state); none_seen && say "     B5 hide, Finder, back, show: at rest none ($s)" || say "     note: B5 hide, Finder, back, show: at rest the arrow ($s), until the first move"
+sleep 1; check_none "B5 a background hide, Finder, back, a background show: at rest within 1 s"
 first_move; check_none "B5 ... 0.1 s after the first move"
 moves; sleep 0.2; check_none "B5 ... after moves"
 

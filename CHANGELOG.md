@@ -48,8 +48,10 @@ in more words.
   took the pointer, but other programs and macOS can show it again (OmacVM Gestures also hid and
   showed it over full-screen VMs). While the VM has the pointer, the Mac's cursor is now an empty
   picture as well, so nothing shows when someone else shows it, and OmacVM Gestures leaves the
-  app's VMs alone (Parallels, UTM and VMware Fusion as before). Ctrl+Option+G, leaving the VM and
-  switching apps bring the arrow back as before.
+  app's VMs alone (Parallels, UTM and VMware Fusion as before). This also holds while the pointer
+  rests, for example while you type: the app looks twice a second while it hides the cursor.
+  Ctrl+Option+G, leaving the VM and switching apps bring the arrow back as before; on
+  Omanotch's strip beside the notch the strip's own pointer stays.
 - **HDR and 10-bit colour (experimental, off by default).** A new switch in the app's Display
   settings, shown on Macs with an HDR display (a MacBook Pro's XDR panel, an HDR monitor). With it
   the VM's main window runs at 10 bits: smoother gradients (about twice the levels on screen), and

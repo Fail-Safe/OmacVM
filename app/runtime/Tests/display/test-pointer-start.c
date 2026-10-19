@@ -72,16 +72,22 @@ static Img img_of(OmacVMCursorImage w)
     return w == OMACVM_CURSOR_EMPTY ? IMG_EMPTY : w == OMACVM_CURSOR_GUEST ? IMG_GUEST : IMG_ARROW;
 }
 
-/* omacvm_cursor_image: set only over our window; force: the other empty one. */
+/*
+ * omacvm_cursor_image: its images and the arrow only over our window;
+ * force: the other empty one. A set after QEMU's arrow was left out
+ * reaches the screen (the arrow first).
+ */
 static void set_image(Vm *v, OmacVMCursorImage want, bool force)
 {
     v->want = want;
     if (want == OMACVM_CURSOR_APPKIT) {
         if (v->qemu_set) {
             v->qemu_set = false;
-            v->appkit = v->shown_image = IMG_ARROW;
+            if (v->over) {
+                v->appkit = v->shown_image = IMG_ARROW;
+            }
         }
-    } else if ((v->appkit != img_of(want) || force) && v->over) {
+    } else if ((v->appkit != img_of(want) || !v->qemu_set || force) && v->over) {
         v->appkit = v->shown_image = img_of(want);
         v->qemu_set = true;
     }
@@ -120,8 +126,8 @@ static void update_cursor(Vm *v)
     }
 }
 
-/* omacvm_cursor_motion: a motion while the VM has the pointer. */
-static void cursor_motion(Vm *v)
+/* omacvm_cursor_again: a motion while the VM has the pointer, or the watch. */
+static void cursor_again(Vm *v)
 {
     bool has, looked = false, shown = false;
 
@@ -196,7 +202,7 @@ static void motion(Vm *v)
         take(v);
     }
     if (v->grabbed) {
-        cursor_motion(v);
+        cursor_again(v);
     }
     if (v->grabbed && v->tablet_live) {
         v->guest_moves++;
@@ -236,9 +242,40 @@ static void enter(Vm *v)
 static void leave(Vm *v)
 {
     v->over = false;
+    v->shown_image = IMG_ARROW;     /* macOS's own outside our windows (seen on macOS 27) */
     omacvm_pointer_left(&v->ptr);
     if (v->key && v->absolute && v->grabbed) {
         ungrab(v);
+    }
+}
+
+/*
+ * Up into Omanotch's strip (full screen below a notch): the strip sets its
+ * own cursor (the guest's arrow) as the pointer enters it; QEMU lets go.
+ */
+static void strip_up(Vm *v)
+{
+    v->over = false;
+    v->shown_image = IMG_GUEST;
+    omacvm_pointer_left(&v->ptr);
+    if (v->key && v->absolute && v->grabbed) {
+        ungrab(v);
+    }
+}
+
+/* Down out of the strip: Omanotch sets the Mac's arrow for OmacVM, the view is entered. */
+static void strip_down(Vm *v)
+{
+    v->shown_image = IMG_ARROW;
+    enter(v);
+}
+
+/* The watch while hidden (omacvm_cursor_watch): one tick, no motion. */
+static void watch_tick(Vm *v)
+{
+    v->now += OMACVM_POINTER_WATCH_S;
+    if (v->cursor_hidden) {
+        cursor_again(v);
     }
 }
 
@@ -709,6 +746,42 @@ static void test_appkit_arrow(void)
     CHECK(!mac_arrow_seen(&v), "so a show after it shows nothing");
 }
 
+/* B5: a show while the pointer rests (the user types); no motion follows. */
+static void test_show_at_rest(void)
+{
+    Vm v = running_vm(false);
+
+    v.now += 1;
+    macos_arrow(&v);        /* or an empty image set while another process hid it: the arrow shows */
+    CHECK(mac_arrow_seen(&v), "a show at rest: the arrow over the VM");
+    watch_tick(&v);
+    CHECK(!mac_arrow_seen(&v) && v.appkit == IMG_EMPTY, "the watch sets the empty image within 0.5 s, no motion");
+    CHECK(v.cursor_hidden && v.hide_count == 1, "no second hide (%d)", v.hide_count);
+    let_go(&v);
+    for (int i = 0; i < 4; i++) {
+        watch_tick(&v);
+    }
+    CHECK(ws_visible(&v) && v.shown_image == IMG_ARROW, "let go: no watch, the arrow stays");
+}
+
+/* Up into Omanotch's strip and back: the strip's own cursor stays, the VM's empty one comes back. */
+static void test_strip(void)
+{
+    Vm v = running_vm(false);
+
+    full_screen(&v);
+    strip_up(&v);
+    CHECK(!v.grabbed && ws_visible(&v) && v.shown_image == IMG_GUEST,
+          "on the strip: the strip's cursor, QEMU sets no arrow over it");
+    strip_down(&v);
+    CHECK(v.grabbed && !ws_visible(&v) && v.shown_image == IMG_EMPTY,
+          "back over the VM: hidden, and the empty image reached the screen");
+    background_show(&v);
+    CHECK(!mac_arrow_seen(&v), "a show after the strip round trip shows nothing");
+    leave(&v);
+    CHECK(ws_visible(&v) && v.shown_image == IMG_ARROW, "leaving anywhere else: the arrow");
+}
+
 static void test_shown_cases_keep_arrow(void)
 {
     Vm v = vm(false);
@@ -751,6 +824,8 @@ int main(void)
     test_background_show();
     test_macos_arrow();
     test_appkit_arrow();
+    test_show_at_rest();
+    test_strip();
     test_shown_cases_keep_arrow();
     if (failures) {
         printf("test-pointer-start: %d of %d checks FAILED\n", failures, checks);
