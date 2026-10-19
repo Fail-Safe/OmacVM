@@ -121,6 +121,14 @@ saw any of them.
 | pointer | moves into the VM; a background program shows the cursor (as OmacVM Gestures did up to 3.1.24); Finder and back; the same in full screen; Graphics without QEMU's lock off, then on (switched in the window) | the Mac shows no cursor over the VM: `CGCursorIsVisible` false or an empty image; a picture of the spot when it does |
 | leftovers | shuts the VM down from inside, closes its window, quits the app | no QEMU of the VM, nothing from the app (but its helpers) or on the VM's folder |
 
+Real events where they work: the pointer, the switches and the sidebar get
+HID events; the window's header buttons (Start, Update VM) get
+Accessibility's press, as a posted click under the window's toolbar does
+nothing (macOS 15), and so does a posted title-bar double-click (the zoom
+button stands in). A copy outside the Applications folders asks to be
+installed: the test runs it without installing. Helpers of the copy that the
+run started (its Bridge) are stopped at the end.
+
 On screen only while nobody uses the Mac: no input for 300 s but the test's
 own (its last event, also a run's before, in `~/Library/Caches/omacvm-e2e-last-input`), no Jump Desktop session, the screen unlocked; it stops when someone
 comes back. Otherwise (or `--headless`) those rows are BLOCKED and
@@ -133,9 +141,10 @@ offline (CI).
 src/tests/e2e/onscreen.sh --app "PATH/OmacVM Test.app" --vm "OmacVM M-e2e" [--only pointer,vm-size]
 ```
 
-About 15 minutes (two starts, Update VM). Results: `summary.tsv` (ok, FAIL,
+About 10 minutes (two starts, Update VM). Results: `summary.tsv` (ok, FAIL,
 BLOCKED, skip), `result.json` (`kind` omacvm-e2e-onscreen, `pass`, the app's
-version and commit, macOS), `shots/`, `run.log`. A release runs it on a test
+version and commit, macOS), `shots/` (with the window's words: over SSH a picture shows only the
+desktop without Screen Recording), `run.log`. A release runs it on a test
 identity build of M (or the release zip relabeled, `relabel.sh`) on each
 macOS it has a Mac for (docs/releasing.md).
 
