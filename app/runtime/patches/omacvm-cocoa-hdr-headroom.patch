@@ -6,7 +6,7 @@ app before it), the main output's entry in the layout on OmacVM's display
 port carries "edr": the EDR headroom of the window's display now (1 = SDR
 white), looked at once a second on the main thread and sent when it moved
 by 10 % or more (ui/omacvm-edr.h); 0 when PQ cannot be shown this run
-(half-float surfaces failed, or the CAOpenGLLayer path). The guest's
+(half-float surfaces failed, the CAOpenGLLayer path, or untagged surfaces). The guest's
 display sync runs Virtual-1 in PQ with max_luminance = 203 nits x that
 headroom, or at 10 bits in sRGB without one. The layer's toneMapMode is
 never while it shows PQ, so macOS does not tone-map again. Only a
@@ -143,16 +143,20 @@ and omacvm-cocoa-hdr-headroom-logic.patch.
          warn_report("cocoa: half-float surfaces failed, 8-bit from now on "
                      "(no deep colour or HDR)");
      }
-@@ -9997,6 +10025,77 @@
-     }
- }
- 
+@@ -9994,9 +10022,81 @@
+             /* The guest is not reading (port closed): it asks again with hello. */
+             break;
+         }
++    }
++}
++
 +/*
 + * OmacVM, HDR (ADR 0049): while QEMU shows the guest's 10-bit frames as PQ,
 + * the main output's entry in the layout carries "edr": the headroom of the
 + * window's display now (1 = SDR white; omacvm-edr.h), which the guest
 + * tone-maps into (omacvm-display-sync); 0 = PQ cannot be shown this run
-+ * (half-float surfaces failed, or the CAOpenGLLayer path). Main thread: a
++ * (half-float surfaces failed, the CAOpenGLLayer path, or untagged surfaces:
++ * OMACVM_GL_COLOR=native). Main thread: a
 + * look once a second while HDR is wanted and the guest's display agent is
 + * there (NSScreen's current headroom follows the panel's brightness, and
 + * QEMU's layer asks for EDR, so it reads the real value); a new value goes
@@ -167,7 +171,7 @@ and omacvm-cocoa-hdr-headroom-logic.patch.
 +    if (!cocoa_gl_present_hdr_wanted()) {
 +        return -1;
 +    }
-+    if (!present_ctx || qatomic_read(&present_deep_failed)) {
++    if (!present_ctx || qatomic_read(&present_deep_failed) || present_color == 0) {
 +        return 0;
 +    }
 +    NSScreen *s = [[cocoaView window] screen];
@@ -198,9 +202,9 @@ and omacvm-cocoa-hdr-headroom-logic.patch.
 +{
 +    if (omacvm_edr_set(omacvm_edr_now())) {
 +        omacvm_send_layout();
-+    }
-+}
-+
+     }
+ }
+ 
 +static void omacvm_edr_watch(void)
 +{
 +    if (omacvm_edr_timer || !cocoa_gl_present_hdr_wanted()) {
@@ -221,7 +225,7 @@ and omacvm-cocoa-hdr-headroom-logic.patch.
  static void omacvm_send_layout(void)
  {
      NSMutableArray *outputs = [NSMutableArray array];
-@@ -10017,12 +10116,16 @@
+@@ -10017,12 +10117,16 @@
          if (s && !builtin && CGDisplayIsBuiltin(omacvm_screen_id(s))) {
              builtin = name;
          }
@@ -239,7 +243,7 @@ and omacvm-cocoa-hdr-headroom-logic.patch.
      }
      NSMutableDictionary *msg = [NSMutableDictionary dictionaryWithDictionary:@{
          @"layout": outputs,
-@@ -10210,6 +10313,8 @@
+@@ -10210,6 +10314,8 @@
              omacvm_guest_ready = true;
              [omacvm_last_layout release];
              omacvm_last_layout = nil;
