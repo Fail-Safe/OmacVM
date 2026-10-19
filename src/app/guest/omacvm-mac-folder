@@ -24,7 +24,7 @@ home=$(getent passwd "$user" | cut -d: -f6)
 # mac_dir umount [rmdir] | mount FSTYPE SOURCE OPTIONS
 mac_dir() {
   python3 -I - "$home" "$user" "$@" <<'PY'
-import ctypes, os, pwd, stat, subprocess, sys
+import ctypes, os, pwd, stat, sys
 home, user, what = sys.argv[1:4]
 pw = pwd.getpwnam(user)
 P = os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -43,12 +43,15 @@ def opened():   # ~/Mac without following a link, and the path a child reaches i
     fd = os.open("Mac", P | os.O_DIRECTORY, dir_fd=h)
     return fd, f"/proc/self/fd/{fd}"
 
+# mount(2) and umount2(2) themselves, on /proc/self/fd/N: umount(8) looks that
+# path up in the mount table and stops, and newer mount(8)s (move_mount) do not
+# follow it; the system calls do, to the folder opened above.
+libc = ctypes.CDLL(None, use_errno=True)
+
 if what == "umount":
     if mounted:
-        # umount2 itself: umount(8) looks /proc/self/fd/N up in the mount table and stops there.
         # MNT_DETACH: the open folder itself keeps the mount busy; it goes when that closes.
         fd, p = opened()
-        libc = ctypes.CDLL(None, use_errno=True)
         if libc.umount2(p.encode(), 2) != 0:
             print(f"omacvm-mac-folder: {home}/Mac: {os.strerror(ctypes.get_errno())}")
     if sys.argv[4:] == ["rmdir"]:
@@ -69,8 +72,8 @@ elif what == "mount":
         print(f"omacvm-mac-folder: {home}/Mac is not {user}'s own folder: not mounted")
         sys.exit(0)
     fstype, source, options = sys.argv[4:7]
-    sys.exit(subprocess.run(["mount", "--no-canonicalize", "-t", fstype, "-o", options, source, p],
-                            pass_fds=[fd]).returncode)
+    if libc.mount(source.encode(), p.encode(), fstype.encode(), 0, options.encode()) != 0:
+        sys.exit(f"omacvm-mac-folder: mount on {home}/Mac: {os.strerror(ctypes.get_errno())}")
 PY
 }
 
