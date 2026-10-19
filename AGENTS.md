@@ -578,6 +578,9 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   `--update-restart`) act only on a VM directly in the build's own `vmsRoot`. e2e harnesses source
   `src/tests/e2e/test-vms.sh`: `e2e_settings_save`/`_restore` for the settings they change, `e2e_vm_guard`
   before every start.
+  Before every publish a release runs the on-screen test `src/tests/e2e/onscreen.sh` on each test Mac's macOS
+  (window size, Update VM, a switch with the VM stopped, full screen, the Mac's cursor over the VM, leftovers;
+  docs/releasing.md); it moves the pointer and clicks only while nobody uses that Mac.
 - **Logs**: `~/Library/Logs/omacvm-{bridge,gestures}.log`; guest
   `journalctl --user -u omacvm-bridge-osd` (and `-u omacvm-bridge-events`, the shared event stream), `journalctl -u omacvm-gestures`,
   Omarchy shell `/run/user/1000/quickshell/by-id/*/log.log`.

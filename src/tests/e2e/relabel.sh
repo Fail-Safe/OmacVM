@@ -9,9 +9,12 @@
 # picks the test port (47930) from its relabeled bundle id from 3.1.16 on; an
 # older release's Gestures listens on 47830, beside the installed one, and
 # cannot (the gate's VM then has no Gestures; nothing else changes).
-#   src/tests/e2e/relabel.sh ZIP OUT_DIR      -> OUT_DIR/OmacVM Test.app
+#   src/tests/e2e/relabel.sh ZIP OUT_DIR [ID]  -> OUT_DIR/OmacVM Test.app
+# ID: a lane's own copy (org.omacvm.app.test.<lane>): its own settings and VMs folder, so another
+# test app on the same Mac keeps its own (onscreen.sh on a shared test Mac).
 set -euo pipefail
-ZIP=${1:?usage: relabel.sh ZIP OUT_DIR}; O=${2:?usage: relabel.sh ZIP OUT_DIR}
+ZIP=${1:?usage: relabel.sh ZIP OUT_DIR [ID]}; O=${2:?usage: relabel.sh ZIP OUT_DIR [ID]}; ID=${3:-org.omacvm.app.test}
+[[ $ID == org.omacvm.app.test || $ID == org.omacvm.app.test.* ]] || { echo "relabel.sh: $ID is not a test identity id" >&2; exit 2; }
 SIGN=${OMACVM_SIGN_ID:?OMACVM_SIGN_ID: a Developer ID Application identity}
 PB=/usr/libexec/PlistBuddy
 rm -rf "$O"; mkdir -p "$O/x"
@@ -34,7 +37,7 @@ for h in "$A"/Contents/Helpers/*.app; do
   # The test identity's helpers carry their own names (src/mac/install.sh starts them by these paths).
   [[ $(basename "$h" .app) == "$name" ]] || mv "$h" "$(dirname "$h")/$name.app"
 done
-$PB -c "Set :CFBundleIdentifier org.omacvm.app.test" "$A/Contents/Info.plist"
+$PB -c "Set :CFBundleIdentifier $ID" "$A/Contents/Info.plist"
 $PB -c "Set :CFBundleName OmacVM Test" "$A/Contents/Info.plist" 2>/dev/null || true
 # The window's Gestures rows (escape combo, Magic Mouse swipe, Swipe out) read
 # the domain build-app.sh --test-identity names; a release has none, so the
@@ -46,7 +49,7 @@ for q in "$A/Contents/MacOS/OmacVM-VM" "$A/Contents/Resources/runtime/bin/OmacVM
   codesign --force --options runtime --timestamp=none --preserve-metadata=entitlements -s "$SIGN" -i org.omacvm.app.test.qemu "$q"
   [[ $(codesign -dv "$q" 2>&1 | sed -n 's/^Identifier=//p') == org.omacvm.app.test.qemu ]] || { echo "relabel.sh: $q is not signed as the test app's QEMU" >&2; exit 1; }
 done
-codesign --force --options runtime --timestamp=none --preserve-metadata=entitlements -s "$SIGN" -i org.omacvm.app.test "$A"
+codesign --force --options runtime --timestamp=none --preserve-metadata=entitlements -s "$SIGN" -i "$ID" "$A"
 codesign --verify --deep --strict "$A"
 [[ $($PB -c "Print :OmacVMGesturesDomain" "$A/Contents/Info.plist") == org.omacvm.test.gestures ]] || { echo "relabel.sh: no test Gestures domain" >&2; exit 1; }
 echo "$($PB -c 'Print :CFBundleShortVersionString' "$A/Contents/Info.plist") $(codesign -dv "$A" 2>&1 | grep -E '^Identifier|^TeamIdentifier' | tr '\n' ' ')gestures domain $($PB -c 'Print :OmacVMGesturesDomain' "$A/Contents/Info.plist")"

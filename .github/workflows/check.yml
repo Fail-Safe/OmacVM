@@ -375,6 +375,9 @@ jobs:
       - name: e2e harnesses put the test app's settings back and start only test VMs
         run: src/tests/e2e-test-vms.sh
 
+      - name: The on-screen release test's checks, offline (its tool builds; no screen, VM or app)
+        run: src/tests/e2e-onscreen.sh
+
       - name: Stale-frame check reads the guest's scanout and finds changed pixels below the bar (#167)
         run: src/tests/stale-frames-diff.sh
 
