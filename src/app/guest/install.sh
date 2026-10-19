@@ -26,6 +26,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
+source ../../guest/home-files.sh   # the home is written as the user
 ../../guest/pkg-add qemu-guest-agent python || true
 # Started without waiting: a VM without the agent's port (the headless QEMU
 # of a build or an update) would hold this step 60-90 s for the device.
@@ -91,17 +92,14 @@ install -Dm644 omacvm-vblank.modprobe /etc/modprobe.d/omacvm-vblank.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/90-omacvm-vblank.conf 2>/dev/null || true
 # Only when it changed: Hyprland reloads its config on every write, and a
 # reload moves the displays (a flicker on each apply).
-if ! cmp -s omacvm_app.lua "$H/.config/hypr/omacvm_app.lua"; then
-  install -o "$U" -g "$U" -m644 omacvm_app.lua "$H/.config/hypr/.omacvm_app.lua.new"
-  mv -f "$H/.config/hypr/.omacvm_app.lua.new" "$H/.config/hypr/omacvm_app.lua"
-fi
+home_same "$H/.config/hypr/omacvm_app.lua" omacvm_app.lua || home_put "$H/.config/hypr/omacvm_app.lua" < omacvm_app.lua
 B=$H/.config/hypr/hyprland.lua
-grep -qxF 'require("hypr.omacvm_app")' "$B" || {
-  printf -- '-- OmacVM.app: the display follows the Mac window.\nrequire("hypr.omacvm_app")\n' >> "$B"; chown "$U:$U" "$B"; }
+home_grep "$B" -qxF 'require("hypr.omacvm_app")' ||
+  printf -- '-- OmacVM.app: the display follows the Mac window.\nrequire("hypr.omacvm_app")\n' | home_append "$B"
 A=$H/.config/hypr/autostart.lua
-grep -q omacvm-display-sync "$A" 2>/dev/null || { echo 'o.launch_on_start("omacvm-display-sync")' >> "$A"; chown "$U:$U" "$A"; }
+home_grep "$A" -q omacvm-display-sync || echo 'o.launch_on_start("omacvm-display-sync")' | home_append "$A"
 # After the app restarted a desktop that lost its GPU context: say so, and which apps closed.
-grep -q omacvm-desktop-recover "$A" 2>/dev/null || { echo 'o.launch_on_start("omacvm-desktop-recover notify")' >> "$A"; chown "$U:$U" "$A"; }
+home_grep "$A" -q omacvm-desktop-recover || echo 'o.launch_on_start("omacvm-desktop-recover notify")' | home_append "$A"
 # Video decoding on the Mac's media engine (the app's QEMU passes VA-API to
 # VideoToolbox): vainfo, the driver shim for Firefox, and Firefox's switch.
 ../../guest/pkg-add libva-utils || true

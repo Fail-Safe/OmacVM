@@ -6,13 +6,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
+source ../../guest/home-files.sh   # the home is written as the user
 
 install -m755 parallels-clip-out /usr/local/bin/parallels-clip-out
 A=$H/.config/hypr/autostart.lua
-grep -q parallels-clip-out "$A" 2>/dev/null ||
-  echo 'o.launch_on_start("wl-paste --type text --watch parallels-clip-out")' >> "$A"
+home_grep "$A" -q parallels-clip-out ||
+  echo 'o.launch_on_start("wl-paste --type text --watch parallels-clip-out")' | home_append "$A"
 # Parallels Tools' invisible clipboard helper window stays out of the tiling layout.
 C=$H/.config/hypr/hyprland.lua
-grep -q "Parallels Shared Clipboard" "$C" 2>/dev/null || cat clipboard-window-rule.lua >> "$C"
-chown "$U:$U" "$A" "$C"
+home_grep "$C" -q "Parallels Shared Clipboard" || home_append "$C" < clipboard-window-rule.lua
 echo "clipboard installed"

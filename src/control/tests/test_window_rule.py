@@ -52,8 +52,9 @@ def test_on_off_round_trip(tmp_path):
     before = 'require("default.hypr.omarchy")\n-- mine\n'
     (hy / "hyprland.lua").write_text(before)
     user = subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()
-    # The guest's user has a group of the same name; a Mac user does not.
-    owner = 'install() { command install -m644 "${@:$#-1:1}" "${@:$#}"; }\nchown() { :; }\n'
+    # The home's files go through home-files.sh, as install.sh has it (not
+    # root here: as this user).
+    owner = 'source ../../guest/home-files.sh\n'
     script = f'set -euo pipefail\nU={user}; H={tmp_path}\n{owner}{body}\nwindow_rule on\nwindow_rule on\n' \
              f'cat "$HY/hyprland.lua" > {tmp_path}/on\nwindow_rule off\n'
     subprocess.run(["bash", "-c", script], cwd=GUEST, check=True)

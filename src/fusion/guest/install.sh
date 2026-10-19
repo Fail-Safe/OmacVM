@@ -10,6 +10,7 @@ DSCALE=${3:-}
 [[ -z $DSCALE || $DSCALE =~ ^[1-4](\.[0-9]+)?$ ]] || { echo "install.sh: scale 1 to 4, not '$DSCALE'" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
 H=$(getent passwd "$U" | cut -d: -f6)
+source "$here/../../guest/home-files.sh"   # the home is written as the user
 
 # Public DNS while OmacVM installs (guest/install.sh turns it off at the end).
 "$here/dns.sh" on
@@ -51,14 +52,14 @@ systemctl --user -M "$U@" enable omacvm-fusion-displays.service >/dev/null 2>&1
 # clipboard (omacvm-fusion-clipboard). The tools' own autostart entry would
 # start a second agent on Hyprland's X11 display, where it cannot work.
 "$here/../../guest/pkg-add" xorg-server-xvfb xorg-xauth xsel wl-clipboard libxfixes
-install -Dm644 /dev/stdin "$H/.config/autostart/vmware-user.desktop" <<'DESKTOP'
+home_mkdir "$H/.config/autostart"
+home_put "$H/.config/autostart/vmware-user.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
 Name=VMware User Agent (started by omacvm-fusion-clipboard instead)
 Exec=/usr/bin/vmware-user-suid-wrapper
 Hidden=true
 DESKTOP
-chown -R "$U:$U" "$H/.config/autostart"
 install -m644 "$here/omacvm-fusion-clipboard.service" /etc/systemd/user/omacvm-fusion-clipboard.service
 systemctl --global disable omacvm-fusion-clipboard.service >/dev/null 2>&1 || true
 systemctl --user -M "$U@" enable omacvm-fusion-clipboard.service >/dev/null 2>&1
@@ -70,11 +71,12 @@ systemctl --user -M "$U@" enable omacvm-fusion-clipboard.service >/dev/null 2>&1
 # ~/.config/brave-flags.conf, which "omarchy install browser brave" replaces:
 # omacvm apply puts the line back.
 B=$H/.config/brave-flags.conf
-for c in /etc/chromium-flags.conf /etc/chrome-flags.conf "$B"; do
-  [[ $c == /etc/* || -f $c ]] || command -v brave >/dev/null || continue
+for c in /etc/chromium-flags.conf /etc/chrome-flags.conf; do
   grep -qx -- '--ignore-gpu-blocklist' "$c" 2>/dev/null || echo '--ignore-gpu-blocklist' >> "$c"
 done
-if [[ -f $B ]]; then chown "$U:$U" "$B"; fi
+if [[ -f $B ]] || command -v brave >/dev/null; then
+  home_grep "$B" -qx -- '--ignore-gpu-blocklist' || echo '--ignore-gpu-blocklist' | home_append "$B"
+fi
 # Firefox counts every vmwgfx driver as software GL (widget/gtk/GfxInfo.cpp)
 # and draws pages (WebRender) and WebGL (llvmpipe) in software. Allow the GPU
 # for those three. Our own default-pref file: Firefox updates leave it alone,
@@ -90,21 +92,22 @@ JS
 
 M=$H/.config/hypr/monitors.lua
 # Written next to it and moved into place, only when it changes: Hyprland
-# reloads on every write.
-tmp=$(mktemp "$M.XXXXXX")
+# reloads on every write. Read and written as the user.
+cur=$(mktemp); tmp=$(mktemp); trap 'rm -f "$cur" "$tmp"' EXIT
+home_cat "$M" > "$cur" || true
 # Ours already: only the first mode changes, the rest stays as you left it.
 # A new VM from a prebuilt image is ours too, with the scale of the Mac the
 # image was made on: SCALE (only given for a new VM) replaces it.
-if head -1 "$M" 2>/dev/null | grep -q '^-- OmacVM, VMware Fusion'; then
+if head -1 "$cur" | grep -q '^-- OmacVM, VMware Fusion'; then
   ed=(-e "s|^\(hl.monitor({ output = \"Virtual-1\", mode = \)\"[^\"]*\"|\1\"$MODE\"|")
   [[ -z $DSCALE ]] || ed+=(-e "s|^local omarchy_monitor_scale = .*|local omarchy_monitor_scale = $DSCALE|"
                            -e "s|^local omarchy_gdk_scale = .*|local omarchy_gdk_scale = $(printf '%.0f' "$DSCALE")|")
-  sed "${ed[@]}" "$M" > "$tmp"
+  sed "${ed[@]}" "$cur" > "$tmp"
 else
 # A number in Omarchy's own file is a choice (Omarchy's default is "auto").
 # Not a guess from the mode: 2940 px wide is a Retina MacBook Air at 2x, and
 # 2560 px a plain display at 1x as much as a 13" Retina one at 2x.
-scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1) || scale=""   # none yet
+scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$cur" | head -1) || scale=""   # none yet
 [[ -n $scale ]] || scale=${DSCALE:-2}
 gdk=$(printf '%.0f' "$scale")
 cat > "$tmp" <<LUA
@@ -120,8 +123,8 @@ hl.monitor({ output = "Virtual-1", mode = "$MODE", position = "0x0", scale = oma
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })
 LUA
 fi
-if cmp -s "$tmp" "$M"; then rm -f "$tmp"; else chmod 644 "$tmp"; chown "$U:$U" "$tmp"; mv -f "$tmp" "$M"; fi
-scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" | head -1)
+home_same "$M" "$tmp" || home_put "$M" < "$tmp"
+scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$tmp" | head -1)
 if systemctl --user -M "$U@" daemon-reload 2>/dev/null; then
   systemctl --user -M "$U@" restart omacvm-fusion-displays.service 2>/dev/null || true
   pkill -u "$U" -f 'vmtoolsd -n vmusr' 2>/dev/null || true   # a stray agent on Hyprland's X11 display

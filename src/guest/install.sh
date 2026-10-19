@@ -88,6 +88,9 @@ system() { [[ -z $ONLY ]]; }   # the steps that are no feature's
 not_set_up() { log "$2: not set up (see above)"; SOFT+=("$1"); }
 read -r layout variant <<<"$KB"
 H=$(getent passwd "$U" | cut -d: -f6)
+# Everything in the user's home is written as the user (a link the user put
+# there must not point root's writes at a system file).
+source "$R/guest/home-files.sh"
 user_ctl() { systemctl --user -M "$U@" "$@"; }
 # A command in the desktop user's session (Hyprland, Omarchy's environment).
 in_session() {
@@ -97,7 +100,7 @@ in_session() {
     bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
 }
 # Updated bar widgets load in a new shell: restarted once at the end.
-restart_shell_later() { install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"; }
+restart_shell_later() { home_mkdir "$H/.local/state/omacvm"; home_put "$H/.local/state/omacvm/restart-shell" < /dev/null; }
 # What off means for the features with a part in the VM that talks to the Mac.
 ROOT=""
 source "$R/guest/off.sh"
@@ -184,7 +187,7 @@ OLD=$(sed -n 's/^OMACVM_PREBUILT_USER=//p' /var/lib/omacvm/prebuilt/image 2>/dev
 if system && [[ $OLD =~ ^[a-z_][a-z0-9_-]*$ && $OLD != "$U" && ! -e /home/$OLD ]]; then
   n=0
   while IFS= read -r -d '' l; do
-    t=$(readlink "$l"); ln -sfn "$H${t#/home/$OLD}" "$l"; chown -h "$U:$U" "$l"; n=$((n + 1))
+    t=$(readlink "$l"); home_run ln -sfn "$H${t#/home/$OLD}" "$l"; n=$((n + 1))
   done < <(find "$H" -xdev -type l \( -lname "/home/$OLD" -o -lname "/home/$OLD/*" \) -print0 2>/dev/null)
   if (( n )); then log "links from the prebuilt image: $n now point into $H (the wallpaper shows after the next login)"; fi
 fi
@@ -359,10 +362,10 @@ if ! want no-idle-lock; then
   :
 elif [[ ${F[no-idle-lock]} == on ]]; then
   log "idle screensaver and lock: disabled (the Mac's lock protects the VM)"
-  install -d -o "$U" -g "$U" "$(dirname "$STAY")" "$(dirname "$MARK")"
-  sudo -u "$U" touch "$STAY" "$MARK"
+  home_mkdir "$(dirname "$STAY")" "$(dirname "$MARK")"
+  home_run touch "$STAY" "$MARK"
 elif [[ -f $MARK ]]; then
-  rm -f "$STAY" "$MARK"
+  home_run rm -f "$STAY" "$MARK"
 fi
 
 # Sound, speakers and microphone, on every route: PipeWire's ALSA, PulseAudio
@@ -532,8 +535,10 @@ fi
 # away when the session is running. A changed copy installs again.
 # Earlier versions cloned Omanotch into the user's home; this copy is used now.
 if want omanotch && [[ -d $H/.local/share/omanotch/.git ]]; then
-  if [[ -z $(git -C "$H/.local/share/omanotch" status --porcelain 2>/dev/null) ]]; then
-    rm -rf "$H/.local/share/omanotch"
+  # git as the user: as root it refuses the user's repository (safe.directory),
+  # prints nothing, and the copy would go with its changes.
+  if st=$(home_run git -C "$H/.local/share/omanotch" status --porcelain 2>/dev/null < /dev/null) && [[ -z $st ]]; then
+    home_run rm -rf "$H/.local/share/omanotch"
   else
     echo "  ~/.local/share/omanotch has local changes and is no longer used: left in place" >&2
   fi
@@ -544,19 +549,19 @@ if ! want omanotch; then
   :
 elif [[ ${F[omanotch]} == on ]]; then
   # An empty notchcast is a broken install (seen once): build it again; a repair always does.
-  [[ -e $H/.local/bin/notchcast && ! -s $H/.local/bin/notchcast ]] && rm -f "$H/.local/bin/notchcast"
-  [[ -n $ONLY ]] && rm -f "$H/.local/state/omacvm/omanotch"
+  [[ -e $H/.local/bin/notchcast && ! -s $H/.local/bin/notchcast ]] && home_run rm -f "$H/.local/bin/notchcast"
+  [[ -n $ONLY ]] && home_run rm -f "$H/.local/state/omacvm/omanotch"
   sum=$(cd "$R/omanotch/guest" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
   stamp=$H/.local/state/omacvm/omanotch
-  if [[ -x $H/.local/bin/notchcast && $(cat "$stamp" 2>/dev/null) != "$sum" ]]; then
+  if [[ -x $H/.local/bin/notchcast && $(home_cat "$stamp") != "$sum" ]]; then
     log "Omanotch: changed, installs again"
-    rm -f "$H/.local/bin/notchcast"
+    home_run rm -f "$H/.local/bin/notchcast"
   fi
   if [[ ! -x $H/.local/bin/notchcast ]]; then
     log "Omanotch (the bar beside the notch)"
     "$R/guest/pkg-add" base-devel lz4 wayland wayland-protocols git
-    install -d -o "$U" -g "$U" "$H/.local/state/omacvm"
-    echo "$sum" > "$stamp"; chown "$U:$U" "$stamp"
+    home_mkdir "$H/.local/state/omacvm"
+    echo "$sum" | home_put "$stamp"
     install -m644 "$R/guest/omacvm-omanotch.service" /etc/systemd/user/
     systemctl --global enable omacvm-omanotch.service >/dev/null 2>&1
     if pgrep -u "$U" -x Hyprland >/dev/null; then
@@ -568,14 +573,13 @@ elif [[ ${F[omanotch]} == on ]]; then
   fi
   # The Mac's address, so notchcast does not have to guess it (on VMware
   # Fusion the gateway is Fusion's NAT, not the Mac).
-  install -d -o "$U" -g "$U" "$H/.config/systemd/user/notchcast.service.d"
+  home_mkdir "$H/.config/systemd/user/notchcast.service.d"
   # OmacVM.app: its display sync already follows the window.
   # Also no start while notchcast is being built again: an older unit file
   # crash-looped into its start limit at the first login (3.0.6).
   { printf '[Unit]\nConditionFileIsExecutable=%%h/.local/bin/notchcast\nStartLimitIntervalSec=60\nStartLimitBurst=10\n'
     printf '[Service]\nEnvironment=NOTCHBAR_HOST=%s\n' "$HOST"
-    [[ $TYPE == app ]] && printf 'Environment=NOTCHBAR_FOLLOW_MODE=0\n'; } > "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
-  chown "$U:$U" "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
+    if [[ $TYPE == app ]]; then printf 'Environment=NOTCHBAR_FOLLOW_MODE=0\n'; fi; } | home_put "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
   user_ctl daemon-reload 2>/dev/null || true
   # A notchcast stuck in its start limit (3.0.6) runs again, no reboot needed.
   user_ctl reset-failed notchcast.service 2>/dev/null || true
@@ -649,7 +653,7 @@ fi
 # a background job restarts it right after the next unlock.
 RS=$H/.local/state/omacvm/restart-shell
 if [[ -f $RS ]]; then
-  rm -f "$RS"
+  home_run rm -f "$RS"
   sudo -u "$U" env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c '
     source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
     omarchy-shell shell ping >/dev/null 2>&1 || exit 0

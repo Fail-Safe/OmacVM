@@ -48,6 +48,7 @@ tx() {
     sudo() { [[ $1 == -u ]] && shift 2; "$@"; }
     export PATH="$T/bin:$PATH" OMACVM_PKG_LOG=$T/pkg.log
     unset XDG_CACHE_HOME OMACVM_VENDOR_DIR
+    source ../../guest/home-files.sh   # as install.sh has it (not root here: as this user)
     eval "$fn"
     textual )
 }

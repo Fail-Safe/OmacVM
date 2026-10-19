@@ -12,6 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: glide.sh <desktop-user> on|off}; ON=${2:?on|off}
 H=$(getent passwd "$U" | cut -d: -f6)
+source ../../guest/home-files.sh   # the home is written as the user
 HY=$H/.config/hypr
 LINE='require("hypr.omacvm_glide")'
 MARK=$H/.local/state/omacvm/glide-flags
@@ -21,37 +22,36 @@ FLAG=--disable-smooth-scrolling
 changed=0
 if [[ $ON == on ]]; then
   # In one step: hyprland.lua requires it and Omarchy reloads on every change.
-  if ! cmp -s omacvm_glide.lua "$HY/omacvm_glide.lua"; then
-    install -o "$U" -g "$U" -m644 omacvm_glide.lua "$HY/.omacvm_glide.lua.new"
-    mv -f "$HY/.omacvm_glide.lua.new" "$HY/omacvm_glide.lua"
+  if ! home_same "$HY/omacvm_glide.lua" omacvm_glide.lua; then
+    home_put "$HY/omacvm_glide.lua" < omacvm_glide.lua
     changed=1
   fi
-  if ! grep -qxF "$LINE" "$HY/hyprland.lua"; then
-    printf -- '-- OmacVM Glide (experimental): scrolling settings for the virtual trackpad.\n%s\n' "$LINE" >> "$HY/hyprland.lua"
-    chown "$U:$U" "$HY/hyprland.lua"
+  if ! home_grep "$HY/hyprland.lua" -qxF "$LINE"; then
+    printf -- '-- OmacVM Glide (experimental): scrolling settings for the virtual trackpad.\n%s\n' "$LINE" | home_append "$HY/hyprland.lua"
     changed=1
   fi
-  install -d -o "$U" -g "$U" "$(dirname "$MARK")"
+  home_mkdir "$(dirname "$MARK")"
   for f in "$H/.config/chromium-flags.conf" "$H/.config/chrome-flags.conf" "$H/.config/brave-flags.conf"; do
     [[ -f $f ]] || continue
-    grep -qxF -- "$FLAG" "$f" && continue
-    printf '%s\n' "$FLAG" >> "$f"
-    grep -qxF "$f" "$MARK" 2>/dev/null || echo "$f" >> "$MARK"
+    home_grep "$f" -qxF -- "$FLAG" && continue
+    printf '%s\n' "$FLAG" | home_append "$f"
+    home_grep "$MARK" -qxF "$f" || echo "$f" | home_append "$MARK"
   done
-  [[ -f $MARK ]] && chown "$U:$U" "$MARK"
   echo "scroll momentum: on (restart Chromium-based apps once)"
 else
-  if grep -qxF "$LINE" "$HY/hyprland.lua" 2>/dev/null || [[ -e $HY/omacvm_glide.lua ]]; then
-    sed -i '/^-- OmacVM Glide (experimental): scrolling settings for the virtual trackpad.$/d' "$HY/hyprland.lua" 2>/dev/null || true
-    sed -i "/^require(\"hypr.omacvm_glide\")$/d" "$HY/hyprland.lua" 2>/dev/null || true
-    rm -f "$HY/omacvm_glide.lua"
+  if home_grep "$HY/hyprland.lua" -qxF "$LINE" || [[ -e $HY/omacvm_glide.lua ]]; then
+    home_run sed -i -e '/^-- OmacVM Glide (experimental): scrolling settings for the virtual trackpad.$/d' \
+      -e "/^require(\"hypr.omacvm_glide\")$/d" "$HY/hyprland.lua" 2>/dev/null || true
+    home_run rm -f "$HY/omacvm_glide.lua"
     changed=1
   fi
   if [[ -f $MARK ]]; then
     while IFS= read -r f; do
-      [[ -f $f ]] && sed -i "/^$FLAG\$/d" "$f"
-    done < "$MARK"
-    rm -f "$MARK"
+      # Only the flags files this script names (the marker is the user's file).
+      case $f in "$H/.config/chromium-flags.conf"|"$H/.config/chrome-flags.conf"|"$H/.config/brave-flags.conf") ;; *) continue ;; esac
+      [[ -f $f ]] && home_run sed -i "/^$FLAG\$/d" "$f"
+    done < <(home_cat "$MARK")
+    home_run rm -f "$MARK"
   fi
   echo "scroll momentum: off"
 fi

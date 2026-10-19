@@ -6,6 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
+source ../../guest/home-files.sh   # the home is written as the user
 
 ../../guest/pkg-add python-evdev
 install -m755 omacvm-gestures /usr/local/bin/omacvm-gestures
@@ -24,29 +25,28 @@ I=$H/.config/hypr/input.lua
 # lines too); "?" (a count it cannot tell): nothing added; without it, a
 # one-line check.
 missing=()
-if taken=$(python3 omacvm-gestures --sideways "$H" 2>/dev/null); then
+if taken=$(home_run python3 omacvm-gestures --sideways "$H" 2>/dev/null); then
   [[ $taken == *"?"* ]] || for n in 3 4; do [[ " $taken " == *" $n "* ]] || missing+=("$n"); done
 else
   for n in 3 4; do
-    grep -Eq "^[[:space:]]*hl\.gesture\(\{ *fingers *= *$n *, *direction *= *\"(horizontal|horiz|left|l|right|r|swipe)\"" "$H"/.config/hypr/*.lua 2>/dev/null || missing+=("$n")
+    grep -Eq "^[[:space:]]*hl\.gesture\(\{ *fingers *= *$n *, *direction *= *\"(horizontal|horiz|left|l|right|r|swipe)\"" \
+      < <(home_run cat -- "$H"/.config/hypr/*.lua 2>/dev/null) || missing+=("$n")
   done
 fi
 if (( ${#missing[@]} )); then
   {
-    grep -q '^-- OmacVM trackpad:' "$I" 2>/dev/null || printf '\n%s\n%s\n' \
+    home_grep "$I" -q '^-- OmacVM trackpad:' || printf '\n%s\n%s\n' \
       "-- OmacVM trackpad: the Mac's multi-finger gestures arrive on a virtual" \
       "-- touchpad while the VM is full screen. Swipe between workspaces like Spaces."
     for n in "${missing[@]}"; do
       echo "hl.gesture({ fingers = $n, direction = \"horizontal\", action = \"workspace\" })"
     done
-  } >> "$I"
-  chown "$U:$U" "$I"
+  } | home_append "$I"
 fi
 # Omarchy turns the workspace animation off, so a swipe jumped to the next
 # workspace when the fingers lifted. Slide like Spaces, unless you set your own.
-if ! grep -q 'leaf *= *"workspaces"' "$H"/.config/hypr/*.lua 2>/dev/null; then
+if ! grep -q 'leaf *= *"workspaces"' < <(home_run cat -- "$H"/.config/hypr/*.lua 2>/dev/null); then
   printf '%s\n' '-- OmacVM trackpad: workspaces slide into place after a swipe, like Spaces.' \
-    'hl.animation({ leaf = "workspaces", enabled = true, speed = 4, bezier = "default", style = "slide" })' >> "$I"
-  chown "$U:$U" "$I"
+    'hl.animation({ leaf = "workspaces", enabled = true, speed = 4, bezier = "default", style = "slide" })' | home_append "$I"
 fi
 echo "omacvm-gestures guest side installed"
