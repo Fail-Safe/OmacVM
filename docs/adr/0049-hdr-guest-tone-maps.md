@@ -41,8 +41,10 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
    a user id of its own, root only installs it) into `/usr/local/lib/omacvm/virtio-gpu/K`,
    which depmod never sees; a modprobe `install` rule loads it only when
    the start's SMBIOS says `omacvm.deepcolor=1`, else (and on any failure)
-   the stock driver. Turning the switch on needs one VM restart; VMs whose
-   app never asks never load it. The pacman hook rebuilds it for new kernels.
+   the stock driver. In the initramfs (mkinitcpio's kms hook puts virtio_gpu
+   there) a 10-bit start loads nothing yet and udev loads it from the real
+   root, through the loader. Turning the switch on needs one VM restart;
+   VMs whose app never asks never load it. The pacman hook rebuilds it for new kernels.
 3. **One app-wide switch**, shown only while a display can show HDR (EDR
    potential > 1). A start gets it only with such a display, outside GPU
    safe mode and with the IOSurface present (`Settings.hdrStart`, one
