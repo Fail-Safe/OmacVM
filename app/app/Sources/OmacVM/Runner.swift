@@ -8,6 +8,7 @@ import OmacVMNet
 import OmacVMUpdate
 import OmacVMUSB
 import OmacVMDesktop
+import OmacVMWindow
 
 /// Runs one VM: QEMU with its own Cocoa window (VirGL), a QMP socket for
 /// power and pause, and the Mac's sleep and wake.
@@ -605,22 +606,33 @@ final class Runner {
             u.start()
         }
         // Held while QEMU runs, so qemu-ga in the VM sleeps (GuestAgent).
-        Thread.detachNewThread { GuestAgent.hold(socketPath: agentPath) }
-        // Grow or Compact asked for in the window (VMDisk), once the guest answers.
+        // Then the folder's SSH key into the VM, when it lacks it (VMKey: a VM
+        // from another Mac, or from before 3.0.12), and only after that the
+        // feature switches made while the VM was stopped: their apply goes
+        // over SSH. Nothing on screen; qemu.log says it when the key was added.
         let pid = p.processIdentifier
+        let folder = c.folder
+        Thread.detachNewThread { [weak self] in
+            GuestAgent.hold(socketPath: agentPath)
+            let r = VMKey.ensure(folder: folder, agentPath: agentPath, pingWait: 600, running: { kill(pid, 0) == 0 })
+            if let line = SSHRepair.logLine(r, stillRunning: kill(pid, 0) == 0) {
+                Task { @MainActor in self?.appendLog(line) }
+            }
+            if let on = imePending {
+                FeatureStart.run(config: c, switch: MacIME.switchState, what: "Mac input methods", on: on, agentPath: agentPath,
+                                 running: { kill(pid, 0) == 0 }) { [weak self] line in
+                    Task { @MainActor in self?.appendLog(line) }
+                }
+            }
+            if let on = gpuComputePending {
+                FeatureStart.run(config: c, switch: GPUCompute.switchState, what: "WebGPU and GPU compute", on: on, agentPath: agentPath,
+                                 running: { kill(pid, 0) == 0 }) { [weak self] line in
+                    Task { @MainActor in self?.appendLog(line) }
+                }
+            }
+        }
+        // Grow or Compact asked for in the window (VMDisk), once the guest answers.
         VMDisk.runJobs(config: c, agentPath: agentPath, running: { kill(pid, 0) == 0 })
-        if let on = imePending {
-            FeatureStart.run(config: c, switch: MacIME.switchState, what: "Mac input methods", on: on, agentPath: agentPath,
-                             running: { kill(pid, 0) == 0 }) { [weak self] line in
-                Task { @MainActor in self?.appendLog(line) }
-            }
-        }
-        if let on = gpuComputePending {
-            FeatureStart.run(config: c, switch: GPUCompute.switchState, what: "WebGPU and GPU compute", on: on, agentPath: agentPath,
-                             running: { kill(pid, 0) == 0 }) { [weak self] line in
-                Task { @MainActor in self?.appendLog(line) }
-            }
-        }
         Runner.watchNotchSkip(folder: c.folder, atStart: notchSkip, agentPath: agentPath, running: { kill(pid, 0) == 0 }) { [weak self] line in
             Task { @MainActor in self?.appendLog(line) }
         }
