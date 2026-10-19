@@ -34,5 +34,6 @@ a new record replaces it and says so.
 | [0045](0045-sound-own-thread.md) | The sound on its own real-time thread, not in QEMU's main loop | accepted, built (`audio`, 3.1.16) |
 | [0046](0046-gpu-off-the-main-loop.md) | The VM's GPU work lets go of the BQL, then leaves the main loop | accepted, built (`gpu-thread`), off by default |
 | [0047](0047-vulkan-windows-without-a-copy.md) | Vulkan windows at the display's rate (no Wayland commit timing), and without a CPU copy (IOSurface window buffers, GPU re-stride) | accepted; no copy built (`vulkan-zc`), off by default |
+| [0048](0048-freed-space-back-to-the-mac.md) | What the VM frees goes back to the Mac; 2 update snapshots instead of omarchy-mac's 5, a trim at every full apply | accepted, built (`disk`) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).
