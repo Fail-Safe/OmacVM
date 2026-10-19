@@ -2,9 +2,9 @@
 # Freeing disk space (src/guest/disk-space.sh) without a VM: omarchy-mac's 5
 # update snapshots become KEEP (once) and the extra ones go at once, a number
 # set by hand stays (also 5 after the change), the weekly trim is on, the
-# trim starts only after btrfs's cleaner (at most a minute); omacvm apply
-# runs it only after the VM side worked, never for a repair; omacvm check's
-# "freeing disk space" line.
+# trim runs after btrfs's cleaner, both together waited for at most a
+# minute; omacvm apply runs it only after the VM side worked, never for a
+# repair; omacvm check's "freeing disk space" line.
 # snapper, systemctl, btrfs, timeout and findmnt are stand-ins.
 #   src/tests/disk-space.sh
 set -uo pipefail
@@ -38,14 +38,17 @@ cat > "$T/bin/systemctl" <<'EOF'
 #!/bin/bash
 echo "systemctl $*" >> "$CALLS"
 [[ $* == "is-enabled -q fstrim.timer" ]] && exit "${TIMER_OFF:-0}"
+[[ $* == "start fstrim.service" && -n ${TRIM_STUCK:-} ]] && exec sleep 30
 exit 0
 EOF
-# btrfs: the cleaner's wait ($CLEANER_STUCK: never ends); $NOT_BTRFS: / is not btrfs
+# btrfs: the cleaner's wait ($CLEANER_SECONDS long; $CLEANER_STUCK: never
+# ends); $NOT_BTRFS: / is not btrfs
 cat > "$T/bin/btrfs" <<'EOF'
 #!/bin/bash
 echo "btrfs $*" >> "$CALLS"
 [[ -z ${NOT_BTRFS:-} ]] || { echo "ERROR: not a btrfs filesystem: /" >&2; exit 1; }
 [[ $* == "subvolume sync /" && -n ${CLEANER_STUCK:-} ]] && exec sleep 30
+[[ $* == "subvolume sync /" ]] && sleep "${CLEANER_SECONDS:-0}"
 exit 0
 EOF
 # timeout SECONDS COMMAND...: as coreutils' (macOS has none), $TIMEOUT_TEST
@@ -74,9 +77,15 @@ config() {   # NUMBER_LIMIT NUMBER_LIMIT_IMPORTANT: omarchy-mac's file
     "NUMBER_LIMIT=\"$1\"" "NUMBER_LIMIT_IMPORTANT=\"$2\"" '' 'TIMELINE_CREATE="no"' > "$T/root"
 }
 limits() { grep -E '^NUMBER_LIMIT' "$T/root" | tr '\n' ' '; }
-run() { : > "$CALLS"; out=$(bash "$S" 2>&1); rc=$?; calls=$(tr '\n' ';' < "$CALLS"); }
-# The timer on, the cleaner (at most 60 s), a commit, then the trim.
-TRIM="systemctl enable fstrim.timer;timeout 60 btrfs subvolume sync /;btrfs subvolume sync /;btrfs filesystem sync /;systemctl start --no-block fstrim.service;"
+# calls: what ran, the trim's time limit as N (BOUND: the number)
+run() {
+  : > "$CALLS"; out=$(bash "$S" 2>&1); rc=$?
+  BOUND=$(sed -n 's/^timeout \([0-9]*\) systemctl start fstrim.service$/\1/p' "$CALLS")
+  calls=$(sed 's/^timeout [0-9]* systemctl/timeout N systemctl/' "$CALLS" | tr '\n' ';')
+}
+# The timer on, the cleaner (at most 60 s), a commit, then the trim, waited
+# for with the rest of the minute.
+TRIM="systemctl enable fstrim.timer;timeout 60 btrfs subvolume sync /;btrfs subvolume sync /;btrfs filesystem sync /;timeout N systemctl start fstrim.service;systemctl start fstrim.service;"
 
 config 5 5; run
 expect "omarchy-mac's 5: exit 0" 0 "$rc"
@@ -85,6 +94,7 @@ expect "omarchy-mac's 5: set, the extra snapshots go at once, timer on, the clea
   "snapper -c root set-config NUMBER_LIMIT=$keep NUMBER_LIMIT_IMPORTANT=$keep;snapper -c root cleanup number;$TRIM" "$calls"
 expect "omarchy-mac's 5: says so" "update snapshots: the last $keep kept (were 5)" "$out"
 expect "omarchy-mac's 5: done once, the number set noted" "$keep" "$(cat "$OMACVM_SNAPPER_DONE" 2>/dev/null)"
+expect "the trim: the rest of the minute" yes "$( (( BOUND >= 59 && BOUND <= 60 )) && echo yes)"
 
 run
 expect "again: snapper untouched, timer, cleaner and trim only" "$TRIM" "$calls"
@@ -106,14 +116,17 @@ NOT_BTRFS=1 run
 expect "/ not btrfs (Omarchy by hand): the trim still" "$TRIM" "$calls"
 expect "/ not btrfs: says nothing, exit 0" "|0" "$out|$rc"
 
-# The cleaner takes longer than the wait (1 s here for 60): the trim still
-# starts, right after the wait.
+# The cleaner takes 3 s: the trim gets what is left of the minute.
+CLEANER_SECONDS=3 run
+expect "a cleaner of 3 s: the trim waited for at most the rest" yes "$( (( BOUND >= 56 && BOUND <= 57 )) && echo yes)"
+# The cleaner and the trim take longer than the wait (1 s here for 60):
+# the trim still starts, right after the wait, and the script ends.
 config 5 5; t0=$SECONDS
-CLEANER_STUCK=1 TIMEOUT_TEST=1 run
-expect "cleaner slower than the wait: snapshots, then the trim after the wait" \
+CLEANER_STUCK=1 TRIM_STUCK=1 TIMEOUT_TEST=1 run
+expect "cleaner and trim slower than the wait: snapshots, the trim after the wait" \
   "snapper -c root set-config NUMBER_LIMIT=$keep NUMBER_LIMIT_IMPORTANT=$keep;snapper -c root cleanup number;$TRIM" "$calls"
-expect "cleaner slower than the wait: does not wait longer, exit 0" "yes|0" \
-  "$( (( SECONDS - t0 <= 5 )) && echo yes)|$rc"
+expect "cleaner and trim slower than the wait: does not wait longer, exit 0" "yes|0" \
+  "$( (( SECONDS - t0 <= 6 )) && echo yes)|$rc"
 rm -rf "${T:?}/lib"
 
 config 5 5; SNAPPER_FAIL=1 run

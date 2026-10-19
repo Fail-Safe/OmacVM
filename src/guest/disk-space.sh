@@ -27,14 +27,17 @@ if [[ ! -e $M && -f $C ]] && grep -qx 'NUMBER_LIMIT="5"' "$C"; then
 fi
 
 systemctl enable fstrim.timer >/dev/null 2>&1 || true
-# btrfs frees a deleted snapshot's blocks later, in its cleaner, and a trim
-# before that misses them (Update VM shuts the VM down right after). So the
-# cleaner first, at most a minute, then a commit, so that what it freed is
-# free space the trim sees. Returns at once when no snapshot is being
-# deleted. What the cleaner frees later (at the next boot, when the VM shut
-# down first) goes back by async discard then, or with the next trim.
+# A trim now: discard=async only sees what is freed while mounted, not what
+# was free before (the install's leftovers, /boot after a new initramfs),
+# and it drops what it has not sent yet when the VM shuts down, which
+# Update VM does right after. btrfs frees a deleted snapshot's blocks later,
+# in its cleaner: so the cleaner first, then a commit, so that what it freed
+# is free space the trim sees, then the trim. At most about a minute for
+# both; if that runs out, the trim goes on by itself.
+# What the cleaner frees later (at the next boot, when the VM shut down
+# first) goes back by async discard then, or with the next trim.
+end=$((SECONDS + 60))
 timeout 60 btrfs subvolume sync / >/dev/null 2>&1 || true
 btrfs filesystem sync / >/dev/null 2>&1 || true
-# A trim now: discard=async only sees what is freed while mounted, not what
-# was free before (the install's leftovers, /boot after a new initramfs).
-systemctl start --no-block fstrim.service >/dev/null 2>&1 || true
+left=$((end - SECONDS)); (( left > 10 )) || left=10
+timeout "$left" systemctl start fstrim.service >/dev/null 2>&1 || true
