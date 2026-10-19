@@ -13,6 +13,13 @@ in more words.
   A number you set yourself stays. On a test VM with 5 update snapshots, Update VM gave back
   2.4 GB on the Mac, and each update after it gives back what its oldest snapshot held (before:
   nothing). `omacvm check` shows a "freeing disk space" line.
+- **No second pointer over the VM.** The Mac's arrow could show up next to Omarchy's pointer and
+  stay until you switched out of the VM and back. The app hid the Mac's cursor once when the VM
+  took the pointer, but other programs and macOS can show it again (OmacVM Gestures also hid and
+  showed it over full-screen VMs). While the VM has the pointer, the Mac's cursor is now an empty
+  picture as well, so nothing shows when someone else shows it, and OmacVM Gestures leaves the
+  app's VMs alone (Parallels, UTM and VMware Fusion as before). Ctrl+Option+G, leaving the VM and
+  switching apps bring the arrow back as before.
 - **The app's window opens at most 800 pt tall,** centred. On a large display it used to open as
   tall as the screen; you can still drag it taller.
 - **mpv keeps playing in UTM VMs too.** UTM's VM draws OpenGL with virgl as well, with the same

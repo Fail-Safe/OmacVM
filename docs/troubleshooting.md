@@ -29,7 +29,9 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   [34](#34-app-keyboard-sharing-apps-the-vm-takes-the-keys-meant-for-the-other-computer).
 - **The Mac's pointer shows over the full-screen VM**: menu bar tools that keep
   their own window across the top of the screen (Bartender, for one) can bring
-  it back. Quit them while you work in the VM.
+  it back. Quit them while you work in the VM. In OmacVM.app up to 3.1.24 the
+  Mac's arrow could also stay next to Omarchy's pointer until you switched out
+  of the VM and back; Ctrl+Option+G and then a click into the VM hides it too.
 - **The Bluetooth panel lists your devices but cannot connect them**: allow
   Bluetooth for *OmacVM Bridge* (System Settings › Privacy & Security ›
   Bluetooth); the panel says so too. A device that is off or out of range
