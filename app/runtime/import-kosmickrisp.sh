@@ -5,8 +5,8 @@
 #   app/runtime/import-kosmickrisp.sh DIR --stamp   print its stamp
 # DIR is the other Mac's app/runtime/.build/kosmickrisp from the same commit
 # (build-kosmickrisp.sh there). Taken only when its stamp names the Mesa
-# commit and the build-kosmickrisp.sh of this checkout, and the dylib is an
-# arm64 library that links only the system's libraries.
+# commit, the build-kosmickrisp.sh and the Mesa patches of this checkout, and
+# the dylib is an arm64 library that links only the system's libraries.
 # build-app.sh and build-qemu-gpu-runtime.sh use it when
 # OMACVM_KOSMICKRISP_FROM=DIR is set.
 set -euo pipefail
@@ -22,6 +22,13 @@ script=$(shasum -a 256 "$native_dir/build-kosmickrisp.sh" | cut -d' ' -f1)
 read -r s_commit s_script _ < "$from/stamp"
 [[ $s_commit == "$commit" ]] || die "built from Mesa $s_commit, this checkout pins $commit"
 [[ $s_script == "$script" ]] || die "built by another build-kosmickrisp.sh: build it again from this commit"
+# The Mesa patches (patches/mesa-kosmickrisp-*.patch) as build-kosmickrisp.sh puts them in the stamp.
+patches=()
+for p in "$native_dir"/patches/mesa-kosmickrisp-*.patch; do [[ -f $p ]] && patches+=("$p"); done
+want_patches=
+((${#patches[@]})) && want_patches="patches-$(cat "${patches[@]}" | shasum -a 256 | cut -c1-16)"
+have_patches=$(tr ' ' '\n' < "$from/stamp" | grep '^patches-' || true)
+[[ $have_patches == "$want_patches" ]] || die "built with other Mesa patches (${have_patches:-none}, this checkout: ${want_patches:-none}): build it again from this commit"
 lib=$from/libvulkan_kosmickrisp.dylib
 [[ $(file -b "$lib") == "Mach-O 64-bit dynamically linked shared library arm64" ]] || die "$lib is not an arm64 dylib"
 others=$(otool -L "$lib" | tail -n +2 | awk '{ print $1 }' | grep -v -E '^(@rpath/libvulkan_kosmickrisp\.dylib|/usr/lib/|/System/Library/)' || true)
