@@ -361,16 +361,14 @@ fi
 # had the Bridge (Gestures off at setup) there was no token yet: the build
 # stopped at "Adding OmacVM to the VM". The Bridge installed later keeps it.
 # The VM folder's own SSH key, for root and the user, beside this Mac's key
-# (never into an image: --image has no token).
+# (never into an image: --image has no token). The user's ~/.ssh is written
+# as the user (guest/ssh-key.sh). The key goes in quoted: one printable line
+# without a single quote.
 if (( TOKEN )) && [[ -n ${OMA_VM_KEY:-} && -s ${OMA_VM_KEY:-}.pub ]]; then
   log "the VM folder's SSH key -> $IP"
-  gssh "$IP" "set -e; k=\$(head -1)
-    case \$k in ssh-ed25519\ *) ;; *) echo 'not an ssh-ed25519 key' >&2; exit 1 ;; esac
-    add() { install -d -m700 -o \"\$2\" -g \"\$(id -gn \"\$2\")\" \"\$1/.ssh\"; f=\$1/.ssh/authorized_keys
-      touch \"\$f\"; grep -qxF \"\$k\" \"\$f\" || printf '%s\\n' \"\$k\" >> \"\$f\"
-      chown \"\$2:\$(id -gn \"\$2\")\" \"\$f\"; chmod 600 \"\$f\"; }
-    add /root root
-    H=\$(getent passwd '$U' | cut -d: -f6); [ -z \"\$H\" ] || add \"\$H\" '$U'" < "$OMA_VM_KEY.pub"
+  pubkey=$(head -1 "$OMA_VM_KEY.pub"); re='^ssh-ed25519 [[:print:]]+$'
+  [[ $pubkey =~ $re && $pubkey != *\'* ]] || die "$OMA_VM_KEY.pub: not one ssh-ed25519 key line"
+  gssh "$IP" "bash -s -- '$U' '$pubkey'" < "$R/src/guest/ssh-key.sh"
 fi
 if (( TOKEN )) && { on gestures || needs_bridge; }; then bridge_token_ensure; fi
 if (( ! TOKEN )); then
