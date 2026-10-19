@@ -7,7 +7,9 @@ or full screen with the pointer on it; not during a click, not after
 Ctrl+Alt+G until the pointer left), and when the Mac's cursor is hidden over
 the VM (only once the guest draws its own pointer: its display agent said
 hello since the last reset). Used by omacvm-cocoa-pointer-start.patch (which
-explains the why).
+explains the why). Also the image QEMU gives the Mac's cursor (an empty one
+while hidden, the arrow again after) and when a motion sets it again; used
+by omacvm-cocoa-cursor-stays-hidden.patch.
 
 Why its own file: so the logic is tested against the start, reboot, focus
 and let-go sequences without QEMU or a display
@@ -19,13 +21,13 @@ Test: app/runtime/Tests/display/test-pointer-start.c.
 
 diff --git a/ui/omacvm-pointer-start.h b/ui/omacvm-pointer-start.h
 new file mode 100644
-index 0000000..8680e0c
+index 0000000..b26ffa1
 --- /dev/null
 +++ b/ui/omacvm-pointer-start.h
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,164 @@
 +/*
-+ * OmacVM: when the VM's window takes the pointer by itself, and when the
-+ * Mac's cursor is hidden over it.
++ * OmacVM: when the VM's window takes the pointer by itself, when the
++ * Mac's cursor is hidden over it, and its image then.
 + *
 + * No AppKit in here, so it is tested on its own
 + * (app/runtime/Tests/display/test-pointer-start.c); ui/cocoa.m feeds it.
@@ -120,6 +122,70 @@ index 0000000..8680e0c
 +        return false;
 +    }
 +    return !absolute || s->off || s->drawing;
++}
++
++/*
++ * The image QEMU gives the Mac's cursor over the VM. Hidden alone was not
++ * enough: whether the cursor is hidden belongs to the window server, and
++ * other processes and macOS undo it (a background helper showing it, an
++ * app or Space switch), while QEMU still counted it hidden and never hid
++ * it again: the Mac's arrow sat over the guest's pointer until the user
++ * switched away and back. So while hidden its image is an empty one too:
++ * whoever shows it again shows nothing. QEMU sets one image of its own
++ * at most; when it shows the cursor again the arrow comes back.
++ */
++typedef enum OmacVMCursorImage {
++    OMACVM_CURSOR_APPKIT,   /* AppKit's own (the arrow): QEMU sets none */
++    OMACVM_CURSOR_GUEST,    /* the guest's pointer image (hardware cursor) */
++    OMACVM_CURSOR_EMPTY,    /* an empty one: hidden, or the guest hides its pointer */
++} OmacVMCursorImage;
++
++/*
++ * hw: the Mac's cursor carries the guest's pointer (ui/omacvm-hw-cursor.h);
++ * guest_shown: the guest shows its pointer on some output; hide: the Mac's
++ * cursor is hidden (omacvm_pointer_hide_mac, or the notch strip's hold).
++ */
++static inline OmacVMCursorImage omacvm_pointer_image(bool hw, bool guest_shown,
++                                                     bool hide)
++{
++    if (hw) {
++        return guest_shown ? OMACVM_CURSOR_GUEST : OMACVM_CURSOR_EMPTY;
++    }
++    return hide ? OMACVM_CURSOR_EMPTY : OMACVM_CURSOR_APPKIT;
++}
++
++/* How often a motion may ask the window server whether the hidden cursor shows. */
++#define OMACVM_POINTER_LOOK_S 0.1
++
++/* A motion: ask the window server now? (*last: when it was asked last; seconds) */
++static inline bool omacvm_pointer_look_due(double now, double *last)
++{
++    if (now >= *last && now - *last < OMACVM_POINTER_LOOK_S) {
++        return false;
++    }
++    *last = now;
++    return true;
++}
++
++/*
++ * A motion over the VM with QEMU's image in place (want not APPKIT): set
++ * it again? appkit_has_it: AppKit's current cursor is that image; AppKit
++ * puts its own back (at a window's edge), and then it is set again at
++ * once. hidden: QEMU hid the cursor; looked: the window server was asked
++ * (omacvm_pointer_look_due), shown: its answer. A show by another process
++ * or by macOS changes nothing AppKit sees, and the image macOS shows then
++ * may be its own arrow: the empty one is set again.
++ */
++static inline bool omacvm_pointer_image_again(OmacVMCursorImage want, bool appkit_has_it,
++                                              bool hidden, bool looked, bool shown)
++{
++    if (want == OMACVM_CURSOR_APPKIT) {
++        return false;
++    }
++    if (!appkit_has_it) {
++        return true;
++    }
++    return want == OMACVM_CURSOR_EMPTY && hidden && looked && shown;
 +}
 +
 +#endif

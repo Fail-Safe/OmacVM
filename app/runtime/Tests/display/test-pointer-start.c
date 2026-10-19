@@ -11,6 +11,13 @@
  * The guest gets a motion only while the VM has the pointer and its tablet
  * is live. [NSCursor hide] is a counter, as on macOS.
  *
+ * The window server's side of the cursor is modelled too: what it shows
+ * (AppKit's current cursor, or an arrow macOS put there itself) and
+ * whether another process or macOS showed the cursor while QEMU still
+ * counts it hidden (the duplicate Mac cursor of 2026-10-19). old_image
+ * runs the cursor as 3.1.24 did (hidden, its image left alone), so the
+ * test also shows that report in the model.
+ *
  * Each case runs the new code and upstream's (off: OMACVM_POINTER_START=0,
  * which is upstream's way) and checks both, so the test also shows the
  * user's 15:00 report in the model: after a start or a guest reboot the
@@ -35,6 +42,9 @@ static int failures, checks;
     } \
 } while (0)
 
+/* What an image looks like on screen. */
+typedef enum Img { IMG_ARROW, IMG_EMPTY, IMG_GUEST } Img;
+
 typedef struct Vm {
     OmacVMPointerStart ptr;
     bool hide_setting;  /* show-cursor=off (guest-pointer) */
@@ -48,7 +58,46 @@ typedef struct Vm {
     bool cursor_hidden; /* ours (omacvm_mac_cursor_hidden) */
     int hide_count;     /* macOS's: [NSCursor hide] minus unhide */
     int guest_moves;    /* motions the guest got */
+    bool old_image;     /* 3.1.24: the image left alone while hidden */
+    OmacVMCursorImage want; /* the image QEMU wants (omacvm_cur_want) */
+    bool qemu_set;      /* QEMU set an image of its own (omacvm_cur_set) */
+    Img appkit;         /* AppKit's current cursor ([NSCursor currentCursor]) */
+    Img shown_image;    /* what the window server shows when the cursor shows */
+    bool revealed;      /* another process or macOS showed the hidden cursor */
+    double now, last_look;
 } Vm;
+
+static Img img_of(OmacVMCursorImage w)
+{
+    return w == OMACVM_CURSOR_EMPTY ? IMG_EMPTY : w == OMACVM_CURSOR_GUEST ? IMG_GUEST : IMG_ARROW;
+}
+
+/* omacvm_cursor_image: set only over our window; force: the other empty one. */
+static void set_image(Vm *v, OmacVMCursorImage want, bool force)
+{
+    v->want = want;
+    if (want == OMACVM_CURSOR_APPKIT) {
+        if (v->qemu_set) {
+            v->qemu_set = false;
+            v->appkit = v->shown_image = IMG_ARROW;
+        }
+    } else if ((v->appkit != img_of(want) || force) && v->over) {
+        v->appkit = v->shown_image = img_of(want);
+        v->qemu_set = true;
+    }
+}
+
+/* The window server shows the cursor: QEMU did not hide it, or someone showed it. */
+static bool ws_visible(const Vm *v)
+{
+    return v->hide_count <= 0 || v->revealed;
+}
+
+/* The user sees the Mac's arrow (or another image) where the guest draws its pointer. */
+static bool mac_arrow_seen(const Vm *v)
+{
+    return ws_visible(v) && v->shown_image != IMG_EMPTY;
+}
 
 static void update_cursor(Vm *v)
 {
@@ -59,9 +108,33 @@ static void update_cursor(Vm *v)
         return;
     }
     hide = omacvm_pointer_hide_mac(&v->ptr, v->hide_setting, v->grabbed, v->absolute);
+    if (!v->old_image) {
+        set_image(v, omacvm_pointer_image(false, false, hide), false);
+    }
     if (hide != v->cursor_hidden) {
         v->cursor_hidden = hide;
         v->hide_count += hide ? 1 : -1;
+        if (hide) {
+            v->revealed = false;    /* QEMU's own hide hides it again */
+        }
+    }
+}
+
+/* omacvm_cursor_motion: a motion while the VM has the pointer. */
+static void cursor_motion(Vm *v)
+{
+    bool has, looked = false, shown = false;
+
+    if (v->old_image || v->ptr.off || v->want == OMACVM_CURSOR_APPKIT) {
+        return;
+    }
+    has = v->appkit == img_of(v->want);
+    if (has && v->cursor_hidden && omacvm_pointer_look_due(v->now, &v->last_look)) {
+        looked = true;
+        shown = ws_visible(v);
+    }
+    if (omacvm_pointer_image_again(v->want, has, v->cursor_hidden, looked, shown)) {
+        set_image(v, v->want, has);
     }
 }
 
@@ -104,6 +177,7 @@ static Vm vm(bool off)
     v.ptr.off = off;
     v.hide_setting = true;
     v.absolute = true;  /* virtio-tablet is registered from the start */
+    v.now = 100;        /* seconds since the Mac started */
     return v;
 }
 
@@ -121,9 +195,31 @@ static void motion(Vm *v)
     if (!v->grabbed && !v->ptr.off) {
         take(v);
     }
+    if (v->grabbed) {
+        cursor_motion(v);
+    }
     if (v->grabbed && v->tablet_live) {
         v->guest_moves++;
     }
+}
+
+/* Another process shows the cursor (OmacVM Gestures' background show, B3 on the Air). */
+static void background_show(Vm *v)
+{
+    v->revealed = true;
+}
+
+/* macOS shows its own arrow (around a Space switch or the menu bar); AppKit sees nothing. */
+static void macos_arrow(Vm *v)
+{
+    v->revealed = true;
+    v->shown_image = IMG_ARROW;
+}
+
+/* AppKit puts its arrow back (the pointer at a window's edge). */
+static void appkit_arrow(Vm *v)
+{
+    v->appkit = v->shown_image = IMG_ARROW;
 }
 
 /* The pointer crossed into the view (mouseEntered:, key window only). */
@@ -508,6 +604,133 @@ static void test_hello_takes(void)
     CHECK(v.grabbed && !mac_cursor_shown(&v), "hello with the pointer on the key VM: taken, hidden");
 }
 
+static void test_image_rules(void)
+{
+    double last = -1;
+
+    CHECK(omacvm_pointer_image(false, false, false) == OMACVM_CURSOR_APPKIT,
+          "not hidden: AppKit's cursor (the arrow)");
+    CHECK(omacvm_pointer_image(false, true, true) == OMACVM_CURSOR_EMPTY,
+          "hidden: an empty image too");
+    CHECK(omacvm_pointer_image(true, true, false) == OMACVM_CURSOR_GUEST,
+          "hardware cursor: the guest's image");
+    CHECK(omacvm_pointer_image(true, false, false) == OMACVM_CURSOR_EMPTY,
+          "hardware cursor, the guest hides its pointer: empty");
+    CHECK(omacvm_pointer_image(true, true, true) == OMACVM_CURSOR_GUEST,
+          "hardware cursor: the guest's image (never hidden)");
+
+    CHECK(omacvm_pointer_look_due(10.0, &last) && last == 10.0, "the first look is due");
+    CHECK(!omacvm_pointer_look_due(10.05, &last) && last == 10.0, "not again within 0.1 s");
+    CHECK(omacvm_pointer_look_due(10.11, &last) && last == 10.11, "again after 0.1 s");
+    CHECK(omacvm_pointer_look_due(5.0, &last) && last == 5.0, "the clock went back: due");
+
+    CHECK(!omacvm_pointer_image_again(OMACVM_CURSOR_APPKIT, false, false, true, true),
+          "AppKit's own: never set by QEMU");
+    CHECK(omacvm_pointer_image_again(OMACVM_CURSOR_EMPTY, false, true, false, false),
+          "AppKit put its arrow back: set again at once");
+    CHECK(omacvm_pointer_image_again(OMACVM_CURSOR_GUEST, false, false, false, false),
+          "hardware cursor, AppKit put its arrow back: set again at once");
+    CHECK(!omacvm_pointer_image_again(OMACVM_CURSOR_EMPTY, true, true, true, false),
+          "hidden, the window server says hidden: nothing to do");
+    CHECK(omacvm_pointer_image_again(OMACVM_CURSOR_EMPTY, true, true, true, true),
+          "hidden, but the window server shows it: set again");
+    CHECK(!omacvm_pointer_image_again(OMACVM_CURSOR_EMPTY, true, true, false, true),
+          "... only when it was asked (at most every 0.1 s)");
+    CHECK(!omacvm_pointer_image_again(OMACVM_CURSOR_EMPTY, true, false, true, true),
+          "the guest hides its hardware cursor (QEMU did not hide): no look");
+}
+
+/* Started windowed, booted, the pointer on the VM: taken, the guest draws, the Mac cursor hidden. */
+static Vm running_vm(bool old_image)
+{
+    Vm v = vm(false);
+
+    v.old_image = old_image;
+    open_under_pointer(&v);
+    become_key(&v);
+    boot(&v);
+    motion(&v);
+    return v;
+}
+
+static void test_background_show(void)
+{
+    for (int old = 0; old <= 1; old++) {
+        Vm v = running_vm(old);
+
+        CHECK(v.grabbed && v.cursor_hidden && !mac_arrow_seen(&v), "running (old=%d): no Mac arrow", old);
+        background_show(&v);    /* OmacVM Gestures shows the cursor from the background */
+        for (int i = 0; i < 5; i++) {
+            v.now += 0.25;
+            motion(&v);
+        }
+        if (old) {
+            CHECK(mac_arrow_seen(&v), "3.1.24: a background show brings the arrow over the VM, moves keep it");
+            resign_key(&v);     /* the user's way out: away and back */
+            become_key(&v);
+            CHECK(!mac_arrow_seen(&v), "3.1.24: away and back hides it again");
+        } else {
+            CHECK(!mac_arrow_seen(&v), "a background show: the cursor shows its empty image, no arrow");
+        }
+        CHECK(v.grabbed && v.guest_moves == 6, "the guest's pointer keeps moving (%d)", v.guest_moves);
+        let_go(&v);
+        CHECK(ws_visible(&v) && v.shown_image == IMG_ARROW, "Ctrl+Alt+G after it (old=%d): the arrow", old);
+        CHECK(v.hide_count <= 0, "hide and unhide stay balanced (%d)", v.hide_count);
+    }
+}
+
+static void test_macos_arrow(void)
+{
+    Vm v = running_vm(false);
+
+    v.now += 1;
+    motion(&v);             /* a look: hidden, all fine */
+    macos_arrow(&v);        /* macOS shows its arrow; AppKit still has the empty one */
+    CHECK(mac_arrow_seen(&v), "macOS showed its arrow (at rest it stays until the next motion)");
+    v.now += 0.02;
+    motion(&v);
+    CHECK(mac_arrow_seen(&v), "a motion within 0.1 s of the last look: not asked yet");
+    v.now += 0.1;
+    motion(&v);
+    CHECK(!mac_arrow_seen(&v) && v.appkit == IMG_EMPTY,
+          "the next look sees it shown: the empty image again, no arrow");
+    CHECK(v.cursor_hidden && v.hide_count == 1, "no second hide (%d)", v.hide_count);
+}
+
+static void test_appkit_arrow(void)
+{
+    Vm v = running_vm(false);
+
+    appkit_arrow(&v);       /* at a window's edge */
+    CHECK(!mac_arrow_seen(&v), "AppKit's arrow while hidden: not seen");
+    motion(&v);
+    CHECK(v.appkit == IMG_EMPTY, "the next motion sets the empty image again at once");
+    background_show(&v);
+    CHECK(!mac_arrow_seen(&v), "so a show after it shows nothing");
+}
+
+static void test_shown_cases_keep_arrow(void)
+{
+    Vm v = vm(false);
+
+    open_under_pointer(&v);
+    become_key(&v);
+    tablet_up(&v);
+    motion(&v);
+    CHECK(v.grabbed && ws_visible(&v) && v.shown_image == IMG_ARROW && !v.qemu_set,
+          "booting (no hello yet): the arrow, QEMU sets no image");
+    hello(&v);
+    CHECK(!ws_visible(&v) && v.appkit == IMG_EMPTY, "hello: hidden, the empty image");
+    resign_key(&v);         /* Finder in front */
+    CHECK(ws_visible(&v) && v.shown_image == IMG_ARROW && !v.qemu_set, "Finder in front: the arrow again");
+    become_key(&v);
+    CHECK(!ws_visible(&v) && v.appkit == IMG_EMPTY, "back: hidden and empty again");
+    guest_reset(&v);
+    CHECK(ws_visible(&v) && v.shown_image == IMG_ARROW, "a guest reset: the arrow until its next hello");
+    leave(&v);
+    CHECK(ws_visible(&v) && v.shown_image == IMG_ARROW, "the pointer left the VM: the arrow");
+}
+
 int main(void)
 {
     test_windowed_start();
@@ -524,6 +747,11 @@ int main(void)
     test_show_cursor_on();
     test_hello_repeats();
     test_hello_takes();
+    test_image_rules();
+    test_background_show();
+    test_macos_arrow();
+    test_appkit_arrow();
+    test_shown_cases_keep_arrow();
     if (failures) {
         printf("test-pointer-start: %d of %d checks FAILED\n", failures, checks);
         return 1;

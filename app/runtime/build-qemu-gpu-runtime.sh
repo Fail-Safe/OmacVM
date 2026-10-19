@@ -977,6 +977,14 @@ grep -q 'getenv("OMACVM_GPU_UNLOCKED")' "$source_dir/hw/display/virtio-gpu-virgl
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
 grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
+# OmacVM: the Mac's cursor stays hidden over the VM: an empty image while
+# hidden, set again on motion when another process or macOS showed it (the
+# Mac's arrow over the guest's pointer, 2026-10-19). Rules and test: the
+# pointer-start logic patch and test-pointer-start.sh above.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-cursor-stays-hidden.patch"
+grep -q 'omacvm_cursor_image(omacvm_pointer_image(hw, omacvm_hwc_visible(&omacvm_hwc), hide));' "$source_dir/ui/cocoa.m" && \
+  [[ $(grep -c '^    omacvm_cursor_motion();$' "$source_dir/ui/cocoa.m") == 2 ]] || \
+  die "ui/cocoa.m: the hidden Mac cursor needs its empty image, set again on motion (cursor-stays-hidden patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
