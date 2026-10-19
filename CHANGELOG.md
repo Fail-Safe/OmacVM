@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.25 (unreleased)
 
 - **App VMs that know only another Mac's SSH key get this Mac's.** A VM set up on another Mac
   (or before 3.0.12) let only that Mac in over SSH: Update VM waited 5 minutes and then said the
