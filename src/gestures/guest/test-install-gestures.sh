@@ -11,6 +11,7 @@ fail=0
 check() { if eval "$1"; then echo "ok   $2"; else echo "FAIL $2" >&2; fail=1; fi; }
 mkdir -p "$T/src/gestures/guest" "$T/src/guest" "$T/bin" "$T/home/u/.config/hypr"
 cp "$HERE/install.sh" "$HERE/omacvm-gestures" "$T/src/gestures/guest/"
+cp "$HERE/../../guest/home-files.sh" "$T/src/guest/"   # install.sh writes the home through it
 # python-evdev stands in for itself: the daemon reads the gestures (--sideways).
 mkdir -p "$T/py"
 printf '%s\n' 'import itertools' 'n = itertools.count(1)' 'class Any(int):' \

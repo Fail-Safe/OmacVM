@@ -25,7 +25,7 @@ I=$H/.config/hypr/input.lua
 # lines too); "?" (a count it cannot tell): nothing added; without it, a
 # one-line check.
 missing=()
-if taken=$(home_run python3 omacvm-gestures --sideways "$H" 2>/dev/null); then
+if taken=$(home_run python3 "$PWD/omacvm-gestures" --sideways "$H" 2>/dev/null); then
   [[ $taken == *"?"* ]] || for n in 3 4; do [[ " $taken " == *" $n "* ]] || missing+=("$n"); done
 else
   for n in 3 4; do
