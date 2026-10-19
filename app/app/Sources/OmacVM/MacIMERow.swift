@@ -112,18 +112,23 @@ enum FeatureStart {
     /// One apply into the VM at a time (two features switched while it was stopped).
     private static let applyLock = NSLock()
 
+    /// The guest agent answers seconds after the start (its unit starts with
+    /// its port, before anyone logs in); `deadline` is the start's one wait
+    /// for it, shared with the SSH repair that runs first (Runner).
     static func run(config c: VMConfig, switch sw: PendingSwitch, what: String, on: Bool, agentPath: String,
-                    running: @escaping () -> Bool, log: @escaping (String) -> Void) {
+                    until deadline: Date, running: @escaping () -> Bool, log: @escaping (String) -> Void) {
         Thread.detachNewThread {
-            // The guest agent starts with Omarchy: up to ten minutes.
-            let deadline = Date().addingTimeInterval(600)
+            let line = "\(what) \(on ? "on" : "off") (switched while the VM was stopped)"
             var up = false
-            while running(), Date() < deadline {
+            repeat {
                 if GuestAgent.execute(socketPath: agentPath, "{\"execute\":\"guest-ping\"}")?.contains("\"return\"") == true { up = true; break }
                 Thread.sleep(forTimeInterval: 5)
+            } while running() && Date() < deadline
+            guard running() else { return }
+            guard up else {
+                log("OmacVM: \(line): not set up, tried again at the next start: the VM's guest agent did not answer")
+                return
             }
-            guard up, running() else { return }
-            let line = "\(what) \(on ? "on" : "off") (switched while the VM was stopped)"
             log("OmacVM: \(line): setting up the VM's part")
             applyLock.lock()
             let err = MacIMERow.run(sw.applyArguments(vm: c.name, on: on))
