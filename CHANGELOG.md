@@ -9,6 +9,22 @@ in more words.
   the desktop user's `~/.ssh/authorized_keys` as root and followed links there: a program
   running as that user could point `~/.ssh` at a system file and take it over at the next apply
   (and with it, root). That part now runs as the user; root's own key file is written as before.
+- **A VM from a prebuilt image gets Vulkan, WebGPU and GPU compute again.** The image's package
+  list is as old as the image, and Arch Linux ARM's mirrors keep only the newest version of each
+  package. On a VM made today from the 3.0.8 image (11 days old), setup could not install the
+  Vulkan driver's build tools or OpenCL ("package list older than the mirrors"): on macOS 26 and
+  later the VM ended up with OpenGL only, and switching WebGPU and GPU compute on failed the same
+  way. Setup now brings the VM's system up to date first, once, with Omarchy's own update (never
+  one package alone), and restarts the VM when that brought a new kernel. On the Air the update
+  took about 2.5 minutes (200 packages), and the whole setup 8.5 minutes, with everything working.
+- **The update in the VM is no longer cut off half way.** OmacVM's system update (Graphics ->
+  Vulkan, and now a prebuilt VM's setup) took systemd being briefly away during the update for the
+  update's end, and stopped it in the middle of pacman's run.
+- **A feature that did not switch on says why in the app.** After a failed switch the window and
+  the log showed only "rolled back ... (what failed is above)"; that line now names it, e.g. "WebGPU
+  and GPU compute was not set up: Omarchy's package list is older than the mirrors (omarchy update
+  first)". `omacvm check` shows a FAIL row for WebGPU and GPU compute when it is on but its
+  packages are missing, instead of "off: Graphics gives this VM OpenGL only".
 - **Deleted files give their space back sooner.** What you delete in the VM goes back to the
   Mac by itself within about two minutes (OmacVM.app: disk.img gets smaller, and still grows up
   to the size you set). Files deleted outside your home folder stayed as long as one of
