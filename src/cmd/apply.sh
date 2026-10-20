@@ -392,6 +392,11 @@ if (( ! TOKEN )); then
 elif [[ -f $T ]]; then
   log "bridge token -> $IP"
   vm_user_file token < "$T"
+  # OmacVM.app: the VM's folder says which Mac's token the VM has now, so a
+  # folder copied to another Mac is known as such there (src/lib/mac-setup.sh).
+  if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM" 2>/dev/null); then
+    mac_setup_write "$d" "$T" || info "the VM folder's mac-setup record was not written"
+  fi
 elif needs_bridge; then
   die "no bridge token yet: the Mac side did not install (run omacvm apply without --no-mac)"
 fi

@@ -7,6 +7,15 @@
 #   mac_helpers_needed      MAC_NEEDED: "|NAME|NAME|", the helpers of the
 #                           features on in FV (features_fix first)
 #   mac_needs NAME          true when MAC_NEEDED has it
+#   mac_token_hash FILE     a Bridge token's short hash (16 hex)
+#   mac_setup_write DIR TOKEN_FILE
+#                           DIR/mac-setup: the VM in DIR has that token
+#
+# A VM folder copied from another Mac has the other Mac's token. DIR/mac-setup
+# ("token <hash>", written by omacvm apply) says which Mac's token the VM has:
+# a Mac moved with Migration Assistant keeps its token, so its VMs count as
+# set up for it.
+MAC_SETUP_FILE=mac-setup
 
 mac_helper_of() {   # FEATURE
   MAC_HELPER=""
@@ -31,3 +40,16 @@ mac_helpers_needed() {
 }
 
 mac_needs() { [[ $MAC_NEEDED == *"|$1|"* ]]; }
+
+mac_token_hash() {   # FILE: nothing and status 1 without a token
+  local t
+  t=$(tr -d '[:space:]' < "$1" 2>/dev/null) || return 1
+  [[ -n $t ]] || return 1
+  printf 'omacvm-bridge-token\n%s' "$t" | shasum -a 256 | cut -c1-16
+}
+
+mac_setup_write() {   # DIR TOKEN_FILE
+  local h
+  h=$(mac_token_hash "$2") || return 1
+  printf 'token %s\n' "$h" > "$1/$MAC_SETUP_FILE.new" && mv -f "$1/$MAC_SETUP_FILE.new" "$1/$MAC_SETUP_FILE"
+}
