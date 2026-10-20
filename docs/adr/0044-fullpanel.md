@@ -88,7 +88,7 @@ changes: the same Start in choice, `OMACVM_FULLPANEL=1`, the same
 `fullpanel-scale` file, the same qemu.log lines for `omacvm check`, the same
 guest side.
 
-**Why.** A provenance audit of FullPanel (2026-10-18) found that the QEMU
+**Why.** A provenance audit of FullPanel (2026-10-18) found that the
 earlier QEMU implementation carried units adapted, in close translation, from
 UTM's `Platform/macOS/Display/VMDisplayWindow.swift` (Apache-2.0, Turing
 Software, LLC): the menu bar reveal observer on AppKit's
