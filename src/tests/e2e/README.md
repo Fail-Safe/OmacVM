@@ -118,7 +118,7 @@ saw any of them.
 | update-vm | Update VM in the window (the VM's OmacVM made older first) | `UPDATED`, the VM's OmacVM is the app's; a kernel question gets Later |
 | switch-stopped | WebGPU and GPU compute with the VM stopped, then Start in the window | the switch can be used; record and pending file; qemu.log "switched while the VM was stopped: set up in the VM"; the second start switches it back |
 | vm-size | the VM's window to full screen and back, twice | the same size after each |
-| pointer | moves into the VM; a background program shows the cursor (as OmacVM Gestures did up to 3.1.24); Finder and back; the same in full screen; Graphics without QEMU's lock off, then on (switched in the window) | the Mac shows no cursor over the VM: `CGCursorIsVisible` false or an empty image; a picture of the spot when it does |
+| pointer | moves into the VM; a background program shows the cursor (as OmacVM Gestures did up to 3.1.24); Finder and back; the same in full screen; Graphics without QEMU's lock on, then off (switched in the window) | the Mac shows no cursor over the VM: `CGCursorIsVisible` false or an empty image; a picture of the spot when it does |
 | leftovers | shuts the VM down from inside, closes its window, quits the app | no QEMU of the VM, nothing from the app (but its helpers) or on the VM's folder |
 
 Real events where they work: the pointer, the switches and the sidebar get

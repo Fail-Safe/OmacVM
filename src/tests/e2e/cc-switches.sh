@@ -109,7 +109,8 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev
 # ---- guards: a test Mac nobody uses right now ----
 [[ $(uname -m) == arm64 ]] || die "Apple Silicon only"
 [[ -e $HOME/.omacvm-user-testing ]] && die "the person is testing (~/.omacvm-user-testing): no VM now"
-if [[ ${OMACVM_E2E_LAPTOP:-} != 1 ]] && ioreg -rc AppleSmartBattery 2>/dev/null | grep -q '"BatteryInstalled" = Yes'; then
+# No `ioreg | grep -q` under pipefail: its SIGPIPE made a MacBook count as having no battery.
+if [[ ${OMACVM_E2E_LAPTOP:-} != 1 && $(ioreg -rc AppleSmartBattery 2>/dev/null) == *'"BatteryInstalled" = Yes'* ]]; then
   die "this Mac has a battery (a MacBook someone may work on): run it on the test Mac, or OMACVM_E2E_LAPTOP=1"
 fi
 idle=$(( $(ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF; exit}') / 1000000000 ))
