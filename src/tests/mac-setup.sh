@@ -216,4 +216,13 @@ expect "--status: a line per helper" 2 "$(grep -c $'^helper\t' <<<"$out")"
 expect "--status: no folder: usage" 2 "$("$R/src/mac/install.sh" --status "$T/none" > /dev/null 2>&1; echo $?)"
 [[ ! -e $HOME/Library/Application\ Support/omacvm/installed ]] && echo "ok   --status installs nothing" || { echo "FAIL --status made the stamps folder"; fails=$((fails + 1)); }
 
+# OmacVM.app reads these keys (app/app/Sources/OmacVMFeatures/MacSetup.swift).
+for k in verdict fix why helpers needed missing version vm-version text; do
+  grep -q "^$k"$'\t' <<<"$out" || { echo "FAIL --status: no $k line"; fails=$((fails + 1)); continue; }
+  grep -qF "f[\"$k\"]" "$R/app/app/Sources/OmacVMFeatures/MacSetup.swift" && echo "ok   the app reads $k" ||
+    { echo "FAIL MacSetup.swift does not read $k"; fails=$((fails + 1)); }
+done
+grep -qF 'p[0] == "helper"' "$R/app/app/Sources/OmacVMFeatures/MacSetup.swift" && echo "ok   the app reads the helper lines" ||
+  { echo "FAIL MacSetup.swift does not read the helper lines"; fails=$((fails + 1)); }
+
 (( fails == 0 )) && echo "mac setup: all passed" || { echo "mac setup: $fails failed"; exit 1; }

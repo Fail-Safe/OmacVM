@@ -1,5 +1,6 @@
-// The features a new OmacVM.app VM starts with (OmacVMFeatures) and the
-// hidden keyboard sharing switch (ShareKeyboardTests.swift), without a VM:
+// The features a new OmacVM.app VM starts with (OmacVMFeatures), the
+// hidden keyboard sharing switch (ShareKeyboardTests.swift) and whether this
+// Mac is set up for a VM (MacSetupTests.swift), without a VM:
 //   cd app/app && swift run features-tests
 // Exit 0 when all pass. CI runs it on every pull request.
 import Foundation
@@ -238,6 +239,7 @@ if let d = UserDefaults(suiteName: "org.omacvm.test.features-menubar.\(getpid())
 }
 
 shareKeyboardTests()
+macSetupTests()
 
 // WebGPU and GPU compute (gpu-compute): on by default, also for a record without the word.
 expect(GPUCompute.isOn(features: nil) && GPUCompute.isOn(features: "bridge=on vulkan=off\n"), "gpu-compute: on without the word")
