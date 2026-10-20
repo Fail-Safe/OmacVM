@@ -894,8 +894,10 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-ime.patch"
 # Experimental FullPanel (issue #339), off unless OmacVM.app asks for one
 # start (OMACVM_FULLPANEL=1: the VM's notch setting): full screen over the
 # strip beside the notch on a display with one; external displays as before.
-# After the other cocoa patches but App Nap's (it hooks their full-screen
-# sizes); its rules' test, then the wiring.
+# AppKit lays the window out over the display (its menu bar reservation
+# answered no), nothing of QEMU's window is hooked. After the other cocoa
+# patches but App Nap's (it uses their full-screen sizes); its rules' test,
+# then the wiring (also: nothing of the earlier version is left).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullpanel-logic.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullpanel.patch"
 "$native_dir/Tests/display/test-fullpanel.sh" "$source_dir/ui/cocoa.m" || \

@@ -14,10 +14,11 @@ draws it above the menu bar. UTM, VMware Fusion and Parallels enforce
 macOS's full screen, so this is their only way to use the strip.
 
 OmacVM.app runs its own QEMU and owns its window. #339 showed that its full
-screen can cover the strip itself: AppKit's private full-screen frame is
-hooked to the whole display, and that Space's menu bar is made transparent
-(SkyLight), as UTM does on macOS 27. The guest then draws its own bar in
-the strip, with no stream.
+screen can cover the strip itself: the window covers the whole display, and
+that Space's menu bar is made transparent (SkyLight), as UTM does on macOS 27.
+The guest then draws its own bar in the strip, with no stream. (Previously,
+the window got there through a hook on AppKit's private full-screen frame;
+since the replacement below, AppKit lays it out there itself.)
 
 ## Decision
 
@@ -46,7 +47,13 @@ the strip, with no stream.
   `omacvm-cocoa-fullpanel.patch`: the wiring), applied after the other
   cocoa patches. Per window: only a window on a display with a camera
   housing; external displays keep normal full screen. Anything private that
-  is missing or changed gives normal full screen, logged once.
+  is missing or changed gives normal full screen, logged once. AppKit's
+  full-screen content controller asks whether the window keeps the menu
+  bar's band free (`-reservesSpaceForMenuBarInFullScreen`); for a VM window
+  in a FullPanel full screen the answer is no, and AppKit lays the window
+  out over the whole display. No window class or frame setter is
+  overridden; QEMU's own full-screen resize leaves such a window as AppKit
+  laid it out.
 - **Guest:** no second bar. Omanotch's bar patch (v20) has a FullPanel
   mode: on the built-in display's output, only while the app's layout says
   that output covers the whole display in full screen, the bar is the
@@ -70,5 +77,103 @@ the strip, with no stream.
 - Real tests need a notched MacBook (the Mac mini has none: there the
   rules, a made-up notch through `OMACVM_TEST_NOTCH_GEOMETRY` in test
   builds and a simulated guest cover the plumbing).
-- A change of the Mac's display resolution while the VM runs keeps the
-  housing measured at the start: restart the VM.
+- FullPanel keeps the display covered across the tested macOS resolution
+  changes. The guest's camera-housing geometry is measured at VM startup;
+  restart the VM if that geometry needs to be refreshed.
+
+## Replacement
+
+Status: proposed with this change. Nothing the user sees, sets or reads
+changes: the same Start in choice, `OMACVM_FULLPANEL=1`, the same
+`fullpanel-scale` file, the same qemu.log lines for `omacvm check`, the same
+guest side.
+
+**Why.** A provenance audit of FullPanel (2026-10-18) found that the QEMU
+earlier QEMU implementation carried units adapted, in close translation, from
+UTM's `Platform/macOS/Display/VMDisplayWindow.swift` (Apache-2.0, Turing
+Software, LLC): the menu bar reveal observer on AppKit's
+`_NSFullScreenMenuBarCompanionController`, the reveal and presentation
+state machine, the hide/show sequence, the toolbar window handling, the
+lifecycle wiring, the state set and the full-screen frame hook. They came
+in through #339's branch, whose headers (and so these patches' headers)
+called the code independent with no UTM code copied; that statement was not
+accurate. Apache-2.0 code linked into QEMU's binary, which has GPL-2.0-only
+files, is a licence conflict on the FSF's reading. Whether the translated
+units are protected expression is a legal question that was not decided;
+replacing them makes it moot for new releases.
+
+**What was removed** (none of it is in the new patches;
+`test-fullpanel.sh` fails the build if any of it comes back):
+
+| Removed (previous implementation) | Replaced by |
+| --- | --- |
+| `-_frameForFullScreenMode` hook on QemuWindow and OmacVMHeadWindow, `-_tileFrameForFullScreen` reads, `omacvm_fp_frame` | AppKit's own layout: the reservation answer (`omacvm_fullpanel_install_reservation`), the entry checked once (`omacvm_fp_verdict`) |
+| `-toggleFullScreen:` overrides on both window classes | one `NSWindowWillEnterFullScreenNotification` observer from the start (`omacvm_fullpanel_init`) |
+| guards on `setFrame:display:`, `setFrame:display:animate:`, `setFrameOrigin:`, `setFrameTopLeftPoint:`, `setContentSize:` on both classes, `omacvm_fp_keep` | none: AppKit keeps its layout; QEMU's own full-screen resize (`resizeWindow`) leaves a FullPanel window as laid out instead of fitting it to the guest's mode (the picture is scaled), and QEMU's full-screen size follows AppKit's proposal |
+| the forced size in `window:willUseFullScreenContentSize:` | AppKit's proposal (the whole display under the answer) |
+| setter hooks on `_NSFullScreenMenuBarCompanionController` (`setMenuBarReveal:`, `setToolbarWindowReveal:`) | KVO on AppKit's titlebar window's `alphaValue` (public API) |
+| `updateMenuBarHidden` / `showMenuBar` / `updatePresentationOptions` / `applyMenuBarReveal` / `menuRevealChanged:`, `omacvm_fp_reveal_allowed`, `omacvm_fp_presentation`, `omacvm_fp_strip_lost`, `omacvm_fp_display_ok` | facts → `omacvm_fp_intent` → one apply step (`-apply:`); `omacvm_fp_zone` / `omacvm_fp_asked_after_move`; `omacvm_fp_lost`; `omacvm_fp_fallback` |
+| hiding the toolbar window's views | the titlebar window lets clicks through while no reveal is on screen |
+| the Mission Control refresh (240 checks) | the return checks (`omacvm_fp_return_ready`, one restart, one presentation re-assert) |
+
+**What stayed** (OmacVM's own): the QEMU integration (the whole display in
+`screenSafeAreaSize`, the display box, `omacvm_fp_cut_rows`), the scale
+patches (`omacvm-cocoa-fullpanel-scale*.patch`, unchanged), the window-gone
+owner (#402, the same design on the new state), "Keep the Dock away"
+keeping the menu bar hidden and `omacvm_fp_menu_bar_in_the_way` (#356),
+`omacvm_fp_reveal_shown`, the relaxed options with the menu bar
+auto-hidden, `SLSTransactionCommit` as `void`, the menu bar transaction
+latch, `@try` around `setPresentationOptions:`, the build-time bit checks,
+the WindowServer bounds check, the per-window state, the log lines.
+
+**Where the new code comes from.** The reservation answer, the SkyLight
+backdrop, the titlebar sensor, the facts-to-intent rules and the return
+checks are new code. That the reservation question decides the layout
+came from Try Omarchy's pull request #361 (themartiano, MIT; idea and
+selector only, no code). What the new code still shares with UTM's is what
+any implementation must share: AppKit's and SkyLight's class, selector,
+symbol and constant names, SkyLight's create/set/commit order, the
+presentation option values, the four pointer event masks, the
+`AppleMenuBarVisibleInFullscreen` key and the titlebar window's class name.
+The rewrite was done by authors who had read the earlier code: it is a
+redesign, not a clean-room implementation.
+
+**Past releases.** Earlier releases shipped QEMU with the prior FullPanel code (it
+was compiled in and gated only at run time). Whether anything is owed for
+them beyond replacing the code from the next release is for the maintainer
+(and counsel) to decide; the replacement does not change those binaries.
+
+**Tested** (2026-10-19, MacBook Pro 14-inch, macOS 27.0.1, 1800x1169 pt,
+QEMU from this branch with the firmware only, no VM): with Keep the Dock
+away on and off, the window covers the whole display and the strip shows
+the guest (screen captures), after Mission Control opened and closed with
+Escape, after its own thumbnail, after another Space's thumbnail, after
+Command-Tab and after the Dock icon (each 1.2 s and 3 s later); the menu
+bar stays hidden at the top edge with Keep the Dock away and comes down
+and goes again without it; leaving and entering full screen again (twice)
+covers the strip each time; quitting leaves the normal menu bar. Normal
+full screen without OMACVM_FULLPANEL is unchanged (the same steps). That
+run found one thing the old frame guards had hidden: QEMU's own full-screen
+resize fitted the window to the firmware's 1920x1080 and moved it off the
+strip; it now leaves a FullPanel window as AppKit laid it out.
+
+**Tested with a real VM** (2026-10-19, the same MacBook, OmacVM Test.app
+from this branch, an APFS clone of a configured Omarchy VM, a Sidecar iPad
+as the external display): the window covers the whole display and
+Omarchy's bar sits in the strip (Virtual-1 3600x2344 at scale 1.6, the bar
+49 px = the 39.5 pt strip, split at the notch), Bridge widgets work; Mission
+Control (Escape and thumbnails); top edge with Keep the Dock away on (the
+menu bar stays away) and off (it comes down and goes again); exit and
+re-entry; a display mode change (1512x982 and back: covered both times;
+this found and fixed a "strip lost" on the mode change); FullPanel to
+native (window below the notch, Omanotch streams the bar) and back to
+FullPanel (Omanotch idle); the Sidecar display keeps normal full screen.
+
+**Not tested on this patch:** Split View (Window > Full Screen Tile from
+full screen did nothing; pairing would need another app's window),
+display unplug (#402), sleep and lock, Stage Manager, macOS other than 27
+(the reservation method is there by name on 15.8; anything missing falls
+back to normal full screen). With an external display attached, the Dock
+icon does not switch the MacBook's Space back (native full screen behaves
+the same), and `omacvm check` warns about the external display's window
+("normal full screen"), as before this change.

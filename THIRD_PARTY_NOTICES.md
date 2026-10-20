@@ -20,6 +20,18 @@ each file taken from them:
   `NativeCameraBridge.swift`; OmacVM.app uses it too), the VM's
   `src/camera/guest/omacvm-camera` (from `omarchy-native-camera-bridge`) and
   its v4l2loopback and udev settings.
+  Its pull request #361 ("Full macOS notch support", themartiano) showed that
+  AppKit's full-screen menu bar reservation decides whether a window covers
+  the strip beside the notch; OmacVM.app's FullPanel answers that question
+  (no code from the pull request).
+- **UTM** (github.com/utmapp/UTM, Turing Software, LLC), Apache-2.0: prior art
+  for FullPanel (UTM pull requests #7885 and #7910, native full screen beside
+  the camera housing). Earlier versions of OmacVM's FullPanel patches
+  contained portions that a 2026-10-18 audit found to be adapted from UTM's
+  `VMDisplayWindow.swift`, although their headers called them an independent
+  implementation. The current FullPanel patches remove the code identified as
+  adapted; they are a redesign, not a clean-room implementation
+  ([ADR 0044](docs/adr/0044-fullpanel.md#replacement)).
 - **omarchy-parallels** (github.com/vincenzopalazzo/omarchy-parallels), MIT,
   (c) Vincenzo Palazzo, `src/vm/live/LICENSE`: the live image builder in
   `src/vm/live`.

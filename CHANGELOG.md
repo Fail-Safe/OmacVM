@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Full screen including notch works without hooking AppKit's window frame.** macOS lays the
+  VM's window out over the whole display itself now (FullPanel answers its full-screen menu bar
+  question), and the menu bar's reveal is seen through AppKit's titlebar window instead of hooks on
+  a private AppKit class. Nothing changes in how it looks or how it is set. The earlier version was
+  found to contain code adapted from UTM's camera-housing full screen; the code identified as
+  adapted has been removed ([ADR 0044](docs/adr/0044-fullpanel.md#replacement)).
+
 ## 3.1.26
 
 - **Chrome no longer looks gray with HDR on.** With the experimental HDR switch on, Chrome and

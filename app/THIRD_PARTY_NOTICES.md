@@ -19,6 +19,16 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   original file) and agent, in OmacVM's `src/battery/` (see the
   repository's `THIRD_PARTY_NOTICES.md`).
   Its release is also downloaded at build time as the temporary live system.
+  Its pull request #361 showed that AppKit's full-screen menu bar
+  reservation decides whether a window covers the strip beside the notch;
+  FullPanel ("Full screen including notch") answers that question (no code
+  from the pull request).
+- **UTM** (Turing Software, LLC), Apache-2.0: its camera-housing full screen
+  is prior art for FullPanel. The earlier FullPanel code in QEMU's `ui/cocoa.m`
+  contained code adapted from it; this version's FullPanel patches
+  (`runtime/patches/omacvm-cocoa-fullpanel*.patch`) remove the code
+  identified as adapted (the repository's `THIRD_PARTY_NOTICES.md` and
+  `docs/adr/0044-fullpanel.md` have the history).
 - **edk2** UEFI firmware (edk2-stable202408, the release QEMU 11.1.1 ships),
   built by `runtime/build-edk2.sh` with QEMU's build flags:
   BSD-2-Clause-Patent, with OpenSSL (Apache-2.0) and others, see

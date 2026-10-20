@@ -4,8 +4,9 @@
 #   - the state hangs on its window through OmacVMFullPanelOwner, which only
 #     the window's association holds, and omacvm_fullpanel_state reads it there;
 #   - the owner's dealloc tells the state (windowGone) before releasing it;
-#   - windowGone forgets the window first, then stops observing and shows the
-#     menu bar; the state's own dealloc never asks the window anything first;
+#   - windowGone forgets the window first, then stops observing and puts the
+#     menu bar back (releaseSystemState); the state's own dealloc never asks the
+#     window anything first;
 #   - with --self-test (CI): the checks fail on the code without the patch.
 #   test-fullpanel-window-gone.sh <patched ui/cocoa.m> | --self-test
 set -uo pipefail
@@ -29,7 +30,7 @@ problems() {
   awk 'NR > 2 && !/^ *$/ && !s {s=NR; first=$0} END{exit !(first ~ /window = nil;/)}' <<<"$gone" ||
     echo "windowGone does not forget the window first"
   grep -q '\[\[NSNotificationCenter defaultCenter\] removeObserver:self\];' <<<"$gone" &&
-    grep -q '\[self showMenuBar\];' <<<"$gone" || echo "windowGone does not stop observing and show the menu bar"
+    grep -q '\[self releaseSystemState\];' <<<"$gone" || echo "windowGone does not stop observing and put the menu bar back"
   dealloc=$(awk '/^@implementation OmacVMFullPanelState/{on=1} on && index($0, "- (void)dealloc") == 1 {d=1} d {print} d && /^}$/ {exit}' "$m")
   grep -q '\[window ' <<<"$dealloc" && echo "the state's dealloc asks the window"
 }
