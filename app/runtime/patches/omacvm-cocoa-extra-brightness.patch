@@ -1,0 +1,810 @@
+From: OmacVM
+Subject: [PATCH] cocoa: extra brightness: the guest's SDR frames up to 2x on an XDR display
+
+What: with the app's switch extraBrightness (its own defaults key, read
+live: QEMU runs as the app; KVO also reports a change from another
+process, and the key is read again when the window is seen again or the
+app becomes active; OMACVM_EXTRA_BRIGHT=1 for a QEMU not started as the
+app), the IOSurface present draws the guest's SDR frames through a shader
+(ui/omacvm-bright.h) into half-float surfaces tagged extended linear
+sRGB: decoded from sRGB to linear light and multiplied by g, and the
+layer shows them with EDR and toneMapMode never. g = the window's
+display's EDR headroom now, at most 2, in hundredths, read every 250 ms
+on the main thread while the switch is on, the window is seen and its
+display's EDR potential is above 2.05; a move of 0.02 or more, the switch
+turning on or off, or a new display redraws the newest frame at once
+(omacvm_bright_bh, in both present modes, also on a static desktop). The
+surfaces carry kIOSurfaceContentHeadroom 2.0, so macOS raises the panel's
+headroom only as far as the frames need.
+
+It goes back by itself: off, the next frame takes the plain 8-bit path
+and the layer drops EDR; out of sight no frame is drawn
+(omacvm-cocoa-present-unseen.patch) and the look stops; on another
+display without the headroom g is 1 and the frames are 8-bit. The
+surfaces actually there decide how a frame is drawn, not the switch, so a
+frame drawn into the other kind during the half-second realloc hold-off
+keeps its own colours (the boot logo too: its clear colour is decoded,
+and it stays at 1x). PQ frames (HDR, ADR 0049) are never boosted: "not
+with HDR yet".
+
+Why: the user asked for an opt-in extra brightness for the VM's window
+(bright light). The guest cannot do it: Hyprland gives PQ windows a fixed
+reference white whatever sdr_max_luminance says, and SDR guests have no
+EDR; a plain 2x of a PQ frame would double and clip its highlights.
+macOS's own tone mapping halves SDR white below full headroom (ADR 0049),
+hence never.
+
+Fallbacks: no IOSurface present (GPU safe mode, OMACVM_GL_PRESENT=layer),
+untagged colour (OMACVM_GL_COLOR=native), half-float surfaces failing
+(present_deep_failed) or the shader not compiling: off for the run, said
+once. The shader is made on present_ctx the first time it is needed,
+never at start: a failure there cannot stop a VM.
+
+Logs (qemu.log, once per change): "cocoa: extra brightness: on, 2.00x",
+"held back by macOS, 1.40x" (after 2 s below 1.90x), "not on this display
+(EDR potential 2.00)", "not with HDR yet", "off (switch off)", "off
+(why)". OMACVM_TEST_EDR="potential,headroom" stands in for the window's
+display (the app passes it to test builds only).
+
+Threads: the main thread reads the switch and NSScreen and writes
+omacvm_bright_wanted and omacvm_bright_gain_c (qatomic); QEMU's thread
+reads them when it draws; the commit thread gets each frame's kind with
+the frame (PresentFrame.linear) for the layer's EDR.
+
+Cost while on: 8 bytes a pixel instead of 4 for the present surfaces
+(5 with vsync: about +154 MB at 3456x2234) and one pow() per pixel.
+
+Upstream: OmacVM only (IOSurface present, the app's settings).
+Test: app/runtime/Tests/display/test-extra-brightness.sh (rules, wiring;
+the checks catch code without it); on screen: work notes
+tracks/night-brightness.md (headroom with the switch on and off, hidden,
+VM stopped, on the M1 Max XDR panel).
+
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -55,6 +55,7 @@
+ #include "ui/omacvm-modifiers.h"
+ #include "ui/omacvm-display-settle.h"
+ #include "ui/omacvm-edr.h"
++#include "ui/omacvm-bright.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -193,6 +194,9 @@ @interface QemuCGLLayer : CAOpenGLLayer
+ static bool gl_present_pending;
+ static bool cocoa_gl_present_iosurface_wanted(void);
+ static void cocoa_gl_present_screen_changed(void);
++static void omacvm_bright_reread(void);
++static void omacvm_bright_look(void);
++static bool omacvm_bright_blit(bool flip, int gain);
+ static uint32_t gl_scanout_id;
+ static DisplayGLTextureBorrower gl_scanout_borrow;
+ static QEMUGLContext gl_view_ctx;
+@@ -4838,10 +4842,14 @@ - (void)omacvmWindowSeen:(NSNotification *)note
+     qatomic_set(&omacvm_window_seen, seen);
+     if (!seen) {
+         since = CACurrentMediaTime();
++#ifdef CONFIG_OPENGL
++        omacvm_bright_look();   /* its look stops while out of sight */
++#endif
+         return;
+     }
+     double away = CACurrentMediaTime() - since;
+ #ifdef CONFIG_OPENGL
++    omacvm_bright_reread();     /* the switch again, before the frame */
+     omacvm_present_seen_again();
+ #endif
+     with_bql(^{
+@@ -4952,6 +4960,9 @@ - (void)windowDidChangeScreen:(NSNotification *)notification
+     [cocoaView updateScale];
+     [cocoaView updateUIInfo];
+     omacvm_displays_update();
++#ifdef CONFIG_OPENGL
++    omacvm_bright_look();       /* extra brightness: the new display's headroom */
++#endif
+ }
+ 
+ - (void)windowDidChangeBackingProperties:(NSNotification *)notification
+@@ -6453,14 +6464,19 @@ static void omacvm_splash_view_size(uint32_t w, uint32_t h)
+  * pixel output without a picture. logo: the logo on Omarchy's background;
+  * else black (the desktop was there: the guest turned the output off).
+  * top_first: the framebuffer's first row is the top (an IOSurface), not the
+- * bottom (a CAOpenGLLayer); gls: the context's shader.
++ * bottom (a CAOpenGLLayer); gls: the context's shader. linear: surfaces in
++ * linear light (extra brightness): the colours are decoded, at 1x.
+  */
+ static void omacvm_splash_draw_with(QemuGLShader *gls, int w, int h, bool logo,
+-                                    bool top_first)
++                                    bool top_first, bool linear)
+ {
+     uint32_t bg = logo ? SPLASH_NAVY : 0;
++    double rgb[3] = { (bg >> 16) / 255.0, ((bg >> 8) & 0xff) / 255.0, (bg & 0xff) / 255.0 };
+ 
+-    glClearColor((bg >> 16) / 255.0, ((bg >> 8) & 0xff) / 255.0, (bg & 0xff) / 255.0, 1);
++    for (int i = 0; i < 3 && linear; i++) {
++        rgb[i] = omacvm_bright_linear(rgb[i]);
++    }
++    glClearColor(rgb[0], rgb[1], rgb[2], 1);
+     glClear(GL_COLOR_BUFFER_BIT);
+     if (!logo) {
+         return;
+@@ -6489,13 +6505,15 @@ static void omacvm_splash_draw_with(QemuGLShader *gls, int w, int h, bool logo,
+     /* Sharp cells, whatever the zoom filter. */
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+-    qemu_gl_run_texture_blit(gls, top_first);
++    if (!linear || !omacvm_bright_blit(top_first, OMACVM_BRIGHT_ONE)) {
++        qemu_gl_run_texture_blit(gls, top_first);
++    }
+     glViewport(0, 0, w, h);
+ }
+ 
+ static void omacvm_splash_draw(int w, int h, bool logo)
+ {
+-    omacvm_splash_draw_with(dgc.gls, w, h, logo, false);
++    omacvm_splash_draw_with(dgc.gls, w, h, logo, false, false);
+ }
+ 
+ /* Main thread: the hint under the logo of the main window. */
+@@ -7388,6 +7406,7 @@ static void cocoa_gl_render(void)
+ static GLuint present_tex[PRESENT_SURFACES];
+ static uint32_t present_w, present_h;
+ static bool present_deep;              /* half-float surfaces (10-bit scanout) */
++static bool present_linear;            /* half-float, extended linear sRGB: extra brightness */
+ 
+ /*
+  * Colour. The guest renders sRGB unless it says otherwise, so the surfaces
+@@ -7469,6 +7488,7 @@ - (void)tick:(CADisplayLink *)link;
+     IOSurfaceRef surf;
+     GLint filter;
+     double flushed;                     /* reached QEMU's present */
++    bool linear;                        /* drawn in linear light (extra brightness) */
+ } PresentFrame;
+ 
+ static struct {
+@@ -7520,7 +7540,128 @@ static void omacvm_present_seen_again(void)
+ 
+ static void cocoa_gl_present_bh(void *opaque);
+ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+-                                         double flushed);
++                                         double flushed, bool linear);
++static void cocoa_gl_present_request(void);
++
++/*
++ * OmacVM, extra brightness (ADR 0050, ui/omacvm-bright.h): with the app's
++ * switch (extraBrightness, read live) the guest's SDR frames go through a
++ * shader into half-float surfaces in extended linear sRGB, times a gain
++ * that follows the window's display's headroom (at most 2x), and the
++ * layer shows them with EDR. Off: the frames take the plain path as
++ * before. Never for PQ frames (HDR): not with HDR yet.
++ *
++ * Threads: the main thread reads the switch and the display (a 250 ms look
++ * while the switch is on, the window is seen and its display can show it)
++ * and writes omacvm_bright_wanted and omacvm_bright_gain_c; QEMU's thread
++ * reads them when it draws (qatomic), makes the shader on present_ctx the
++ * first time and redraws the newest frame when they change
++ * (omacvm_bright_bh, in both present modes, also on a static desktop).
++ */
++static int omacvm_bright_wanted;        /* qatomic: linear surfaces for SDR frames */
++static int omacvm_bright_gain_c = OMACVM_BRIGHT_ONE;   /* qatomic: hundredths */
++static int omacvm_bright_pq;            /* qatomic: the guest's frames are PQ now */
++static int omacvm_bright_failed;        /* qatomic: the shader failed: off this run */
++static QEMUBH *omacvm_bright_bh;
++static GLuint omacvm_bright_prog, omacvm_bright_vao, omacvm_bright_vbo;
++static GLint omacvm_bright_u_gain, omacvm_bright_u_flip;
++static int omacvm_bright_made;          /* QEMU thread: 1 made, -1 failed */
++
++static GLuint omacvm_bright_shader(GLenum type, const char *src)
++{
++    GLuint s = glCreateShader(type);
++    GLint ok = 0;
++
++    glShaderSource(s, 1, &src, NULL);
++    glCompileShader(s);
++    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
++    if (!ok) {
++        char why[512] = "";
++        glGetShaderInfoLog(s, sizeof(why), NULL, why);
++        warn_report("cocoa: extra brightness: the %s shader does not compile: %s",
++                    type == GL_VERTEX_SHADER ? "vertex" : "fragment", why);
++        glDeleteShader(s);
++        return 0;
++    }
++    return s;
++}
++
++/* QEMU thread, present_ctx current: the gain program, made once. */
++static bool omacvm_bright_program(void)
++{
++    static const GLfloat quad[] = { -1, -1, 1, -1, -1, 1, 1, 1 };
++
++    if (omacvm_bright_made) {
++        return omacvm_bright_made > 0;
++    }
++    GLuint vs = omacvm_bright_shader(GL_VERTEX_SHADER, OMACVM_BRIGHT_VERT);
++    GLuint fs = omacvm_bright_shader(GL_FRAGMENT_SHADER, OMACVM_BRIGHT_FRAG);
++    GLint ok = 0;
++    if (vs && fs) {
++        omacvm_bright_prog = glCreateProgram();
++        glAttachShader(omacvm_bright_prog, vs);
++        glAttachShader(omacvm_bright_prog, fs);
++        glBindAttribLocation(omacvm_bright_prog, 0, "in_position");
++        glLinkProgram(omacvm_bright_prog);
++        glGetProgramiv(omacvm_bright_prog, GL_LINK_STATUS, &ok);
++    }
++    glDeleteShader(vs);
++    glDeleteShader(fs);
++    if (!ok) {
++        if (omacvm_bright_prog) {
++            glDeleteProgram(omacvm_bright_prog);
++            omacvm_bright_prog = 0;
++        }
++        omacvm_bright_made = -1;
++        qatomic_set(&omacvm_bright_failed, 1);
++        warn_report("cocoa: extra brightness: no shader, off for this run");
++        dispatch_async(dispatch_get_main_queue(), ^{
++            omacvm_bright_look();
++        });
++        return false;
++    }
++    glUseProgram(omacvm_bright_prog);
++    glUniform1i(glGetUniformLocation(omacvm_bright_prog, "image"), 0);
++    omacvm_bright_u_gain = glGetUniformLocation(omacvm_bright_prog, "gain");
++    omacvm_bright_u_flip = glGetUniformLocation(omacvm_bright_prog, "yflip");
++    glGenVertexArrays(1, &omacvm_bright_vao);
++    glBindVertexArray(omacvm_bright_vao);
++    glGenBuffers(1, &omacvm_bright_vbo);
++    glBindBuffer(GL_ARRAY_BUFFER, omacvm_bright_vbo);
++    glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
++    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
++    glEnableVertexAttribArray(0);
++    glBindBuffer(GL_ARRAY_BUFFER, 0);
++    glBindVertexArray(0);
++    omacvm_bright_made = 1;
++    return true;
++}
++
++/*
++ * QEMU thread, present_ctx current: the bound texture into the bound
++ * framebuffer as QEMU's blit (flip as its texture_blit_flip), decoded to
++ * linear light and times gain (hundredths). False without the program.
++ */
++static bool omacvm_bright_blit(bool flip, int gain)
++{
++    if (omacvm_bright_made <= 0) {
++        return false;
++    }
++    glUseProgram(omacvm_bright_prog);
++    glUniform1f(omacvm_bright_u_gain, gain / 100.0f);
++    glUniform1f(omacvm_bright_u_flip, flip ? 1.0f : -1.0f);
++    glBindVertexArray(omacvm_bright_vao);
++    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++    glBindVertexArray(0);
++    return true;
++}
++
++/* QEMU thread, BQL held: the switch or the gain changed: the newest frame again. */
++static void omacvm_bright_redraw(void *opaque)
++{
++    gl_dirty = true;
++    cocoa_gl_present_request();
++}
+ 
+ static bool cocoa_gl_present_iosurface_wanted(void)
+ {
+@@ -7604,6 +7745,9 @@ static bool cocoa_gl_present_init(void)
+         present_bh = aio_bh_new(iohandler_get_aio_context(),
+                                 cocoa_gl_present_bh, NULL);
+     }
++    /* Extra brightness redraws in either mode (same context, same reason). */
++    omacvm_bright_bh = aio_bh_new(iohandler_get_aio_context(),
++                                  omacvm_bright_redraw, NULL);
+     info_report("cocoa: frames shown %s",
+                 !present_vsync ? "when drawn" :
+                 present_fixed ? "on the display's refresh, full rate" :
+@@ -7638,6 +7782,7 @@ static void cocoa_gl_present_free(void)
+     }
+     present_w = present_h = 0;
+     present_deep = false;
++    present_linear = false;
+ }
+ 
+ static bool cocoa_gl_present_hdr_wanted(void)
+@@ -7650,8 +7795,8 @@ static bool cocoa_gl_present_hdr_wanted(void)
+     return present_hdr == 1;
+ }
+ 
+-/* The colour space of frames in a surface of this depth, or NULL. */
+-static CGColorSpaceRef cocoa_gl_present_colorspace(bool deep)
++/* The colour space of frames in a surface of this depth (or linear), or NULL. */
++static CGColorSpaceRef cocoa_gl_present_colorspace(bool deep, bool linear)
+ {
+     if (present_color < 0) {
+         const char *e = getenv("OMACVM_GL_COLOR");
+@@ -7660,16 +7805,23 @@ static CGColorSpaceRef cocoa_gl_present_colorspace(bool deep)
+     if (!present_color) {
+         return NULL;
+     }
++    if (linear) {
++        return CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearSRGB);
++    }
+     return CGColorSpaceCreateWithName(deep && cocoa_gl_present_hdr_wanted() ?
+                                       kCGColorSpaceITUR_2100_PQ :
+                                       kCGColorSpaceSRGB);
+ }
+ 
+-/* The thread that commits a frame: EDR only while showing HDR. */
+-static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf)
++/*
++ * The thread that commits a frame: EDR only while showing HDR, or a frame
++ * of extra brightness (linear: drawn in linear light, at most the headroom
++ * now, so never is right for it too).
++ */
++static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf, bool linear)
+ {
+     BOOL hdr = IOSurfaceGetPixelFormat(surf) == 'RGhA' &&
+-               present_color == 1 && cocoa_gl_present_hdr_wanted();
++               present_color == 1 && (cocoa_gl_present_hdr_wanted() || linear);
+     if ([layer wantsExtendedDynamicRangeContent] != hdr) {
+         [layer setWantsExtendedDynamicRangeContent:hdr];
+         /*
+@@ -7725,8 +7877,10 @@ static void omacvm_present_gravity(CALayer *layer, IOSurfaceRef surf)
+  * then the frame is drawn scaled into the surfaces there are, and the
+  * timer comes back to make the right ones.
+  */
+-static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep)
++static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear)
+ {
++    bool half = deep || linear;
++
+     uint64_t cap = qatomic_read(&present_cap);
+     uint32_t cap_w = cap >> 32, cap_h = (uint32_t)cap;
+     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+@@ -7740,7 +7894,8 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep)
+         h = MAX(1, (uint32_t)(h * scale));
+     }
+     if (present_surf[0]) {
+-        if (w == present_w && h == present_h && deep == present_deep) {
++        if (w == present_w && h == present_h && deep == present_deep &&
++            linear == present_linear) {
+             return true;
+         }
+         /*
+@@ -7748,10 +7903,12 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep)
+          * once: in the old surfaces its frames would show in the wrong
+          * colours until the hold-off ends. It comes with a modeset, not in
+          * a stream of window sizes; a guest that flips it all the time
+-         * still gets one remake a second at most.
++         * still gets one remake a second at most. So does extra brightness
++         * turning on or off (linear light).
+          */
+         static int64_t depth_ns;
+-        bool depth_now = deep != present_deep && now - depth_ns >= NANOSECONDS_PER_SECOND;
++        bool depth_now = (deep != present_deep || linear != present_linear) &&
++                         now - depth_ns >= NANOSECONDS_PER_SECOND;
+         if (now - present_alloc_ns < PRESENT_REALLOC_NS && !depth_now) {
+             present_realloc_due = true;
+             timer_mod(present_timer, present_alloc_ns + PRESENT_REALLOC_NS);
+@@ -7768,10 +7925,10 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep)
+     NSDictionary *props = @{
+         (id)kIOSurfaceWidth: @(w),
+         (id)kIOSurfaceHeight: @(h),
+-        (id)kIOSurfaceBytesPerElement: deep ? @8 : @4,
+-        (id)kIOSurfacePixelFormat: @(deep ? (uint32_t)'RGhA' : (uint32_t)'BGRA'),
++        (id)kIOSurfaceBytesPerElement: half ? @8 : @4,
++        (id)kIOSurfacePixelFormat: @(half ? (uint32_t)'RGhA' : (uint32_t)'BGRA'),
+     };
+-    CGColorSpaceRef cs = cocoa_gl_present_colorspace(deep);
++    CGColorSpaceRef cs = cocoa_gl_present_colorspace(deep, linear);
+     CFPropertyListRef cs_plist = cs ? CGColorSpaceCopyPropertyList(cs) : NULL;
+     bool ok = true;
+     for (int i = 0; i < present_nsurf && ok; i++) {
+@@ -7783,12 +7940,20 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep)
+         if (cs_plist) {
+             IOSurfaceSetValue(present_surf[i], kIOSurfaceColorSpace, cs_plist);
+         }
++        if (linear) {
++            /*
++             * Extra brightness: the most the frames reach (2x), so macOS
++             * raises the panel's headroom that far, not to its potential.
++             */
++            IOSurfaceSetValue(present_surf[i], kIOSurfaceContentHeadroom,
++                              (CFNumberRef)@(OMACVM_BRIGHT_TARGET));
++        }
+         glGenTextures(1, &present_tex[i]);
+         glBindTexture(GL_TEXTURE_RECTANGLE, present_tex[i]);
+         ok = CGLTexImageIOSurface2D(present_ctx, GL_TEXTURE_RECTANGLE,
+-                                    deep ? GL_RGBA16F : GL_RGBA, w, h,
+-                                    deep ? GL_RGBA : GL_BGRA,
+-                                    deep ? GL_HALF_FLOAT :
++                                    half ? GL_RGBA16F : GL_RGBA, w, h,
++                                    half ? GL_RGBA : GL_BGRA,
++                                    half ? GL_HALF_FLOAT :
+                                            GL_UNSIGNED_INT_8_8_8_8_REV,
+                                     present_surf[i], 0) == kCGLNoError;
+     }
+@@ -7804,6 +7969,7 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep)
+     present_w = w;
+     present_h = h;
+     present_deep = deep;
++    present_linear = linear;
+     present_next = 0;
+     return true;
+ }
+@@ -7881,15 +8047,39 @@ static bool cocoa_gl_present(void)
+                     deep && cocoa_gl_present_hdr_wanted() ? ", HDR (PQ)" : "");
+         deep_logged = deep;
+     }
+-    if (!cocoa_gl_present_alloc(w, h, deep)) {
+-        if (!deep || !cocoa_gl_present_alloc(w, h, false)) {
++    /*
++     * Extra brightness: the guest's SDR frames (8-bit, or 10-bit sRGB) in
++     * linear light; never PQ frames, and the boot logo stays at 1x (the
++     * start animation's layers next to it are SDR).
++     */
++    bool pq = deep && cocoa_gl_present_hdr_wanted();
++    if (src && pq != qatomic_read(&omacvm_bright_pq)) {
++        qatomic_set(&omacvm_bright_pq, pq);
++        dispatch_async(dispatch_get_main_queue(), ^{
++            omacvm_bright_look();
++        });
++    }
++    bool linear = !splash && !pq && qatomic_read(&omacvm_bright_wanted) &&
++                  !qatomic_read(&present_deep_failed) && omacvm_bright_program();
++    if (!cocoa_gl_present_alloc(w, h, deep, linear)) {
++        if (!(deep || linear) || !cocoa_gl_present_alloc(w, h, false, false)) {
+             CGLSetCurrentContext(prev);
+             return false;
+         }
+         qatomic_set(&present_deep_failed, true);
+         warn_report("cocoa: half-float surfaces failed, 8-bit from now on "
+-                    "(no deep colour or HDR)");
++                    "(no deep colour, HDR or extra brightness)");
++        dispatch_async(dispatch_get_main_queue(), ^{
++            omacvm_bright_look();
++        });
+     }
++    /*
++     * The surfaces there are decide how to draw, not the switch: during
++     * the hold-off (alloc) a frame of the other kind goes into them, and
++     * must still show its own colours.
++     */
++    bool boost = present_linear;
++    int gain = qatomic_read(&omacvm_bright_gain_c);
+ 
+     /* The next surface Core Animation is not showing or reading. */
+     unsigned i;
+@@ -7929,7 +8119,7 @@ static bool cocoa_gl_present(void)
+     glActiveTexture(GL_TEXTURE0);
+     if (splash) {
+         omacvm_splash_draw_with(present_gls, present_w, present_h,
+-                                !omacvm_desktop_up, true);
++                                !omacvm_desktop_up, true, boost);
+     } else {
+         glBindTexture(GL_TEXTURE_2D, src);
+         /* Pixel for pixel, unless the frame had to be scaled (see alloc). */
+@@ -7937,7 +8127,9 @@ static bool cocoa_gl_present(void)
+                                                                : GL_LINEAR;
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, blit_filter);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, blit_filter);
+-        qemu_gl_run_texture_blit(present_gls, flip);
++        if (!boost || !omacvm_bright_blit(flip, linear ? gain : OMACVM_BRIGHT_ONE)) {
++            qemu_gl_run_texture_blit(present_gls, flip);
++        }
+     }
+     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+     glBindTexture(GL_TEXTURE_2D, 0);
+@@ -7976,7 +8168,7 @@ static bool cocoa_gl_present(void)
+         }
+         CGLSetCurrentContext(NULL);
+         if (present_vsync) {
+-            cocoa_gl_present_queue_frame(surf, filter, flushed);
++            cocoa_gl_present_queue_frame(surf, filter, flushed, boost);
+             return;
+         }
+         dispatch_async(dispatch_get_main_queue(), ^{
+@@ -7986,7 +8178,7 @@ static bool cocoa_gl_present(void)
+             NSString *f = filter == GL_LINEAR ? kCAFilterLinear : kCAFilterNearest;
+             [layer setMagnificationFilter:f];
+             [layer setMinificationFilter:f];
+-            cocoa_gl_layer_follow(layer, surf);
++            cocoa_gl_layer_follow(layer, surf, boost);
+             omacvm_present_gravity(layer, surf);
+             [layer setContents:(id)surf];
+             [CATransaction commit];
+@@ -8082,7 +8274,8 @@ static void surface_put(IOSurfaceRef surf)
+ }
+ 
+ /* Any thread: put a finished frame on the layer. */
+-static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushed)
++static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushed,
++                                  bool linear)
+ {
+     CALayer *layer = [cocoaView layer];
+     NSString *f = filter == GL_LINEAR ? kCAFilterLinear : kCAFilterNearest;
+@@ -8091,7 +8284,7 @@ static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushe
+     [CATransaction setDisableActions:YES];
+     [layer setMagnificationFilter:f];
+     [layer setMinificationFilter:f];
+-    cocoa_gl_layer_follow(layer, surf);
++    cocoa_gl_layer_follow(layer, surf, linear);
+     omacvm_present_gravity(layer, surf);
+     [layer setContents:(id)surf];
+     [CATransaction commit];
+@@ -8207,7 +8400,7 @@ static void present_window_reset(double now)
+  * link runs slower than the screen.
+  */
+ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+-                                         double flushed)
++                                         double flushed, bool linear)
+ {
+     double now = CACurrentMediaTime();
+     PresentFrame drop = { 0 };
+@@ -8275,6 +8468,7 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+         }
+         present_sync.queue[present_sync.queued++] = (PresentFrame){
+             .surf = surf, .filter = filter, .flushed = flushed,
++            .linear = linear,
+         };
+         /*
+          * The guest draws faster than a slowed link (two extra frames in a
+@@ -8296,7 +8490,7 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+         surface_put(drop.surf);
+     }
+     if (show) {
+-        cocoa_gl_present_show(surf, filter, flushed);
++        cocoa_gl_present_show(surf, filter, flushed, linear);
+         surface_put(surf);
+     }
+     if (wake) {
+@@ -8505,7 +8699,7 @@ static bool cocoa_gl_present_vsync(double T)
+         surface_put(trimmed[i].surf);
+     }
+     if (show.surf) {
+-        cocoa_gl_present_show(show.surf, show.filter, show.flushed);
++        cocoa_gl_present_show(show.surf, show.filter, show.flushed, show.linear);
+         surface_put(show.surf);
+         /* The guest may have drawn while the queue was full. */
+         qemu_bh_schedule(present_bh);
+@@ -10536,6 +10730,232 @@ static void omacvm_edr_watch(void)
+     dispatch_resume(omacvm_edr_timer);
+ }
+ 
++/*
++ * OmacVM, extra brightness (ADR 0050): the main thread's side. The switch
++ * is the app's own defaults key extraBrightness (QEMU runs as the app, so
++ * its standard defaults are the app's), watched with KVO, which also
++ * reports a change made by another process (the app's window, defaults
++ * write), and read again when the window is seen again or the app becomes
++ * active. A QEMU not started as the app takes OMACVM_EXTRA_BRIGHT=1.
++ * OMACVM_TEST_EDR="potential,headroom" stands in for the window's display
++ * (the app passes it to test builds only). The look runs every 250 ms
++ * while the switch is on, the window is seen and its display can show it,
++ * and stops otherwise: no wakeups while it is off.
++ */
++static int omacvm_bright_switch = -1;   /* main thread; -1 before omacvm_bright_init */
++static dispatch_source_t omacvm_bright_timer;
++static OmacVMBright omacvm_bright_now_state = OMACVM_BRIGHT_OFF;
++static int omacvm_bright_logged = -1;
++static double omacvm_bright_held_since;
++
++static bool omacvm_bright_as_app(void)
++{
++    return [[[NSBundle mainBundle] bundleIdentifier] hasPrefix:@"org.omacvm.app"];
++}
++
++static void omacvm_bright_read_switch(void)
++{
++    if (omacvm_bright_as_app()) {
++        CFPreferencesAppSynchronize((CFStringRef)[[NSBundle mainBundle] bundleIdentifier]);
++        omacvm_bright_switch = [[NSUserDefaults standardUserDefaults] boolForKey:@"extraBrightness"];
++    } else {
++        const char *e = getenv("OMACVM_EXTRA_BRIGHT");
++        omacvm_bright_switch = e && !strcmp(e, "1");
++    }
++}
++
++/* The window's display: false while it has none yet (and no test hook). */
++static bool omacvm_bright_screen(double *now, double *potential)
++{
++    static int hook = -1;
++    static double hook_p, hook_n;
++
++    if (hook < 0) {
++        const char *t = getenv("OMACVM_TEST_EDR");
++        hook = t && sscanf(t, "%lf,%lf", &hook_p, &hook_n) == 2;
++        if (hook) {
++            info_report("cocoa: extra brightness: display from OMACVM_TEST_EDR "
++                        "(potential %.2f, headroom %.2f)", hook_p, hook_n);
++        }
++    }
++    if (hook) {
++        *potential = hook_p;
++        *now = hook_n;
++        return true;
++    }
++    NSScreen *s = [[cocoaView window] screen];
++    if (!s) {
++        return false;
++    }
++    *now = [s maximumExtendedDynamicRangeColorComponentValue];
++    *potential = [s maximumPotentialExtendedDynamicRangeColorComponentValue];
++    return true;
++}
++
++/* Why the present cannot do it, or NULL (as HDR: omacvm_edr_now). */
++static const char *omacvm_bright_no_path(void)
++{
++    const char *c = getenv("OMACVM_GL_COLOR");
++
++    if (!present_ctx) {
++        return "frames in a CAOpenGLLayer: GPU safe mode or OMACVM_GL_PRESENT=layer";
++    }
++    if (qatomic_read(&present_deep_failed)) {
++        return "half-float surfaces failed";
++    }
++    if (qatomic_read(&omacvm_bright_failed)) {
++        return "no shader";
++    }
++    if (c && !strcmp(c, "native")) {
++        return "untagged colour: OMACVM_GL_COLOR=native";
++    }
++    return NULL;
++}
++
++static void omacvm_bright_log(OmacVMBright st, int gain, double potential, const char *why)
++{
++    switch (st) {
++    case OMACVM_BRIGHT_OFF:
++        info_report("cocoa: extra brightness: off (switch off)");
++        break;
++    case OMACVM_BRIGHT_ON:
++        info_report("cocoa: extra brightness: on, %.2fx", gain / 100.0);
++        break;
++    case OMACVM_BRIGHT_HELD:
++        info_report("cocoa: extra brightness: held back by macOS, %.2fx", gain / 100.0);
++        break;
++    case OMACVM_BRIGHT_NO_DISPLAY:
++        info_report("cocoa: extra brightness: not on this display (EDR potential %.2f)",
++                    potential);
++        break;
++    case OMACVM_BRIGHT_NO_HDR:
++        info_report("cocoa: extra brightness: not with HDR yet (the guest sends PQ)");
++        break;
++    case OMACVM_BRIGHT_NO_PATH:
++        info_report("cocoa: extra brightness: off (%s)", why);
++        break;
++    }
++}
++
++static void omacvm_bright_timer_run(bool run)
++{
++    if (run && !omacvm_bright_timer) {
++        omacvm_bright_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
++                                                     dispatch_get_main_queue());
++        dispatch_source_set_timer(omacvm_bright_timer,
++                                  dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4),
++                                  NSEC_PER_SEC / 4, NSEC_PER_SEC / 20);
++        dispatch_source_set_event_handler(omacvm_bright_timer, ^{
++            omacvm_bright_look();
++        });
++        dispatch_resume(omacvm_bright_timer);
++    } else if (!run && omacvm_bright_timer) {
++        dispatch_source_cancel(omacvm_bright_timer);
++        dispatch_release(omacvm_bright_timer);
++        omacvm_bright_timer = NULL;
++    }
++}
++
++/* Main thread: the switch, the window's display and the path decide; a change redraws. */
++static void omacvm_bright_look(void)
++{
++    static int hidden = -1;
++    double now = 1, potential = 1;
++
++    if (omacvm_bright_switch < 0) {
++        return;
++    }
++    if (hidden < 0) {
++        hidden = getenv("OMACVM_PRESENT_HIDDEN") != NULL;
++    }
++    bool on = omacvm_bright_switch == 1;
++    const char *why = omacvm_bright_no_path();
++    bool seen = qatomic_read(&omacvm_window_seen) || hidden;
++    if (!omacvm_bright_screen(&now, &potential)) {
++        /* No display yet: look again soon while it could be wanted. */
++        omacvm_bright_timer_run(on && !why && seen);
++        return;
++    }
++    bool pq = qatomic_read(&omacvm_bright_pq);
++    bool want = on && !why && omacvm_bright_display(potential);
++    int gain = want ? omacvm_bright_gain(now, potential) : OMACVM_BRIGHT_ONE;
++    bool was = qatomic_read(&omacvm_bright_wanted);
++    if (want != was || omacvm_bright_moved(qatomic_read(&omacvm_bright_gain_c), gain)) {
++        qatomic_set(&omacvm_bright_gain_c, gain);
++        qatomic_set(&omacvm_bright_wanted, want);
++        if (omacvm_bright_bh) {
++            qemu_bh_schedule(omacvm_bright_bh);
++        }
++    }
++
++    /* qemu.log: once per change; "held back" only once it lasted 2 s. */
++    OmacVMBright st = omacvm_bright_state(omacvm_bright_now_state, on, !why, potential, pq, gain);
++    double t = CACurrentMediaTime();
++    omacvm_bright_now_state = st;
++    if (st != OMACVM_BRIGHT_HELD || omacvm_bright_logged == OMACVM_BRIGHT_HELD) {
++        omacvm_bright_held_since = 0;
++    } else if (!omacvm_bright_held_since) {
++        omacvm_bright_held_since = t;
++    }
++    bool settling = omacvm_bright_held_since && t - omacvm_bright_held_since < 2;
++    if ((int)st != omacvm_bright_logged && !settling &&
++        !(omacvm_bright_logged < 0 && st == OMACVM_BRIGHT_OFF)) {
++        omacvm_bright_log(st, gain, potential, why);
++        omacvm_bright_logged = st;
++    }
++    omacvm_bright_timer_run(want && !pq && seen);
++}
++
++static void omacvm_bright_reread(void)
++{
++    if (omacvm_bright_switch < 0) {
++        return;
++    }
++    omacvm_bright_read_switch();
++    omacvm_bright_look();
++}
++
++@interface OmacVMBrightWatch : NSObject
++@end
++
++@implementation OmacVMBrightWatch
++/* Any thread: the app's switch changed (this process or another). */
++- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
++                        change:(NSDictionary *)change context:(void *)context
++{
++    dispatch_async(dispatch_get_main_queue(), ^{
++        omacvm_bright_reread();
++    });
++}
++@end
++
++/* Main thread, once the GL present is chosen. */
++static void omacvm_bright_init(void)
++{
++    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
++
++    omacvm_bright_read_switch();
++    if (omacvm_bright_as_app()) {
++        static OmacVMBrightWatch *watch;
++        watch = [[OmacVMBrightWatch alloc] init];
++        [[NSUserDefaults standardUserDefaults] addObserver:watch
++                                                forKeyPath:@"extraBrightness"
++                                                   options:0
++                                                   context:NULL];
++    }
++    [nc addObserverForName:NSApplicationDidBecomeActiveNotification object:nil
++                     queue:[NSOperationQueue mainQueue]
++                usingBlock:^(NSNotification *note) {
++        omacvm_bright_reread();
++    }];
++    [nc addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil
++                     queue:[NSOperationQueue mainQueue]
++                usingBlock:^(NSNotification *note) {
++        omacvm_bright_look();
++    }];
++    omacvm_bright_look();
++}
++
+ static void omacvm_send_layout(void)
+ {
+     NSMutableArray *outputs = [NSMutableArray array];
+@@ -12032,6 +12452,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+         }
+         info_report("cocoa: GL frames shown %s",
+                     present_ctx ? "as IOSurfaces" : "with a CAOpenGLLayer");
++        omacvm_bright_init();
+         qemu_register_reset(omacvm_splash_reset, NULL);
+         if (opts->gl != DISPLAY_GL_MODE_ES) {
+             omacvm_intro_start();
