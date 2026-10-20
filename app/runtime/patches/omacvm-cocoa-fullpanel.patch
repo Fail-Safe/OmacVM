@@ -43,14 +43,10 @@ Why: OmacVM.app's own full screen can draw beside the camera itself, so on
 that route the guest's bar can sit in the strip without Omanotch's stream
 (Omanotch stays the default and the only way on UTM, VMware Fusion and
 Parallels, which keep their windows below the notch). Issue #339. This
-version replaces the previous FullPanel code (a hook on AppKit's private
-full-screen frame, guards on five frame setters, a forced full-screen
-content size and hooks on AppKit's menu bar companion's reveal setters),
-whose reveal observer, menu bar and presentation logic and frame hook an
-audit (2026-10-18) found to be adapted from UTM's camera-housing full
-screen (Apache-2.0, which the FSF holds incompatible with GPL-2.0-only
-code, and QEMU's binary has such files); this version removes the code
-identified as adapted (docs/adr/0044-fullpanel.md, "Replacement").
+version (#480) replaces the previous FullPanel code (a hook on AppKit's
+private full-screen frame, guards on five frame setters, a forced
+full-screen content size and hooks on AppKit's menu bar companion's reveal
+setters; docs/adr/0044-fullpanel.md, "Replacement").
 
 Fallbacks: without OMACVM_FULLPANEL=1 nothing of it runs. External
 displays (no camera housing), macOS's "Always show the menu bar in full
@@ -61,15 +57,16 @@ AppKit refuses give normal full screen (logged). A full screen that loses
 the strip is not forced back; a full-screen Space moved to a display
 without a housing is normal full screen there until it is back.
 
-Credit: Brian Merchant's FullPanel branch for OmacVM (#339). Answering
-AppKit's full-screen menu bar reservation question to get the layout was
-inspired by Try Omarchy's pull request #361 (themartiano, MIT; no code
-from it).
-UTM's camera-housing full screen (Turing Software, LLC; UTM PR #7885 and
-#7910, Apache-2.0) is prior art for this feature. OmacVM's earlier
-version contained code adapted from it; the code identified as adapted is
-not in this patch. This is a redesign by authors who had read the earlier
-code, not a clean-room implementation.
+Credit: @brianmerchant's FullPanel branch (#339) and this rewrite (#480).
+Answering AppKit's full-screen menu bar reservation question to get the
+layout was inspired by Try Omarchy's pull request #361 (themartiano, MIT;
+no code from it). FullPanel in OmacVM 3.0.16-3.1.26 contained code adapted
+from UTM (Apache-2.0; Copyright © 2026 Turing Software, LLC,
+VMDisplayWindow.swift, UTM pull requests #7885 and #7910). Since #480
+FullPanel is rewritten and has no code from UTM. It still follows UTM's
+approach: the menu bar's backdrop made transparent with SkyLight, the menu
+bar held back with the app's presentation options. Written by people who
+had read the earlier code (not a clean-room rewrite).
 
 Upstream: not applicable (private AppKit/SkyLight interfaces, OmacVM's notch).
 Test: app/runtime/Tests/display/test-fullpanel.sh (the rules, every
@@ -194,11 +191,11 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 + * layout was inspired by Try Omarchy's pull request #361 (themartiano,
 + * MIT); no code of the pull request is here.
 + *
-+ * This replaces OmacVM's earlier FullPanel implementation (a
-+ * frame hook and a menu bar reveal observer, found to be adapted from
-+ * UTM's camera-housing full screen, Apache-2.0); the code identified as
-+ * adapted is removed. docs/adr/0044-fullpanel.md says where each part
-+ * comes from.
++ * FullPanel in OmacVM 3.0.16-3.1.26 contained code adapted from UTM
++ * (Apache-2.0). Since #480 FullPanel is rewritten and has no code from UTM;
++ * it still follows UTM's approach (the menu bar's backdrop made transparent
++ * with SkyLight, the menu bar held back with the app's presentation
++ * options). docs/adr/0044-fullpanel.md says where each part comes from.
 + *
 + * Main thread (AppKit), as all of cocoa.m's window code.
 + */

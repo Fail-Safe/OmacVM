@@ -83,24 +83,21 @@ since the replacement below, AppKit lays it out there itself.)
 
 ## Replacement
 
-Status: proposed with this change. Nothing the user sees, sets or reads
-changes: the same Start in choice, `OMACVM_FULLPANEL=1`, the same
+Status: accepted with #480 (@brianmerchant). Nothing the user sees, sets or
+reads changes: the same Start in choice, `OMACVM_FULLPANEL=1`, the same
 `fullpanel-scale` file, the same qemu.log lines for `omacvm check`, the same
 guest side.
 
-**Why.** A provenance audit of FullPanel (2026-10-18) found that the
-earlier QEMU implementation carried units adapted, in close translation, from
-UTM's `Platform/macOS/Display/VMDisplayWindow.swift` (Apache-2.0, Turing
+**Why.** FullPanel in OmacVM 3.0.16-3.1.26 contained code adapted from UTM
+(Apache-2.0). Parts of that QEMU code were a close translation of UTM's
+`Platform/macOS/Display/VMDisplayWindow.swift` (Copyright © 2026 Turing
 Software, LLC): the menu bar reveal observer on AppKit's
 `_NSFullScreenMenuBarCompanionController`, the reveal and presentation
 state machine, the hide/show sequence, the toolbar window handling, the
 lifecycle wiring, the state set and the full-screen frame hook. They came
 in through #339's branch, whose headers (and so these patches' headers)
-called the code independent with no UTM code copied; that statement was not
-accurate. Apache-2.0 code linked into QEMU's binary, which has GPL-2.0-only
-files, is a licence conflict on the FSF's reading. Whether the translated
-units are protected expression is a legal question that was not decided;
-replacing them makes it moot for new releases.
+said no UTM code was copied; that was wrong. This rewrite replaces all of
+it.
 
 **What was removed** (none of it is in the new patches;
 `test-fullpanel.sh` fails the build if any of it comes back):
@@ -130,18 +127,20 @@ the WindowServer bounds check, the per-window state, the log lines.
 backdrop, the titlebar sensor, the facts-to-intent rules and the return
 checks are new code. That the reservation question decides the layout
 came from Try Omarchy's pull request #361 (themartiano, MIT; idea and
-selector only, no code). What the new code still shares with UTM's is what
-any implementation must share: AppKit's and SkyLight's class, selector,
-symbol and constant names, SkyLight's create/set/commit order, the
-presentation option values, the four pointer event masks, the
-`AppleMenuBarVisibleInFullscreen` key and the titlebar window's class name.
-The rewrite was done by authors who had read the earlier code: it is a
-redesign, not a clean-room implementation.
+selector only, no code). Since #480 (@brianmerchant) FullPanel is
+rewritten and has no code from UTM. It still follows UTM's approach: the
+menu bar's backdrop made transparent with SkyLight, the menu bar held back
+with the app's presentation options. Compared with UTM's file (commit
+224ffec6) before it landed, it shares what any code of that approach
+shares: AppKit's and SkyLight's class, selector, symbol and constant
+names, SkyLight's create/set/commit order, the presentation option values,
+the four pointer event masks, the `AppleMenuBarVisibleInFullscreen` key and
+the titlebar window's class name. It was written by people who had read
+the earlier code (not a clean-room rewrite).
 
-**Past releases.** Earlier releases shipped QEMU with the prior FullPanel code (it
-was compiled in and gated only at run time). Whether anything is owed for
-them beyond replacing the code from the next release is for the maintainer
-(and counsel) to decide; the replacement does not change those binaries.
+**Past releases.** OmacVM 3.0.16-3.1.26 shipped QEMU with the earlier code
+compiled in (it ran only with FullPanel on). Those releases are not
+changed; UTM is credited in `THIRD_PARTY_NOTICES.md`.
 
 **Tested** (2026-10-19, MacBook Pro 14-inch, macOS 27.0.1, 1800x1169 pt,
 QEMU from this branch with the firmware only, no VM): with Keep the Dock

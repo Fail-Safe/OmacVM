@@ -24,14 +24,14 @@ each file taken from them:
   AppKit's full-screen menu bar reservation decides whether a window covers
   the strip beside the notch; OmacVM.app's FullPanel answers that question
   (no code from the pull request).
-- **UTM** (github.com/utmapp/UTM, Turing Software, LLC), Apache-2.0: prior art
-  for FullPanel (UTM pull requests #7885 and #7910, native full screen beside
-  the camera housing). Earlier versions of OmacVM's FullPanel patches
-  contained portions that a 2026-10-18 audit found to be adapted from UTM's
-  `VMDisplayWindow.swift`, although their headers called them an independent
-  implementation. The current FullPanel patches remove the code identified as
-  adapted; they are a redesign, not a clean-room implementation
-  ([ADR 0044](docs/adr/0044-fullpanel.md#replacement)).
+- **UTM** (github.com/utmapp/UTM), Copyright © 2026 Turing Software, LLC,
+  Apache License, Version 2.0: FullPanel in OmacVM 3.0.16-3.1.26 contained
+  code adapted from UTM (Apache-2.0), from its
+  `Platform/macOS/Display/VMDisplayWindow.swift` (UTM pull requests #7885 and
+  #7910). Since #480 (@brianmerchant) FullPanel is rewritten and has no code
+  from UTM. It still follows UTM's approach: the menu bar's backdrop made
+  transparent with SkyLight, the menu bar held back with the app's
+  presentation options ([ADR 0044](docs/adr/0044-fullpanel.md#replacement)).
 - **omarchy-parallels** (github.com/vincenzopalazzo/omarchy-parallels), MIT,
   (c) Vincenzo Palazzo, `src/vm/live/LICENSE`: the live image builder in
   `src/vm/live`.

@@ -10,9 +10,8 @@ in more words.
   (FullPanel answers its full-screen menu bar question), and the menu bar's reveal is seen through
   AppKit's titlebar window instead of hooks on a private AppKit class. Nothing changes in how it
   looks or how it is set. With external displays on, `omacvm check` no longer warns about their
-  windows' normal full screen. The earlier version was found to contain code adapted from UTM's
-  camera-housing full screen; the code identified as adapted has been removed
-  ([ADR 0044](docs/adr/0044-fullpanel.md#replacement)).
+  windows' normal full screen. Earlier versions (3.0.16-3.1.26) adapted UTM's code (Apache-2.0);
+  UTM is now credited in the notices ([ADR 0044](docs/adr/0044-fullpanel.md#replacement)).
 
 ## 3.1.26
 
