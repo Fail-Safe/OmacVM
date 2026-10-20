@@ -14,7 +14,7 @@ final class USBRun: ObservableObject {
     let requestName: String
     private let pid: pid_t
     private let log: (String) -> Void
-    private let watch: USBWatch
+    private let watch = USBWatch()
     private let asker = USBAlertAsker()
     private var session: USBSession?
     private var observers: [NSObjectProtocol] = []
@@ -35,10 +35,8 @@ final class USBRun: ObservableObject {
     @Published private(set) var rows = USBListRows()
     private var devices: [UInt32: USBDevice] = [:]
 
-    /// vendorHID: the "Vendor HID devices" switch at this start (USBVendorHID).
-    init(config: VMConfig, qemuPID: pid_t, vendorHID: Bool = false, log: @escaping (String) -> Void) {
+    init(config: VMConfig, qemuPID: pid_t, log: @escaping (String) -> Void) {
         self.config = config
-        watch = USBWatch(hid: vendorHID)
         self.pid = qemuPID
         self.log = log
         requestName = Self.requestName()

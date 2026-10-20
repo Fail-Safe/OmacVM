@@ -7,10 +7,8 @@
 import Foundation
 import OmacVMUSB
 
-// --list: this Mac's devices as the app sees them; --list --hid: with the
-// "Vendor HID devices" switch on (each device's HID part; nothing opened).
 if CommandLine.arguments.contains("--list") {
-    for d in USBScan.devices(hid: CommandLine.arguments.contains("--hid")) {
+    for d in USBScan.devices() {
         let a: String
         switch d.availability {
         case .free: a = "free: a VM can have it"
@@ -18,8 +16,7 @@ if CommandLine.arguments.contains("--list") {
         case .notOffered(let why): a = "not offered: \(why)"
         }
         let ifs = d.interfaces.map { "\($0.number):\(String(format: "%02x", $0.interfaceClass))\($0.users.isEmpty ? "" : "[\($0.users.joined(separator: ","))]")" }
-        print("\(d.id) \(d.name) (class \(String(format: "%02x", d.deviceClass))) -> \(a)"
-              + (d.hid.map { " [vendor HID, registry id \(String($0.registryID, radix: 16))]" } ?? ""))
+        print("\(d.id) \(d.name) (class \(String(format: "%02x", d.deviceClass))) -> \(a)")
         print("    interfaces \(ifs.joined(separator: " "))\(d.drivers.isEmpty ? "" : "; device drivers \(d.drivers.joined(separator: ","))")")
     }
     exit(0)
@@ -361,6 +358,29 @@ do {
                                     "macOS uses it as a keyboard, mouse or security key"] && rows.isEmpty,
            "3: the list shows them under Kept by macOS with why (hubs not at all)")
 }
+// 3b. A vendor HID board remembered as Connect while 3.1.14-3.1.26's Vendor HID devices was on:
+// macOS's HID driver has it again, so it stays with the Mac and the list and log say so.
+do {
+    var hidBoard = dev(0x1d50, 0x6018, "ECU Interface", [I(number: 0, interfaceClass: 3, users: ["AppleUserUSBHostHIDDevice"])])
+    hidBoard.location = 0x0140_0000
+    let remembered = USBMemory(devices: [.init(vendor: "1d50", product: "6018", name: "ECU Interface", choice: .omarchy)])
+    let (s, m, a, _, saved, lines) = rig(remembered)
+    s.plugged(hidBoard)
+    expect(a.asked.isEmpty && m.log.isEmpty && saved().isEmpty
+           && s.plugs[hidBoard.location]?.state == .kept("macOS uses it as a keyboard, mouse or security key"),
+           "3b: a vendor HID board remembered as Connect: kept by macOS, not connected, not asked, usb.json unchanged")
+    expect(lines() == ["OmacVM: USB: 1d50:6018 ECU Interface not connected: macOS uses it as a keyboard, mouse or security key (remembered as Connect)"],
+           "3b: the log says why it was not connected")
+    let rows = USBListRows.make(memory: remembered, devices: [hidBoard], states: s.plugs.mapValues(\.state), vmName: "Omarchy")
+    expect(rows.remembered.map(\.status) == ["Plugged in, kept by macOS"] && rows.remembered[0].plan == .omarchy
+           && !rows.remembered[0].canConnect && rows.kept.map(\.name) == ["ECU Interface"] && rows.plugged.isEmpty,
+           "3b: the list: remembered as Connect, plugged in, kept by macOS (no Connect), and under Kept by macOS")
+    let gone = USBListRows.make(memory: remembered, devices: [], states: nil, vmName: "Omarchy")
+    expect(gone.remembered.map(\.status) == ["Not plugged in"], "3b: unplugged: not plugged in")
+    let (s2, _, _, _, _, lines2) = rig()
+    s2.plugged(key)
+    expect(lines2().isEmpty, "3b: a device macOS keeps that is not remembered: no log line")
+}
 // 4. Unplugged while asking; two devices at once.
 do {
     let (s, _, a, _, saved, _) = rig()
@@ -533,7 +553,6 @@ do {
     expect(rows.remembered.count == 1 && rows.plugged.count == 1 && rows.plugged[0].plan == .omarchy,
            "10: two boards without a serial: the second shows the choice they share")
 }
-vendorHIDTests()
 try? FileManager.default.removeItem(at: tmp)
 
 if let i = CommandLine.arguments.firstIndex(of: "--qmp"), i + 1 < CommandLine.arguments.count {
