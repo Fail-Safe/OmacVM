@@ -10,6 +10,13 @@ in more words.
   vendor HID board stays with the Mac again, also one remembered as Connect. The USB Devices
   list then shows it as plugged in and kept by macOS, and the VM's log says why it did not
   connect. A VM folder's old `usb-vendor-hid` file is no longer read.
+- **Full screen including notch: FullPanel rewritten with one small hook instead of many**
+  (@brianmerchant, #480). macOS lays the VM's window out over the whole display itself now
+  (FullPanel answers its full-screen menu bar question), and the menu bar's reveal is seen through
+  AppKit's titlebar window instead of hooks on a private AppKit class. Nothing changes in how it
+  looks or how it is set. With external displays on, `omacvm check` no longer warns about their
+  windows' normal full screen. Earlier versions (3.0.16-3.1.26) adapted UTM's code (Apache-2.0);
+  UTM is now credited in the notices ([ADR 0044](docs/adr/0044-fullpanel.md#replacement)).
 
 ## 3.1.26
 

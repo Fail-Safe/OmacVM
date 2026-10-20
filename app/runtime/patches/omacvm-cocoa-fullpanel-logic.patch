@@ -2,23 +2,38 @@ From: OmacVM
 Subject: [PATCH] ui: FullPanel's decisions, tested without a notched Mac
 
 What: a header with no AppKit in it: whether a start asked for FullPanel
-(OMACVM_FULLPANEL=1), whether a window's display can have it (a camera
-housing, macOS's "Always show the menu bar in full screen" off), what
-AppKit's full-screen frame becomes (the whole display, kept over AppKit's
-camera-safe re-ask, or AppKit's own: Split View, a smaller tile, an
-external display), when a frame change is refused, when the strip is lost
-for the rest of a full screen, whether the guest may be a few rows
-shorter (never over the whole panel), when macOS's menu bar may come down
-from the top row and the app's presentation options for it (never with
-"Keep the Dock away", QEMU's immersive=on), whether "Always show the menu
-bar in full screen" is in the way (only without "Keep the Dock away") and
-whether AppKit's own reveal is shown (only when allowed). Used by
-omacvm-cocoa-fullpanel.patch (which explains the why).
+(OMACVM_FULLPANEL=1); why a full screen gets normal full screen, first
+reason first (no camera housing, macOS's "Always show the menu bar in full
+screen" in the way, AppKit's menu bar reservation not there or not
+AppKit's own, no SkyLight), and whether that is the line omacvm check
+reads (not for an external display beside the open MacBook); whether that reservation may be answered
+(AppKit's own method, nobody else's change before or after ours); whether
+AppKit gave a full screen the whole display (counted once the window
+covers it, final at didEnterFullScreen: Split View keeps AppKit's layout);
+when the strip is lost for the rest of a full screen; when a Space on a
+display without a housing is normal full screen there and when it gets
+the strip back; whether the guest may be a few rows shorter (never over
+the whole panel); where the pointer is (the top row, the strip, the
+picture) and whether the menu bar is asked for; what the backdrop, the
+app's presentation options and AppKit's titlebar window should be for a
+set of facts (one rule, applied in one place); where the options go when
+FullPanel relaxes or lets go of them (never with "Keep the Dock away",
+QEMU's immersive=on, the menu bar held back all the time); and the
+Mission Control and Space return checks (WindowServer has the window in
+place, at most 2 s). Used by omacvm-cocoa-fullpanel.patch (which explains
+the why).
 
 Why its own file: so the rules are tested on the sizes of every notched
 MacBook, external displays and a window moving between them, without QEMU,
 a display or a notch (app/runtime/Tests/display/test-fullpanel.sh applies
 this patch to an empty folder; at build time and in CI).
+
+Where it comes from: the reservation, verdict, release, pointer, intent,
+restore and return rules are new in this version; the requested, menu bar,
+cut-rows, reveal-shown and relaxed rules are kept from the earlier version
+of this patch. It replaces that earlier header's frame, keep, strip-lost,
+reveal-allowed and presentation rules (docs/adr/0044-fullpanel.md,
+"Replacement").
 
 Upstream: not applicable (OmacVM's notch strip).
 Test: app/runtime/Tests/display/test-fullpanel.c.
@@ -27,7 +42,7 @@ diff --git a/ui/omacvm-fullpanel.h b/ui/omacvm-fullpanel.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-fullpanel.h
-@@ -0,0 +1,249 @@
+@@ -0,0 +1,468 @@
 +/*
 + * OmacVM: FullPanel, the VM's full-screen window over the whole notched
 + * display, the strip beside the camera housing included (experimental,
@@ -38,6 +53,13 @@ new file mode 100644
 + * (omacvm-cocoa-fullpanel.patch).
 + *
 + * Rects are in points, AppKit's bottom-left origin, as NSRect.
++ *
++ * omacvm_fp_fallback, _hook, _verdict, _screen_releases/_resumes, _zone,
++ * _asked_after_move, _own_options, _intent, _restore, _compositor_matches
++ * and the _return_ rules are new in this version; the requested, menu
++ * bar, cut-rows, reveal-shown and relaxed rules are kept from the earlier
++ * one. Where each part comes from:
++ * docs/adr/0044-fullpanel.md.
 + */
 +#ifndef OMACVM_FULLPANEL_H
 +#define OMACVM_FULLPANEL_H
@@ -64,18 +86,6 @@ new file mode 100644
 +}
 +
 +/*
-+ * A window may use the strip on this display: asked, the display has a
-+ * camera housing (a top safe-area inset; external displays have none), and
-+ * macOS's "Always show the menu bar in full screen" is off (the menu bar
-+ * would sit on the VM's top rows).
-+ */
-+static inline bool omacvm_fp_display_ok(bool requested, double notch_inset,
-+                                        bool menu_bar_always_shown)
-+{
-+    return requested && notch_inset > 0 && !menu_bar_always_shown;
-+}
-+
-+/*
 + * "Always show the menu bar in full screen" (AppleMenuBarVisibleInFullscreen)
 + * is in the way only without "Keep the Dock away" (QEMU's immersive=on): its
 + * presentation options hide the menu bar in full screen whatever that
@@ -88,70 +98,165 @@ new file mode 100644
 +    return always_shown && !immersive;
 +}
 +
-+/* What AppKit's full-screen frame for the window becomes. */
-+typedef enum {
-+    OMACVM_FP_APPKIT,        /* AppKit's own frame (below the notch, Split View, ...) */
-+    OMACVM_FP_DISPLAY,       /* the whole display: AppKit's tile is the whole display */
-+    OMACVM_FP_DISPLAY_KEPT,  /* the whole display kept over AppKit's camera-safe re-ask */
-+} OmacVMFPFrame;
-+
-+typedef struct {
-+    bool usable;            /* omacvm_fp_display_ok and the private parts are there */
-+    bool area_lost;         /* this full screen lost the strip once: no second try */
-+    bool accepted;          /* the whole display was given out in this full screen */
-+    bool kept;              /* entering or in full screen (not leaving) */
-+    bool full_screen_style; /* NSWindowStyleMaskFullScreen */
-+    double notch;           /* the display's top safe-area inset */
-+    OmacVMFPRect tile;      /* AppKit's tile for this window in full screen */
-+    OmacVMFPRect display;   /* the display's frame */
-+} OmacVMFPFrameIn;
-+
 +/*
-+ * The whole display only for a window that has the display to itself in
-+ * full screen (AppKit's tile is the whole display). Once given, AppKit may
-+ * ask again while its tile is briefly the camera-safe one (same x, y and
-+ * width, the inset shorter): the whole display stays. Anything else (Split
-+ * View, a smaller tile, no notch) keeps AppKit's frame.
++ * Why an entry into full screen gets normal full screen, first reason
++ * first; OMACVM_FP_OK when it may cover the strip.
 + */
-+static inline OmacVMFPFrame omacvm_fp_frame(const OmacVMFPFrameIn *in)
-+{
-+    OmacVMFPRect d = in->display, t = in->tile;
++typedef enum {
++    OMACVM_FP_OK,
++    OMACVM_FP_NO_NOTCH,          /* the display has no camera housing (external displays) */
++    OMACVM_FP_MENU_BAR_SHOWN,    /* omacvm_fp_menu_bar_in_the_way */
++    OMACVM_FP_NO_RESERVATION,    /* AppKit's menu bar reservation is not there or not ours */
++    OMACVM_FP_NO_SKYLIGHT,       /* SkyLight lacks a function, or gave no transaction */
++} OmacVMFPFallback;
 +
-+    if (!in->usable || in->area_lost) {
-+        return OMACVM_FP_APPKIT;
++static inline OmacVMFPFallback omacvm_fp_fallback(double notch_inset, bool menu_bar_in_the_way,
++                                                  bool reservation, bool skylight)
++{
++    if (notch_inset <= 0) {
++        return OMACVM_FP_NO_NOTCH;
 +    }
-+    if (omacvm_fp_rect_equal(t, d)) {
-+        return OMACVM_FP_DISPLAY;
++    if (menu_bar_in_the_way) {
++        return OMACVM_FP_MENU_BAR_SHOWN;
 +    }
-+    if (in->accepted && in->kept && in->full_screen_style && in->notch > 0 &&
-+        fabs(t.x - d.x) < 0.5 && fabs(t.y - d.y) < 0.5 &&
-+        fabs(t.w - d.w) < 0.5 && fabs(t.h - (d.h - in->notch)) < 0.5) {
-+        return OMACVM_FP_DISPLAY_KEPT;
++    if (!reservation) {
++        return OMACVM_FP_NO_RESERVATION;
 +    }
-+    return OMACVM_FP_APPKIT;
++    return skylight ? OMACVM_FP_OK : OMACVM_FP_NO_SKYLIGHT;
 +}
 +
-+typedef struct {
-+    bool kept, accepted, full_screen_style, usable, area_lost;
-+    OmacVMFPRect frame;     /* the window's frame now */
-+    OmacVMFPRect display;
-+    OmacVMFPRect tile;
-+} OmacVMFPKeepIn;
++static inline const char *omacvm_fp_fallback_text(OmacVMFPFallback f)
++{
++    switch (f) {
++    case OMACVM_FP_OK:
++        return "none";
++    case OMACVM_FP_NO_NOTCH:
++        return "this window's display has no camera housing";
++    case OMACVM_FP_MENU_BAR_SHOWN:
++        return "the menu bar is always shown in full screen and Keep the Dock away is off";
++    case OMACVM_FP_NO_RESERVATION:
++        return "AppKit's full-screen menu bar reservation is not there (or other code replaced it)";
++    case OMACVM_FP_NO_SKYLIGHT:
++        return "SkyLight's menu bar transaction is not there";
++    }
++    return "unknown";
++}
 +
 +/*
-+ * A frame change is refused (the window keeps the whole display) while it
-+ * has the whole display in full screen: AppKit tries the camera-safe frame
-+ * during relayouts. A horizontal change of the tile (Split View) still
-+ * goes through.
++ * Whether a fallback is logged as the line omacvm check reads ("...: normal
++ * full screen"). Not for a window on another display than the Mac's
++ * built-in one while that one is on (a head window with "Use external
++ * displays"): its line came after the built-in display's "strip covered",
++ * was the last one check read, and check warned. Such a window logs a line
++ * of its own.
 + */
-+static inline bool omacvm_fp_keep(const OmacVMFPKeepIn *in)
++static inline bool omacvm_fp_fallback_checked(OmacVMFPFallback f, bool beside_builtin)
 +{
-+    if (!in->kept || !in->accepted || !in->full_screen_style || !in->usable ||
-+        in->area_lost || !omacvm_fp_rect_equal(in->frame, in->display)) {
-+        return false;
++    return f != OMACVM_FP_OK && !(f == OMACVM_FP_NO_NOTCH && beside_builtin);
++}
++
++/*
++ * AppKit's answer to its full-screen content controller's question
++ * "does this window leave the menu bar's band free?"
++ * (-reservesSpaceForMenuBarInFullScreen) is changed only when it is
++ * AppKit's own: the controller class implements the method itself (not
++ * inherited), with the type encodings checked; before it is changed the
++ * implementation lies in AppKit's image (no other code changed it first);
++ * after, it is still ours.
++ */
++typedef enum {
++    OMACVM_FP_HOOK_USABLE,
++    OMACVM_FP_HOOK_MISSING,      /* class, selector or encoding not as on macOS 27 */
++    OMACVM_FP_HOOK_INHERITED,    /* the class does not implement it itself */
++    OMACVM_FP_HOOK_INTERCEPTED,  /* other code replaced it before us: left alone */
++    OMACVM_FP_HOOK_REPLACED,     /* other code replaced ours later */
++} OmacVMFPHook;
++
++static inline OmacVMFPHook omacvm_fp_hook(bool methods_match, bool own_method,
++                                          bool imp_in_appkit, bool installed, bool imp_ours)
++{
++    if (!methods_match) {
++        return OMACVM_FP_HOOK_MISSING;
 +    }
-+    return fabs(in->tile.x - in->display.x) <= 1 &&
-+           fabs(in->tile.w - in->display.w) <= 1;
++    if (!own_method) {
++        return OMACVM_FP_HOOK_INHERITED;
++    }
++    if (installed) {
++        return imp_ours ? OMACVM_FP_HOOK_USABLE : OMACVM_FP_HOOK_REPLACED;
++    }
++    return imp_in_appkit ? OMACVM_FP_HOOK_USABLE : OMACVM_FP_HOOK_INTERCEPTED;
++}
++
++static inline const char *omacvm_fp_hook_text(OmacVMFPHook h)
++{
++    switch (h) {
++    case OMACVM_FP_HOOK_USABLE:
++        return "usable";
++    case OMACVM_FP_HOOK_MISSING:
++        return "AppKit's full-screen menu bar reservation is not there or changed";
++    case OMACVM_FP_HOOK_INHERITED:
++        return "AppKit's full-screen menu bar reservation is inherited, not AppKit's own";
++    case OMACVM_FP_HOOK_INTERCEPTED:
++        return "other code replaced AppKit's full-screen menu bar reservation first";
++    case OMACVM_FP_HOOK_REPLACED:
++        return "other code replaced FullPanel's full-screen menu bar reservation";
++    }
++    return "unknown";
++}
++
++/*
++ * Whether AppKit gave the entry the whole display. There is no frame to
++ * hand out: AppKit lays the window out itself, and the entry counts once
++ * the window, in full screen, covers a display with a camera housing.
++ * At didEnterFullScreen the answer is final (definitive): a window that
++ * does not cover it then (Split View's tile, or AppKit kept it below the
++ * notch) is rejected, the band is left to AppKit for that full screen.
++ */
++typedef enum {
++    OMACVM_FP_PENDING,
++    OMACVM_FP_ACCEPTED,
++    OMACVM_FP_REJECTED,
++} OmacVMFPVerdict;
++
++static inline OmacVMFPVerdict omacvm_fp_verdict(bool claiming, bool full_screen, bool covers,
++                                                bool notch, bool definitive)
++{
++    if (!claiming || !full_screen) {
++        return OMACVM_FP_PENDING;
++    }
++    if (covers && notch) {
++        return OMACVM_FP_ACCEPTED;
++    }
++    return definitive ? OMACVM_FP_REJECTED : OMACVM_FP_PENDING;
++}
++
++/*
++ * The strip is gone for this full screen: the window was accepted, is
++ * still in full screen, no longer covers its display, and the display did
++ * not change (a new resolution moves both; the window follows). AppKit
++ * moved it (Split View joined, ...); it gets AppKit's layout until the
++ * next full screen, nothing forces it back.
++ */
++static inline bool omacvm_fp_lost(bool accepted, bool full_screen, bool covers,
++                                  bool display_unchanged)
++{
++    return accepted && full_screen && !covers && display_unchanged;
++}
++
++/*
++ * A full-screen Space on (or moved to) a display without a camera housing
++ * is normal full screen there; back beside one, the entry covers the strip
++ * again (AppKit's layout under the reservation answer).
++ */
++static inline bool omacvm_fp_screen_releases(bool armed, bool full_screen, bool notch,
++                                             bool released)
++{
++    return armed && full_screen && !notch && !released;
++}
++
++static inline bool omacvm_fp_screen_resumes(bool released, bool full_screen, bool notch)
++{
++    return released && full_screen && notch;
 +}
 +
 +/*
@@ -170,33 +275,40 @@ new file mode 100644
 +}
 +
 +/*
-+ * The strip is gone for this full screen: a window that may have it, in
-+ * full screen, no longer covers the display (AppKit moved it below the
-+ * notch after all). The menu bar comes back and nothing forces the frame
-+ * again. A window on a display without a notch never had it to lose.
++ * Where the pointer is: the display's very top row, the strip below it,
++ * or the VM's picture. y and top in global points (bottom-left origin).
 + */
-+static inline bool omacvm_fp_strip_lost(bool usable, bool in_full_screen,
-+                                        OmacVMFPRect frame, OmacVMFPRect display)
++typedef enum {
++    OMACVM_FP_ZONE_PICTURE,
++    OMACVM_FP_ZONE_STRIP,
++    OMACVM_FP_ZONE_TOP_ROW,
++} OmacVMFPZone;
++
++static inline OmacVMFPZone omacvm_fp_zone(double y, double top, double notch)
 +{
-+    return usable && in_full_screen && !omacvm_fp_rect_equal(frame, display);
++    if (y >= top - 0.5) {
++        return OMACVM_FP_ZONE_TOP_ROW;
++    }
++    return y >= top - notch ? OMACVM_FP_ZONE_STRIP : OMACVM_FP_ZONE_PICTURE;
 +}
 +
 +/*
-+ * macOS's menu bar over the strip: transparent, and allowed to come down
-+ * only after the pointer touched the display's top row; once the pointer is
-+ * below the strip again (and the menu is not open) it is held back again.
-+ * y and top in global points (bottom-left origin).
++ * The menu bar is asked for once the pointer touches the top row. The ask
++ * holds while the pointer stays in the strip, and while the menu bar is on
++ * screen (the pointer in an open menu); back in the picture with the menu
++ * bar gone, it ends.
 + */
-+static inline bool omacvm_fp_reveal_allowed(bool allowed, bool revealed, double y,
-+                                            double top, double notch)
++static inline bool omacvm_fp_asked_after_move(bool asked, OmacVMFPZone zone, bool shown)
 +{
-+    if (!allowed && y >= top - 1) {
++    switch (zone) {
++    case OMACVM_FP_ZONE_TOP_ROW:
 +        return true;
++    case OMACVM_FP_ZONE_PICTURE:
++        return shown ? asked : false;
++    case OMACVM_FP_ZONE_STRIP:
++        return asked;
 +    }
-+    if (allowed && !revealed && y < top - notch) {
-+        return false;
-+    }
-+    return allowed;
++    return asked;
 +}
 +
 +/*
@@ -222,58 +334,180 @@ new file mode 100644
 +#define OMACVM_FP_HIDE_MENU_BAR      (1ull << 3)
 +#define OMACVM_FP_FULL_SCREEN        (1ull << 10)
 +
-+typedef struct {
-+    bool valid;      /* the full screen's own options were read */
-+    bool covered;    /* the window covers the strip (its menu bar is transparent) */
-+    bool allowed;    /* omacvm_fp_reveal_allowed: the pointer touched the top row */
-+    bool key;        /* the window is the key window */
-+    bool changed;    /* options other than the own ones are set */
-+    bool immersive;  /* "Keep the Dock away" (QEMU's immersive=on) */
-+    uint64_t own;    /* the full screen's own options */
-+} OmacVMFPPresentIn;
++/* The menu bar held back over the strip (AppKit wants the Dock hidden with it). */
++#define OMACVM_FP_HELD_BACK (OMACVM_FP_FULL_SCREEN | OMACVM_FP_HIDE_MENU_BAR | OMACVM_FP_HIDE_DOCK)
 +
 +/*
-+ * The app's presentation options while the window covers the strip, or
-+ * false to leave them as they are.
-+ *
-+ * Held back: the menu bar (and the Dock) hidden for good, so the top rows
-+ * are the VM's. With "Keep the Dock away" (QEMU's immersive=on, the app's
-+ * default) it stays held back: the menu bar never comes down, as in normal
-+ * full screen with that setting (the user, 2026-10-12). Without it,
-+ * allowed (the pointer touched the top row): the full screen's own options
-+ * with the menu bar auto-hidden, so macOS brings it down at the top edge as
-+ * in other full-screen apps. The Dock stays as it was (AppKit wants it
-+ * hidden or auto-hidden with an auto-hidden menu bar). Not covered any
-+ * more, or not key: the own options, once, if they were changed.
++ * The options that let macOS bring the menu bar down at the top edge as
++ * in other full-screen apps: the full screen's own, with the menu bar
++ * auto-hidden. The Dock stays as it was (AppKit wants it hidden or
++ * auto-hidden with an auto-hidden menu bar).
 + */
-+static inline bool omacvm_fp_presentation(const OmacVMFPPresentIn *in, uint64_t *out)
++static inline uint64_t omacvm_fp_relaxed(uint64_t own)
 +{
-+    uint64_t o;
++    uint64_t o = (own & ~(OMACVM_FP_HIDE_MENU_BAR | OMACVM_FP_AUTO_HIDE_MENU_BAR)) |
++                 OMACVM_FP_AUTO_HIDE_MENU_BAR | OMACVM_FP_FULL_SCREEN;
 +
-+    if (!in->valid) {
-+        return false;
++    if (!(o & (OMACVM_FP_HIDE_DOCK | OMACVM_FP_AUTO_HIDE_DOCK))) {
++        o |= OMACVM_FP_AUTO_HIDE_DOCK;
 +    }
-+    if (in->covered && in->key && (in->immersive || !in->allowed)) {
-+        *out = OMACVM_FP_FULL_SCREEN | OMACVM_FP_HIDE_MENU_BAR | OMACVM_FP_HIDE_DOCK;
-+        return true;
-+    }
-+    if (in->covered && in->key) {
-+        o = (in->own & ~(OMACVM_FP_HIDE_MENU_BAR | OMACVM_FP_AUTO_HIDE_MENU_BAR)) |
-+            OMACVM_FP_AUTO_HIDE_MENU_BAR;
-+        if (!(o & (OMACVM_FP_HIDE_DOCK | OMACVM_FP_AUTO_HIDE_DOCK))) {
-+            o |= OMACVM_FP_AUTO_HIDE_DOCK;
-+        }
-+        *out = o;
-+        return true;
-+    }
-+    if (in->changed) {
-+        *out = in->own;
-+        return true;
-+    }
-+    return false;
++    return o;
 +}
 +
-+/* SkyLight's Space types: 0 a desktop, 4 an app's full-screen Space. */
++/*
++ * Where relaxing goes: the full screen's own options (AppKit's, with "Keep
++ * the Dock away" QEMU's), else the ones from before the menu bar was held
++ * back; made revealable only when the menu bar may come down at all. With
++ * "Keep the Dock away" they are the held-back ones already.
++ */
++static inline uint64_t omacvm_fp_relax_target(bool own_known, uint64_t own, uint64_t before,
++                                              bool reveal)
++{
++    uint64_t base = own_known ? own : before;
++
++    return reveal ? omacvm_fp_relaxed(base) : base;
++}
++
++/*
++ * AppKit's own full-screen options are what the app has in full screen
++ * before FullPanel held the menu bar back (the windowed ones, read early,
++ * do not count).
++ */
++static inline bool omacvm_fp_own_options(bool full_screen, uint64_t current)
++{
++    return full_screen && (current & OMACVM_FP_FULL_SCREEN) && current != OMACVM_FP_HELD_BACK;
++}
++
++/* The facts the menu bar, the app's options and the titlebar follow. */
++typedef struct {
++    bool covering;     /* the window covers the strip of its own full-screen Space */
++    bool key;          /* the window is the key window */
++    bool on_space;     /* its Space is the active one (not Mission Control, another Space) */
++    bool reveal;       /* the menu bar may come down (not with "Keep the Dock away") */
++    bool asked;        /* omacvm_fp_asked_after_move */
++    bool shown;        /* AppKit shows its menu bar reveal (the titlebar window) */
++    bool releasing;    /* a return's one-turn release of the held-back options */
++    bool holding;      /* the held-back options are set */
++} OmacVMFPFacts;
++
++typedef enum {
++    OMACVM_FP_OPTIONS_LEAVE,
++    OMACVM_FP_OPTIONS_HOLD,    /* OMACVM_FP_HELD_BACK */
++    OMACVM_FP_OPTIONS_RELAX,   /* back to the full screen's own (omacvm_fp_relaxed) */
++} OmacVMFPOptions;
++
++typedef struct {
++    bool menu_bar_opaque;  /* SkyLight's backdrop over the strip as macOS draws it */
++    OmacVMFPOptions options;
++    bool pass_through;     /* clicks in the strip go past the titlebar window to the VM */
++} OmacVMFPIntent;
++
++/*
++ * What FullPanel wants from the facts, applied in one place. Covering: the
++ * menu bar's backdrop is transparent unless a reveal that was asked for is
++ * on screen; the options hold the menu bar back while the window is key
++ * and no reveal is asked for, else they are relaxed once. Away from its
++ * Space (Mission Control, another Space) the options are the system's
++ * transition: neither held nor relaxed until it is back. Not covering:
++ * options left over are relaxed, the rest is the release's.
++ */
++static inline OmacVMFPIntent omacvm_fp_intent(OmacVMFPFacts f)
++{
++    OmacVMFPIntent i = { .menu_bar_opaque = true, .options = OMACVM_FP_OPTIONS_LEAVE,
++                         .pass_through = false };
++    bool wanted = f.reveal && f.asked;
++    bool shown = f.reveal && omacvm_fp_reveal_shown(f.shown, f.asked);
++
++    if (!f.covering) {
++        if (f.holding) {
++            i.options = OMACVM_FP_OPTIONS_RELAX;
++        }
++        return i;
++    }
++    i.menu_bar_opaque = shown;
++    i.pass_through = !shown;
++    if (!f.on_space) {
++        return i;
++    }
++    if (f.key && !wanted && !f.releasing) {
++        i.options = OMACVM_FP_OPTIONS_HOLD;
++    } else if (f.holding) {
++        i.options = OMACVM_FP_OPTIONS_RELAX;
++    }
++    return i;
++}
++
++/*
++ * Where the app's options go when FullPanel lets go: in full screen the
++ * full screen's own (when known; else they stay for AppKit), outside it
++ * the ones from before.
++ */
++static inline bool omacvm_fp_restore(bool full_screen, bool own_known, uint64_t own,
++                                     uint64_t windowed, uint64_t *out)
++{
++    if (full_screen) {
++        if (!own_known) {
++            return false;
++        }
++        *out = own;
++        return true;
++    }
++    *out = windowed;
++    return true;
++}
++
++/*
++ * Back in the Space (Mission Control, another Space, the Dock, Command-Tab):
++ * WindowServer may still be moving the window while AppKit's frame stays.
++ * WindowServer's bounds are top-left based; the primary display's top
++ * turns AppKit's frame into them.
++ */
++static inline bool omacvm_fp_compositor_matches(OmacVMFPRect ws, OmacVMFPRect frame,
++                                                double primary_top)
++{
++    OmacVMFPRect expected = { frame.x, primary_top - (frame.y + frame.h), frame.w, frame.h };
++
++    return omacvm_fp_rect_equal(ws, expected);
++}
++
++/* Checks after a return, at 1/60 s: 2 s, then nothing is forced. */
++#define OMACVM_FP_RETURN_CHECKS 120
++/* WindowServer gives no bounds: a settled key window after 0.3 s will do. */
++#define OMACVM_FP_RETURN_UNKNOWN_AFTER 102
++
++/* compositor: 1 in place, 0 still moving, -1 not known. */
++static inline bool omacvm_fp_return_ready(bool covers, bool on_space, bool key,
++                                          int compositor, unsigned checks_left)
++{
++    bool unknown_long_enough = compositor < 0 && checks_left <= OMACVM_FP_RETURN_UNKNOWN_AFTER;
++
++    return covers && on_space && key && (compositor == 1 || unknown_long_enough);
++}
++
++/*
++ * A check started while Mission Control was still open must not use up its
++ * time before the real return: started again once, when the window is back.
++ */
++static inline bool omacvm_fp_return_again(bool pending, bool was_away, bool key, bool on_space,
++                                          bool visible, bool done_once)
++{
++    return pending && !done_once && was_away && key && on_space && visible;
++}
++
++/*
++ * After a return from away with the menu bar held back: let go of the
++ * options for one turn and hold them again, then the backdrop again, the
++ * order a top-edge reveal ends with (Mission Control's own options were
++ * left on the app otherwise).
++ */
++static inline bool omacvm_fp_return_reassert(bool from_away, bool reveal_tracking, bool holding,
++                                             bool shown, bool scheduled)
++{
++    return from_away && reveal_tracking && holding && !shown && !scheduled;
++}
++
++/* SkyLight's Space types and masks: 4 an app's full-screen Space; 7 any kind. */
 +#define OMACVM_FP_SPACE_FULL_SCREEN 4
++#define OMACVM_FP_SPACES_ANY 7
 +
 +#endif

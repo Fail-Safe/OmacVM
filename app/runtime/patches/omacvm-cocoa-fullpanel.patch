@@ -5,52 +5,75 @@ What: with OMACVM_FULLPANEL=1 (OmacVM.app sets it for one start, for a VM
 whose notch setting is FullPanel), a full-screen window on a display with a
 camera housing covers the whole display, the strip beside the notch
 included, and stays a real macOS full-screen window in a Space of its own.
-AppKit's private full-screen frame (-_frameForFullScreenMode, hooked on
-QemuWindow and OmacVMHeadWindow) becomes the whole display while the
-window has the display to itself, and stays so for that full screen;
-frame changes AppKit tries during relayouts are refused, Split View still
-goes through. The full-screen Space's menu bar is made transparent
-(SkyLight, that Space only). With "Keep the Dock away" (QEMU's
-immersive=on, the app's default) it never comes down, as in normal full
-screen with that setting (3.0.16 brought it down at the top edge; the
-user did not want that). Without it, it comes down from the display's top
-row as usual (auto-hidden while the pointer is at the top row). AppKit's
-full-screen toolbar window is hidden with it. SLSTransactionCommit returns nothing (macOS 27: w0 is
-left over), so it is not read as a status. The guest's
-size, the full-screen area and the display arrangement sent to the guest
-then start at the display's top edge, and the guest is the whole panel:
-no rows cut for Omarchy's scale presets (omacvm-cocoa-clean-size.patch
-does that below a notch; over the strip the cut rows were a black band at
-the bottom, 2940x1900 on a 2940x1912 MacBook Air). Rules in
-ui/omacvm-fullpanel.h (omacvm-cocoa-fullpanel-logic.patch). qemu.log:
-"omacvm: full panel: strip covered: ..." per full screen that has it
-(omacvm check reads it), "strip lost" when AppKit moved the window below
-the notch after all.
+AppKit itself lays the window out over the whole display: its full-screen
+content controller asks whether the window keeps the menu bar's band free
+(-[_NSFullScreenContentController reservesSpaceForMenuBarInFullScreen]),
+and for a VM window (QemuWindow, OmacVMHeadWindow) in such a full screen
+the answer is no. Every other window, and every call off the main thread,
+gets AppKit's own answer. No window class or frame setter is overridden
+and no full-screen size forced; QEMU's own full-screen resize leaves a
+FullPanel window as AppKit laid it out (a guest mode that does not fill
+it, the firmware's 1920x1080, is scaled onto it, not the window fitted to
+it, which moved it off the strip). The full screen counts once the
+window covers the display; a window that does not at didEnterFullScreen
+(Split View) keeps AppKit's layout for that full screen. The full-screen
+Space's menu bar backdrop is made transparent (SkyLight, that Space only).
+With "Keep the Dock away" (QEMU's immersive=on, the app's default) the
+menu bar never comes down, as in normal full screen with that setting.
+Without it, it comes down from the display's top row as usual: the reveal
+is seen through AppKit's full-screen titlebar window (its alpha, observed
+with KVO), and while no reveal is on screen that window lets clicks in the
+strip through to the VM. After Mission Control, a Space switch, the Dock
+or Command-Tab, the backdrop and the options are applied again once
+WindowServer has the window back in place (at most 2 s; never a frame).
+SLSTransactionCommit returns nothing (macOS 27: w0 is left over), so it is
+not read as a status. The guest's size, the full-screen area and the
+display arrangement sent to the guest then start at the display's top
+edge, and the guest is the whole panel: no rows cut for Omarchy's scale
+presets (omacvm-cocoa-clean-size.patch does that below a notch; over the
+strip the cut rows were a black band at the bottom, 2940x1900 on a
+2940x1912 MacBook Air). Rules in ui/omacvm-fullpanel.h
+(omacvm-cocoa-fullpanel-logic.patch). qemu.log: "omacvm: full panel:
+strip covered: ..." per full screen that has it (omacvm check reads it),
+"strip lost" when AppKit moved the window off the whole display after all
+(not for a new display mode: CoreGraphics has it before NSScreen does),
+"... normal full screen" when a full screen falls back.
 
 Why: OmacVM.app's own full screen can draw beside the camera itself, so on
 that route the guest's bar can sit in the strip without Omanotch's stream
 (Omanotch stays the default and the only way on UTM, VMware Fusion and
-Parallels, which keep their windows below the notch). Issue #339.
+Parallels, which keep their windows below the notch). Issue #339. This
+version (#480) replaces the previous FullPanel code (a hook on AppKit's
+private full-screen frame, guards on five frame setters, a forced
+full-screen content size and hooks on AppKit's menu bar companion's reveal
+setters; docs/adr/0044-fullpanel.md, "Replacement").
 
 Fallbacks: without OMACVM_FULLPANEL=1 nothing of it runs. External
 displays (no camera housing), macOS's "Always show the menu bar in full
-screen", and any private class, selector, function or type encoding that
-is missing or changed give normal full screen, logged once ("using normal
-full screen"); so do no menu bar transaction from SkyLight and
-presentation options AppKit refuses (logged once). A full screen that
-loses the strip is not forced back.
+screen" without Keep the Dock away, a reservation method that is missing,
+changed, inherited or replaced by other code, any SkyLight function that is
+missing, no menu bar transaction from SkyLight, and presentation options
+AppKit refuses give normal full screen (logged). A full screen that loses
+the strip is not forced back; a full-screen Space moved to a display
+without a housing is normal full screen there until it is back.
 
-Credit: Brian Merchant's FullPanel branch for OmacVM (#339): the frame
-hook, the reveal handling and the fallbacks follow it. That work follows
-UTM's camera-housing full screen (Turing Software, LLC; UTM PR #7885 and
-#7910, Apache-2.0) as an independent Objective-C implementation; no UTM
-code is copied.
+Credit: @brianmerchant's FullPanel branch (#339) and this rewrite (#480).
+Answering AppKit's full-screen menu bar reservation question to get the
+layout was inspired by Try Omarchy's pull request #361 (themartiano, MIT;
+no code from it). FullPanel in OmacVM 3.0.16-3.1.26 contained code adapted
+from UTM (Apache-2.0; Copyright © 2026 Turing Software, LLC,
+VMDisplayWindow.swift, UTM pull requests #7885 and #7910). Since #480
+FullPanel is rewritten and has no code from UTM. It still follows UTM's
+approach: the menu bar's backdrop made transparent with SkyLight, the menu
+bar held back with the app's presentation options. Written by people who
+had read the earlier code (not a clean-room rewrite).
 
 Upstream: not applicable (private AppKit/SkyLight interfaces, OmacVM's notch).
 Test: app/runtime/Tests/display/test-fullpanel.sh (the rules, every
-notched MacBook's size, external displays, moves between them); the
-runtime build compiles it; the strip itself only on a notched Mac
-(docs/features.md, FullPanel).
+notched MacBook's size, external displays, moves between them; with the
+patched ui/cocoa.m also the wiring, and that none of the earlier version's
+hooks is left); the runtime build compiles it; the strip itself only on a
+notched Mac (docs/features.md, FullPanel).
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
 --- a/ui/cocoa.m
@@ -71,14 +94,13 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  #include <AppKit/NSOpenGL.h>
  #ifdef CONFIG_OPENGL
  #import <IOSurface/IOSurface.h>
-@@ -1577,10 +1579,17 @@
-  * that view shrank it on every reboot.
+@@ -1578,9 +1580,16 @@ - (NSSize)fixAspectRatio:(NSSize)max
   */
  static CGFloat omacvm_main_full_top = -1;
-+
+ 
 +/* OmacVM FullPanel (omacvm-cocoa-fullpanel.patch), defined below. */
 +static bool omacvm_fullpanel_window_usable(NSWindow *window);
- 
++
  - (NSSize) screenSafeAreaSize
  {
      NSSize size = [[[self window] screen] frame].size;
@@ -89,7 +111,28 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      NSEdgeInsets insets = [[[self window] screen] safeAreaInsets];
      size.width -= insets.left + insets.right;
      size.height -= insets.top + insets.bottom;
-@@ -1775,9 +1784,11 @@
+@@ -1712,6 +1721,20 @@ - (void) resizeWindow
+         return;
+     }
+ 
++    /*
++     * OmacVM FullPanel: the window keeps the whole display AppKit laid it
++     * out on, also while the guest's mode does not fill it (the firmware's
++     * 1920x1080); the picture is scaled onto it. Fitted to the guest's
++     * aspect ratio it left the strip (1800x1013 on a 1800x1169 display).
++     * It sizes nothing, so it may come before the check for a display that
++     * does not count (#428), which omacvm-cocoa-display-settle.patch puts
++     * after it.
++     */
++    if (omacvm_fullpanel_window_usable([self window])) {
++        [self omacvmGuestAtTop:false];
++        return;
++    }
++
+     [[self window] setContentAspectRatio:NSMakeSize(screen.width, screen.height)];
+ 
+     /*
+@@ -1775,9 +1798,11 @@ - (void) updateUIInfoLocked
          /*
           * Rows are cut only below a notch, and only where the guest can be
           * drawn at the top of a window that fills the area (Omanotch).
@@ -103,12 +146,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -2967,11 +2978,1006 @@
-  * always macOS's own (doToggleFullScreen:).
-  */
- @interface QemuWindow : NSWindow
-+@end
-+
+@@ -2974,6 +2999,1395 @@ - (BOOL)canBecomeKeyWindow { return YES; }
+ - (BOOL)canBecomeMainWindow { return YES; }
+ @end
+ 
 +/*
 + * ---------------------------------------------------------------------------
 + * OmacVM FullPanel (experimental): the full-screen window over the whole
@@ -117,33 +158,44 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 + *
 + * Only with OMACVM_FULLPANEL=1 (OmacVM.app sets it for one start, for a VM
 + * whose notch setting is FullPanel; Omanotch is off for that start). The
-+ * window stays a real macOS full-screen window in a Space of its own; macOS
-+ * normally keeps such a window below the camera housing in two ways:
++ * window stays a real macOS full-screen window in a Space of its own. What
++ * FullPanel changes, per window and only on a display with a camera housing:
 + *
-+ *   1. AppKit proposes a full-screen frame below the notch;
-+ *   2. the full-screen Space's menu bar covers the strip.
++ *   - AppKit's full-screen content controller asks whether the window keeps
++ *     the menu bar's band free (-reservesSpaceForMenuBarInFullScreen). For
++ *     a VM window in a FullPanel full screen the answer is no, and AppKit
++ *     lays the window out over the whole display itself. Every other window
++ *     gets AppKit's answer. No window class, frame or frame setter of
++ *     QEMU's is changed. The full screen counts once the window covers the
++ *     display; at didEnterFullScreen a window that does not (Split View) is
++ *     left to AppKit for that full screen;
++ *   - the menu bar's backdrop over that one full-screen Space is transparent
++ *     (SkyLight); with "Keep the Dock away" (immersive=on, the app's
++ *     default) the menu bar never comes down, as in normal full screen with
++ *     that setting; without it it comes down as usual from the display's
++ *     top row, seen through AppKit's titlebar window (its alpha, observed);
++ *   - clicks in the strip go past AppKit's titlebar window to the VM.
 + *
-+ * Here, per window and only on a display with a camera housing:
-+ *
-+ *   - AppKit's private full-screen frame (-_frameForFullScreenMode) becomes
-+ *     the whole display, only while the window has the display to itself
-+ *     (ui/omacvm-fullpanel.h, omacvm_fp_frame), and stays so for that full
-+ *     screen when AppKit asks again with its camera-safe tile;
-+ *   - the menu bar layer of that one full-screen Space is transparent
-+ *     (SkyLight); with "Keep the Dock away" (immersive=on, the default)
-+ *     the menu bar never comes down, as in normal full screen; without it
-+ *     it comes down as usual from the display's top row;
-+ *   - AppKit's full-screen toolbar window is hidden while the menu bar is.
++ * One place applies it (-apply:): the facts go through omacvm_fp_intent
++ * (ui/omacvm-fullpanel.h), the backdrop, the app's presentation options and
++ * the titlebar window follow. After Mission Control or a Space switch it is
++ * applied again once WindowServer has the window back (never a new frame).
 + *
 + * Every private class, selector, function and type encoding is looked up at
 + * run time; anything missing or changed, an external display, or macOS's
-+ * "Always show the menu bar in full screen" gives normal full screen (logged
-+ * once). Once a full screen loses the strip it is not forced back.
++ * "Always show the menu bar in full screen" without Keep the Dock away gives
++ * normal full screen (logged). A full screen that loses the strip is not
++ * forced back.
 + *
-+ * Based on Brian Merchant's FullPanel branch for OmacVM (issue #339), which
-+ * follows the camera-housing full screen of UTM (Turing Software, LLC; UTM
-+ * PR #7885 and #7910, Apache-2.0) as an independent Objective-C
-+ * implementation; no UTM code is copied.
++ * Answering AppKit's full-screen menu bar reservation question to get the
++ * layout was inspired by Try Omarchy's pull request #361 (themartiano,
++ * MIT); no code of the pull request is here.
++ *
++ * FullPanel in OmacVM 3.0.16-3.1.26 contained code adapted from UTM
++ * (Apache-2.0). Since #480 FullPanel is rewritten and has no code from UTM;
++ * it still follows UTM's approach (the menu bar's backdrop made transparent
++ * with SkyLight, the menu bar held back with the app's presentation
++ * options). docs/adr/0044-fullpanel.md says where each part comes from.
 + *
 + * Main thread (AppKit), as all of cocoa.m's window code.
 + */
@@ -158,375 +210,493 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    return (OmacVMFPRect){ r.origin.x, r.origin.y, r.size.width, r.size.height };
 +}
 +
-+typedef NSRect (*OmacVMFullPanelFrameFn)(id, SEL);
-+static SEL omacvm_fullpanel_frame_selector;
-+static SEL omacvm_fullpanel_tile_selector;
-+static OmacVMFullPanelFrameFn omacvm_fullpanel_appkit_frame;
-+static OmacVMFullPanelFrameFn omacvm_fullpanel_tile_frame;
-+static const char *omacvm_fullpanel_frame_types;
-+static Class omacvm_fullpanel_hooked_classes[8];
-+static int omacvm_fullpanel_hooked_count;
++static bool omacvm_fullpanel_in_full_screen(NSWindow *w)
++{
++    return w && ([w styleMask] & NSWindowStyleMaskFullScreen);
++}
 +
-+typedef int32_t (*OmacVMSLSMainConnectionIDFn)(void);
-+typedef CFArrayRef (*OmacVMSLSCopySpacesForWindowsFn)(int32_t, int32_t, CFArrayRef);
-+typedef int32_t (*OmacVMSLSSpaceGetTypeFn)(int32_t, uint64_t);
-+typedef CFTypeRef (*OmacVMSLSTransactionCreateFn)(int32_t);
-+typedef void (*OmacVMSLSTransactionSetMenuBarAlphaFn)(CFTypeRef, uint64_t, float);
++static bool omacvm_fullpanel_covers(NSWindow *w)
++{
++    NSScreen *s = [w screen];
++    return s && omacvm_fp_rect_equal(omacvm_fullpanel_rect([w frame]),
++                                     omacvm_fullpanel_rect([s frame]));
++}
++
++/* The window's display has a camera housing; without a display, neither this nor ... */
++static bool omacvm_fullpanel_notch(NSWindow *w)
++{
++    NSScreen *s = [w screen];
++    return s && [s safeAreaInsets].top > 0;
++}
++
++/* ... this: during a display change a window may briefly have none. */
++static bool omacvm_fullpanel_no_notch(NSWindow *w)
++{
++    NSScreen *s = [w screen];
++    return s && [s safeAreaInsets].top <= 0;
++}
++
 +/*
-+ * Private; the second argument means synchronous. It returns nothing: on
-+ * macOS 27 w0 is left over from its last call (yabai's extern.h and UTM
-+ * declare a CGError, and every commit there "failed" with a different
-+ * large number). Nothing to check after it.
++ * The window is on another display than the Mac's built-in one, and the
++ * built-in one is on (a MacBook with its lid open and an external display).
 + */
-+typedef void (*OmacVMSLSTransactionCommitFn)(CFTypeRef, int32_t);
++static bool omacvm_fullpanel_beside_builtin(NSWindow *w)
++{
++    NSNumber *mine = [[[w screen] deviceDescription] objectForKey:@"NSScreenNumber"];
++    bool builtin = false;
 +
-+static void *omacvm_fullpanel_skylight;
-+static int omacvm_fullpanel_skylight_state;
-+static OmacVMSLSMainConnectionIDFn omacvm_fullpanel_sls_main;
-+static OmacVMSLSCopySpacesForWindowsFn omacvm_fullpanel_sls_spaces;
-+static OmacVMSLSSpaceGetTypeFn omacvm_fullpanel_sls_space_type;
-+static OmacVMSLSTransactionCreateFn omacvm_fullpanel_sls_transaction_create;
-+static OmacVMSLSTransactionSetMenuBarAlphaFn omacvm_fullpanel_sls_menu_alpha;
-+static OmacVMSLSTransactionCommitFn omacvm_fullpanel_sls_transaction_commit;
++    for (NSScreen *s in [NSScreen screens]) {
++        NSNumber *n = [[s deviceDescription] objectForKey:@"NSScreenNumber"];
 +
-+@class OmacVMFullPanelState;
++        if (n && CGDisplayIsBuiltin([n unsignedIntValue])) {
++            if (mine && [n isEqual:mine]) {
++                return false;
++            }
++            builtin = true;
++        }
++    }
++    return builtin;
++}
++
++/*
++ * The display is the one the full screen was accepted on: NSScreen says so,
++ * and so does CoreGraphics, which has a new display mode at once (NSScreen
++ * follows later; AppKit lays the window out on the new mode before it).
++ */
++static bool omacvm_fullpanel_same_display(NSScreen *s, NSRect accepted)
++{
++    NSNumber *n = [[s deviceDescription] objectForKey:@"NSScreenNumber"];
++    CGRect now = n ? CGDisplayBounds([n unsignedIntValue]) : NSRectToCGRect([s frame]);
++
++    return omacvm_fp_rect_equal(omacvm_fullpanel_rect([s frame]), omacvm_fullpanel_rect(accepted)) &&
++           fabs(now.size.width - accepted.size.width) < 0.5 &&
++           fabs(now.size.height - accepted.size.height) < 0.5;
++}
++
++/*
++ * What FullPanel asks of SkyLight, WindowServer's private client library:
++ * that one full-screen Space draws no menu bar backdrop (alpha 0, set in a
++ * transaction), and which Space holds the window. Resolved by name on first
++ * use; without any one of these functions FullPanel is normal full screen,
++ * logged with dlopen's or dlsym's reason.
++ */
++#define OMACVM_SKYLIGHT_PATH "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight"
++
++typedef CFTypeRef (*OmacVMSLSNewTransaction)(int32_t cid);
++typedef void (*OmacVMSLSMenuBarAlpha)(CFTypeRef transaction, uint64_t space, float alpha);
++/*
++ * Its second argument means synchronous. It returns nothing: on macOS 27 w0
++ * is left over from its last call (every commit "failed" with a different
++ * large number when it was read as a CGError), so nothing is checked after it.
++ */
++typedef void (*OmacVMSLSCommit)(CFTypeRef transaction, int32_t synchronous);
++typedef int32_t (*OmacVMSLSConnection)(void);
++typedef CFArrayRef (*OmacVMSLSWindowSpaces)(int32_t cid, int32_t mask, CFArrayRef window_ids);
++typedef int32_t (*OmacVMSLSSpaceType)(int32_t cid, uint64_t space);
++
++static OmacVMSLSNewTransaction omacvm_sls_new_transaction;
++static OmacVMSLSMenuBarAlpha omacvm_sls_menu_bar_alpha;
++static OmacVMSLSCommit omacvm_sls_commit;
++static OmacVMSLSConnection omacvm_sls_connection;
++static OmacVMSLSWindowSpaces omacvm_sls_window_spaces;
++static OmacVMSLSSpaceType omacvm_sls_space_type;
++
++/*
++ * Set once SkyLight gave no transaction for the menu bar: from then on the
++ * menu bar is left as macOS has it (normal full screen), logged once.
++ */
++static bool omacvm_fullpanel_menu_failed;
++
++/* One function of SkyLight's; *all turns false (logged) when it is missing. */
++static void *omacvm_fullpanel_sls(void *lib, const char *symbol, bool *all)
++{
++    void *fn = dlsym(lib, symbol);
++
++    if (!fn && *all) {
++        const char *why = dlerror();
++        fprintf(stderr, "omacvm: full panel: dlsym %s: %s: normal full screen\n",
++                symbol, why ? why : "not found");
++    }
++    *all = *all && fn;
++    return fn;
++}
++
++/* Every SkyLight function FullPanel calls is there (looked up once). */
++static bool omacvm_fullpanel_skylight(void)
++{
++    static int found;   /* 0 not yet, 1 all of them, -1 not */
++    bool all = true;
++    void *lib;
++
++    if (found) {
++        return found > 0;
++    }
++    found = -1;
++    lib = dlopen(OMACVM_SKYLIGHT_PATH, RTLD_LAZY | RTLD_LOCAL);
++    if (!lib) {
++        const char *why = dlerror();
++        fprintf(stderr, "omacvm: full panel: dlopen SkyLight: %s: normal full screen\n",
++                why ? why : "failed");
++        return false;
++    }
++    omacvm_sls_new_transaction = (OmacVMSLSNewTransaction)
++        omacvm_fullpanel_sls(lib, "SLSTransactionCreate", &all);
++    omacvm_sls_menu_bar_alpha = (OmacVMSLSMenuBarAlpha)
++        omacvm_fullpanel_sls(lib, "SLSTransactionSetMenuBarSystemOverrideAlpha", &all);
++    omacvm_sls_commit = (OmacVMSLSCommit)
++        omacvm_fullpanel_sls(lib, "SLSTransactionCommit", &all);
++    omacvm_sls_connection = (OmacVMSLSConnection)
++        omacvm_fullpanel_sls(lib, "SLSMainConnectionID", &all);
++    omacvm_sls_window_spaces = (OmacVMSLSWindowSpaces)
++        omacvm_fullpanel_sls(lib, "SLSCopySpacesForWindows", &all);
++    omacvm_sls_space_type = (OmacVMSLSSpaceType)
++        omacvm_fullpanel_sls(lib, "SLSSpaceGetType", &all);
++    if (all) {
++        found = 1;
++    }
++    return all;
++}
++
++/*
++ * The full-screen Space that holds the window, or 0. SkyLight lists every
++ * Space the window is on (OMACVM_FP_SPACES_ANY); only a single one of the
++ * full-screen type counts.
++ */
++static uint64_t omacvm_fullpanel_space(NSWindow *w)
++{
++    int64_t number = w ? (int64_t)[w windowNumber] : 0;
++    uint64_t space = 0;
++    CFNumberRef wid;
++    CFArrayRef ids, spaces;
++    int32_t cid;
++
++    if (number <= 0 || !omacvm_fullpanel_skylight()) {
++        return 0;
++    }
++    cid = omacvm_sls_connection();
++    wid = CFNumberCreate(NULL, kCFNumberSInt64Type, &number);
++    ids = CFArrayCreate(NULL, (const void **)&wid, 1, &kCFTypeArrayCallBacks);
++    CFRelease(wid);
++    spaces = ids ? omacvm_sls_window_spaces(cid, OMACVM_FP_SPACES_ANY, ids) : NULL;
++    if (ids) {
++        CFRelease(ids);
++    }
++    if (!spaces) {
++        return 0;
++    }
++    if (CFArrayGetCount(spaces) == 1) {
++        CFTypeRef only = CFArrayGetValueAtIndex(spaces, 0);
++
++        if (only && CFGetTypeID(only) == CFNumberGetTypeID() &&
++            !CFNumberGetValue((CFNumberRef)only, kCFNumberSInt64Type, &space)) {
++            space = 0;
++        }
++    }
++    CFRelease(spaces);
++    if (space && omacvm_sls_space_type(cid, space) != OMACVM_FP_SPACE_FULL_SCREEN) {
++        space = 0;
++    }
++    return space;
++}
++
++/* The menu bar's backdrop over full-screen Space `space`: macOS's own (opaque) or none. */
++static bool omacvm_fullpanel_backdrop(uint64_t space, bool opaque)
++{
++    CFTypeRef transaction;
++    int32_t cid;
++
++    if (!space || omacvm_fullpanel_menu_failed || !omacvm_fullpanel_skylight()) {
++        return false;
++    }
++    cid = omacvm_sls_connection();
++    transaction = omacvm_sls_new_transaction(cid);
++    if (!transaction) {
++        omacvm_fullpanel_menu_failed = true;
++        fprintf(stderr, "omacvm: full panel: SkyLight gave no menu bar transaction (connection %d); the menu bar stays as macOS has it, normal full screen\n",
++                (int)cid);
++        return false;
++    }
++    omacvm_sls_menu_bar_alpha(transaction, space, opaque ? 1.0f : 0.0f);
++    omacvm_sls_commit(transaction, 1);
++    CFRelease(transaction);
++    return true;
++}
++
++/*
++ * 1: WindowServer has the window at AppKit's frame, 0: still moving
++ * (Mission Control animates the real window while AppKit's frame stays),
++ * -1: not known. Only ever used to wait, never to force a frame.
++ */
++static int omacvm_fullpanel_compositor(NSWindow *w)
++{
++    NSScreen *primary = [[NSScreen screens] firstObject];
++    CFArrayRef info;
++    int state = -1;
++
++    if (!w || !primary || ![w screen] || [w windowNumber] <= 0) {
++        return -1;
++    }
++    info = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,
++                                      (CGWindowID)[w windowNumber]);
++    if (!info) {
++        return -1;
++    }
++    for (NSDictionary *entry in (NSArray *)info) {
++        CFDictionaryRef value;
++        CGRect bounds;
++
++        if ([[entry objectForKey:(id)kCGWindowNumber] integerValue] != [w windowNumber]) {
++            continue;
++        }
++        value = (CFDictionaryRef)[entry objectForKey:(id)kCGWindowBounds];
++        if (value && CGRectMakeWithDictionaryRepresentation(value, &bounds)) {
++            state = omacvm_fp_compositor_matches(omacvm_fullpanel_rect(NSRectFromCGRect(bounds)),
++                                                 omacvm_fullpanel_rect([w frame]),
++                                                 NSMaxY([primary frame])) ? 1 : 0;
++        }
++        break;
++    }
++    CFRelease(info);
++    return state;
++}
++
++@interface OmacVMFullPanelState : NSObject
++{
++    NSWindow *window;          /* not retained: the window holds this state */
++    /* This full screen (willEnterFullScreen to willExitFullScreen). */
++    bool inside;               /* from willEnterFullScreen to willExitFullScreen */
++    bool armed;                /* every part there, a display with a camera housing */
++    bool entered;              /* didEnterFullScreen came */
++    bool accepted;             /* the window covered its display */
++    bool rejected;             /* it did not at didEnterFullScreen: AppKit's layout */
++    bool lost;                 /* it stopped covering later: AppKit's layout */
++    bool released;             /* its Space is on a display without a camera housing */
++    bool reveal;               /* the menu bar may come down (not with Keep the Dock away) */
++    NSRect accepted_display;
++    /* Applied (-apply:, -releaseSystemState). */
++    uint64_t space;            /* the Space whose menu bar backdrop is changed, or 0 */
++    bool opaque;               /* that backdrop as last set */
++    bool tracking;
++    bool asked;                /* omacvm_fp_asked_after_move */
++    bool shown;                /* AppKit's menu bar reveal on screen (titlebar window) */
++    bool releasing;            /* a return's one-turn release */
++    bool holding;              /* OMACVM_FP_HELD_BACK set */
++    uint64_t before;           /* the app's options before they were held back */
++    bool before_known;
++    uint64_t own;              /* the full screen's own options */
++    bool own_known;
++    NSWindow *titlebar;        /* AppKit's titlebar window, retained while observed */
++    bool titlebar_ignored;     /* its ignoresMouseEvents before */
++    bool titlebar_changed;
++    bool pass_through;
++    id child_observer;
++    id pointer_monitor;
++    bool options_observing;
++    /* Returns (Mission Control, Spaces, the Dock, Command-Tab). */
++    bool away;
++    bool return_pending;
++    bool return_from_away;
++    bool return_again_done;
++    bool reassert_scheduled;
++    unsigned return_checks;
++    /* Logged once per full screen. */
++    bool covered_logged;
++    bool reveal_logged;
++    bool fallback_logged;
++    bool options_logged;
++}
++- (id)initWithWindow:(NSWindow *)w;
++- (bool)claimsStrip;
++- (void)willEnterFullScreen;
++- (void)releaseSystemState;
++@end
++
 +static char omacvm_fullpanel_state_key;
-+static int omacvm_fullpanel_reveal_state;
++static char omacvm_fullpanel_titlebar_context;
++static char omacvm_fullpanel_options_context;
 +
 +static OmacVMFullPanelState *omacvm_fullpanel_state(NSWindow *window)
 +{
 +    return window ? objc_getAssociatedObject(window, &omacvm_fullpanel_state_key) : nil;
 +}
 +
-+static bool omacvm_fullpanel_load_skylight(void)
-+{
-+    if (omacvm_fullpanel_skylight_state) {
-+        return omacvm_fullpanel_skylight_state > 0;
-+    }
-+    omacvm_fullpanel_skylight_state = -1;
-+    omacvm_fullpanel_skylight = dlopen(
-+        "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
-+        RTLD_LAZY | RTLD_LOCAL);
-+    if (!omacvm_fullpanel_skylight) {
-+        fprintf(stderr, "omacvm: full panel: SkyLight is not there; using normal full screen\n");
-+        return false;
-+    }
-+
-+#define OMACVM_FULLPANEL_SYM(dst, type, name) \
-+    dst = (type)dlsym(omacvm_fullpanel_skylight, name)
-+    OMACVM_FULLPANEL_SYM(omacvm_fullpanel_sls_main,
-+                         OmacVMSLSMainConnectionIDFn, "SLSMainConnectionID");
-+    OMACVM_FULLPANEL_SYM(omacvm_fullpanel_sls_spaces,
-+                         OmacVMSLSCopySpacesForWindowsFn, "SLSCopySpacesForWindows");
-+    OMACVM_FULLPANEL_SYM(omacvm_fullpanel_sls_space_type,
-+                         OmacVMSLSSpaceGetTypeFn, "SLSSpaceGetType");
-+    OMACVM_FULLPANEL_SYM(omacvm_fullpanel_sls_transaction_create,
-+                         OmacVMSLSTransactionCreateFn, "SLSTransactionCreate");
-+    OMACVM_FULLPANEL_SYM(omacvm_fullpanel_sls_menu_alpha,
-+                         OmacVMSLSTransactionSetMenuBarAlphaFn,
-+                         "SLSTransactionSetMenuBarSystemOverrideAlpha");
-+    OMACVM_FULLPANEL_SYM(omacvm_fullpanel_sls_transaction_commit,
-+                         OmacVMSLSTransactionCommitFn, "SLSTransactionCommit");
-+#undef OMACVM_FULLPANEL_SYM
-+
-+    if (!omacvm_fullpanel_sls_main || !omacvm_fullpanel_sls_spaces ||
-+        !omacvm_fullpanel_sls_space_type || !omacvm_fullpanel_sls_transaction_create ||
-+        !omacvm_fullpanel_sls_menu_alpha || !omacvm_fullpanel_sls_transaction_commit) {
-+        fprintf(stderr, "omacvm: full panel: SkyLight lacks a function it needs; using normal full screen\n");
-+        return false;
-+    }
-+    omacvm_fullpanel_skylight_state = 1;
-+    return true;
-+}
-+
-+static uint64_t omacvm_fullpanel_space_id(NSWindow *window)
-+{
-+    if (!window || !omacvm_fullpanel_load_skylight()) {
-+        return 0;
-+    }
-+    int32_t cid = omacvm_fullpanel_sls_main();
-+    NSNumber *number = [NSNumber numberWithInteger:[window windowNumber]];
-+    CFArrayRef windows = (CFArrayRef)[NSArray arrayWithObject:number];
-+    CFArrayRef spaces = omacvm_fullpanel_sls_spaces(cid, 7, windows);
-+    if (!spaces) {
-+        return 0;
-+    }
-+
-+    uint64_t space = 0;
-+    if (CFArrayGetCount(spaces) == 1) {
-+        CFTypeRef value = CFArrayGetValueAtIndex(spaces, 0);
-+        if (value && CFGetTypeID(value) == CFNumberGetTypeID()) {
-+            CFNumberGetValue((CFNumberRef)value, kCFNumberSInt64Type, &space);
-+        }
-+    }
-+    CFRelease(spaces);
-+    return space;
-+}
-+
-+/* The window's own full-screen Space (never a desktop's). */
-+static uint64_t omacvm_fullpanel_full_screen_space(NSWindow *window)
-+{
-+    uint64_t space = omacvm_fullpanel_space_id(window);
-+    if (!space) {
-+        return 0;
-+    }
-+    return omacvm_fullpanel_sls_space_type(omacvm_fullpanel_sls_main(), space) ==
-+           OMACVM_FP_SPACE_FULL_SCREEN ? space : 0;
-+}
-+
-+/*
-+ * Set once SkyLight gave no transaction for the menu bar: from then on
-+ * the menu bar is left as macOS has it (normal full screen's), logged once.
-+ */
-+static bool omacvm_fullpanel_menu_failed;
-+
-+static bool omacvm_fullpanel_set_menu_alpha(uint64_t space, float alpha, const char *why)
-+{
-+    if (!space || omacvm_fullpanel_menu_failed || !omacvm_fullpanel_load_skylight()) {
-+        return false;
-+    }
-+    int32_t cid = omacvm_fullpanel_sls_main();
-+    CFTypeRef transaction = omacvm_fullpanel_sls_transaction_create(cid);
-+    if (!transaction) {
-+        omacvm_fullpanel_menu_failed = true;
-+        fprintf(stderr, "omacvm: full panel: SkyLight gave no menu bar transaction (%s, connection %d); the menu bar stays as macOS has it\n",
-+                why, (int)cid);
-+        return false;
-+    }
-+    omacvm_fullpanel_sls_menu_alpha(transaction, space, alpha);
-+    omacvm_fullpanel_sls_transaction_commit(transaction, 1);
-+    CFRelease(transaction);
-+    return true;
-+}
-+
-+static Method omacvm_fullpanel_private_method(const char *class_name,
-+                                              const char *selector_name,
-+                                              const char *expected_types)
-+{
-+    Class cls = NSClassFromString([NSString stringWithUTF8String:class_name]);
-+    if (!cls) {
-+        fprintf(stderr, "omacvm: full panel: no %s; using normal full screen\n", class_name);
-+        return NULL;
-+    }
-+    SEL selector = NSSelectorFromString([NSString stringWithUTF8String:selector_name]);
-+    Method method = class_getInstanceMethod(cls, selector);
-+    const char *types = method ? method_getTypeEncoding(method) : NULL;
-+    if (!method || !types || strcmp(types, expected_types)) {
-+        fprintf(stderr, "omacvm: full panel: cannot use -[%s %s]; using normal full screen\n",
-+                class_name, selector_name);
-+        return NULL;
-+    }
-+    return method;
-+}
-+
-+typedef void (*OmacVMFullPanelSetRevealFn)(id, SEL, double);
-+typedef double (*OmacVMFullPanelGetRevealFn)(id, SEL);
-+typedef id (*OmacVMFullPanelGetObjectFn)(id, SEL);
-+
-+@interface OmacVMFullPanelState : NSObject
-+{
-+    NSWindow *window;
-+    bool full_screen_frame_kept;
-+    /* Set once the frame hook gave out the whole display in this full screen. */
-+    bool frame_accepted;
-+    bool safe_tile_logged;
-+    bool reject_logged;
-+    bool display_logged;
-+    bool in_full_screen_space;
-+    bool area_lost;
-+    uint64_t menu_bar_hidden_space;
-+    NSApplicationPresentationOptions revealable_presentation;
-+    bool revealable_presentation_valid;
-+    bool menu_bar_revealed;
-+    bool toolbar_revealed;
-+    bool menu_bar_reveal_allowed;
-+    bool presentation_forced;
-+    bool presentation_observing;
-+    id top_edge_monitor;
-+    bool workspace_observing;
-+    bool refresh_pending;
-+    bool reveal_logged;
-+    bool presentation_logged;
-+}
-+- (id)initWithWindow:(NSWindow *)w;
-+- (bool)usable;
-+- (NSRect)fullScreenFrameForAppKitFrame:(NSRect)frame;
-+- (bool)keepSetFrame:(NSRect)proposed display:(bool)display;
-+- (void)menuRevealChanged:(bool)menu toolbar:(bool)toolbar;
-+- (void)activeSpaceChanged:(NSNotification *)notification;
-+- (void)scheduleRefresh:(NSString *)reason;
-+- (bool)refreshForReason:(NSString *)reason;
-+- (void)finishReturn:(NSString *)reason checksLeft:(unsigned)checks;
-+@end
-+
-+/*
-+ * 1: WindowServer has the window at its frame, 0: still moving (Mission
-+ * Control animates the real window while AppKit's frame stays), -1: not
-+ * known. Only ever used to wait, never to force a frame.
-+ */
-+static int omacvm_fullpanel_compositor_ready(NSWindow *w)
-+{
-+    NSScreen *primary = [[NSScreen screens] firstObject];
-+    if (!w || !primary || [w windowNumber] <= 0) {
-+        return -1;
-+    }
-+    CFArrayRef info = CGWindowListCopyWindowInfo(
-+        kCGWindowListOptionIncludingWindow, (CGWindowID)[w windowNumber]);
-+    if (!info) {
-+        return -1;
-+    }
-+    int ready = -1;
-+    NSRect frame = [w frame];
-+    NSRect expected = NSMakeRect(frame.origin.x,
-+        NSMaxY([primary frame]) - NSMaxY(frame), frame.size.width, frame.size.height);
-+    for (NSDictionary *entry in (NSArray *)info) {
-+        if ([[entry objectForKey:(id)kCGWindowNumber] integerValue] != [w windowNumber]) {
-+            continue;
-+        }
-+        CGRect bounds;
-+        CFDictionaryRef value = (CFDictionaryRef)[entry objectForKey:(id)kCGWindowBounds];
-+        if (value && CGRectMakeWithDictionaryRepresentation(value, &bounds)) {
-+            ready = omacvm_fp_rect_equal(omacvm_fullpanel_rect(NSRectFromCGRect(bounds)),
-+                                         omacvm_fullpanel_rect(expected)) ? 1 : 0;
-+        }
-+        break;
-+    }
-+    CFRelease(info);
-+    return ready;
-+}
-+
++/* The guest's size, the full-screen area and the display box use the whole display. */
 +static bool omacvm_fullpanel_window_usable(NSWindow *window)
 +{
 +    OmacVMFullPanelState *state = omacvm_fullpanel_state(window);
-+    return state && [state usable];
++    return state && [state claimsStrip];
 +}
 +
-+/* AppKit's menu bar companion says when the menu bar or toolbar comes down. */
-+static bool omacvm_fullpanel_install_reveal_observer(void)
++/*
++ * The reservation answer. AppKit's class, so it is the same method for
++ * every full-screen window of the process: AppKit is asked first, and only
++ * its yes for a window whose state claims the strip becomes no; any other
++ * window, and any call off the main thread, gets AppKit's answer. Installed
++ * once, before the first full screen, only when AppKit's method is AppKit's
++ * own; never put back (that could undo another library's later change).
++ * When other code changes it after us, the next full screens are normal.
++ */
++typedef BOOL (*OmacVMFullPanelBoolFn)(id, SEL);
++typedef id (*OmacVMFullPanelObjectFn)(id, SEL);
++
++static IMP omacvm_fullpanel_reservation;        /* ours, once installed */
++static bool omacvm_fullpanel_reservation_refused;
++
++/* What differs from macOS 27's controller, if anything (logged with the fallback). */
++static char omacvm_fullpanel_differs[192];
++
++/*
++ * The instance method `name` of `cls` with the type encoding `want`, else
++ * NULL and what differs in omacvm_fullpanel_differs (other types are
++ * another method).
++ */
++static Method omacvm_fullpanel_method(Class cls, const char *name, const char *want)
 +{
-+    if (omacvm_fullpanel_reveal_state) {
-+        return omacvm_fullpanel_reveal_state > 0;
++    Method m = class_getInstanceMethod(cls, sel_registerName(name));
++    const char *has = m ? method_getTypeEncoding(m) : NULL;
++
++    if (has && !strcmp(has, want)) {
++        return m;
 +    }
-+    omacvm_fullpanel_reveal_state = -1;
-+
-+    Method set_menu = omacvm_fullpanel_private_method(
-+        "_NSFullScreenMenuBarCompanionController", "setMenuBarReveal:", "v24@0:8d16");
-+    Method set_toolbar = omacvm_fullpanel_private_method(
-+        "_NSFullScreenMenuBarCompanionController", "setToolbarWindowReveal:", "v24@0:8d16");
-+    Method get_menu = omacvm_fullpanel_private_method(
-+        "_NSFullScreenMenuBarCompanionController", "menuBarReveal", "d16@0:8");
-+    Method get_toolbar = omacvm_fullpanel_private_method(
-+        "_NSFullScreenMenuBarCompanionController", "toolbarWindowReveal", "d16@0:8");
-+    Method get_content = omacvm_fullpanel_private_method(
-+        "_NSFullScreenMenuBarCompanionController", "contentController", "@16@0:8");
-+    Method get_window = omacvm_fullpanel_private_method(
-+        "_NSFullScreenContentController", "window", "@16@0:8");
-+
-+    if (!set_menu || !set_toolbar || !get_menu || !get_toolbar ||
-+        !get_content || !get_window) {
-+        return false;
++    if (omacvm_fullpanel_differs[0]) {
++        return NULL;
 +    }
-+
-+    SEL menu_get_sel = method_getName(get_menu);
-+    SEL toolbar_get_sel = method_getName(get_toolbar);
-+    SEL content_sel = method_getName(get_content);
-+    SEL window_sel = method_getName(get_window);
-+    OmacVMFullPanelGetRevealFn menu_get =
-+        (OmacVMFullPanelGetRevealFn)method_getImplementation(get_menu);
-+    OmacVMFullPanelGetRevealFn toolbar_get =
-+        (OmacVMFullPanelGetRevealFn)method_getImplementation(get_toolbar);
-+    OmacVMFullPanelGetObjectFn content_get =
-+        (OmacVMFullPanelGetObjectFn)method_getImplementation(get_content);
-+    OmacVMFullPanelGetObjectFn window_get =
-+        (OmacVMFullPanelGetObjectFn)method_getImplementation(get_window);
-+
-+    Method setters[2] = { set_menu, set_toolbar };
-+    for (int i = 0; i < 2; i++) {
-+        Method setter = setters[i];
-+        SEL setter_sel = method_getName(setter);
-+        OmacVMFullPanelSetRevealFn original =
-+            (OmacVMFullPanelSetRevealFn)method_getImplementation(setter);
-+
-+        id block = ^(id companion, double value) {
-+            original(companion, setter_sel, value);
-+
-+            bool menu = menu_get(companion, menu_get_sel) > 0;
-+            bool toolbar = toolbar_get(companion, toolbar_get_sel) > 0;
-+            id content = content_get(companion, content_sel);
-+            NSWindow *w = content ? window_get(content, window_sel) : nil;
-+            OmacVMFullPanelState *state = omacvm_fullpanel_state(w);
-+            if (!state) {
-+                return;
-+            }
-+            void (^update)(void) = ^{
-+                [state menuRevealChanged:menu toolbar:toolbar];
-+            };
-+            if ([NSThread isMainThread]) {
-+                update();
-+            } else {
-+                dispatch_async(dispatch_get_main_queue(), update);
-+            }
-+        };
-+        method_setImplementation(setter, imp_implementationWithBlock(block));
++    if (m) {
++        snprintf(omacvm_fullpanel_differs, sizeof(omacvm_fullpanel_differs),
++                 "%s -%s has the types %s, not %s", class_getName(cls), name,
++                 has ? has : "(none)", want);
++    } else {
++        snprintf(omacvm_fullpanel_differs, sizeof(omacvm_fullpanel_differs),
++                 "%s has no -%s", class_getName(cls), name);
 +    }
-+
-+    omacvm_fullpanel_reveal_state = 1;
-+    return true;
++    return NULL;
 +}
 +
-+static NSRect omacvm_fullpanel_frame_hook(id object, SEL selector)
++/* The controller's class and methods as on macOS 27, looked up once. */
++static bool omacvm_fullpanel_controller(Class *cls, Method *reserves, Method *window_of,
++                                        bool *own)
 +{
-+    NSRect frame = omacvm_fullpanel_appkit_frame ?
-+        omacvm_fullpanel_appkit_frame(object, selector) : [(NSWindow *)object frame];
-+    OmacVMFullPanelState *state = omacvm_fullpanel_state((NSWindow *)object);
-+    return state ? [state fullScreenFrameForAppKitFrame:frame] : frame;
-+}
++    static bool looked, found, implements;
++    static Class c;
++    static Method r, w;
 +
-+static bool omacvm_fullpanel_class_hooked(Class cls)
-+{
-+    for (int i = 0; i < omacvm_fullpanel_hooked_count; i++) {
-+        if (omacvm_fullpanel_hooked_classes[i] == cls) {
-+            return true;
++    if (!looked) {
++        Class parent;
++
++        looked = true;
++        c = objc_getClass("_NSFullScreenContentController");
++        if (!c) {
++            snprintf(omacvm_fullpanel_differs, sizeof(omacvm_fullpanel_differs),
++                     "no class _NSFullScreenContentController");
 +        }
++        r = c ? omacvm_fullpanel_method(c, "reservesSpaceForMenuBarInFullScreen", "B16@0:8") : NULL;
++        w = c ? omacvm_fullpanel_method(c, "window", "@16@0:8") : NULL;
++        found = r && w;
++        parent = c ? class_getSuperclass(c) : Nil;
++        implements = found &&
++            !(parent && class_getInstanceMethod(parent, method_getName(r)) == r);
 +    }
-+    return false;
++    if (cls) {
++        *cls = c;
++    }
++    if (reserves) {
++        *reserves = r;
++    }
++    if (window_of) {
++        *window_of = w;
++    }
++    if (own) {
++        *own = implements;
++    }
++    return found;
 +}
 +
-+/* -_frameForFullScreenMode on the window's own class (QemuWindow, OmacVMHeadWindow). */
-+static bool omacvm_fullpanel_install_frame_hook(Class cls)
++/* The implementation lies in the image that defines the class (AppKit). */
++static bool omacvm_fullpanel_in_image(IMP imp, Class cls)
 +{
-+    if (omacvm_fullpanel_class_hooked(cls)) {
-+        return true;
-+    }
-+    if (!omacvm_fullpanel_appkit_frame) {
-+        const char *expected = "{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8";
-+        omacvm_fullpanel_frame_selector = NSSelectorFromString(@"_frameForFullScreenMode");
-+        omacvm_fullpanel_tile_selector = NSSelectorFromString(@"_tileFrameForFullScreen");
++    const char *image = class_getImageName(cls);
++    Dl_info info;
 +
-+        Method frame = class_getInstanceMethod([NSWindow class], omacvm_fullpanel_frame_selector);
-+        Method tile = class_getInstanceMethod([NSWindow class], omacvm_fullpanel_tile_selector);
-+        const char *frame_types = frame ? method_getTypeEncoding(frame) : NULL;
-+        const char *tile_types = tile ? method_getTypeEncoding(tile) : NULL;
-+        if (!frame || !tile || !frame_types || !tile_types ||
-+            strcmp(frame_types, expected) || strcmp(tile_types, expected)) {
-+            fprintf(stderr, "omacvm: full panel: AppKit's full-screen frame methods changed; using normal full screen\n");
++    return imp && image && dladdr((const void *)imp, &info) && info.dli_fname &&
++           !strcmp(info.dli_fname, image);
++}
++
++static OmacVMFPHook omacvm_fullpanel_hook_state(void)
++{
++    Class cls;
++    Method reserves;
++    bool own;
++    IMP now;
++
++    if (!omacvm_fullpanel_controller(&cls, &reserves, NULL, &own)) {
++        return omacvm_fp_hook(false, false, false, false, false);
++    }
++    if (omacvm_fullpanel_reservation_refused) {
++        return omacvm_fp_hook(true, own, false, false, false);
++    }
++    now = method_getImplementation(reserves);
++    return omacvm_fp_hook(true, own,
++                          !omacvm_fullpanel_reservation && omacvm_fullpanel_in_image(now, cls),
++                          omacvm_fullpanel_reservation != NULL,
++                          omacvm_fullpanel_reservation && now == omacvm_fullpanel_reservation);
++}
++
++/* Why the reservation is not answered, with what differs when it is known. */
++static void omacvm_fullpanel_hook_log(OmacVMFPHook hook)
++{
++    const char *differs = omacvm_fullpanel_differs;
++
++    fprintf(stderr, "omacvm: full panel: %s%s%s%s; using normal full screen\n",
++            omacvm_fp_hook_text(hook), differs[0] ? " (" : "", differs, differs[0] ? ")" : "");
++}
++
++static bool omacvm_fullpanel_install_reservation(void)
++{
++    static bool tried;
++    OmacVMFPHook hook;
++
++    if (!tried) {
++        Method reserves, window_of;
++        SEL reserves_sel, window_sel;
++        OmacVMFullPanelBoolFn appkit;
++        OmacVMFullPanelObjectFn window_get;
++
++        tried = true;
++        hook = omacvm_fullpanel_hook_state();
++        if (hook != OMACVM_FP_HOOK_USABLE) {
++            omacvm_fullpanel_reservation_refused = hook == OMACVM_FP_HOOK_INTERCEPTED;
++            omacvm_fullpanel_hook_log(hook);
 +            return false;
 +        }
-+        omacvm_fullpanel_frame_types = frame_types;
-+        omacvm_fullpanel_appkit_frame = (OmacVMFullPanelFrameFn)method_getImplementation(frame);
-+        omacvm_fullpanel_tile_frame = (OmacVMFullPanelFrameFn)method_getImplementation(tile);
++        omacvm_fullpanel_controller(NULL, &reserves, &window_of, NULL);
++        reserves_sel = method_getName(reserves);
++        window_sel = method_getName(window_of);
++        appkit = (OmacVMFullPanelBoolFn)method_getImplementation(reserves);
++        window_get = (OmacVMFullPanelObjectFn)method_getImplementation(window_of);
++        omacvm_fullpanel_reservation = imp_implementationWithBlock(^BOOL(id controller) {
++            BOOL keeps = appkit(controller, reserves_sel);
++            OmacVMFullPanelState *state;
++            id w;
++
++            if (!keeps || ![NSThread isMainThread]) {
++                return keeps;
++            }
++            w = window_get(controller, window_sel);
++            state = [w isKindOfClass:[NSWindow class]] ? omacvm_fullpanel_state(w) : nil;
++            return state && [state claimsStrip] ? NO : keeps;
++        });
++        method_setImplementation(reserves, omacvm_fullpanel_reservation);
++        return true;
 +    }
-+    if (omacvm_fullpanel_hooked_count >=
-+        (int)(sizeof(omacvm_fullpanel_hooked_classes) / sizeof(omacvm_fullpanel_hooked_classes[0]))) {
++    hook = omacvm_fullpanel_hook_state();
++    if (hook != OMACVM_FP_HOOK_USABLE) {
++        static bool logged;
++        if (!logged) {
++            logged = true;
++            omacvm_fullpanel_hook_log(hook);
++        }
 +        return false;
 +    }
-+    if (!class_addMethod(cls, omacvm_fullpanel_frame_selector,
-+                         (IMP)omacvm_fullpanel_frame_hook, omacvm_fullpanel_frame_types)) {
-+        fprintf(stderr, "omacvm: full panel: cannot hook %s's full-screen frame; using normal full screen\n",
-+                class_getName(cls));
-+        return false;
-+    }
-+    omacvm_fullpanel_hooked_classes[omacvm_fullpanel_hooked_count++] = cls;
 +    return true;
 +}
 +
@@ -541,470 +711,757 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +- (id)initWithWindow:(NSWindow *)w
 +{
++    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
++
 +    self = [super init];
 +    if (!self) {
 +        return nil;
 +    }
 +    window = w;
++    opaque = true;
 +
-+    [[[NSWorkspace sharedWorkspace] notificationCenter]
-+        addObserver:self selector:@selector(activeSpaceChanged:)
-+        name:NSWorkspaceActiveSpaceDidChangeNotification object:nil];
-+    workspace_observing = true;
-+
-+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
-+    [center addObserver:self selector:@selector(willEnterFullScreen:)
-+                   name:NSWindowWillEnterFullScreenNotification object:w];
 +    [center addObserver:self selector:@selector(didEnterFullScreen:)
 +                   name:NSWindowDidEnterFullScreenNotification object:w];
-+    [center addObserver:self selector:@selector(windowDidResize:)
-+                   name:NSWindowDidResizeNotification object:w];
-+    [center addObserver:self selector:@selector(willLeaveFullScreen:)
++    [center addObserver:self selector:@selector(willExitFullScreen:)
 +                   name:NSWindowWillExitFullScreenNotification object:w];
-+    [center addObserver:self selector:@selector(willLeaveFullScreen:)
++    [center addObserver:self selector:@selector(windowWillClose:)
 +                   name:NSWindowWillCloseNotification object:w];
-+    [center addObserver:self selector:@selector(otherWindowDidChangeOcclusionState:)
-+                   name:NSWindowDidChangeOcclusionStateNotification object:nil];
-+    [center addObserver:self selector:@selector(windowDidBecomeKey:)
++    [center addObserver:self selector:@selector(frameChanged:)
++                   name:NSWindowDidResizeNotification object:w];
++    [center addObserver:self selector:@selector(frameChanged:)
++                   name:NSWindowDidMoveNotification object:w];
++    [center addObserver:self selector:@selector(screenChanged:)
++                   name:NSWindowDidChangeScreenNotification object:w];
++    [center addObserver:self selector:@selector(screenChanged:)
++                   name:NSApplicationDidChangeScreenParametersNotification object:nil];
++    [center addObserver:self selector:@selector(cameBack:)
 +                   name:NSWindowDidBecomeKeyNotification object:w];
++    [center addObserver:self selector:@selector(cameBack:)
++                   name:NSApplicationDidBecomeActiveNotification object:nil];
++    [center addObserver:self selector:@selector(wentAway:)
++                   name:NSWindowDidResignKeyNotification object:w];
++    [center addObserver:self selector:@selector(wentAway:)
++                   name:NSApplicationDidResignActiveNotification object:nil];
++    [center addObserver:self selector:@selector(visibilityChanged:)
++                   name:NSWindowDidChangeOcclusionStateNotification object:w];
++    [[[NSWorkspace sharedWorkspace] notificationCenter]
++        addObserver:self selector:@selector(visibilityChanged:)
++        name:NSWorkspaceActiveSpaceDidChangeNotification object:nil];
 +    return self;
 +}
 +
 +- (void)dealloc
 +{
-+    if (workspace_observing) {
-+        [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
-+    }
-+    [self showMenuBar];
++    [self releaseSystemState];
++    [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
 +    [[NSNotificationCenter defaultCenter] removeObserver:self];
 +    [super dealloc];
 +}
 +
-+- (bool)usable
++/* The reservation answer's question: does this window's full screen take the strip? */
++- (bool)claimsStrip
 +{
-+    NSScreen *screen = window ? [window screen] : nil;
++    return window && inside && armed && !rejected && !lost && !released &&
++           !omacvm_fullpanel_menu_failed && omacvm_fullpanel_notch(window);
++}
++
++/*
++ * Before AppKit lays the window out for full screen (every way in posts
++ * it first, before the reservation question): this full screen's parts.
++ */
++- (void)willEnterFullScreen
++{
++    NSScreen *screen = [window screen];
++    double notch = screen ? [screen safeAreaInsets].top : 0;
 +    bool always = [[NSUserDefaults standardUserDefaults] boolForKey:@"AppleMenuBarVisibleInFullscreen"];
-+    if (!screen || !omacvm_fp_display_ok(omacvm_fullpanel_requested(),
-+                                         [screen safeAreaInsets].top,
-+                                         omacvm_fp_menu_bar_in_the_way(always, immersive_mode_enabled))) {
-+        return false;
++    OmacVMFPFallback fallback;
++
++    [self releaseSystemState];
++    [self endFullScreen];
++    inside = true;
++    fallback = omacvm_fp_fallback(notch, omacvm_fp_menu_bar_in_the_way(always, immersive_mode_enabled),
++                                  notch > 0 && omacvm_fullpanel_install_reservation(),
++                                  omacvm_fullpanel_skylight() && !omacvm_fullpanel_menu_failed);
++    if (fallback != OMACVM_FP_OK) {
++        if (!fallback_logged) {
++            fallback_logged = true;
++            if (omacvm_fp_fallback_checked(fallback, omacvm_fullpanel_beside_builtin(window))) {
++                fprintf(stderr, "omacvm: full panel: %s: normal full screen\n",
++                        omacvm_fp_fallback_text(fallback));
++            } else {
++                fprintf(stderr, "omacvm: full panel: a window on another display than the built-in one: macOS's own full screen there\n");
++            }
++        }
++        return;
 +    }
-+    return omacvm_fullpanel_class_hooked([window class]) &&
-+           omacvm_fullpanel_load_skylight() && !omacvm_fullpanel_menu_failed &&
-+           omacvm_fullpanel_install_reveal_observer();
++    armed = true;
++    reveal = !immersive_mode_enabled;
 +}
 +
-+- (NSRect)fullScreenFrameForAppKitFrame:(NSRect)frame
++/* Everything of the last full screen forgotten (the logs may come again). */
++- (void)endFullScreen
 +{
-+    NSScreen *screen = [window screen];
-+    if (!screen) {
-+        return frame;
-+    }
-+    NSRect display = [screen frame];
-+    NSRect tile = omacvm_fullpanel_tile_frame ?
-+        omacvm_fullpanel_tile_frame(window, omacvm_fullpanel_tile_selector) : frame;
-+    OmacVMFPFrameIn in = {
-+        .usable = [self usable],
-+        .area_lost = area_lost,
-+        .accepted = frame_accepted,
-+        .kept = full_screen_frame_kept,
-+        .full_screen_style = ([window styleMask] & NSWindowStyleMaskFullScreen) != 0,
-+        .notch = [screen safeAreaInsets].top,
-+        .tile = omacvm_fullpanel_rect(tile),
-+        .display = omacvm_fullpanel_rect(display),
-+    };
-+
-+    switch (omacvm_fp_frame(&in)) {
-+    case OMACVM_FP_DISPLAY:
-+        break;
-+    case OMACVM_FP_DISPLAY_KEPT:
-+        if (!safe_tile_logged) {
-+            safe_tile_logged = true;
-+            fprintf(stderr, "omacvm: full panel: kept the whole display over AppKit's %.0fx%.0f tile\n",
-+                    tile.size.width, tile.size.height);
-+        }
-+        break;
-+    case OMACVM_FP_APPKIT:
-+    default:
-+        if (in.usable && frame_accepted && !reject_logged) {
-+            reject_logged = true;
-+            fprintf(stderr, "omacvm: full panel: AppKit's frame for tile (%.0f %.0f %.0fx%.0f) on display (%.0f %.0f %.0fx%.0f)\n",
-+                    tile.origin.x, tile.origin.y, tile.size.width, tile.size.height,
-+                    display.origin.x, display.origin.y, display.size.width, display.size.height);
-+        }
-+        return frame;
-+    }
-+    frame_accepted = true;
-+    return display;
++    inside = armed = entered = accepted = rejected = lost = released = reveal = false;
++    own_known = false;
++    covered_logged = reveal_logged = fallback_logged = options_logged = false;
 +}
 +
-+- (bool)keepSetFrame:(NSRect)proposed display:(bool)display
++/* Whether AppKit gave this full screen the whole display (definitive: didEnterFullScreen). */
++- (void)verify:(bool)definitive
++{
++    OmacVMFPVerdict verdict;
++    NSRect frame, display;
++
++    if (!armed || rejected || (accepted && !definitive)) {
++        return;
++    }
++    verdict = omacvm_fp_verdict([self claimsStrip], omacvm_fullpanel_in_full_screen(window),
++                                omacvm_fullpanel_covers(window),
++                                omacvm_fullpanel_notch(window), definitive);
++    if (verdict == OMACVM_FP_PENDING || (verdict == OMACVM_FP_ACCEPTED && accepted)) {
++        return;
++    }
++    if (verdict == OMACVM_FP_ACCEPTED) {
++        accepted = true;
++        accepted_display = [[window screen] frame];
++        return;
++    }
++    accepted = false;
++    rejected = true;
++    [self releaseSystemState];
++    frame = [window frame];
++    display = [[window screen] frame];
++    fprintf(stderr, "omacvm: full panel: AppKit kept its own layout (%.0f %.0f %.0fx%.0f) on display (%.0f %.0f %.0fx%.0f), Split View or below the notch: normal full screen for this one\n",
++            frame.origin.x, frame.origin.y, frame.size.width, frame.size.height,
++            display.origin.x, display.origin.y, display.size.width, display.size.height);
++    [self relayout];
++}
++
++- (void)didEnterFullScreen:(NSNotification *)notification
++{
++    [self verify:true];
++    if (!armed || !accepted) {
++        return;
++    }
++    entered = true;
++    /* The way in is no return from away. */
++    away = false;
++    return_from_away = false;
++    [self engage];
++}
++
++- (void)willExitFullScreen:(NSNotification *)notification
++{
++    [self releaseSystemState];
++    [self endFullScreen];
++}
++
++/* Closed (also in full screen): nothing of FullPanel's stays behind it. */
++- (void)windowWillClose:(NSNotification *)notification
++{
++    [self releaseSystemState];
++    inside = armed = false;
++}
++
++/*
++ * This full screen stopped claiming the strip (rejected, lost, on a display
++ * without a housing) or claims it again. QEMU's own handlers may have sized
++ * the guest and the display arrangement on the same notification, before
++ * the claim changed: they run once more on the next turn (the window's
++ * delegate as after a resize, the arrangement after its settle time).
++ */
++- (void)relayout
++{
++    dispatch_async(dispatch_get_main_queue(), ^{
++        id<NSWindowDelegate> delegate = window ? [window delegate] : nil;
++
++        if ([delegate respondsToSelector:@selector(windowDidResize:)]) {
++            [delegate windowDidResize:[NSNotification
++                notificationWithName:NSWindowDidResizeNotification object:window]];
++        }
++        omacvm_displays_update();
++    });
++}
++
++/* The window covers the strip of its own Space, which is the active one. */
++- (bool)eligible
++{
++    return armed && accepted && inside && !lost && !released && !rejected &&
++           omacvm_fullpanel_in_full_screen(window) && [window isOnActiveSpace] &&
++           omacvm_fullpanel_covers(window) && !omacvm_fullpanel_no_notch(window);
++}
++
++/*
++ * The backdrop for the window's full-screen Space (again after a return:
++ * WindowServer may have put it back), and the reveal followed from then on.
++ * true when it was set; setting it is no proof that it shows.
++ */
++- (bool)engage
 +{
 +    NSScreen *screen = [window screen];
-+    if (!screen || !full_screen_frame_kept || !frame_accepted) {
++    uint64_t s;
++
++    if (![self eligible]) {
 +        return false;
 +    }
-+    NSRect d = [screen frame];
-+    NSRect tile = omacvm_fullpanel_tile_frame ?
-+        omacvm_fullpanel_tile_frame(window, omacvm_fullpanel_tile_selector) : d;
-+    OmacVMFPKeepIn in = {
-+        .kept = full_screen_frame_kept,
-+        .accepted = frame_accepted,
-+        .full_screen_style = ([window styleMask] & NSWindowStyleMaskFullScreen) != 0,
-+        .usable = [self usable],
-+        .area_lost = area_lost,
-+        .frame = omacvm_fullpanel_rect([window frame]),
-+        .display = omacvm_fullpanel_rect(d),
-+        .tile = omacvm_fullpanel_rect(tile),
-+    };
-+    if (!omacvm_fp_keep(&in)) {
++    s = omacvm_fullpanel_space(window);
++    if (!s) {
 +        return false;
 +    }
-+    if (!omacvm_fp_rect_equal(omacvm_fullpanel_rect(proposed), in.display)) {
-+        fprintf(stderr, "omacvm: full panel: kept the whole display %.0fx%.0f over %.0fx%.0f\n",
-+                d.size.width, d.size.height, proposed.size.width, proposed.size.height);
++    if (space && space != s) {
++        omacvm_fullpanel_backdrop(space, true);
 +    }
-+    if (display) {
-+        [window display];
++    space = s;
++    [self startTracking];
++    if (![self apply:true]) {
++        /* No transaction (logged): macOS's menu bar, AppKit's layout. */
++        [self releaseSystemState];
++        return false;
++    }
++    if (!covered_logged) {
++        covered_logged = true;
++        /* omacvm check reads this line: the strip beside the notch shows the VM. */
++        fprintf(stderr, "omacvm: full panel: strip covered: full-screen Space %llu, display %.0fx%.0f, notch %.0f, %s\n",
++                (unsigned long long)s, [screen frame].size.width, [screen frame].size.height,
++                [screen safeAreaInsets].top, immersive_mode_enabled ?
++                "menu bar hidden (Keep the Dock away)" : "menu bar at the top edge");
 +    }
 +    return true;
 +}
 +
-+- (NSWindow *)fullScreenToolbarWindow
++- (OmacVMFPFacts)facts
 +{
-+    if (!menu_bar_hidden_space) {
-+        return nil;
-+    }
-+    for (NSWindow *candidate in [NSApp windows]) {
-+        if (candidate == window) {
-+            continue;
-+        }
-+        if (![NSStringFromClass([candidate class]) isEqualToString:@"NSToolbarFullScreenWindow"]) {
-+            continue;
-+        }
-+        if (omacvm_fullpanel_space_id(candidate) == menu_bar_hidden_space) {
-+            return candidate;
-+        }
-+    }
-+    return nil;
-+}
-+
-+- (void)setToolbarHidden:(bool)hidden
-+{
-+    NSWindow *toolbar = [self fullScreenToolbarWindow];
-+    NSView *content = [toolbar contentView];
-+    if (!content) {
-+        return;
-+    }
-+    NSView *view = [content superview] ?: content;
-+    [view setHidden:hidden];
-+    [toolbar setIgnoresMouseEvents:hidden];
-+}
-+
-+- (void)updatePresentationOptions
-+{
-+    OmacVMFPPresentIn in = {
-+        .valid = revealable_presentation_valid,
-+        .covered = menu_bar_hidden_space != 0,
-+        .allowed = menu_bar_reveal_allowed,
++    return (OmacVMFPFacts){
++        .covering = tracking && space,
 +        .key = [window isKeyWindow],
-+        .changed = presentation_forced,
-+        .immersive = immersive_mode_enabled,
-+        .own = revealable_presentation,
++        .on_space = [window isOnActiveSpace],
++        .reveal = reveal,
++        .asked = asked,
++        .shown = shown,
++        .releasing = releasing,
++        .holding = holding,
 +    };
-+    uint64_t options;
++}
 +
-+    if (!omacvm_fp_presentation(&in, &options)) {
-+        return;
++/*
++ * The one place FullPanel's intent is applied: the backdrop (set when it
++ * changes, or always with `submit`), the app's options, the titlebar.
++ * false only when a backdrop to set could not be.
++ */
++- (bool)apply:(bool)submit
++{
++    OmacVMFPFacts facts = [self facts];
++    OmacVMFPIntent intent = omacvm_fp_intent(facts);
++    bool ok = true;
++
++    if (facts.covering && (submit || intent.menu_bar_opaque != opaque)) {
++        ok = omacvm_fullpanel_backdrop(space, intent.menu_bar_opaque);
++        if (ok) {
++            opaque = intent.menu_bar_opaque;
++        }
 +    }
-+    presentation_forced = options != (uint64_t)revealable_presentation;
++    [self options:intent.options];
++    [self setPassThrough:facts.covering && intent.pass_through];
++    if (facts.covering && intent.menu_bar_opaque && !reveal_logged) {
++        reveal_logged = true;
++        fprintf(stderr, "omacvm: full panel: menu bar came down at the top edge\n");
++    }
++    return ok;
++}
++
++- (void)reconcile
++{
++    (void)[self apply:false];
++}
++
++- (void)setOptions:(uint64_t)options
++{
 +    if ((uint64_t)[NSApp presentationOptions] == options) {
 +        return;
 +    }
 +    @try {
 +        [NSApp setPresentationOptions:(NSApplicationPresentationOptions)options];
 +    } @catch (NSException *exception) {
-+        /* AppKit refuses a combination: leave its own (normal full screen). */
-+        presentation_forced = false;
-+        if (!presentation_logged) {
-+            presentation_logged = true;
++        /* AppKit refuses a combination: its own stay (normal full screen's). */
++        if (options == OMACVM_FP_HELD_BACK) {
++            holding = false;
++        }
++        if (!options_logged) {
++            options_logged = true;
 +            fprintf(stderr, "omacvm: full panel: AppKit refused presentation options 0x%llx: %s; normal full screen menu bar\n",
 +                    (unsigned long long)options, [[exception reason] UTF8String]);
 +        }
 +    }
 +}
 +
-+- (void)applyMenuBarReveal
++- (void)options:(OmacVMFPOptions)options
 +{
-+    if (!menu_bar_hidden_space) {
-+        return;
-+    }
-+    if (!omacvm_fullpanel_set_menu_alpha(menu_bar_hidden_space,
-+                                         menu_bar_revealed ? 1.0f : 0.0f, "reveal")) {
-+        /* No transaction: macOS's own menu bar (logged once). */
-+        [self showMenuBar];
-+        return;
-+    }
-+    [self setToolbarHidden:!toolbar_revealed];
-+}
++    uint64_t current = (uint64_t)[NSApp presentationOptions];
 +
-+- (void)pointerDidMove
-+{
-+    NSScreen *screen = [window screen];
-+    if (![window isKeyWindow] || !menu_bar_hidden_space || !screen) {
-+        return;
-+    }
-+    bool allowed = omacvm_fp_reveal_allowed(menu_bar_reveal_allowed, menu_bar_revealed,
-+                                            [NSEvent mouseLocation].y, NSMaxY([screen frame]),
-+                                            [screen safeAreaInsets].top);
-+    if (allowed != menu_bar_reveal_allowed) {
-+        menu_bar_reveal_allowed = allowed;
-+        [self updatePresentationOptions];
-+    }
-+}
-+
-+- (void)showMenuBar
-+{
-+    uint64_t space = menu_bar_hidden_space;
-+
-+    if (top_edge_monitor) {
-+        [NSEvent removeMonitor:top_edge_monitor];
-+        top_edge_monitor = nil;
-+    }
-+    if (presentation_observing) {
-+        @try {
-+            [NSApp removeObserver:self forKeyPath:@"currentSystemPresentationOptions"];
-+        } @catch (NSException *exception) {
-+            (void)exception;
++    if (options == OMACVM_FP_OPTIONS_HOLD) {
++        if (!holding && !before_known) {
++            before = current;
++            before_known = true;
 +        }
-+        presentation_observing = false;
-+    }
-+    [self setToolbarHidden:false];
-+    /* Not covered any more: the full screen's own options again. */
-+    menu_bar_hidden_space = 0;
-+    menu_bar_reveal_allowed = true;
-+    [self updatePresentationOptions];
-+    revealable_presentation_valid = false;
-+    if (space) {
-+        omacvm_fullpanel_set_menu_alpha(space, 1.0f, "menu bar back");
-+    }
-+}
-+
-+- (void)updateMenuBarHidden
-+{
-+    NSScreen *screen = [window screen];
-+    if (screen && omacvm_fp_strip_lost([self usable], in_full_screen_space,
-+                                       omacvm_fullpanel_rect([window frame]),
-+                                       omacvm_fullpanel_rect([screen frame]))) {
-+        if (!area_lost) {
-+            NSRect actual = [window frame], physical = [screen frame];
-+            fprintf(stderr, "omacvm: full panel: strip lost: frame (%.0f %.0f %.0fx%.0f) on display (%.0f %.0f %.0fx%.0f); normal full screen until the next one\n",
-+                    actual.origin.x, actual.origin.y, actual.size.width, actual.size.height,
-+                    physical.origin.x, physical.origin.y, physical.size.width, physical.size.height);
++        if (omacvm_fp_own_options(omacvm_fullpanel_in_full_screen(window), current)) {
++            own = current;
++            own_known = true;
 +        }
-+        area_lost = true;
-+    }
-+    if (!in_full_screen_space || ![self usable] || area_lost || !screen ||
-+        !omacvm_fp_rect_equal(omacvm_fullpanel_rect([window frame]),
-+                              omacvm_fullpanel_rect([screen frame]))) {
-+        [self showMenuBar];
-+        return;
-+    }
-+    uint64_t space = omacvm_fullpanel_full_screen_space(window);
-+    if (!space) {
-+        [self showMenuBar];
-+        return;
-+    }
-+    if (menu_bar_hidden_space == space) {
-+        return;
-+    }
-+
-+    [self showMenuBar];
-+    menu_bar_hidden_space = space;
-+    revealable_presentation = [NSApp presentationOptions];
-+    revealable_presentation_valid = true;
-+    [NSApp addObserver:self forKeyPath:@"currentSystemPresentationOptions"
-+               options:NSKeyValueObservingOptionNew context:NULL];
-+    presentation_observing = true;
-+
-+    /* Only without "Keep the Dock away": with it the menu bar never comes down. */
-+    if (!immersive_mode_enabled) {
-+        OmacVMFullPanelState *state = self;
-+        top_edge_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:
-+            (NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
-+             NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged)
-+            handler:^NSEvent *(NSEvent *event) {
-+                [state pointerDidMove];
-+                return event;
-+            }];
-+    }
-+
-+    menu_bar_reveal_allowed = false;
-+    menu_bar_revealed = false;
-+    toolbar_revealed = false;
-+    [self updatePresentationOptions];
-+    [self applyMenuBarReveal];
-+    if (!menu_bar_hidden_space) {
-+        return;   /* no menu bar transaction: normal full screen (logged) */
-+    }
-+    /* omacvm check reads this line: the strip beside the notch shows the VM. */
-+    fprintf(stderr, "omacvm: full panel: strip covered: full-screen Space %llu, display %.0fx%.0f, notch %.0f, %s\n",
-+            (unsigned long long)space, [screen frame].size.width, [screen frame].size.height,
-+            [screen safeAreaInsets].top, immersive_mode_enabled ?
-+            "menu bar hidden (Keep the Dock away)" : "menu bar at the top edge");
-+}
-+
-+- (void)menuRevealChanged:(bool)menu toolbar:(bool)toolbar
-+{
-+    /* AppKit's own reveal (the way into full screen) stays hidden unless allowed. */
-+    menu = omacvm_fp_reveal_shown(menu, menu_bar_reveal_allowed);
-+    toolbar = omacvm_fp_reveal_shown(toolbar, menu_bar_reveal_allowed);
-+    if (menu_bar_revealed == menu && toolbar_revealed == toolbar) {
-+        return;
-+    }
-+    menu_bar_revealed = menu;
-+    toolbar_revealed = toolbar;
-+    if (!menu_bar_hidden_space) {
-+        return;
-+    }
-+    if (menu && !reveal_logged) {
-+        reveal_logged = true;
-+        fprintf(stderr, "omacvm: full panel: menu bar came down at the top edge\n");
-+    }
-+    [self applyMenuBarReveal];
-+    if (!menu_bar_revealed) {
-+        menu_bar_reveal_allowed = false;
-+        [self updatePresentationOptions];
++        holding = true;
++        [self setOptions:OMACVM_FP_HELD_BACK];
++    } else if (options == OMACVM_FP_OPTIONS_RELAX && holding) {
++        holding = false;
++        [self setOptions:omacvm_fp_relax_target(own_known, own, before, reveal)];
 +    }
 +}
 +
-+- (void)willEnterFullScreen:(NSNotification *)notification
++/* FullPanel lets go of the app's options: the full screen's own, or the ones from before. */
++- (void)restoreOptions
 +{
-+    full_screen_frame_kept = true;
-+    area_lost = false;
-+    if (![self usable] && !display_logged) {
-+        display_logged = true;
-+        fprintf(stderr, "omacvm: full panel: this window's display has no camera housing (or the menu bar is always shown and Keep the Dock away is off): normal full screen\n");
++    uint64_t target;
++
++    if (holding) {
++        holding = false;
++        if (omacvm_fp_restore(omacvm_fullpanel_in_full_screen(window), own_known, own,
++                              before_known ? before : (uint64_t)[NSApp presentationOptions],
++                              &target)) {
++            [self setOptions:target];
++        }
 +    }
-+}
-+
-+- (void)didEnterFullScreen:(NSNotification *)notification
-+{
-+    in_full_screen_space = true;
-+    [self updateMenuBarHidden];
-+}
-+
-+- (void)windowDidResize:(NSNotification *)notification
-+{
-+    if (in_full_screen_space) {
-+        [self updateMenuBarHidden];
-+    }
-+}
-+
-+- (void)willLeaveFullScreen:(NSNotification *)notification
-+{
-+    full_screen_frame_kept = false;
-+    frame_accepted = false;
-+    safe_tile_logged = false;
-+    reject_logged = false;
-+    display_logged = false;
-+    reveal_logged = false;
-+    in_full_screen_space = false;
-+    area_lost = false;
-+    menu_bar_revealed = false;
-+    toolbar_revealed = false;
-+    [self showMenuBar];
-+}
-+
-+- (void)activeSpaceChanged:(NSNotification *)notification
-+{
-+    [self scheduleRefresh:@"active Space changed"];
++    before_known = false;
 +}
 +
 +/*
-+ * Mission Control may rebuild the menu bar while the window keeps its frame
-+ * and Space: apply the reveal state again at once, then once WindowServer
-+ * has the window back in place (one at a time; never a new frame).
++ * AppKit's titlebar window for the full screen (a child window of it,
++ * NSToolbarFullScreenWindow): AppKit fades it in with the menu bar's reveal
++ * and out again, so its alpha (observed) says when a reveal is on screen;
++ * a reveal starts only while AppKit means to show the menu bar. Without
++ * one, AppKit's intent alone. It lies over the strip: while no reveal is
++ * on screen it lets clicks through to the VM.
 + */
-+- (void)scheduleRefresh:(NSString *)reason
++- (void)followTitlebar
 +{
-+    if (![NSThread isMainThread]) {
-+        dispatch_async(dispatch_get_main_queue(), ^{
-+            [self scheduleRefresh:reason];
-+        });
++    NSWindow *found = nil;
++
++    if (!tracking) {
 +        return;
 +    }
-+    if (refresh_pending) {
-+        return;
++    for (NSWindow *child in [window childWindows]) {
++        if ([NSStringFromClass([child class]) isEqualToString:@"NSToolbarFullScreenWindow"]) {
++            found = child;
++            break;
++        }
 +    }
-+    refresh_pending = true;
-+    [self refreshForReason:reason];
-+    dispatch_async(dispatch_get_main_queue(), ^{
-+        [self finishReturn:reason checksLeft:240];
-+    });
++    if (found != titlebar) {
++        [self letGoOfTitlebar];
++        if (found) {
++            titlebar = [found retain];
++            [titlebar addObserver:self forKeyPath:@"alphaValue" options:0
++                          context:&omacvm_fullpanel_titlebar_context];
++        }
++    }
++    [self applyPassThrough];
++    [self readReveal];
 +}
 +
-+/* At most 2 s (240 x 1/120 s), then it gives up and logs it. */
-+- (void)finishReturn:(NSString *)reason checksLeft:(unsigned)checks
++- (void)letGoOfTitlebar
 +{
-+    if ([self refreshForReason:reason]) {
-+        refresh_pending = false;
++    if (!titlebar) {
 +        return;
 +    }
-+    if (!checks) {
-+        refresh_pending = false;
-+        fprintf(stderr, "omacvm: full panel: return not settled in 2 s (%s); nothing forced\n",
-+                [reason UTF8String]);
-+        return;
++    [titlebar removeObserver:self forKeyPath:@"alphaValue"
++                     context:&omacvm_fullpanel_titlebar_context];
++    if (titlebar_changed) {
++        [titlebar setIgnoresMouseEvents:titlebar_ignored];
 +    }
-+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 120),
-+                   dispatch_get_main_queue(), ^{
-+        [self finishReturn:reason checksLeft:checks - 1];
-+    });
++    [titlebar release];
++    titlebar = nil;
++    titlebar_changed = false;
 +}
 +
-+/* true: done or nothing to do; false: wait for WindowServer. */
-+- (bool)refreshForReason:(NSString *)reason
++- (void)setPassThrough:(bool)on
 +{
-+    (void)reason;
-+    if (!in_full_screen_space || !full_screen_frame_kept || !frame_accepted || area_lost ||
-+        !menu_bar_hidden_space ||
-+        !([window styleMask] & NSWindowStyleMaskFullScreen) ||
-+        ![window isKeyWindow] || ![window isVisible] || ![window isOnActiveSpace] ||
++    pass_through = on;
++    [self applyPassThrough];
++}
++
++- (void)applyPassThrough
++{
++    if (!titlebar) {
++        return;
++    }
++    if (pass_through) {
++        if (!titlebar_changed) {
++            titlebar_ignored = [titlebar ignoresMouseEvents];
++            titlebar_changed = true;
++        }
++        if (![titlebar ignoresMouseEvents]) {
++            [titlebar setIgnoresMouseEvents:YES];
++        }
++    } else if (titlebar_changed) {
++        [titlebar setIgnoresMouseEvents:titlebar_ignored];
++        titlebar_changed = false;
++    }
++}
++
++- (void)readReveal
++{
++    NSScreen *screen = [window screen];
++    bool on;
++
++    if (!tracking) {
++        return;
++    }
++    if (titlebar) {
++        /* It starts with AppKit's intent and ends with the fade-out. */
++        on = [titlebar alphaValue] > 0.01 && (shown || [NSMenu menuBarVisible]);
++    } else {
++        on = [NSMenu menuBarVisible];
++    }
++    if (on == shown) {
++        return;
++    }
++    shown = on;
++    if (!on && screen) {
++        /* The reveal went: still asked only while the pointer is in the strip. */
++        asked = omacvm_fp_asked_after_move(asked,
++                    omacvm_fp_zone([NSEvent mouseLocation].y, NSMaxY([screen frame]),
++                                   [screen safeAreaInsets].top), false);
++    }
++    [self reconcile];
++}
++
++- (void)pointerMoved
++{
++    NSScreen *screen = [window screen];
++    bool now;
++
++    if (!tracking || ![window isKeyWindow] || !screen) {
++        return;
++    }
++    now = omacvm_fp_asked_after_move(asked,
++              omacvm_fp_zone([NSEvent mouseLocation].y, NSMaxY([screen frame]),
++                             [screen safeAreaInsets].top), shown);
++    if (now != asked) {
++        asked = now;
++        [self reconcile];
++    }
++}
++
++- (void)startTracking
++{
++    __block OmacVMFullPanelState *me = self;   /* not retained: removed before it goes */
++
++    if (tracking || !window) {
++        return;
++    }
++    tracking = true;
++    asked = false;
++    shown = false;
++    /* AppKit may order in a new titlebar window (around Mission Control). */
++    child_observer = [[[NSNotificationCenter defaultCenter]
++        addObserverForName:NSWindowDidChangeOcclusionStateNotification object:nil queue:nil
++                usingBlock:^(NSNotification *note) {
++        NSWindow *other = [note object];
++        if ([other isKindOfClass:[NSWindow class]] && me->window &&
++            [other parentWindow] == me->window && other != me->titlebar) {
++            [me followTitlebar];
++        }
++    }] retain];
++    [self followTitlebar];
++    /* Only without "Keep the Dock away": with it the menu bar never comes down. */
++    if (reveal) {
++        pointer_monitor = [[NSEvent addLocalMonitorForEventsMatchingMask:
++            (NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
++             NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged)
++            handler:^NSEvent *(NSEvent *event) {
++                [me pointerMoved];
++                return event;
++            }] retain];
++    }
++    [NSApp addObserver:self forKeyPath:@"currentSystemPresentationOptions" options:0
++               context:&omacvm_fullpanel_options_context];
++    options_observing = true;
++}
++
++- (void)stopTracking
++{
++    if (pointer_monitor) {
++        [NSEvent removeMonitor:pointer_monitor];
++        [pointer_monitor release];
++        pointer_monitor = nil;
++    }
++    if (options_observing) {
++        @try {
++            [NSApp removeObserver:self forKeyPath:@"currentSystemPresentationOptions"
++                          context:&omacvm_fullpanel_options_context];
++        } @catch (NSException *exception) {
++            (void)exception;
++        }
++        options_observing = false;
++    }
++    if (child_observer) {
++        [[NSNotificationCenter defaultCenter] removeObserver:child_observer];
++        [child_observer release];
++        child_observer = nil;
++    }
++    pass_through = false;
++    [self letGoOfTitlebar];
++    tracking = false;
++    asked = false;
++    shown = false;
++}
++
++/*
++ * Everything FullPanel changed outside the window back as it was: the
++ * backdrop, the app's options, the titlebar, the monitor, the observers,
++ * pending returns. The full screen itself stays as it is.
++ */
++- (void)releaseSystemState
++{
++    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(checkReturn)
++                                               object:nil];
++    return_pending = false;
++    return_from_away = false;
++    reassert_scheduled = false;
++    releasing = false;
++    away = false;
++    [self stopTracking];
++    if (space) {
++        omacvm_fullpanel_backdrop(space, true);
++        space = 0;
++    }
++    opaque = true;
++    [self restoreOptions];
++}
++
++/* AppKit moved or resized the window: its full screen counts, or was lost. */
++- (void)frameChanged:(NSNotification *)notification
++{
++    NSScreen *screen = [window screen];
++    bool covers;
++
++    if (!armed || !inside || !omacvm_fullpanel_in_full_screen(window)) {
++        return;
++    }
++    if (!accepted) {
++        [self verify:false];
++    } else if (entered && !lost && !released && screen) {
++        covers = omacvm_fullpanel_covers(window);
++        if (covers) {
++            accepted_display = [screen frame];
++        } else if (omacvm_fp_lost(accepted, true, covers,
++                                  omacvm_fullpanel_same_display(screen, accepted_display))) {
++            NSRect actual = [window frame], physical = [screen frame];
++
++            lost = true;
++            [self releaseSystemState];
++            fprintf(stderr, "omacvm: full panel: strip lost: frame (%.0f %.0f %.0fx%.0f) on display (%.0f %.0f %.0fx%.0f); normal full screen until the next one\n",
++                    actual.origin.x, actual.origin.y, actual.size.width, actual.size.height,
++                    physical.origin.x, physical.origin.y, physical.size.width, physical.size.height);
++            [self relayout];
++            return;
++        }
++    }
++    [self comeBack];
++}
++
++/*
++ * A full-screen Space on (or moved to) a display without a camera housing
++ * is normal full screen there; back beside one, the strip again.
++ */
++- (void)screenChanged:(NSNotification *)notification
++{
++    bool full = omacvm_fullpanel_in_full_screen(window);
++
++    if (omacvm_fp_screen_releases(armed && inside, full, !omacvm_fullpanel_no_notch(window),
++                                  released)) {
++        released = true;
++        [self releaseSystemState];
++        fprintf(stderr, "omacvm: full panel: the full screen is on a display without a camera housing: normal full screen there\n");
++        [self relayout];
++    } else if (omacvm_fp_screen_resumes(released, full, omacvm_fullpanel_notch(window))) {
++        released = false;
++        covered_logged = false;
++        [self relayout];
++        [self comeBack];
++    } else if (full) {
++        [self comeBack];
++    }
++}
++
++/*
++ * A sign of coming and going (keyness, activation, visibility, the active
++ * Space): while followed, the titlebar is looked for again (AppKit may
++ * have made a new one) and the intent applied; the backdrop is set again
++ * when the window's visibility or Space changed, also while the Space is
++ * shown in Mission Control (set only after the return, the strip stayed
++ * black for longer). Never a frame or a Space.
++ */
++- (void)noteEvent:(bool)resubmit
++{
++    bool key = [window isKeyWindow];
++    bool on_space = [window isOnActiveSpace];
++    bool visible = ([window occlusionState] & NSWindowOcclusionStateVisible) != 0;
++
++    if (tracking) {
++        [self followTitlebar];
++        (void)[self apply:resubmit];
++    }
++    if (!armed || !accepted || !inside || lost || !space ||
++        !omacvm_fullpanel_in_full_screen(window)) {
++        return;
++    }
++    if (!away && (!key || ![NSApp isActive] || !on_space || !visible)) {
++        away = true;
++    }
++}
++
++- (void)cameBack:(NSNotification *)notification
++{
++    [self noteEvent:false];
++    [self comeBack];
++}
++
++- (void)wentAway:(NSNotification *)notification
++{
++    [self noteEvent:false];
++}
++
++- (void)visibilityChanged:(NSNotification *)notification
++{
++    [self noteEvent:true];
++    if ([[notification name] isEqualToString:NSWorkspaceActiveSpaceDidChangeNotification] ||
++        ([window occlusionState] & NSWindowOcclusionStateVisible)) {
++        [self comeBack];
++    }
++}
++
++/*
++ * The backdrop once per return, before WindowServer has the window in
++ * place; the compositor-checked engage after it still decides.
++ */
++- (void)earlyApply
++{
++    uint64_t s;
++
++    if (!away || !armed || !accepted || !inside || lost || !space || shown ||
++        !omacvm_fullpanel_in_full_screen(window) || !omacvm_fullpanel_covers(window) ||
 +        !([window occlusionState] & NSWindowOcclusionStateVisible) ||
-+        ![self usable] || ![window screen] ||
-+        !omacvm_fp_rect_equal(omacvm_fullpanel_rect([window frame]),
-+                              omacvm_fullpanel_rect([[window screen] frame])) ||
-+        omacvm_fullpanel_full_screen_space(window) != menu_bar_hidden_space) {
-+        return true;
-+    }
-+    int compositor = omacvm_fullpanel_compositor_ready(window);
-+    if (compositor != 1) {
-+        return compositor < 0;   /* not known: stop, force nothing */
-+    }
-+    [self updatePresentationOptions];
-+    [self applyMenuBarReveal];
-+    return true;
-+}
-+
-+- (void)otherWindowDidChangeOcclusionState:(NSNotification *)notification
-+{
-+    if (!menu_bar_hidden_space) {
++        ![window isOnActiveSpace] || ![window isKeyWindow]) {
 +        return;
 +    }
-+    NSWindow *changed = [notification object];
-+    if (changed == window && ([window occlusionState] & NSWindowOcclusionStateVisible)) {
-+        [self scheduleRefresh:@"window became visible"];
++    s = omacvm_fullpanel_space(window);
++    if (s != space) {
++        return;
 +    }
-+    if (changed && changed == [self fullScreenToolbarWindow]) {
-+        [self applyMenuBarReveal];
++    away = false;   /* once per return */
++    if (omacvm_fullpanel_backdrop(s, false)) {
++        opaque = false;
 +    }
 +}
 +
-+- (void)windowDidBecomeKey:(NSNotification *)notification
++/*
++ * Back in the Space (Mission Control, a Space switch, the Dock, Command-Tab)
++ * or the window changed: engage again once WindowServer has the window at
++ * its frame (checked at 1/60 s, at most 2 s). One check at a time; one
++ * started while Mission Control was still open starts again once at the
++ * real return.
++ */
++- (void)comeBack
 +{
-+    [self updatePresentationOptions];
-+    [self scheduleRefresh:@"window became key"];
++    bool was_away = away;
++
++    if (!armed || !inside || rejected || lost || released ||
++        !omacvm_fullpanel_in_full_screen(window)) {
++        return;
++    }
++    if (!accepted) {
++        [self verify:false];
++    }
++    [self earlyApply];
++    if (return_pending) {
++        if (omacvm_fp_return_again(true, was_away, [window isKeyWindow], [window isOnActiveSpace],
++                                   ([window occlusionState] & NSWindowOcclusionStateVisible) != 0,
++                                   return_again_done)) {
++            return_again_done = true;
++            return_from_away = true;
++            return_checks = OMACVM_FP_RETURN_CHECKS;
++        }
++        return;
++    }
++    return_pending = true;
++    return_again_done = false;
++    return_from_away = was_away;
++    return_checks = OMACVM_FP_RETURN_CHECKS;
++    [self performSelector:@selector(checkReturn) withObject:nil afterDelay:0.016
++                  inModes:[NSArray arrayWithObject:NSRunLoopCommonModes]];
++}
++
++- (void)checkReturn
++{
++    int compositor;
++
++    if (!return_pending) {
++        return;
++    }
++    if (!armed || !inside || rejected || lost || released ||
++        !omacvm_fullpanel_in_full_screen(window)) {
++        return_pending = false;
++        return;
++    }
++    compositor = omacvm_fullpanel_compositor(window);
++    if (omacvm_fp_return_ready(omacvm_fullpanel_covers(window), [window isOnActiveSpace],
++                               [window isKeyWindow], compositor, return_checks)) {
++        bool done = [self engage];
++        if (done) {
++            away = false;
++        }
++        if (done && omacvm_fp_return_reassert(return_from_away, tracking && reveal, holding,
++                                              shown, reassert_scheduled)) {
++            [self reassert];
++        }
++        return_from_away = false;
++        return_pending = false;
++        return;
++    }
++    if (return_checks-- == 0) {
++        return_pending = false;
++        if ([window isOnActiveSpace] && [window isKeyWindow]) {
++            fprintf(stderr, "omacvm: full panel: return not settled in 2 s (WindowServer %d); nothing forced\n",
++                    compositor);
++        }
++        return;
++    }
++    [self performSelector:@selector(checkReturn) withObject:nil afterDelay:1.0 / 60
++                  inModes:[NSArray arrayWithObject:NSRunLoopCommonModes]];
++}
++
++/*
++ * Once per return from away with the menu bar held back: release the
++ * options for one main-queue turn, hold them again on the next, then the
++ * backdrop on the one after, the order a top-edge reveal ends with.
++ */
++- (void)reassert
++{
++    reassert_scheduled = true;
++    releasing = true;
++    [self reconcile];
++    dispatch_async(dispatch_get_main_queue(), ^{
++        releasing = false;
++        if (!reassert_scheduled || !tracking || !space) {
++            reassert_scheduled = false;
++            return;
++        }
++        [self reconcile];
++        dispatch_async(dispatch_get_main_queue(), ^{
++            bool live = reassert_scheduled && tracking && space;
++            reassert_scheduled = false;
++            if (live) {
++                (void)[self apply:true];
++            }
++        });
++    });
 +}
 +
 +- (void)observeValueForKeyPath:(NSString *)keyPath
@@ -1012,117 +1469,80 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                        change:(NSDictionary *)change
 +                       context:(void *)context
 +{
-+    if ([keyPath isEqualToString:@"currentSystemPresentationOptions"]) {
++    if (context == &omacvm_fullpanel_titlebar_context) {
++        if (object != titlebar) {
++            return;
++        }
++        if ([NSThread isMainThread]) {
++            [self readReveal];
++        } else {
++            dispatch_async(dispatch_get_main_queue(), ^{
++                [self readReveal];
++            });
++        }
++        return;
++    }
++    if (context == &omacvm_fullpanel_options_context) {
++        /* Once the change has reached everyone. */
 +        dispatch_async(dispatch_get_main_queue(), ^{
-+            [self updatePresentationOptions];
++            [self reconcile];
 +        });
 +        return;
 +    }
 +    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
 +}
 +
- @end
- 
-+/* Before a window enters full screen: its state, the hooks (once per class). */
++@end
++
++/* A VM window's FullPanel state, made before its first full screen. */
 +static void omacvm_fullpanel_prepare_window(NSWindow *window)
 +{
-+    static bool logged;
++    OmacVMFullPanelState *state;
 +
-+    if (!omacvm_fullpanel_requested() || !window || omacvm_fullpanel_state(window)) {
++    if (!window || omacvm_fullpanel_state(window)) {
 +        return;
 +    }
-+    if (!logged) {
-+        logged = true;
-+        fprintf(stderr, "omacvm: full panel: asked for (OMACVM_FULLPANEL=1)\n");
-+    }
-+    bool frame = omacvm_fullpanel_install_frame_hook([window class]);
-+    bool sky = omacvm_fullpanel_load_skylight();
-+    bool reveal = omacvm_fullpanel_install_reveal_observer();
-+
-+    OmacVMFullPanelState *state = [[OmacVMFullPanelState alloc] initWithWindow:window];
++    state = [[OmacVMFullPanelState alloc] initWithWindow:window];
 +    objc_setAssociatedObject(window, &omacvm_fullpanel_state_key, state,
 +                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 +    [state release];
-+
-+    if (!frame || !sky || !reveal) {
-+        fprintf(stderr, "omacvm: full panel: a private part is missing; using normal full screen\n");
-+    }
 +}
 +
-+static bool omacvm_fullpanel_keep_frame(NSWindow *window, NSRect proposed, bool display)
++/* The VM's windows: the main one and the other displays' (external displays on). */
++static bool omacvm_fullpanel_vm_window(id w)
 +{
-+    OmacVMFullPanelState *state = omacvm_fullpanel_state(window);
-+    return state && [state keepSetFrame:proposed display:display];
++    return [w isKindOfClass:[QemuWindow class]] ||
++           [w isKindOfClass:objc_getClass("OmacVMHeadWindow")];
 +}
 +
- @implementation QemuWindow
- - (BOOL)canBecomeKeyWindow { return YES; }
- - (BOOL)canBecomeMainWindow { return YES; }
-+/* FullPanel (above): the whole notched display in full screen. */
-+- (void)toggleFullScreen:(id)sender
++/*
++ * At the start, before any window goes full screen: the reservation answer
++ * (AppKit asks during the way in) and, on every way into full screen of a
++ * VM window, its state and that full screen's parts.
++ */
++static void omacvm_fullpanel_init(void)
 +{
-+    if (!([self styleMask] & NSWindowStyleMaskFullScreen)) {
-+        omacvm_fullpanel_prepare_window(self);
-+    }
-+    [super toggleFullScreen:sender];
-+}
-+- (void)setFrame:(NSRect)frameRect display:(BOOL)flag
-+{
-+    if (omacvm_fullpanel_keep_frame(self, frameRect, flag)) {
++    if (!omacvm_fullpanel_requested()) {
 +        return;
 +    }
-+    [super setFrame:frameRect display:flag];
++    fprintf(stderr, "omacvm: full panel: asked for (OMACVM_FULLPANEL=1)\n");
++    (void)omacvm_fullpanel_install_reservation();
++    (void)omacvm_fullpanel_skylight();
++    [[NSNotificationCenter defaultCenter]
++        addObserverForName:NSWindowWillEnterFullScreenNotification object:nil queue:nil
++                usingBlock:^(NSNotification *note) {
++        NSWindow *w = [note object];
++        if (omacvm_fullpanel_vm_window(w)) {
++            omacvm_fullpanel_prepare_window(w);
++            [omacvm_fullpanel_state(w) willEnterFullScreen];
++        }
++    }];
 +}
-+- (void)setFrame:(NSRect)frameRect display:(BOOL)flag animate:(BOOL)animate
-+{
-+    if (omacvm_fullpanel_keep_frame(self, frameRect, flag)) {
-+        return;
-+    }
-+    [super setFrame:frameRect display:flag animate:animate];
-+}
-+- (void)setFrameOrigin:(NSPoint)point
-+{
-+    NSRect proposed = [self frame];
-+    proposed.origin = point;
-+    if (omacvm_fullpanel_keep_frame(self, proposed, false)) {
-+        return;
-+    }
-+    [super setFrameOrigin:point];
-+}
-+- (void)setFrameTopLeftPoint:(NSPoint)point
-+{
-+    NSRect proposed = [self frame];
-+    proposed.origin = NSMakePoint(point.x, point.y - proposed.size.height);
-+    if (omacvm_fullpanel_keep_frame(self, proposed, false)) {
-+        return;
-+    }
-+    [super setFrameTopLeftPoint:point];
-+}
-+- (void)setContentSize:(NSSize)size
-+{
-+    NSRect proposed = [self frame];
-+    proposed.size = size;
-+    if (omacvm_fullpanel_keep_frame(self, proposed, false)) {
-+        return;
-+    }
-+    [super setContentSize:size];
-+}
- @end
- 
++
  static BOOL notchFull;
-@@ -3290,6 +4296,11 @@
- /* OmacVM: macOS says how big the full-screen area is: remember where it starts. */
- - (NSSize)window:(NSWindow *)window willUseFullScreenContentSize:(NSSize)proposedSize
- {
-+    /* FullPanel: the area starts at the display's top edge. */
-+    if (omacvm_fullpanel_window_usable(window)) {
-+        proposedSize = [[window screen] frame].size;
-+    }
-+
-     NSSize display = [[window screen] frame].size;
-     CGFloat top = display.height - proposedSize.height;
+ static NSRect notchSavedFrame;
  
-@@ -7445,7 +8456,7 @@
+@@ -7450,7 +8864,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
      CGRect r = CGDisplayBounds(omacvm_screen_id(s));
      OmacVMBox b = { r.origin.x, r.origin.y, r.size.width, r.size.height };
  
@@ -1131,59 +1551,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          NSEdgeInsets in = [s safeAreaInsets];
          b.x += in.left;
          b.y += in.top;
-@@ -7853,6 +8864,55 @@
- @implementation OmacVMHeadWindow
- - (BOOL)canBecomeKeyWindow { return YES; }
- - (BOOL)canBecomeMainWindow { return NO; }
-+/* FullPanel: the MacBook's display may be another output's (external displays on). */
-+- (void)toggleFullScreen:(id)sender
-+{
-+    if (!([self styleMask] & NSWindowStyleMaskFullScreen)) {
-+        omacvm_fullpanel_prepare_window(self);
-+    }
-+    [super toggleFullScreen:sender];
-+}
-+- (void)setFrame:(NSRect)frameRect display:(BOOL)flag
-+{
-+    if (omacvm_fullpanel_keep_frame(self, frameRect, flag)) {
-+        return;
-+    }
-+    [super setFrame:frameRect display:flag];
-+}
-+- (void)setFrame:(NSRect)frameRect display:(BOOL)flag animate:(BOOL)animate
-+{
-+    if (omacvm_fullpanel_keep_frame(self, frameRect, flag)) {
-+        return;
-+    }
-+    [super setFrame:frameRect display:flag animate:animate];
-+}
-+- (void)setFrameOrigin:(NSPoint)point
-+{
-+    NSRect proposed = [self frame];
-+    proposed.origin = point;
-+    if (omacvm_fullpanel_keep_frame(self, proposed, false)) {
-+        return;
-+    }
-+    [super setFrameOrigin:point];
-+}
-+- (void)setFrameTopLeftPoint:(NSPoint)point
-+{
-+    NSRect proposed = [self frame];
-+    proposed.origin = NSMakePoint(point.x, point.y - proposed.size.height);
-+    if (omacvm_fullpanel_keep_frame(self, proposed, false)) {
-+        return;
-+    }
-+    [super setFrameTopLeftPoint:point];
-+}
-+- (void)setContentSize:(NSSize)size
-+{
-+    NSRect proposed = [self frame];
-+    proposed.size = size;
-+    if (omacvm_fullpanel_keep_frame(self, proposed, false)) {
-+        return;
-+    }
-+    [super setContentSize:size];
-+}
- @end
+@@ -9683,6 +11097,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+                         opts->u.cocoa.full_grab;
+     immersive_mode_enabled = !opts->u.cocoa.has_immersive ||
+                              opts->u.cocoa.immersive;
++    /* FullPanel (OMACVM_FULLPANEL=1): ready before the window goes full screen. */
++    omacvm_fullpanel_init();
  
- static OmacVMHead *omacvm_head_for_window(NSWindow *w)
+     /* if fullscreen mode is to be used */
+     if (opts->has_full_screen && opts->full_screen) {
