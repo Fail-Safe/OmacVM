@@ -63,11 +63,18 @@ without a serial number has one entry for all of them.
   itself. 3.0.4 keeps that: those devices become **Connect to Omarchy** in
   the list, the switch stays on, and the old `usb` file is renamed
   `usb.before-3.0.4`. Set them to Ask Each Time or forget them in the list.
+- From 3.1.14 to 3.1.26 an experimental **Vendor HID devices** switch under
+  USB devices gave the VM boards that talk in HID reports of their own. It is
+  gone (#476). Its file, `usb-vendor-hid`, is no longer read; you can delete
+  it. Such a board stays with the Mac again, also one remembered as
+  **Connect to Omarchy**: the list shows it as "Plugged in, kept by macOS"
+  and under **Kept by macOS**. Forget it there if you like.
 - `logs/qemu.log` says what happened: `OmacVM: USB devices: on (asks;
   remembered: ...)` at the start, then a line per device (`OmacVM: USB:
   0483:3748 ST-Link V2 connected (asked, this time)`, `... disconnected
-  (unplugged)`, `... not connected: in use on the Mac`). `omacvm check` shows
-  the devices the VM has now.
+  (unplugged)`, `... not connected: in use on the Mac`, `... not connected:
+  macOS uses it as ... (remembered as Connect)`). `omacvm check` shows the
+  devices the VM has now.
 
 In the VM, `lsusb` (`sudo pacman -S usbutils`) lists the device. Linux needs
 its driver as usual (most are in Arch's kernel; some tools want a udev rule
