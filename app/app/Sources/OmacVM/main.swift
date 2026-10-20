@@ -1,5 +1,6 @@
 import AppKit
 import OmacVMUpdate
+import OmacVMFeatures
 import OmacVMWindow
 import SwiftUI
 
@@ -143,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The control centre's Mac jobs run this app's omacvm when there is no checkout.
         ControlCLI.refresh()
         state.startVM = { [weak self] in self?.startVM() }
+        state.checkForUpdates = { [weak self] in self?.checkForUpdates(nil) }
         state.showVM = { Self.qemuApp?.activate() }
         state.vmRunning = { [weak self] in self?.runner?.isRunning == true || Self.qemuApp != nil }
         state.storage.appBusy = { [weak self] in
@@ -418,11 +420,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CGFloat(WindowSize.defaultHeight(visible: Double(NSWindow.appScreen?.frame.height ?? CGFloat(WindowSize.smallScreenVisible))))
     }
 
-    /// How a start takes the network: `.ask` checks the fast network's
-    /// service first (askFastNetwork); `.decided(why)`: checked, and why this
+    /// How far a start got: `.ask` asks about the run marker and this Mac's
+    /// helpers (askMacHelpers); `.helpersChecked`: done, the fast network's
+    /// service next (askFastNetwork); `.decided(why)`: checked, and why this
     /// start goes on QEMU's user network although the fast network is on (nil:
-    /// as FastNetwork.choose says).
-    enum NetworkStart { case ask, decided(String?) }
+    /// as FastNetwork.choose says). Each step that waits (a look off the main
+    /// thread, a question) calls startVM again, so the checks below run again
+    /// after it: meanwhile a build, a move or another start may have begun.
+    enum NetworkStart { case ask, helpersChecked, decided(String?) }
 
     private func startVM(openGLOnce: String? = nil, network: NetworkStart = .ask) {
         // A build or an update runs the VM without a window: a second QEMU on
@@ -431,6 +436,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showWindow()
             return
         }
+        // This app runs the VM already, or a start is on its way: that one goes on.
+        if let r = runner {
+            if r.isRunning { Self.qemuApp?.activate() }
+            return
+        }
+        if case .ask = network, askingHelpers || askingFastNetwork { return }
         // Start in the window while an update with a VM restart waits: it stops.
         Updater.shared.vmStarting()
         reloadConfig()
@@ -460,8 +471,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Not shut down cleanly, or copied while it ran (RunMarker): asked
         // first, once per start (.decided: the same start, continued).
-        if case .ask = network, !RunMarker.confirmStart(state.config) {
-            showWindow()
+        if case .ask = network {
+            guard RunMarker.confirmStart(state.config) else {
+                showWindow()
+                return
+            }
+            // This Mac's helpers for the VM (a VM copied from another Mac):
+            // said once per start, Update VM offered.
+            askMacHelpers { [weak self] go in
+                if go { self?.startVM(openGLOnce: openGLOnce, network: .helpersChecked) }
+            }
             return
         }
         // The fast network on, and its service not for this app (after an app
@@ -485,6 +504,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         r.sizeNote = state.config.startSizeNote
         r.openGLOnce = openGLOnce
         r.userNetwork = userNetwork
+        r.helpersNote = helpersNote
+        helpersNote = nil
         r.onExit = { [weak self, weak r] status in
             guard let self else { return }
             let fellBack = r?.venusFallback, driveGone = r?.driveGone, diskLocked = r?.diskLocked == true
@@ -634,6 +655,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         }
                         finish(FastNetwork.notUpdated(err))
                     }
+                }
+            }
+        }
+    }
+
+    /// Before a start: is this Mac set up for the VM (MacSetup, the same
+    /// answer as omacvm check's "Mac setup")? A VM folder copied from another
+    /// Mac has none of the helpers its features need and the other Mac's
+    /// token, and nothing said so (2026-10-20). Said once per start with what
+    /// fixes it: Update VM (it installs the helpers, which then ask macOS for
+    /// their permissions; the VM starts when it is done), Check for Updates
+    /// (a VM with a newer OmacVM), the System Settings pane; or Later (not
+    /// asked again for this problem and app version). Nothing is installed
+    /// without the person. `done(true)`: the start goes on.
+    private var askingHelpers = false
+    /// For qemu.log ("OmacVM: Mac helpers: ..."): what the look said and what was asked.
+    private var helpersNote: String?
+    private func askMacHelpers(_ done: @escaping (Bool) -> Void) {
+        askingHelpers = true
+        helpersNote = nil
+        let c = state.config
+        let notch = Mac.hasNotch
+        // The start right after Update VM from this question: the helpers it
+        // installed have macOS's own questions open now. Only the log line.
+        let quiet = state.helpersQuietOnce
+        state.helpersQuietOnce = false
+        let hidden = ProcessInfo.processInfo.environment["OMACVM_COCOA_HIDDEN"] != nil
+        // Test builds answer without the question: update (the fix) or later.
+        let hook = TestHooks.value("OMACVM_TEST_HELPERS_ANSWER", bundleID: Bundle.main.bundleIdentifier)
+        DispatchQueue.global(qos: .userInitiated).async {
+            var s = MacSetup.probe(c, notch: notch)
+            // Not set up: looked at once more 2 s later, as omacvm update or a
+            // control centre job may be installing a helper right now.
+            if let first = s, first.verdict == .setup, !quiet, !MacSetupLater.isQuiet(first, folder: c.folder) {
+                Thread.sleep(forTimeInterval: 2)
+                s = MacSetup.probe(c, notch: notch) ?? first
+            }
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.askingHelpers = false
+                    self.state.macSetupFound(s, folder: c.folder)
+                    // The window shows another VM now: no start of that one from here.
+                    guard self.state.config.folder.standardizedFileURL == c.folder.standardizedFileURL else {
+                        done(false)
+                        self.showWindow()
+                        return
+                    }
+                    guard let s else {
+                        self.helpersNote = "not known (src/mac/install.sh --status gave no answer)"
+                        done(true)
+                        return
+                    }
+                    @MainActor func go(_ asked: String?) {
+                        self.helpersNote = s.record + (asked.map { "; asked: \($0)" } ?? "")
+                        done(true)
+                    }
+                    guard s.needsAction else { MacSetupLater.clear(folder: c.folder); go(nil); return }
+                    if quiet { go("no (the start after Update VM)"); return }
+                    if MacSetupLater.isQuiet(s, folder: c.folder) { go("remembered (Later)"); return }
+                    let answer: MacSetup.Answer
+                    if let hook {
+                        answer = hook == "later" ? .later : .fix
+                    } else if hidden {
+                        go("no (no window to ask in)"); return
+                    } else {
+                        answer = s.ask(vm: c.name)
+                    }
+                    if answer == .later {
+                        MacSetupLater.remember(s, folder: c.folder)
+                        go("later")
+                        return
+                    }
+                    FileHandle.standardError.write(Data("OmacVM: Mac helpers: \(s.record); asked: \(hook ?? "fix")\n".utf8))
+                    done(false)
+                    if case .updateVM = s.fix { self.state.startAfterUpdate = true }
+                    // A test build's hook opens no System Settings pane.
+                    if hook == nil || s.fix == .updateVM || s.fix == .updateApp { self.state.fixMacSetup(s, askMarker: false) }
+                    self.showWindow()
                 }
             }
         }
