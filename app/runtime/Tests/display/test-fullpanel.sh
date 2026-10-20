@@ -59,6 +59,14 @@ grep -q 'verdict = omacvm_fp_verdict(\[self claimsStrip\]' "$m" &&
   body '- (void)didEnterFullScreen:(NSNotification *)notification' | grep -q '    \[self verify:true\];' ||
   fail "the full screen is not verified (Split View)"
 grep -q 'omacvm_fp_lost(accepted, true, covers,' "$m" || fail "a lost strip is not seen"
+# A claim that ends (rejected, lost, a display without a housing) or comes back:
+# QEMU's own handlers may have sized the guest before it, so they run again.
+relayout=$(body '- (void)relayout')
+grep -q 'windowDidResize:\[NSNotification' <<<"$relayout" && grep -q 'omacvm_displays_update();' <<<"$relayout" ||
+  fail "the relayout does not run QEMU's resize handler and the arrangement"
+body '- (void)verify:(bool)definitive' | grep -q '    \[self relayout\];' ||
+  fail "a rejected full screen (Split View) keeps the guest's FullPanel size"
+[[ $(grep -c '\[self relayout\];' "$m") == 4 ]] || fail "not every change of the claim lays out again"
 # A new display mode is no lost strip: CoreGraphics has the mode before NSScreen
 # (a 1512x982 mode looked like a lost strip on the old 1800x1169 frame).
 grep -q 'omacvm_fullpanel_same_display(screen, accepted_display)' "$m" &&

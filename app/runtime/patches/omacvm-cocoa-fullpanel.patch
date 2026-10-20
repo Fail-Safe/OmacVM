@@ -146,7 +146,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -2974,6 +2996,1345 @@ - (BOOL)canBecomeKeyWindow { return YES; }
+@@ -2974,6 +2996,1369 @@ - (BOOL)canBecomeKeyWindow { return YES; }
  - (BOOL)canBecomeMainWindow { return YES; }
  @end
  
@@ -808,6 +808,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    fprintf(stderr, "omacvm: full panel: AppKit kept its own layout (%.0f %.0f %.0fx%.0f) on display (%.0f %.0f %.0fx%.0f), Split View or below the notch: normal full screen for this one\n",
 +            frame.origin.x, frame.origin.y, frame.size.width, frame.size.height,
 +            display.origin.x, display.origin.y, display.size.width, display.size.height);
++    [self relayout];
 +}
 +
 +- (void)didEnterFullScreen:(NSNotification *)notification
@@ -834,6 +835,26 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +{
 +    [self releaseSystemState];
 +    inside = armed = false;
++}
++
++/*
++ * This full screen stopped claiming the strip (rejected, lost, on a display
++ * without a housing) or claims it again. QEMU's own handlers may have sized
++ * the guest and the display arrangement on the same notification, before
++ * the claim changed: they run once more on the next turn (the window's
++ * delegate as after a resize, the arrangement after its settle time).
++ */
++- (void)relayout
++{
++    dispatch_async(dispatch_get_main_queue(), ^{
++        id<NSWindowDelegate> delegate = window ? [window delegate] : nil;
++
++        if ([delegate respondsToSelector:@selector(windowDidResize:)]) {
++            [delegate windowDidResize:[NSNotification
++                notificationWithName:NSWindowDidResizeNotification object:window]];
++        }
++        omacvm_displays_update();
++    });
 +}
 +
 +/* The window covers the strip of its own Space, which is the active one. */
@@ -1212,6 +1233,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +            fprintf(stderr, "omacvm: full panel: strip lost: frame (%.0f %.0f %.0fx%.0f) on display (%.0f %.0f %.0fx%.0f); normal full screen until the next one\n",
 +                    actual.origin.x, actual.origin.y, actual.size.width, actual.size.height,
 +                    physical.origin.x, physical.origin.y, physical.size.width, physical.size.height);
++            [self relayout];
 +            return;
 +        }
 +    }
@@ -1231,9 +1253,11 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        released = true;
 +        [self releaseSystemState];
 +        fprintf(stderr, "omacvm: full panel: the full screen is on a display without a camera housing: normal full screen there\n");
++        [self relayout];
 +    } else if (omacvm_fp_screen_resumes(released, full, omacvm_fullpanel_notch(window))) {
 +        released = false;
 +        covered_logged = false;
++        [self relayout];
 +        [self comeBack];
 +    } else if (full) {
 +        [self comeBack];
@@ -1492,7 +1516,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  static BOOL notchFull;
  static NSRect notchSavedFrame;
  
-@@ -7450,7 +8811,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
+@@ -7450,7 +8835,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
      CGRect r = CGDisplayBounds(omacvm_screen_id(s));
      OmacVMBox b = { r.origin.x, r.origin.y, r.size.width, r.size.height };
  
@@ -1501,7 +1525,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          NSEdgeInsets in = [s safeAreaInsets];
          b.x += in.left;
          b.y += in.top;
-@@ -9683,6 +11044,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -9683,6 +11068,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
                          opts->u.cocoa.full_grab;
      immersive_mode_enabled = !opts->u.cocoa.has_immersive ||
                               opts->u.cocoa.immersive;
