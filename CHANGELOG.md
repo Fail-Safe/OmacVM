@@ -5,12 +5,14 @@ in more words.
 
 ## Unreleased
 
-- **Full screen including notch works without hooking AppKit's window frame.** macOS lays the
-  VM's window out over the whole display itself now (FullPanel answers its full-screen menu bar
-  question), and the menu bar's reveal is seen through AppKit's titlebar window instead of hooks on
-  a private AppKit class. Nothing changes in how it looks or how it is set. The earlier version was
-  found to contain code adapted from UTM's camera-housing full screen; the code identified as
-  adapted has been removed ([ADR 0044](docs/adr/0044-fullpanel.md#replacement)).
+- **Full screen including notch: FullPanel rewritten with one small hook instead of many**
+  (@brianmerchant, #480). macOS lays the VM's window out over the whole display itself now
+  (FullPanel answers its full-screen menu bar question), and the menu bar's reveal is seen through
+  AppKit's titlebar window instead of hooks on a private AppKit class. Nothing changes in how it
+  looks or how it is set. With external displays on, `omacvm check` no longer warns about their
+  windows' normal full screen. The earlier version was found to contain code adapted from UTM's
+  camera-housing full screen; the code identified as adapted has been removed
+  ([ADR 0044](docs/adr/0044-fullpanel.md#replacement)).
 
 ## 3.1.26
 
