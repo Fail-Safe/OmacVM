@@ -161,6 +161,11 @@ expect "3.1's own stay: ask, Flexoki Light, Swipe out" "ask flexoki-light true" 
   "$(val app.closeAction) $(val app.appIconTheme) $(val app.swipeOut)"
 expect "3.0.x Gamma: Skip the notch off (new, off by default), Alpha's kept" "false true" \
   "$(val vms.2.notchSkip) $(val vms.0.notchSkip)"
+# A folder from 3.1.14-3.1.26 with Vendor HID devices on (usb-vendor-hid, gone since): plain USB, no stale setting.
+echo on > "$V/Gamma/usb-vendor-hid"
+dump
+expect "3.1.14-3.1.26 Gamma: usb-vendor-hid left there: USB on as before, nothing of it in the window" "true 0 0" \
+  "$(val vms.2.usb) $(val vms.2.usbRemembered) $(grep -ci "vendor.\{0,1\}hid" "$T/dump.json")"
 
 # (e) omacvm on the Mac changes what the window reads (the test identity's
 # CLI with this test's settings domain).
