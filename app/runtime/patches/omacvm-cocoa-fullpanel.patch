@@ -114,7 +114,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      NSEdgeInsets insets = [[[self window] screen] safeAreaInsets];
      size.width -= insets.left + insets.right;
      size.height -= insets.top + insets.bottom;
-@@ -1712,6 +1721,17 @@ - (void) resizeWindow
+@@ -1712,6 +1721,20 @@ - (void) resizeWindow
          return;
      }
  
@@ -123,6 +123,9 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +     * out on, also while the guest's mode does not fill it (the firmware's
 +     * 1920x1080); the picture is scaled onto it. Fitted to the guest's
 +     * aspect ratio it left the strip (1800x1013 on a 1800x1169 display).
++     * It sizes nothing, so it may come before the check for a display that
++     * does not count (#428), which omacvm-cocoa-display-settle.patch puts
++     * after it.
 +     */
 +    if (omacvm_fullpanel_window_usable([self window])) {
 +        [self omacvmGuestAtTop:false];
@@ -132,7 +135,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      [[self window] setContentAspectRatio:NSMakeSize(screen.width, screen.height)];
  
      /*
-@@ -1775,9 +1795,11 @@ - (void) updateUIInfoLocked
+@@ -1775,9 +1798,11 @@ - (void) updateUIInfoLocked
          /*
           * Rows are cut only below a notch, and only where the guest can be
           * drawn at the top of a window that fills the area (Omanotch).
@@ -146,7 +149,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -2974,6 +2996,1395 @@ - (BOOL)canBecomeKeyWindow { return YES; }
+@@ -2974,6 +2999,1395 @@ - (BOOL)canBecomeKeyWindow { return YES; }
  - (BOOL)canBecomeMainWindow { return YES; }
  @end
  
@@ -1542,7 +1545,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  static BOOL notchFull;
  static NSRect notchSavedFrame;
  
-@@ -7450,7 +8861,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
+@@ -7450,7 +8864,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
      CGRect r = CGDisplayBounds(omacvm_screen_id(s));
      OmacVMBox b = { r.origin.x, r.origin.y, r.size.width, r.size.height };
  
@@ -1551,7 +1554,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          NSEdgeInsets in = [s safeAreaInsets];
          b.x += in.left;
          b.y += in.top;
-@@ -9683,6 +11094,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -9683,6 +11097,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
                          opts->u.cocoa.full_grab;
      immersive_mode_enabled = !opts->u.cocoa.has_immersive ||
                               opts->u.cocoa.immersive;
