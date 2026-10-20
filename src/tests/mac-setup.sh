@@ -194,6 +194,18 @@ mac_setup_write "$V" "$T/t1"
 expect "the record" "token $(mac_token_hash "$T/t1")" "$(cat "$V/mac-setup")"
 grep -q 'mac_setup_write "$d" "$T"' "$R/src/cmd/apply.sh" && echo "ok   apply writes the record" || { echo "FAIL apply.sh does not write the record"; fails=$((fails + 1)); }
 
+# ---------- omacvm check ----------
+# Its "Mac setup" line for app VMs comes from the same function, and a helper
+# not running points to Update VM there.
+grep -q 'mac_setup_state "$msd"' "$R/src/cmd/check.sh" && echo "ok   check: Mac setup from mac_setup_state" || { echo "FAIL check.sh has no Mac setup line"; fails=$((fails + 1)); }
+for n in Bridge Gestures; do
+  grep -qF "OmacVM $n is not running (\$HELPER_FIX)" "$R/src/cmd/check.sh" && echo "ok   check: $n not running says how" ||
+    { echo "FAIL check.sh: $n not running without the fix"; fails=$((fails + 1)); }
+done
+# The caller's features stay (check reads FV for its record lines).
+FV=(caller); mac_setup_state "$V" > /dev/null
+expect "the caller's FV is kept" caller "${FV[*]}"
+
 # ---------- src/mac/install.sh --status ----------
 reset "$ALL"; put_helpers bridge gestures; token other
 out=$(OMACVM_NOTCH=none "$R/src/mac/install.sh" --status "$V" 2>&1); rc=$?

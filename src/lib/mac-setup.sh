@@ -136,7 +136,8 @@ mac_helper_state() {
 
 mac_setup_state() {   # DIR
   local d=$1 i v rec name have want other=0 vmv now h hs why="" setup="" disabled="" perm="" miss="" lines=""
-  local TYPE=app test=""
+  # Its own FV, TYPE and NOTCH: the caller's (omacvm check) stay as they are.
+  local TYPE=app test="" FV NOTCH=${NOTCH:-}
   [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && test="test"
   MS_VERDICT=ok MS_FIX="" MS_WHY="" MS_HELPERS="" MS_NEEDED="" MS_MISSING="" MS_LINES="" MS_TEXT=""
   vmv=$(head -1 "$d/omacvm-version" 2>/dev/null | tr -d '[:space:]') || vmv=""
