@@ -20,14 +20,8 @@ public enum USBQMP {
     public static func qemuID(location: UInt32) -> String { String(format: "usbh-%08x", location) }
 
     public static func attachArguments(_ d: USBDevice) -> [String: Any] {
-        // A vendor HID device (switch on): by its HID part, which QEMU checks
-        // again and opens through IOHIDDevice (USBHID.swift).
-        if let hid = d.hid {
-            return ["driver": "usb-host-hid", "id": qemuID(location: d.location), "bus": "\(controller).0",
-                    "registry-id": hid.registryID, "vendorid": d.id.vendor, "productid": d.id.product, "serial": hid.serial]
-        }
-        return ["driver": "usb-host", "id": qemuID(location: d.location), "bus": "\(controller).0",
-                "hostbus": d.bus, "hostaddr": d.address]
+        ["driver": "usb-host", "id": qemuID(location: d.location), "bus": "\(controller).0",
+         "hostbus": d.bus, "hostaddr": d.address]
     }
 
     /// The ids "info usb" lists: a device QEMU has attached to the VM's bus

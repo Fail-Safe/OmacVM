@@ -9,9 +9,7 @@ import IOKit
 // OmacVM has not got it) or root. So the app offers only devices nothing on
 // the Mac uses (debug probes, SDR sticks, logic analysers, phones in
 // fastboot/ADB, ...), and says why the others (keyboards, security keys,
-// storage, serial adapters, audio, cameras) stay with the Mac. With the VM's
-// "Vendor HID devices" switch on, a vendor HID device macOS holds can go to
-// the VM too, by its HID reports (USBHID.swift).
+// storage, serial adapters, audio, cameras) stay with the Mac.
 
 /// A device's vendor and product (with its serial number, what the remembered
 /// choices match: USBMemory).
@@ -73,12 +71,9 @@ public struct USBDevice: Equatable, Sendable {
     public var location: UInt32
     /// Its address on that bus ("USB Address"; libusb's device address on macOS).
     public var address: Int
-    /// Its HID part, when it is a vendor HID device QEMU's usb-host-hid can
-    /// take (read only while the "Vendor HID devices" switch is on).
-    public var hid: USBHID?
 
     public init(id: USBDeviceID, name: String, deviceClass: Int, drivers: [String] = [], interfaces: [Interface],
-                serial: String = "", maker: String = "", location: UInt32 = 0, address: Int = 0, hid: USBHID? = nil) {
+                serial: String = "", maker: String = "", location: UInt32 = 0, address: Int = 0) {
         self.id = id
         self.name = name
         self.deviceClass = deviceClass
@@ -88,7 +83,6 @@ public struct USBDevice: Equatable, Sendable {
         self.maker = maker
         self.location = location
         self.address = address
-        self.hid = hid
     }
 
     /// libusb's bus number on macOS: the top byte of the locationID.
@@ -119,8 +113,6 @@ public struct USBDevice: Equatable, Sendable {
         if deviceClass == 0x11 || interfaces.contains(where: { $0.interfaceClass == 0x11 }) {
             return .notOffered("a USB-C adapter's info device")
         }
-        // macOS's HID driver has it, and usb-host-hid shares it with the Mac.
-        if hid != nil { return .free }
         let users = drivers + interfaces.flatMap(\.users)
         if let u = users.first { return .usedByMac(USBDevice.reason(u)) }
         return .free
@@ -234,8 +226,7 @@ public enum USBSwitch {
 /// The Mac's USB devices now, from the IORegistry. Reads properties only:
 /// no device is opened, so nothing on the Mac notices.
 public enum USBScan {
-    /// With `hid` (the "Vendor HID devices" switch on): also each device's HID part.
-    public static func devices(hid: Bool = false) -> [USBDevice] {
+    public static func devices() -> [USBDevice] {
         var iter: io_iterator_t = 0
         guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOUSBHostDevice"), &iter) == KERN_SUCCESS else {
             return []
@@ -244,7 +235,7 @@ public enum USBScan {
         var out: [USBDevice] = []
         while case let dev = IOIteratorNext(iter), dev != 0 {
             defer { IOObjectRelease(dev) }
-            if let d = device(dev, hid: hid) { out.append(d) }
+            if let d = device(dev) { out.append(d) }
         }
         return out.sorted { ($0.name.lowercased(), $0.id) < ($1.name.lowercased(), $1.id) }
     }

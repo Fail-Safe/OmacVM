@@ -52,7 +52,6 @@ enum SettingsDump {
             "macFolder": MacFolder.path(c) ?? "",
             "usb": USBSwitch.isOn(folder: f),
             "usbRemembered": USBMemory.load(folder: f).devices.count,
-            "usbVendorHID": USBVendorHID.isOn(folder: f),
             "fastNetwork": FastNetwork.isOn(c),
             "macIME": MacIME.pending(pending) ?? MacIME.isOn(features: record),
             "gpuCompute": GPUCompute.switchState.pending(

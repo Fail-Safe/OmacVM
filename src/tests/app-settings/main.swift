@@ -49,7 +49,6 @@ MainActor.assumeIsolated {
         case "notchSkip": try NotchSkip.write(value == "true", folder: need().folder)
         case "macFolder": try MacFolder.set(value.isEmpty ? nil : URL(fileURLWithPath: value), for: need())
         case "usb": try USBSwitch.set(value == "true", folder: need().folder)
-        case "usbVendorHID": try USBVendorHID.set(value == "true", folder: need().folder)
         case "usbRemember":
             try USBMemory(devices: [.init(vendor: "0483", product: "3748", name: value, maker: "STMicroelectronics",
                                           choice: .omarchy, since: "2026-10-12")]).save(folder: need().folder)

@@ -83,7 +83,6 @@ for i in 0 1; do
   expect "fresh $n: Skip the notch off" false "$(val vms.$i.notchSkip)"
   expect "fresh $n: Mac folder off" "" "$(val vms.$i.macFolder)"
   expect "fresh $n: USB devices off, none remembered" "false 0" "$(val vms.$i.usb) $(val vms.$i.usbRemembered)"
-  expect "fresh $n: Vendor HID devices off" false "$(val vms.$i.usbVendorHID)"
   expect "fresh $n: fast network off" false "$(val vms.$i.fastNetwork)"
   expect "fresh $n: Mac input off" false "$(val vms.$i.macIME)"
   expect "fresh $n: resources as built" "4 8 64" "$(val vms.$i.cpus) $(val vms.$i.memoryGB) $(val vms.$i.diskGB)"
@@ -103,7 +102,7 @@ for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuO
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
 for kv in "resources 6:12" "graphics vulkan" "notchMode fullpanel" "notchSkip true" "macFolder $H/Shared" "usb true" \
-          "usbVendorHID true" "usbRemember STLink" "macIME true"; do
+          "usbRemember STLink" "macIME true"; do
   run set $kv Alpha || { echo "FAIL set $kv Alpha"; fail=1; }
 done
 for launch in 1 2; do
@@ -127,7 +126,6 @@ for launch in 1 2; do
   expect "launch $launch Beta: Skip the notch still off" false "$(val vms.1.notchSkip)"
   expect "launch $launch Alpha: Mac folder" "$H/Shared" "$(val vms.0.macFolder)"
   expect "launch $launch Alpha: USB on, 1 remembered" "true 1" "$(val vms.0.usb) $(val vms.0.usbRemembered)"
-  expect "launch $launch Alpha: Vendor HID devices on, Beta's off" "true false" "$(val vms.0.usbVendorHID) $(val vms.1.usbVendorHID)"
   expect "launch $launch Alpha: Mac input on" true "$(val vms.0.macIME)"
   expect "launch $launch Beta keeps its own: 4 CPUs, auto, native, no folder, USB off" "4 auto native  false false" \
     "$(val vms.1.cpus) $(val vms.1.graphics) $(val vms.1.notchMode) $(val vms.1.macFolder) $(val vms.1.usb) $(val vms.1.macIME)"
@@ -155,14 +153,19 @@ defaults write "$G" EscapeSwipe pointer
 defaults write "$G" MouseSwipeFingers -int 4
 dump
 expect "3.0.x Gamma: OpenGL, including notch" "opengl fullpanel" "$(val vms.2.graphics) $(val vms.2.notchMode)"
-expect "3.0.x Gamma: fast network, Mac folder, USB, Mac input; Vendor HID devices off (new)" "true $H/Shared true true false" \
-  "$(val vms.2.fastNetwork) $(val vms.2.macFolder) $(val vms.2.usb) $(val vms.2.macIME) $(val vms.2.usbVendorHID)"
+expect "3.0.x Gamma: fast network, Mac folder, USB, Mac input" "true $H/Shared true true" \
+  "$(val vms.2.fastNetwork) $(val vms.2.macFolder) $(val vms.2.usb) $(val vms.2.macIME)"
 expect "3.0.x app-wide: full screen, Dock away, focused monitor, 4 fingers" "true true pointer 4" \
   "$(val app.startFullScreen) $(val app.keepDockAway) $(val app.escapeSwipe) $(val app.mouseSwipeFingers)"
 expect "3.1's own stay: ask, Flexoki Light, Swipe out" "ask flexoki-light true" \
   "$(val app.closeAction) $(val app.appIconTheme) $(val app.swipeOut)"
 expect "3.0.x Gamma: Skip the notch off (new, off by default), Alpha's kept" "false true" \
   "$(val vms.2.notchSkip) $(val vms.0.notchSkip)"
+# A folder from 3.1.14-3.1.26 with Vendor HID devices on (usb-vendor-hid, gone since): plain USB, no stale setting.
+echo on > "$V/Gamma/usb-vendor-hid"
+dump
+expect "3.1.14-3.1.26 Gamma: usb-vendor-hid left there: USB on as before, nothing of it in the window" "true 0 0" \
+  "$(val vms.2.usb) $(val vms.2.usbRemembered) $(grep -ci "vendor.\{0,1\}hid" "$T/dump.json")"
 
 # (e) omacvm on the Mac changes what the window reads (the test identity's
 # CLI with this test's settings domain).
