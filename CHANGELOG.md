@@ -3,12 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Vendor HID devices is gone.** The experimental switch under USB devices (3.1.14, by
+  @fbalazsy, #424) is removed at its author's request (#476). USB devices work as before; a
+  vendor HID board stays with the Mac again, also one remembered as Connect. The USB Devices
+  list then shows it as plugged in and kept by macOS, and the VM's log says why it did not
+  connect. A VM folder's old `usb-vendor-hid` file is no longer read.
+
 ## 3.1.26
 
-- **The experimental Vendor HID devices option is removed.** We could not make this approach
-  reliable for the intended device workflow and are retiring it rather than leaving unused code
-  to maintain. Ordinary USB passthrough, its device choices and remembered connections stay as
-  they were. Devices held by macOS's HID driver stay with the Mac.
 - **Chrome no longer looks gray with HDR on.** With the experimental HDR switch on, Chrome and
   Chromium draw their whole window as HDR, and the VM dimmed all of it to fit, so pages and white
   looked gray. Their normal content now looks exactly like any other app's, and HDR video still
