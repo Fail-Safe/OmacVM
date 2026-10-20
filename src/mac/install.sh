@@ -25,11 +25,17 @@
 # switch), except the --retry-app ones; omacvm update always tries again.
 # macOS asks for Location Services (Bridge) and Accessibility + Input Monitoring
 # (Bridge, Gestures) the first time.
+#   src/mac/install.sh --status VM_DIR
+# installs nothing: whether this Mac has what the OmacVM.app VM in VM_DIR
+# needs (its helpers running and allowed, its token), as "key<TAB>value"
+# lines (mac_setup_state in src/lib/mac-setup.sh). OmacVM.app runs it before
+# a start and says what to do (Update VM, System Settings).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-BRIDGE=1; GESTURES=1; CLIP=1; NOTCH=0; FORCE=0; QUIET=0; FORCE_APPS="|"; SKIP_FAILED=0; RETRY_APPS="|"
+BRIDGE=1; GESTURES=1; CLIP=1; NOTCH=0; FORCE=0; QUIET=0; FORCE_APPS="|"; SKIP_FAILED=0; RETRY_APPS="|"; STATUS=""
 while (( $# )); do
   case $1 in
+    --status) STATUS=${2:?--status VM_DIR}; shift ;;
     --no-bridge) BRIDGE=0 ;;
     --keys-only) GESTURES=0 ;;
     --skip-gestures) GESTURES=-1 ;;
@@ -44,6 +50,20 @@ while (( $# )); do
   esac
   shift
 done
+if [[ -n $STATUS ]]; then
+  [[ -d $STATUS ]] || { echo "src/mac/install.sh: --status: no folder $STATUS" >&2; exit 2; }
+  # NOTCH (notch|none) from the caller when it knows (the app does), else mac-notch.
+  NOTCH=${OMACVM_NOTCH:-}
+  source "$R/lib/mac.sh"
+  source "$R/lib/app.sh"
+  source "$R/lib/features.sh"
+  source "$R/lib/notch.sh"
+  source "$R/lib/mac-setup.sh"
+  features_load
+  mac_setup_state "$STATUS"
+  mac_setup_print
+  exit 0
+fi
 # The test identity (OMACVM_TEST_IDENTITY=1, app/scripts/build-app.sh
 # --test-identity): its helpers are the ones inside "OmacVM Test.app", on their
 # own ports and folders, granted once. Nothing is built or installed and no
