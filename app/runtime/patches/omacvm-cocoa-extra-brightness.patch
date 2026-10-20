@@ -432,12 +432,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      present_next = 0;
      return true;
  }
-@@ -7881,15 +8047,39 @@ static bool cocoa_gl_present(void)
-                     deep && cocoa_gl_present_hdr_wanted() ? ", HDR (PQ)" : "");
-         deep_logged = deep;
+@@ -7874,22 +8040,46 @@ static bool cocoa_gl_present(void)
      }
--    if (!cocoa_gl_present_alloc(w, h, deep)) {
--        if (!deep || !cocoa_gl_present_alloc(w, h, false)) {
+     bool deep = ifmt == GL_RGB10_A2;
+     deep = deep && !qatomic_read(&present_deep_failed);
 +    /*
 +     * Extra brightness: the guest's SDR frames (8-bit, or 10-bit sRGB) in
 +     * linear light; never PQ frames, and the boot logo stays at 1x (the
@@ -452,6 +450,19 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    }
 +    bool linear = !splash && !pq && qatomic_read(&omacvm_bright_wanted) &&
 +                  !qatomic_read(&present_deep_failed) && omacvm_bright_program();
+     static int deep_logged = -1;
+-    if (src && deep != deep_logged) {
++    if (src && deep + 2 * linear != deep_logged) {
+         info_report("cocoa: scanout format 0x%x, %s surfaces%s", ifmt,
+-                    deep ? "half-float" : "8-bit",
+-                    deep && cocoa_gl_present_hdr_wanted() ? ", HDR (PQ)" : "");
+-        deep_logged = deep;
++                    linear ? "half-float linear-light" : deep ? "half-float" : "8-bit",
++                    pq ? ", HDR (PQ)" : linear ? ", extra brightness" : "");
++        deep_logged = deep + 2 * linear;
+     }
+-    if (!cocoa_gl_present_alloc(w, h, deep)) {
+-        if (!deep || !cocoa_gl_present_alloc(w, h, false)) {
 +    if (!cocoa_gl_present_alloc(w, h, deep, linear)) {
 +        if (!(deep || linear) || !cocoa_gl_present_alloc(w, h, false, false)) {
              CGLSetCurrentContext(prev);
