@@ -32,6 +32,8 @@ enum RenderVMWindow {
         var magicMouse: Bool? = false
         /// A display that can show HDR (the HDR row).
         var hdr: Bool? = false
+        /// A display with headroom above 2x (the extra brightness row).
+        var extraBrightness: Bool? = false
         /// macOS keeps the menu bar in full screen (#356).
         var menuBar: Bool? = false
         /// Disk › Change… open: what Omarchy needs, the size chosen.
@@ -113,6 +115,7 @@ enum RenderVMWindow {
         allOn.keyNote = .needsUser
         allOn.magicMouse = true
         allOn.hdr = true
+        allOn.extraBrightness = true
         page("page-3-all-on", state, allOn)
         allOn.section = "general"
         window("window-6-custom-resources", state, allOn)

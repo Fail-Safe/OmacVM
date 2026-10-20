@@ -24,6 +24,7 @@ enum SettingsDump {
             "shareKeyboard": Settings.shareKeyboard,
             "vkWindowsNoCopy": Settings.vkWindowsNoCopy,
             "hdr": Settings.hdr,
+            "extraBrightness": Settings.extraBrightness,
             "closeAction": Settings.closeAction.rawValue,
             "appIconTheme": IconTheme.choice(stored: UserDefaults.standard.object(forKey: IconTheme.key)).id,
             "escapeSwipe": EscapeSetting.current().rawValue,
