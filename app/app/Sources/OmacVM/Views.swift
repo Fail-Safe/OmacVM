@@ -109,8 +109,11 @@ final class AppState: ObservableObject {
         if updated, startAfterUpdate {
             startAfterUpdate = false
             if creator.warning == nil {
+                // Read as the start asks (askMacHelpers), and gone after it
+                // either way: a start that stopped early leaves no quiet one behind.
                 helpersQuietOnce = true
                 startVM()
+                helpersQuietOnce = false
             }
         }
     }
