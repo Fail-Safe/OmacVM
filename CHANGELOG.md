@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.27 (unreleased)
 
 - **Vendor HID devices is gone.** The experimental switch under USB devices (3.1.14, by
   @fbalazsy, #424) is removed at its author's request (#476). USB devices work as before; a
