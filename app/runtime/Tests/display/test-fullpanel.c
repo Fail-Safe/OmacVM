@@ -98,6 +98,19 @@ static void test_fallback(void)
     for (int f = OMACVM_FP_OK; f <= OMACVM_FP_NO_SKYLIGHT; f++) {
         CHECK(omacvm_fp_fallback_text((OmacVMFPFallback)f)[0], "reason %d has a text", f);
     }
+    /*
+     * The line omacvm check reads: every fallback, but an external display's
+     * window while the built-in display is on (it came after "strip covered").
+     */
+    CHECK(!omacvm_fp_fallback_checked(OMACVM_FP_OK, false), "no fallback, no line");
+    CHECK(!omacvm_fp_fallback_checked(fallback(&externals[0]), true),
+          "external display beside the open MacBook: its own line");
+    CHECK(omacvm_fp_fallback_checked(fallback(&externals[0]), false),
+          "external display only (lid closed, a Mac mini): the line check reads");
+    for (int f = OMACVM_FP_MENU_BAR_SHOWN; f <= OMACVM_FP_NO_SKYLIGHT; f++) {
+        CHECK(omacvm_fp_fallback_checked((OmacVMFPFallback)f, true) &&
+              omacvm_fp_fallback_checked((OmacVMFPFallback)f, false), "reason %d: check reads it", f);
+    }
 }
 
 /*

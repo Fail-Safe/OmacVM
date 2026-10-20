@@ -72,6 +72,10 @@ body '- (void)verify:(bool)definitive' | grep -q '    \[self relayout\];' ||
 grep -q 'omacvm_fullpanel_same_display(screen, accepted_display)' "$m" &&
   grep -q 'CGDisplayBounds(\[n unsignedIntValue\])' "$m" || fail "a display mode change counts as a lost strip"
 grep -q 'omacvm_fp_screen_releases(armed && inside, full,' "$m" || fail "a display without a notch is not released"
+# An external display's fallback beside the open MacBook is not the line check reads.
+grep -q 'if (omacvm_fp_fallback_checked(fallback, omacvm_fullpanel_beside_builtin(window))) {' "$m" &&
+  grep -q 'CGDisplayIsBuiltin(' <<<"$(body 'static bool omacvm_fullpanel_beside_builtin(NSWindow *w)')" ||
+  fail "an external display's fallback can be the last line omacvm check reads"
 # "Always show the menu bar in full screen" only without Keep the Dock away (#356).
 grep -q 'omacvm_fp_menu_bar_in_the_way(always, immersive_mode_enabled)' "$m" || fail "the menu bar setting counts with Keep the Dock away"
 # Keep the Dock away (immersive=on): the menu bar never comes down in FullPanel.
@@ -83,7 +87,7 @@ grep -q '@"NSToolbarFullScreenWindow"' "$m" &&
   grep -q 'addObserver:self forKeyPath:@"alphaValue"' "$m" || fail "the reveal is not seen through the titlebar window"
 [[ $(grep -c 'QEMU_BUILD_BUG_ON(NSApplicationPresentation' "$m") == 5 ]] || fail "the presentation bits are not checked against AppKit's"
 # The decisions are the tested ones.
-for f in omacvm_fp_fallback omacvm_fp_hook omacvm_fp_verdict omacvm_fp_lost omacvm_fp_screen_releases omacvm_fp_screen_resumes omacvm_fp_cut_rows omacvm_fp_zone omacvm_fp_asked_after_move omacvm_fp_intent omacvm_fp_relax_target omacvm_fp_own_options omacvm_fp_restore omacvm_fp_compositor_matches omacvm_fp_return_ready omacvm_fp_return_again omacvm_fp_return_reassert omacvm_fp_menu_bar_in_the_way; do
+for f in omacvm_fp_fallback omacvm_fp_fallback_checked omacvm_fp_hook omacvm_fp_verdict omacvm_fp_lost omacvm_fp_screen_releases omacvm_fp_screen_resumes omacvm_fp_cut_rows omacvm_fp_zone omacvm_fp_asked_after_move omacvm_fp_intent omacvm_fp_relax_target omacvm_fp_own_options omacvm_fp_restore omacvm_fp_compositor_matches omacvm_fp_return_ready omacvm_fp_return_again omacvm_fp_return_reassert omacvm_fp_menu_bar_in_the_way; do
   grep -q "$f(" "$m" || fail "$f is not used"
 done
 # Private interfaces only looked up at run time (no link to SkyLight).

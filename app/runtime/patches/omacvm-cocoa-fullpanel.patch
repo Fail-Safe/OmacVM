@@ -146,7 +146,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -2974,6 +2996,1369 @@ - (BOOL)canBecomeKeyWindow { return YES; }
+@@ -2974,6 +2996,1395 @@ - (BOOL)canBecomeKeyWindow { return YES; }
  - (BOOL)canBecomeMainWindow { return YES; }
  @end
  
@@ -234,6 +234,28 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +{
 +    NSScreen *s = [w screen];
 +    return s && [s safeAreaInsets].top <= 0;
++}
++
++/*
++ * The window is on another display than the Mac's built-in one, and the
++ * built-in one is on (a MacBook with its lid open and an external display).
++ */
++static bool omacvm_fullpanel_beside_builtin(NSWindow *w)
++{
++    NSNumber *mine = [[[w screen] deviceDescription] objectForKey:@"NSScreenNumber"];
++    bool builtin = false;
++
++    for (NSScreen *s in [NSScreen screens]) {
++        NSNumber *n = [[s deviceDescription] objectForKey:@"NSScreenNumber"];
++
++        if (n && CGDisplayIsBuiltin([n unsignedIntValue])) {
++            if (mine && [n isEqual:mine]) {
++                return false;
++            }
++            builtin = true;
++        }
++    }
++    return builtin;
 +}
 +
 +/*
@@ -763,8 +785,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    if (fallback != OMACVM_FP_OK) {
 +        if (!fallback_logged) {
 +            fallback_logged = true;
-+            fprintf(stderr, "omacvm: full panel: %s: normal full screen\n",
-+                    omacvm_fp_fallback_text(fallback));
++            if (omacvm_fp_fallback_checked(fallback, omacvm_fullpanel_beside_builtin(window))) {
++                fprintf(stderr, "omacvm: full panel: %s: normal full screen\n",
++                        omacvm_fp_fallback_text(fallback));
++            } else {
++                fprintf(stderr, "omacvm: full panel: a window on another display than the built-in one: macOS's own full screen there\n");
++            }
 +        }
 +        return;
 +    }
@@ -1516,7 +1542,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  static BOOL notchFull;
  static NSRect notchSavedFrame;
  
-@@ -7450,7 +8835,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
+@@ -7450,7 +8861,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
      CGRect r = CGDisplayBounds(omacvm_screen_id(s));
      OmacVMBox b = { r.origin.x, r.origin.y, r.size.width, r.size.height };
  
@@ -1525,7 +1551,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          NSEdgeInsets in = [s safeAreaInsets];
          b.x += in.left;
          b.y += in.top;
-@@ -9683,6 +11068,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -9683,6 +11094,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
                          opts->u.cocoa.full_grab;
      immersive_mode_enabled = !opts->u.cocoa.has_immersive ||
                               opts->u.cocoa.immersive;

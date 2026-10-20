@@ -5,7 +5,8 @@ What: a header with no AppKit in it: whether a start asked for FullPanel
 (OMACVM_FULLPANEL=1); why a full screen gets normal full screen, first
 reason first (no camera housing, macOS's "Always show the menu bar in full
 screen" in the way, AppKit's menu bar reservation not there or not
-AppKit's own, no SkyLight); whether that reservation may be answered
+AppKit's own, no SkyLight), and whether that is the line omacvm check
+reads (not for an external display beside the open MacBook); whether that reservation may be answered
 (AppKit's own method, nobody else's change before or after ours); whether
 AppKit gave a full screen the whole display (counted once the window
 covers it, final at didEnterFullScreen: Split View keeps AppKit's layout);
@@ -41,7 +42,7 @@ diff --git a/ui/omacvm-fullpanel.h b/ui/omacvm-fullpanel.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-fullpanel.h
-@@ -0,0 +1,455 @@
+@@ -0,0 +1,468 @@
 +/*
 + * OmacVM: FullPanel, the VM's full-screen window over the whole notched
 + * display, the strip beside the camera housing included (experimental,
@@ -139,6 +140,19 @@ new file mode 100644
 +        return "SkyLight's menu bar transaction is not there";
 +    }
 +    return "unknown";
++}
++
++/*
++ * Whether a fallback is logged as the line omacvm check reads ("...: normal
++ * full screen"). Not for a window on another display than the Mac's
++ * built-in one while that one is on (a head window with "Use external
++ * displays"): its line came after the built-in display's "strip covered",
++ * was the last one check read, and check warned. Such a window logs a line
++ * of its own.
++ */
++static inline bool omacvm_fp_fallback_checked(OmacVMFPFallback f, bool beside_builtin)
++{
++    return f != OMACVM_FP_OK && !(f == OMACVM_FP_NO_NOTCH && beside_builtin);
 +}
 +
 +/*
