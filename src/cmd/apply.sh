@@ -42,6 +42,7 @@ source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 source "$R/src/lib/graphics.sh"
+source "$R/src/lib/mac-setup.sh"
 features_load
 VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; VMKEY=""; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1; TRANSACTION=0
 YES=0; NEWKEY=0; REINSTALL=(); KERNEL=0
@@ -195,12 +196,10 @@ on() { [[ ${FV[$(feature_index "$1")]} == on ]]; }
 for f in ${REINSTALL[@]+"${REINSTALL[@]}"}; do
   on "$f" || { echo "omacvm apply: --reinstall $f: it is off in '$VM' (omacvm enable $f)" >&2; exit 2; }
 done
-# UTM and Fusion get the Mac's battery and camera from OmacVM Bridge, also with
-# its bar features off (OmacVM.app passes them itself).
-battery_via_bridge() { on battery && [[ $TYPE == utm || $TYPE == fusion ]]; }
-camera_via_bridge() { on camera && [[ $TYPE == utm || $TYPE == fusion ]]; }
-# The control centre asks the Mac through the Bridge (also with its bar features off).
-needs_bridge() { on bridge || battery_via_bridge || camera_via_bridge || on control-centre; }
+# The Mac helpers the features need (mac_helper_of in src/lib/mac-setup.sh:
+# the control centre asks the Mac through the Bridge, and UTM and Fusion get
+# the Mac's battery and camera from it, also with its bar features off).
+needs_bridge() { mac_helpers_needed; mac_needs "OmacVM Bridge"; }
 log "$TYPE VM '$VM' at $IP, user $U${had:+, OmacVM $had}"
 info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)"
 
@@ -230,15 +229,7 @@ fi
 
 # ---------- the Mac side ----------
 # helper_of FEATURE: the Mac helper it needs built (empty: none).
-helper_of() {
-  case $1 in
-    bridge|control-centre) echo "OmacVM Bridge" ;;   # the control centre asks the Mac through it
-    camera|battery) [[ $TYPE == utm || $TYPE == fusion ]] && echo "OmacVM Bridge" ;;
-    gestures|scroll-momentum) echo "OmacVM Gestures" ;;
-    omanotch) echo Omanotch ;;
-  esac
-  return 0
-}
+helper_of() { mac_helper_of "$1"; [[ -z $MAC_HELPER ]] || echo "$MAC_HELPER"; }
 # repair_forces FEATURE: the Mac helper a repair of it builds again even when
 # it is up to date (empty: none). The control centre's repair is about the
 # VM side: its Bridge is built only when it is missing, stopped or out of
@@ -271,12 +262,13 @@ if (( MAC )); then
     args+=(--skip-failed)
     for h in ${NEED[@]+"${NEED[@]}"}; do args+=(--retry-app "$h"); done
   fi
-  needs_bridge || args+=(--no-bridge)
-  on gestures || args+=(--skip-gestures)
+  mac_helpers_needed
+  mac_needs "OmacVM Bridge" || args+=(--no-bridge)
+  mac_needs "OmacVM Gestures" || args+=(--skip-gestures)
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
   # Omanotch from src/omanotch. OmacVM.app too, as for the other routes: its
   # full screen sits below the camera and Omanotch fills the strip.
-  on omanotch && args+=(--omanotch)
+  mac_needs Omanotch && args+=(--omanotch)
   MAC_FAILED=$(mktemp -t omacvm-mac)
   mrc=0; OMACVM_MAC_FAILED_FILE=$MAC_FAILED "$R/src/mac/install.sh" "${args[@]}" || mrc=$?
   if (( mrc == 5 )); then

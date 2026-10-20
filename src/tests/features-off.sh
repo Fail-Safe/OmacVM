@@ -249,6 +249,8 @@ apply() {   # TYPE GESTURES [BRIDGE] -> the installer's gestures argument and wh
   ( TYPE=$1 G=$2 B=${3:-off} TOKEN=1 args=() tok=no
     on() { [[ $1 == gestures && $G == on ]]; }
     needs_bridge() { [[ $B == on ]]; }
+    mac_helpers_needed() { :; }
+    mac_needs() { case $1 in "OmacVM Gestures") [[ $G == on ]] ;; "OmacVM Bridge") [[ $B == on ]] ;; *) false ;; esac; }
     bridge_token_ensure() { tok=yes; }
     eval "$mac"
     echo "${args[*]:-none} token=$tok" )
