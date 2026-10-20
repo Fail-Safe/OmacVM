@@ -68,7 +68,15 @@ public struct USBListRows: Equatable, Sendable {
             let d = free.first { !used.contains($0.location) && memory.entry(for: $0) == e }
             if let d { used.insert(d.location) }
             let shared = memory.devices.filter { $0.vendor == e.vendor && $0.product == e.product }.count > 1
-            let (s, c, dis) = status(d)
+            var (s, c, dis) = status(d)
+            // Plugged in, but macOS uses it now (a vendor HID board remembered while
+            // 3.1.14-3.1.26's Vendor HID devices was on): it is under Kept by macOS.
+            if d == nil, devices.contains(where: {
+                if case .usedByMac = $0.availability { return memory.entry(for: $0) == e }
+                return false
+            }) {
+                (s, c, dis) = ("Plugged in, kept by macOS", false, false)
+            }
             out.remembered.append(Row(id: e.key, name: e.displayName,
                                       detail: detail(maker: e.maker, id: "\(e.vendor):\(e.product)", serial: e.serial, sharedID: shared),
                                       status: s, plan: e.choice, key: e.key, device: d,

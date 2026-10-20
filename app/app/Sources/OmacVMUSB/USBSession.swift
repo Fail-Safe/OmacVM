@@ -167,6 +167,10 @@ public final class USBSession {
             p = Plug(device: d, state: .ignored, how: "")
         case .usedByMac(let why):
             p = Plug(device: d, state: .kept(why), how: "")
+            // Remembered as Connect, but macOS has it (a vendor HID board from 3.1.14-3.1.26): say why, once a plug-in.
+            if memory.plan(for: d) == .omarchy {
+                log("OmacVM: USB: \(Self.label(d)) not connected: \(why) (remembered as Connect)")
+            }
         case .free:
             switch memory.plan(for: d) {
             case .omarchy:
