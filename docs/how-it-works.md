@@ -9,8 +9,9 @@ build, every VM setting and the dead ends we hit are in
 OmacVM installs [omarchy-mac](https://github.com/omacom/omarchy-mac), the Arch
 Linux ARM port of Omarchy, onto the VM's own disk: the real system, with your
 user, `omarchy update` and everything Omarchy ships. It uses omarchy-mac's
-**release candidate** (`rc`) packages for now, and its `stable` lane
-automatically once omarchy-mac publishes one.
+**release candidate** (`rc`) packages for now. Once omarchy-mac publishes a
+`stable` lane, new builds take it automatically; VMs built before stay on `rc`
+(#479).
 
 [try-omarchy](https://github.com/omacom/try-omarchy) is something else: a
 pinned, try-it-out image. OmacVM only boots it once, as the temporary
