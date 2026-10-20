@@ -461,8 +461,10 @@ jobs:
       - name: HDR's headroom for the guest (ADR 0049; the checks catch code without it)
         run: app/runtime/Tests/display/test-hdr-headroom.sh
 
-      - name: Extra brightness's gain and shader (ADR 0050; the checks catch code without it)
-        run: app/runtime/Tests/display/test-extra-brightness.sh
+      - name: Extra brightness's gain, shader and omacvm check line (ADR 0050; the checks catch code without it)
+        run: |
+          app/runtime/Tests/display/test-extra-brightness.sh
+          src/tests/extra-brightness-check.sh
 
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
