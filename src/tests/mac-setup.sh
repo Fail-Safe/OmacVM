@@ -12,7 +12,7 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/home/Applications" "$T/home/Library/LaunchAgents" "$T/home/Library/Logs" "$T/bin" "$T/state"
 export HOME=$T/home
-unset OMACVM_TEST_IDENTITY OMACVM_NOTCH
+unset OMACVM_TEST_IDENTITY OMACVM_MAC_NOTCH
 # pgrep -a -o -u UID -f PATTERN: the pid in state/pid-<helper>, else none.
 cat > "$T/bin/pgrep" <<EOF
 #!/bin/bash
@@ -208,7 +208,7 @@ expect "the caller's FV is kept" caller "${FV[*]}"
 
 # ---------- src/mac/install.sh --status ----------
 reset "$ALL"; put_helpers bridge gestures; token other
-out=$(OMACVM_NOTCH=none "$R/src/mac/install.sh" --status "$V" 2>&1); rc=$?
+out=$(OMACVM_MAC_NOTCH=none "$R/src/mac/install.sh" --status "$V" 2>&1); rc=$?
 expect "--status: exit 0" 0 "$rc"
 expect "--status: the verdict line" $'verdict\tsetup' "$(sed -n 1p <<<"$out")"
 expect "--status: why" $'why\tother-mac' "$(grep '^why' <<<"$out")"

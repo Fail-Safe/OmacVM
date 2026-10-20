@@ -19,7 +19,7 @@ extension MacSetup {
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = [script.path, "--status", c.folder.path]
         var env = TestIdentity.environment()
-        env["OMACVM_NOTCH"] = notch ? "notch" : "none"
+        env["OMACVM_MAC_NOTCH"] = notch ? "notch" : "none"
         p.environment = env
         p.standardInput = FileHandle.nullDevice
         let out = Pipe()

@@ -53,7 +53,7 @@ done
 if [[ -n $STATUS ]]; then
   [[ -d $STATUS ]] || { echo "src/mac/install.sh: --status: no folder $STATUS" >&2; exit 2; }
   # NOTCH (notch|none) from the caller when it knows (the app does), else mac-notch.
-  NOTCH=${OMACVM_NOTCH:-}
+  NOTCH=${OMACVM_MAC_NOTCH:-}
   source "$R/lib/mac.sh"
   source "$R/lib/app.sh"
   source "$R/lib/features.sh"
