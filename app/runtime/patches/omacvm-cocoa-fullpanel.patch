@@ -146,7 +146,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -2974,6 +2996,1311 @@ - (BOOL)canBecomeKeyWindow { return YES; }
+@@ -2974,6 +2996,1345 @@ - (BOOL)canBecomeKeyWindow { return YES; }
  - (BOOL)canBecomeMainWindow { return YES; }
  @end
  
@@ -520,11 +520,34 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +static IMP omacvm_fullpanel_reservation;        /* ours, once installed */
 +static bool omacvm_fullpanel_reservation_refused;
 +
-+static Method omacvm_fullpanel_method(Class cls, const char *name, const char *types)
++/* What differs from macOS 27's controller, if anything (logged with the fallback). */
++static char omacvm_fullpanel_differs[192];
++
++/*
++ * The instance method `name` of `cls` with the type encoding `want`, else
++ * NULL and what differs in omacvm_fullpanel_differs (other types are
++ * another method).
++ */
++static Method omacvm_fullpanel_method(Class cls, const char *name, const char *want)
 +{
 +    Method m = class_getInstanceMethod(cls, sel_registerName(name));
-+    const char *t = m ? method_getTypeEncoding(m) : NULL;
-+    return t && !strcmp(t, types) ? m : NULL;
++    const char *has = m ? method_getTypeEncoding(m) : NULL;
++
++    if (has && !strcmp(has, want)) {
++        return m;
++    }
++    if (omacvm_fullpanel_differs[0]) {
++        return NULL;
++    }
++    if (m) {
++        snprintf(omacvm_fullpanel_differs, sizeof(omacvm_fullpanel_differs),
++                 "%s -%s has the types %s, not %s", class_getName(cls), name,
++                 has ? has : "(none)", want);
++    } else {
++        snprintf(omacvm_fullpanel_differs, sizeof(omacvm_fullpanel_differs),
++                 "%s has no -%s", class_getName(cls), name);
++    }
++    return NULL;
 +}
 +
 +/* The controller's class and methods as on macOS 27, looked up once. */
@@ -540,6 +563,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +        looked = true;
 +        c = objc_getClass("_NSFullScreenContentController");
++        if (!c) {
++            snprintf(omacvm_fullpanel_differs, sizeof(omacvm_fullpanel_differs),
++                     "no class _NSFullScreenContentController");
++        }
 +        r = c ? omacvm_fullpanel_method(c, "reservesSpaceForMenuBarInFullScreen", "B16@0:8") : NULL;
 +        w = c ? omacvm_fullpanel_method(c, "window", "@16@0:8") : NULL;
 +        found = r && w;
@@ -592,6 +619,15 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                          omacvm_fullpanel_reservation && now == omacvm_fullpanel_reservation);
 +}
 +
++/* Why the reservation is not answered, with what differs when it is known. */
++static void omacvm_fullpanel_hook_log(OmacVMFPHook hook)
++{
++    const char *differs = omacvm_fullpanel_differs;
++
++    fprintf(stderr, "omacvm: full panel: %s%s%s%s; using normal full screen\n",
++            omacvm_fp_hook_text(hook), differs[0] ? " (" : "", differs, differs[0] ? ")" : "");
++}
++
 +static bool omacvm_fullpanel_install_reservation(void)
 +{
 +    static bool tried;
@@ -607,8 +643,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        hook = omacvm_fullpanel_hook_state();
 +        if (hook != OMACVM_FP_HOOK_USABLE) {
 +            omacvm_fullpanel_reservation_refused = hook == OMACVM_FP_HOOK_INTERCEPTED;
-+            fprintf(stderr, "omacvm: full panel: %s; using normal full screen\n",
-+                    omacvm_fp_hook_text(hook));
++            omacvm_fullpanel_hook_log(hook);
 +            return false;
 +        }
 +        omacvm_fullpanel_controller(NULL, &reserves, &window_of, NULL);
@@ -636,8 +671,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        static bool logged;
 +        if (!logged) {
 +            logged = true;
-+            fprintf(stderr, "omacvm: full panel: %s; using normal full screen\n",
-+                    omacvm_fp_hook_text(hook));
++            omacvm_fullpanel_hook_log(hook);
 +        }
 +        return false;
 +    }
@@ -1458,7 +1492,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  static BOOL notchFull;
  static NSRect notchSavedFrame;
  
-@@ -7450,7 +8777,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
+@@ -7450,7 +8811,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
      CGRect r = CGDisplayBounds(omacvm_screen_id(s));
      OmacVMBox b = { r.origin.x, r.origin.y, r.size.width, r.size.height };
  
@@ -1467,7 +1501,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          NSEdgeInsets in = [s safeAreaInsets];
          b.x += in.left;
          b.y += in.top;
-@@ -9683,6 +11010,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -9683,6 +11044,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
                          opts->u.cocoa.full_grab;
      immersive_mode_enabled = !opts->u.cocoa.has_immersive ||
                               opts->u.cocoa.immersive;
