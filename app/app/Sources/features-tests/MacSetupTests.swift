@@ -81,7 +81,10 @@ func macSetupTests() {
 
     // Later: quiet for the same problem and app version only.
     let k = copied?.laterKey(appVersion: "3.1.28")
-    expect(k == "setup:update-vm:OmacVM Gestures|OmacVM Bridge@3.1.28", "mac setup: Later's key")
+    expect(k == "setup:update-vm:other-mac:OmacVM Gestures|OmacVM Bridge@3.1.28", "mac setup: Later's key")
+    var stoppedToo = copied
+    stoppedToo?.why = "not-running"
+    expect(stoppedToo?.laterKey(appVersion: "3.1.28") != k, "mac setup: the same helpers for another cause ask again")
     expect(k != copied?.laterKey(appVersion: "3.1.29"), "mac setup: a new app version asks again")
     expect(k != gone?.laterKey(appVersion: "3.1.28") && both?.laterKey(appVersion: "3.1.28") != k, "mac setup: another problem asks again")
 

@@ -255,7 +255,7 @@ public struct MacSetup: Equatable, Sendable {
     /// What Later remembers per VM: this problem with this app version. The
     /// alert comes again when the problem or the app changes.
     public func laterKey(appVersion: String) -> String {
-        "\(verdict.rawValue):\(fix.rawValue):\(helpers.joined(separator: "|"))@\(appVersion)"
+        "\(verdict.rawValue):\(fix.rawValue):\(why):\(helpers.joined(separator: "|"))@\(appVersion)"
     }
 
     /// For qemu.log ("OmacVM: Mac helpers: ...", which omacvm check can read).
