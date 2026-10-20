@@ -170,9 +170,21 @@ FullPanel (Omanotch idle); the Sidecar display keeps normal full screen.
 
 **Not tested on this patch:** Split View (Window > Full Screen Tile from
 full screen did nothing; pairing would need another app's window),
-display unplug (#402), sleep and lock, Stage Manager, macOS other than 27
-(the reservation method is there by name on 15.8; anything missing falls
-back to normal full screen). With an external display attached, the Dock
-icon does not switch the MacBook's Space back (native full screen behaves
-the same), and `omacvm check` warns about the external display's window
-("normal full screen"), as before this change.
+display unplug (#402), sleep and lock, Stage Manager, macOS 15 and 26 on
+screen. With an external display attached, the Dock icon does not switch
+the MacBook's Space back (native full screen behaves the same).
+
+**Changed when it landed** (2026-10-20): SkyLight's functions are looked
+up one by one, and a failed `dlopen` or `dlsym` logs its reason; the
+reservation's fallback line names the class, method or types that differ;
+when a full screen stops claiming the strip (Split View's rejection, a
+strip lost, another display) or claims it again, QEMU's resize handler and
+the display arrangement run once more, so the guest is not left at the
+whole panel's size (AppKit's layout of a rejected tile is not changed); a
+window on an external display beside the open MacBook logs "a window on
+another display than the built-in one: macOS's own full screen there",
+which `omacvm check` does not read, so it no longer warns about it. The
+run-time checks (the controller class, the method with `B16@0:8`, `-window`
+with `@16@0:8`, AppKit's own implementation in AppKit's image, SkyLight's
+six functions) pass on macOS 15.7.9 and 26.6.2 (GitHub's arm64 runners)
+and 27.0 (the Mac mini).
