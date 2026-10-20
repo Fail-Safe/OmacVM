@@ -46,6 +46,8 @@ problems() {
   grep -q 'kIOSurfaceContentHeadroom' <<<"$alloc" && grep -q 'OMACVM_BRIGHT_TARGET' <<<"$alloc" ||
     echo "the surfaces do not say they need 2x (macOS may raise the panel to its most)"
   grep -q 'linear != present_linear' <<<"$alloc" || echo "turning it on or off waits for the hold-off"
+  grep -q 'if (@available(macOS 26.0, \*)) {' <<<"$follow" && grep -q 'CGFloat need = hdr && linear ? OMACVM_BRIGHT_TARGET : 0;' <<<"$follow" ||
+    echo "the layer does not ask for 2x only (macOS 26+): the panel goes to its most, HDR is capped"
   # Every draw into the present surfaces follows the kind the surfaces have.
   grep -q 'bool boost = present_linear;' <<<"$present" || echo "the kind drawn follows the switch, not the surfaces"
   grep -q 'omacvm_bright_blit(flip, linear ? gain : OMACVM_BRIGHT_ONE)' <<<"$present" ||
