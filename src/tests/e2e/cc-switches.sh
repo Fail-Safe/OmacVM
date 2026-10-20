@@ -346,7 +346,7 @@ start_vm() {
   (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1 --env OMACVM_BACKGROUND=1)
   # A build that asks before a start (the fast network's service not ready, #215) takes its answer from a test hook.
   [[ -n ${OMACVM_E2E_FASTNET_ANSWER:-} ]] && hide+=(--env "OMACVM_TEST_FAST_NETWORK_ANSWER=$OMACVM_E2E_FASTNET_ANSWER")
-  open -n -g --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.e2e ${hide[@]+"${hide[@]}"} "$APP" --args --start --vm "$VM"
+  open -n -g --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.e2e --env OMACVM_TEST_HELPERS_ANSWER=later ${hide[@]+"${hide[@]}"} "$APP" --args --start --vm "$VM"
   for ((i = 0; i < 40; i++)); do [[ -n $(qemu_pid) ]] && break; sleep 1; done
   [[ -n $(qemu_pid) ]] || return 1
   for ((i = 0; i < 90; i++)); do gssh "test -d /run/user/\$(id -u \$(sed -n 's/^OMACVM_USER=//p' /etc/omacvm/env))/hypr" 2>/dev/null && { sleep 5; return 0; }; sleep 2; done
@@ -364,7 +364,7 @@ restart_vm() { stop_vm && start_vm && reachable 60 && cc start 120 && ccok; }
 window() {   # the launcher's window on this VM (the VM must be stopped): its pid, or nothing
   local i p
   close_window   # a launcher from before keeps the VM it shows
-  open -n -g "$APP" --args --vm "$VM"
+  open -n -g --env OMACVM_TEST_HELPERS_ANSWER=later "$APP" --args --vm "$VM"
   for ((i = 0; i < 20; i++)); do
     p=$(launcher_pid)
     if [[ -n $p && $("$OUT/ax" "$p" dump 2>/dev/null | head -1) == "windows: "[1-9]* ]]; then

@@ -345,7 +345,8 @@ gpu_lock_switch() {   # "Graphics without QEMU's lock" switched in the window (V
 }
 
 open_window() {
-  open -n --env OMACVM_POINTER_DEBUG=1 "$APP" --args --vm "$VM"
+  # The question about this Mac's helpers (the test helpers may not run) never blocks the rows.
+  open -n --env OMACVM_POINTER_DEBUG=1 --env OMACVM_TEST_HELPERS_ANSWER=later "$APP" --args --vm "$VM"
   waitfor 30 has_launcher >/dev/null || return 1
   LP=$(launcher_pid)
   waitfor 30 has_window >/dev/null || return 1
