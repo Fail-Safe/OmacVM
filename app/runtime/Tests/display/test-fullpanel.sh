@@ -81,8 +81,9 @@ done
 # Private interfaces only looked up at run time (no link to SkyLight).
 grep -q 'dlopen(' "$m" && grep -q '"SLSTransactionSetMenuBarSystemOverrideAlpha"' "$m" || fail "SkyLight is not looked up at run time"
 # SLSTransactionCommit returns nothing (macOS 27: w0 left over): never read as a status.
-grep -q '    void (\*transaction_commit)(CFTypeRef, int32_t);' "$m" || fail "SLSTransactionCommit is not declared void"
-! grep -q '= sky->transaction_commit(' "$m" || fail "SLSTransactionCommit's leftover w0 is read as a status"
+grep -q '^typedef void (\*OmacVMSLSCommit)(CFTypeRef transaction, int32_t synchronous);$' "$m" ||
+  fail "SLSTransactionCommit is not declared void"
+! grep -q '= omacvm_sls_commit(' "$m" || fail "SLSTransactionCommit's leftover w0 is read as a status"
 # Nothing of the earlier version is left.
 for old in _frameForFullScreenMode _tileFrameForFullScreen _NSFullScreenMenuBarCompanionController \
            setMenuBarReveal: setToolbarWindowReveal: omacvm_fullpanel_keep_frame omacvm_fullpanel_frame_hook \

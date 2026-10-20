@@ -146,7 +146,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -2974,6 +2996,1287 @@ - (BOOL)canBecomeKeyWindow { return YES; }
+@@ -2974,6 +2996,1311 @@ - (BOOL)canBecomeKeyWindow { return YES; }
  - (BOOL)canBecomeMainWindow { return YES; }
  @end
  
@@ -158,14 +158,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 + *
 + * Only with OMACVM_FULLPANEL=1 (OmacVM.app sets it for one start, for a VM
 + * whose notch setting is FullPanel; Omanotch is off for that start). The
-+ * window stays a real macOS full-screen window in a Space of its own; macOS
-+ * normally keeps such a window below the camera housing in two ways:
-+ *
-+ *   1. AppKit keeps the menu bar's band at the top of the display free and
-+ *      lays the window out below it;
-+ *   2. the full-screen Space's menu bar covers the strip.
-+ *
-+ * Here, per window and only on a display with a camera housing:
++ * window stays a real macOS full-screen window in a Space of its own. What
++ * FullPanel changes, per window and only on a display with a camera housing:
 + *
 + *   - AppKit's full-screen content controller asks whether the window keeps
 + *     the menu bar's band free (-reservesSpaceForMenuBarInFullScreen). For
@@ -258,120 +252,150 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +}
 +
 +/*
-+ * SkyLight (private): which Space a window is on, and the alpha of the
-+ * full-screen menu bar's backdrop over one Space, in a transaction. All of
-+ * it or nothing.
++ * What FullPanel asks of SkyLight, WindowServer's private client library:
++ * that one full-screen Space draws no menu bar backdrop (alpha 0, set in a
++ * transaction), and which Space holds the window. Resolved by name on first
++ * use; without any one of these functions FullPanel is normal full screen,
++ * logged with dlopen's or dlsym's reason.
 + */
-+typedef struct {
-+    int32_t (*connection)(void);
-+    CFArrayRef (*spaces_of_windows)(int32_t, int32_t, CFArrayRef);
-+    int32_t (*space_type)(int32_t, uint64_t);
-+    CFTypeRef (*transaction_create)(int32_t);
-+    void (*transaction_menu_bar_alpha)(CFTypeRef, uint64_t, float);
-+    /*
-+     * The second argument means synchronous. It returns nothing: on macOS
-+     * 27 w0 is left over from its last call (every commit "failed" with a
-+     * different large number when it was read as a CGError). Nothing to
-+     * check after it.
-+     */
-+    void (*transaction_commit)(CFTypeRef, int32_t);
-+} OmacVMFullPanelSkyLight;
++#define OMACVM_SKYLIGHT_PATH "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight"
 +
-+static OmacVMFullPanelSkyLight omacvm_fullpanel_sky;
-+static int omacvm_fullpanel_sky_state;   /* 0 not looked up, 1 there, -1 not */
++typedef CFTypeRef (*OmacVMSLSNewTransaction)(int32_t cid);
++typedef void (*OmacVMSLSMenuBarAlpha)(CFTypeRef transaction, uint64_t space, float alpha);
++/*
++ * Its second argument means synchronous. It returns nothing: on macOS 27 w0
++ * is left over from its last call (every commit "failed" with a different
++ * large number when it was read as a CGError), so nothing is checked after it.
++ */
++typedef void (*OmacVMSLSCommit)(CFTypeRef transaction, int32_t synchronous);
++typedef int32_t (*OmacVMSLSConnection)(void);
++typedef CFArrayRef (*OmacVMSLSWindowSpaces)(int32_t cid, int32_t mask, CFArrayRef window_ids);
++typedef int32_t (*OmacVMSLSSpaceType)(int32_t cid, uint64_t space);
++
++static OmacVMSLSNewTransaction omacvm_sls_new_transaction;
++static OmacVMSLSMenuBarAlpha omacvm_sls_menu_bar_alpha;
++static OmacVMSLSCommit omacvm_sls_commit;
++static OmacVMSLSConnection omacvm_sls_connection;
++static OmacVMSLSWindowSpaces omacvm_sls_window_spaces;
++static OmacVMSLSSpaceType omacvm_sls_space_type;
++
 +/*
 + * Set once SkyLight gave no transaction for the menu bar: from then on the
 + * menu bar is left as macOS has it (normal full screen), logged once.
 + */
 +static bool omacvm_fullpanel_menu_failed;
 +
-+static bool omacvm_fullpanel_skylight(void)
++/* One function of SkyLight's; *all turns false (logged) when it is missing. */
++static void *omacvm_fullpanel_sls(void *lib, const char *symbol, bool *all)
 +{
-+    static const struct {
-+        const char *name;
-+        size_t offset;
-+    } symbols[] = {
-+        { "SLSMainConnectionID", offsetof(OmacVMFullPanelSkyLight, connection) },
-+        { "SLSCopySpacesForWindows", offsetof(OmacVMFullPanelSkyLight, spaces_of_windows) },
-+        { "SLSSpaceGetType", offsetof(OmacVMFullPanelSkyLight, space_type) },
-+        { "SLSTransactionCreate", offsetof(OmacVMFullPanelSkyLight, transaction_create) },
-+        { "SLSTransactionSetMenuBarSystemOverrideAlpha",
-+          offsetof(OmacVMFullPanelSkyLight, transaction_menu_bar_alpha) },
-+        { "SLSTransactionCommit", offsetof(OmacVMFullPanelSkyLight, transaction_commit) },
-+    };
-+    OmacVMFullPanelSkyLight found = { 0 };
-+    void *image;
++    void *fn = dlsym(lib, symbol);
 +
-+    if (omacvm_fullpanel_sky_state) {
-+        return omacvm_fullpanel_sky_state > 0;
++    if (!fn && *all) {
++        const char *why = dlerror();
++        fprintf(stderr, "omacvm: full panel: dlsym %s: %s: normal full screen\n",
++                symbol, why ? why : "not found");
 +    }
-+    omacvm_fullpanel_sky_state = -1;
-+    image = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
-+                   RTLD_LAZY | RTLD_LOCAL);
-+    if (!image) {
-+        fprintf(stderr, "omacvm: full panel: SkyLight is not there; using normal full screen\n");
-+        return false;
-+    }
-+    for (size_t i = 0; i < ARRAY_SIZE(symbols); i++) {
-+        void *address = dlsym(image, symbols[i].name);
-+        if (!address) {
-+            fprintf(stderr, "omacvm: full panel: SkyLight has no %s; using normal full screen\n",
-+                    symbols[i].name);
-+            return false;
-+        }
-+        memcpy((char *)&found + symbols[i].offset, &address, sizeof(address));
-+    }
-+    omacvm_fullpanel_sky = found;
-+    omacvm_fullpanel_sky_state = 1;
-+    return true;
++    *all = *all && fn;
++    return fn;
 +}
 +
-+/* The window's own full-screen Space: it is on exactly one, of that type; else 0. */
++/* Every SkyLight function FullPanel calls is there (looked up once). */
++static bool omacvm_fullpanel_skylight(void)
++{
++    static int found;   /* 0 not yet, 1 all of them, -1 not */
++    bool all = true;
++    void *lib;
++
++    if (found) {
++        return found > 0;
++    }
++    found = -1;
++    lib = dlopen(OMACVM_SKYLIGHT_PATH, RTLD_LAZY | RTLD_LOCAL);
++    if (!lib) {
++        const char *why = dlerror();
++        fprintf(stderr, "omacvm: full panel: dlopen SkyLight: %s: normal full screen\n",
++                why ? why : "failed");
++        return false;
++    }
++    omacvm_sls_new_transaction = (OmacVMSLSNewTransaction)
++        omacvm_fullpanel_sls(lib, "SLSTransactionCreate", &all);
++    omacvm_sls_menu_bar_alpha = (OmacVMSLSMenuBarAlpha)
++        omacvm_fullpanel_sls(lib, "SLSTransactionSetMenuBarSystemOverrideAlpha", &all);
++    omacvm_sls_commit = (OmacVMSLSCommit)
++        omacvm_fullpanel_sls(lib, "SLSTransactionCommit", &all);
++    omacvm_sls_connection = (OmacVMSLSConnection)
++        omacvm_fullpanel_sls(lib, "SLSMainConnectionID", &all);
++    omacvm_sls_window_spaces = (OmacVMSLSWindowSpaces)
++        omacvm_fullpanel_sls(lib, "SLSCopySpacesForWindows", &all);
++    omacvm_sls_space_type = (OmacVMSLSSpaceType)
++        omacvm_fullpanel_sls(lib, "SLSSpaceGetType", &all);
++    if (all) {
++        found = 1;
++    }
++    return all;
++}
++
++/*
++ * The full-screen Space that holds the window, or 0. SkyLight lists every
++ * Space the window is on (OMACVM_FP_SPACES_ANY); only a single one of the
++ * full-screen type counts.
++ */
 +static uint64_t omacvm_fullpanel_space(NSWindow *w)
 +{
-+    OmacVMFullPanelSkyLight *sky = &omacvm_fullpanel_sky;
-+    NSArray *ids, *list;
-+    CFArrayRef spaces;
++    int64_t number = w ? (int64_t)[w windowNumber] : 0;
 +    uint64_t space = 0;
++    CFNumberRef wid;
++    CFArrayRef ids, spaces;
 +    int32_t cid;
 +
-+    if (!w || [w windowNumber] <= 0 || !omacvm_fullpanel_skylight()) {
++    if (number <= 0 || !omacvm_fullpanel_skylight()) {
 +        return 0;
 +    }
-+    cid = sky->connection();
-+    ids = [NSArray arrayWithObject:[NSNumber numberWithInteger:[w windowNumber]]];
-+    spaces = sky->spaces_of_windows(cid, OMACVM_FP_SPACES_ANY, (CFArrayRef)ids);
++    cid = omacvm_sls_connection();
++    wid = CFNumberCreate(NULL, kCFNumberSInt64Type, &number);
++    ids = CFArrayCreate(NULL, (const void **)&wid, 1, &kCFTypeArrayCallBacks);
++    CFRelease(wid);
++    spaces = ids ? omacvm_sls_window_spaces(cid, OMACVM_FP_SPACES_ANY, ids) : NULL;
++    if (ids) {
++        CFRelease(ids);
++    }
 +    if (!spaces) {
 +        return 0;
 +    }
-+    list = (NSArray *)spaces;
-+    if ([list count] == 1 && [[list objectAtIndex:0] isKindOfClass:[NSNumber class]]) {
-+        space = [[list objectAtIndex:0] unsignedLongLongValue];
++    if (CFArrayGetCount(spaces) == 1) {
++        CFTypeRef only = CFArrayGetValueAtIndex(spaces, 0);
++
++        if (only && CFGetTypeID(only) == CFNumberGetTypeID() &&
++            !CFNumberGetValue((CFNumberRef)only, kCFNumberSInt64Type, &space)) {
++            space = 0;
++        }
 +    }
 +    CFRelease(spaces);
-+    return space && sky->space_type(cid, space) == OMACVM_FP_SPACE_FULL_SCREEN ? space : 0;
++    if (space && omacvm_sls_space_type(cid, space) != OMACVM_FP_SPACE_FULL_SCREEN) {
++        space = 0;
++    }
++    return space;
 +}
 +
 +/* The menu bar's backdrop over full-screen Space `space`: macOS's own (opaque) or none. */
 +static bool omacvm_fullpanel_backdrop(uint64_t space, bool opaque)
 +{
-+    OmacVMFullPanelSkyLight *sky = &omacvm_fullpanel_sky;
 +    CFTypeRef transaction;
 +    int32_t cid;
 +
 +    if (!space || omacvm_fullpanel_menu_failed || !omacvm_fullpanel_skylight()) {
 +        return false;
 +    }
-+    cid = sky->connection();
-+    transaction = sky->transaction_create(cid);
++    cid = omacvm_sls_connection();
++    transaction = omacvm_sls_new_transaction(cid);
 +    if (!transaction) {
 +        omacvm_fullpanel_menu_failed = true;
 +        fprintf(stderr, "omacvm: full panel: SkyLight gave no menu bar transaction (connection %d); the menu bar stays as macOS has it, normal full screen\n",
 +                (int)cid);
 +        return false;
 +    }
-+    sky->transaction_menu_bar_alpha(transaction, space, opaque ? 1.0f : 0.0f);
-+    sky->transaction_commit(transaction, 1);
++    omacvm_sls_menu_bar_alpha(transaction, space, opaque ? 1.0f : 0.0f);
++    omacvm_sls_commit(transaction, 1);
 +    CFRelease(transaction);
 +    return true;
 +}
@@ -1434,7 +1458,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  static BOOL notchFull;
  static NSRect notchSavedFrame;
  
-@@ -7450,7 +8753,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
+@@ -7450,7 +8777,7 @@ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
      CGRect r = CGDisplayBounds(omacvm_screen_id(s));
      OmacVMBox b = { r.origin.x, r.origin.y, r.size.width, r.size.height };
  
@@ -1443,7 +1467,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          NSEdgeInsets in = [s safeAreaInsets];
          b.x += in.left;
          b.y += in.top;
-@@ -9683,6 +10986,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -9683,6 +11010,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
                          opts->u.cocoa.full_grab;
      immersive_mode_enabled = !opts->u.cocoa.has_immersive ||
                               opts->u.cocoa.immersive;
