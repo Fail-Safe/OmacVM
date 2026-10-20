@@ -10,6 +10,10 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
 ## Common problems
 
 - **First stop**: `omacvm check` names what is wrong and what to do.
+- **Gestures do nothing after copying a VM to another Mac**: the Mac helpers
+  are set up per Mac, by Update VM in OmacVM. The app says so before the
+  start and offers it
+  ([40](#40-app-gestures-and-the-bar-do-nothing-in-a-vm-copied-from-another-mac)).
 - **A feature does not switch on: "Omarchy's package list is older than the
   mirrors"**: the VM's system was not updated for a while, and the packages
   the feature needs are no longer on the mirrors in those versions. OmacVM
@@ -1076,3 +1080,35 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Where:** `src/app/guest/hyprpicker/redraw-on-change.patch` (built by
   `build.sh`), `src/app/guest/install.sh`, `src/guest/check.sh`; test
   `src/tests/hyprpicker-patch.sh`.
+
+## 40. app: gestures and the bar do nothing in a VM copied from another Mac
+
+- **Symptom:** a VM folder copied to another Mac (a new Mac, a second Mac)
+  starts, but trackpad gestures, ⌃⌥ Esc and scroll momentum do nothing, the
+  bar shows "Ethernet" instead of the Mac's Wi-Fi, and macOS never asked to
+  allow anything. Since 3.1.28 OmacVM says so before the start ("... was set
+  up on another Mac") and as a red notice in its window.
+- **Cause:** the Mac helpers (OmacVM Gestures, OmacVM Bridge, Omanotch) and
+  the token the VM uses to talk to them belong to a Mac. Only Update VM, a
+  build or `omacvm apply` install them; a start does not. A copied VM also
+  has the other Mac's token, which the helpers here refuse. macOS asks for
+  Accessibility and Input Monitoring only when a helper starts for the first
+  time, so with no helper there is no question either.
+- **Fix:** click **Update VM** (in the question before the start, the notice
+  or the window's header). It starts the VM without a window, installs the
+  helpers the VM's features need, gives the VM this Mac's token and shuts it
+  down, then starts it. macOS then asks you to allow OmacVM Gestures
+  (Accessibility, Input Monitoring) and OmacVM Bridge (also Location Services
+  and Bluetooth). A helper that is installed but not allowed, or switched off
+  under System Settings › General › Login Items & Extensions, gets a button
+  for that pane instead. A VM from a newer OmacVM needs the app updated first
+  (Check for Updates). `omacvm check --vm NAME` shows the same in its
+  "Mac setup" line. Later starts the VM as it is and is not asked again for
+  that problem until it or the app changes.
+- **Where:** `src/lib/mac-setup.sh` (which helpers a VM's features need, the
+  same map `omacvm apply` installs by; `mac_setup_state`), `src/mac/install.sh
+  --status`, the VM folder's `mac-setup` record (a hash of the token `omacvm
+  apply` gave the VM), `src/cmd/check.sh` ("Mac setup"),
+  `app/app/Sources/OmacVMFeatures/MacSetup.swift` (the words),
+  `app/app/Sources/OmacVM/MacSetupAsk.swift` and `main.swift`
+  (`askMacHelpers`); tests `src/tests/mac-setup.sh`, `swift run features-tests`.

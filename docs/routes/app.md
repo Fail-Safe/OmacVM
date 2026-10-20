@@ -61,7 +61,9 @@ VM runs, and goes back by itself when a new version does not start
   same under `/Applications`) must print the same as `echo ~/OmacVM` (a home
   folder can be on another drive, under `/Volumes`). If it prints another
   folder, move the VM folder there and use that path below. Open the app and
-  start the VM. Then, with the VM running, set up this Mac's side (Bridge, Gestures, clock, token) with
+  start the VM: the app says that the VM was set up on another Mac and offers
+  **Update VM**, which sets up this Mac's side (Bridge, Gestures, token) and
+  lets the helpers ask macOS for their permissions. By hand instead, with the VM running:
   `bash ~/Applications/OmacVM.app/Contents/Resources/scripts/apply-vm.sh ~/OmacVM/<VM name>`
   (or `omacvm apply --vm "<VM name>" --vm-type app`). If it says there is no
   SSH access, the VM does not know this VM folder's key yet: start it once in
@@ -287,7 +289,9 @@ VM runs, and goes back by itself when a new version does not start
   To take a VM to another Mac, copy its folder into that Mac's VMs folder
   (the VM must be shut down; above: a copy made while it runs has a damaged
   disk, and the app asks before it starts one: the file `running` in the
-  folder names the Mac it ran on) with `cp -R`, which keeps the disk sparse (`ditto` wrote it in full). Where
+  folder names the Mac it ran on) with `cp -R`, which keeps the disk sparse (`ditto` wrote it in full).
+  There, the app says before the first start that the VM was set up on another
+  Mac and offers Update VM: it sets up that Mac's helpers and token. Where
   something else already has the name ~/OmacVM (a file, a git clone
   ~/omacvm: the same folder on a case-insensitive disk), new VMs go to the
   old place below instead.
