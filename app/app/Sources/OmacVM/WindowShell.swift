@@ -137,7 +137,7 @@ struct NoticeStrip: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            InfoButton(topic: "this", text: info)
+            InfoButton(topic: "this Mac's setup", text: info)
             Button(action, action: run)
                 .disabled(disabled)
                 .fixedSize()
