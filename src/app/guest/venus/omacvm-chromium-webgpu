@@ -7,11 +7,21 @@
 # the GL driver (virgl) but costs about a fifth more per frame, so this is a
 # separate launcher, not the default. A browser already running with the same
 # profile ignores these flags: close it first.
-B=chromium
-[[ ${0##*/} == omacvm-chrome-webgpu ]] && B=/opt/google/chrome/google-chrome
+B=chromium FLAGS=chromium-flags.conf
+[[ ${0##*/} == omacvm-chrome-webgpu ]] && B=/opt/google/chrome/google-chrome FLAGS=chrome-flags.conf
 if [[ -z ${DISPLAY:-} ]]; then
   echo "${0##*/}: no X11 display (Xwayland), starting without WebGPU" >&2
   exec "$B" "$@"
 fi
 export MESA_VK_WSI_DEBUG=sw
+# On X11 Chrome does not see Hyprland's scale (Omarchy draws Xwayland windows at
+# the display's own pixels), so on a Retina display its pages and menus came
+# out at half size (3200x1740 at 1x on a scale-2 display). Give it the scale of
+# the display it opens on, unless the command line or the user's flags file
+# already sets one.
+scale=""
+[[ " $* " == *" --force-device-scale-factor="* ]] ||
+  grep -qs -e '--force-device-scale-factor' "${XDG_CONFIG_HOME:-$HOME/.config}/$FLAGS" ||
+  scale=$(hyprctl monitors -j 2>/dev/null | jq -r 'first(.[] | select(.focused)) | .scale' 2>/dev/null)
+[[ $scale =~ ^[0-9]+(\.[0-9]+)?$ ]] && set -- --force-device-scale-factor="$scale" "$@"
 exec "$B" --ozone-platform=x11 --enable-skia-graphite --skia-graphite-dawn-backend=vulkan "$@"

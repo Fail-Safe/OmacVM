@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Chromium (WebGPU) at the display's scale.** The "Chromium (WebGPU)" menu entry runs Chromium
+  on X11, which does not see Omarchy's display scale: on a Retina display its pages and menus came
+  out at half size. It now opens at the scale of the display it starts on (a scale you set
+  yourself, on its command line or in `chromium-flags.conf`, still wins).
+
 ## 3.1.27
 
 - **Vendor HID devices is gone.** The experimental switch under USB devices (3.1.14, by
