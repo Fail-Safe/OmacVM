@@ -1,5 +1,6 @@
 // The VM window's settings across launches: src/tests/app-settings.sh.
 //   t dump                 the settings as the window reads them (SettingsDump)
+//   t start                what a start of a VM reads: Extra brightness and HDR for it
 //   t set KEY VALUE [VM]   one change, made with the call the window's row makes
 import AppKit
 import Foundation
@@ -15,6 +16,11 @@ MainActor.assumeIsolated {
     let a = CommandLine.arguments
     guard a.count > 1 else { exit(2) }
     if a[1] == "dump" { SettingsDump.main() }
+    if a[1] == "start" {   // what a start of a VM reads (Runner.start), printed; nothing is written
+        let x = Settings.extraBrightnessStart(), h = Settings.hdrStart()
+        print("extra \(x.on) (\(x.why)), hdr \(h.on) (\(h.why))")
+        exit(0)
+    }
     guard a[1] == "set", a.count > 3 else { exit(2) }
     let key = a[2], value = a[3]
     let vm = a.count > 4 ? VMConfig.named(a[4]) : nil
