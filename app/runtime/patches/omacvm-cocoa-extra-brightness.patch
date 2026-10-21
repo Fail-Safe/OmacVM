@@ -623,7 +623,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          surface_put(show.surf);
          /* The guest may have drawn while the queue was full. */
          qemu_bh_schedule(present_bh);
-@@ -10480,14 +10693,50 @@ static void omacvm_chan_write(NSString *line)
+@@ -10480,14 +10693,52 @@ static void omacvm_chan_write(NSString *line)
  static double omacvm_edr_sent = -1;
  static dispatch_source_t omacvm_edr_timer;
  
@@ -645,8 +645,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                        "(potential %.2f, headroom %.2f)", hook_p, hook_n);
 +        }
 +    }
-+    *potential = hook_p;
-+    *now = hook_n;
++    if (hook) {
++        *potential = hook_p;
++        *now = hook_n;
++    }
 +    return hook;
 +}
 +
@@ -674,7 +676,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      NSScreen *s = [[cocoaView window] screen];
      if (!s) {
          return omacvm_edr_sent > 0 ? omacvm_edr_sent : 1;
-@@ -10536,6 +10785,226 @@ static void omacvm_edr_watch(void)
+@@ -10536,6 +10787,226 @@ static void omacvm_edr_watch(void)
      dispatch_resume(omacvm_edr_timer);
  }
  
@@ -901,7 +903,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  static void omacvm_send_layout(void)
  {
      NSMutableArray *outputs = [NSMutableArray array];
-@@ -12032,6 +12501,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -12032,6 +12503,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          }
          info_report("cocoa: GL frames shown %s",
                      present_ctx ? "as IOSurfaces" : "with a CAOpenGLLayer");
