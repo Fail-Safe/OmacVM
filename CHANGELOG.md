@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.28
 
 - **A VM from another Mac says what it needs.** When OmacVM Gestures or the Bridge aren't set up
   on this Mac (a VM folder copied to a new Mac), OmacVM says so before the start and in the
