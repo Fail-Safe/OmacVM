@@ -127,12 +127,30 @@ and/or `{"swipe_out": true|false}` only. Mac-wide as well.)
   `updates` answers `mac_app` so the control centre knows the plan
   before it asks. A 3.0.0 Mac knows none of this: the control centre then
   says to update OmacVM.app on the Mac first.
+- `/omacvm/app/...` (3.1.30) is the app's own: OmacVM.app answers it on the
+  VM's control port itself and never passes it to the Bridge (an app before
+  3.1.30 does, and the Bridge answers 404). `/omacvm/app/extra-brightness`:
+  `GET` gives `{"display", "safe_mode", "on", "available"}` (a display with
+  more than 2x headroom, GPU safe mode of this run of the VM, the switch);
+  `POST {"on": true|false}` sets the app's Extra brightness (ADR 0050), the
+  same setting as its row in the VM window, so both stay in step. The VM's
+  Display panel and `omacvm extra-brightness` use it. Only a real JSON
+  boolean (400), only with such a display and outside GPU safe mode (409
+  `no-display`, `safe-mode`), only while this VM's window is the app in
+  front (409 `not-front`: the setting is the app's, so a VM in the
+  background must not switch it for the one the user looks at; the test
+  identity's `testExtraBrightnessAnyWindow` lets headless tests through), at
+  most 4 writes a second (429); any other `/omacvm/app/` path is 404. The
+  port is the VM's own and only its desktop user can open it, so this is
+  the user's own switch, reached from the VM.
 
 ## Consequences
 
 - A hostile guest can switch its own VM's features and trigger an update to
   a signed release. It cannot reach other VMs, pass arguments, pick a version
-  or get a shell.
+  or get a shell. In OmacVM.app it can also switch Extra brightness while its
+  window is in front: a brighter window and more battery, as the user's own
+  switch, never more than 2x.
 - macOS permission prompts still appear on the Mac.
 - The Bridge app stays installed while control-centre is on, also with the
   bridge feature off (as for the camera).
