@@ -314,11 +314,14 @@ EXTRA_PROPS = """  // OmacVM.app: the Mac's Extra brightness (omacvm extra-brigh
   property bool macExtraBusy: false
   // false after no answer (an older app, not an app VM): until the panel opens again
   property bool macExtraAsk: true
+  // One more at each click: a reading that started before it is old.
+  property int macExtraSeq: 0
   readonly property string macExtraTip: """ + qml_string(extra_tip()) + "\n"
 
 EXTRA_FUNCS = """  // ---- OmacVM.app: the Mac's Extra brightness (an XDR display) ----
   function toggleMacExtra() {
     if (!root.macExtraShown || root.macExtraSafe || root.macExtraBusy) return
+    root.macExtraSeq += 1
     root.macExtraOn = !root.macExtraOn
     root.macExtraBusy = true
     macExtraSetProc.command = """ + EXTRA_CMD + """, root.macExtraOn ? "on" : "off", "--json"]
@@ -339,18 +342,27 @@ EXTRA_FUNCS = """  // ---- OmacVM.app: the Mac's Extra brightness (an XDR displa
     return false
   }
 
+  // Not while a click is on its way: its own answer says how it went.
   function askMacExtra() {
-    if (root.macExtraAsk && !macExtraProc.running) macExtraProc.running = true
+    if (!root.macExtraAsk || root.macExtraBusy || macExtraProc.running) return
+    macExtraProc.seq = root.macExtraSeq
+    macExtraProc.running = true
   }
 
   Process {
     id: macExtraProc
+    // macExtraSeq when it started (the 5 s refresh may run into a click).
+    property int seq: 0
     command: """ + EXTRA_CMD + """, "--json"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: if (!root.macExtraAnswer(text)) {
-        root.macExtraShown = false
-        root.macExtraAsk = false
+      onStreamFinished: {
+        // Read before the last click: old, the switch would jump back.
+        if (macExtraProc.seq !== root.macExtraSeq || root.macExtraBusy) return
+        if (!root.macExtraAnswer(text)) {
+          root.macExtraShown = false
+          root.macExtraAsk = false
+        }
       }
     }
   }

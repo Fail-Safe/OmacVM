@@ -136,6 +136,12 @@ class Build(unittest.TestCase):
         self.assertIn("    root.askMacExtra()\n", text)
         self.assertIn("root.macExtraAsk = false", text)
         self.assertIn("function onOpenedChanged()", text)
+        # A reading that started before a click (the 5 s refresh) is dropped, and none starts while
+        # a click is on its way: the switch never jumps back to the old state.
+        self.assertIn("    root.macExtraSeq += 1\n    root.macExtraOn = !root.macExtraOn\n", text)
+        self.assertIn("if (!root.macExtraAsk || root.macExtraBusy || macExtraProc.running) return\n"
+                      "    macExtraProc.seq = root.macExtraSeq\n", text)
+        self.assertIn("if (macExtraProc.seq !== root.macExtraSeq || root.macExtraBusy) return\n", text)
         # Its row: right under BRIGHTNESS (before TEXT SIZE), Omarchy's colours as Commons.Color (#376).
         self.assertLess(text.index("id: macExtraRow"), text.index("// ---------- Text size ----------"))
         row = text[text.index("id: macExtraRow"):text.index("// ---------- Text size ----------")]
