@@ -278,8 +278,9 @@ OPTIONAL_EDITS = [
 # `omacvm extra-brightness` asks OmacVM.app over this VM's control port; the
 # app answers itself (ADR 0031). No answer (an app before 3.1.30, not an app
 # VM, the control centre off): no row, and no more asking until the panel
-# opens again. All or nothing: Omarchy without the parts or the anchors keeps
-# the panel without the row.
+# opens again; a row already there stays (the port was busy a moment). All
+# or nothing: Omarchy without the parts or the anchors keeps the panel
+# without the row.
 EXTRA_CAPTION = "Up to 2x on this Mac's XDR display. Use with care."
 EXTRA_SAFE = "Off while GPU safe mode is on."
 # The HDR sentence is word for word the app's row (SettingsRows.swift, ExtraBrightnessRow).
@@ -312,7 +313,7 @@ EXTRA_PROPS = """  // OmacVM.app: the Mac's Extra brightness (omacvm extra-brigh
   property bool macExtraOn: false
   property bool macExtraSafe: false
   property bool macExtraBusy: false
-  // false after no answer (an older app, not an app VM): until the panel opens again
+  // false after no answer and no row (an older app, not an app VM): until the panel opens again
   property bool macExtraAsk: true
   // One more at each click: a reading that started before it is old.
   property int macExtraSeq: 0
@@ -359,10 +360,11 @@ EXTRA_FUNCS = """  // ---- OmacVM.app: the Mac's Extra brightness (an XDR displa
       onStreamFinished: {
         // Read before the last click: old, the switch would jump back.
         if (macExtraProc.seq !== root.macExtraSeq || root.macExtraBusy) return
-        if (!root.macExtraAnswer(text)) {
-          root.macExtraShown = false
-          root.macExtraAsk = false
-        }
+        if (root.macExtraAnswer(text)) return
+        // No answer. With the row there, the port was busy a moment (the
+        // control centre can hold it for a while): the row stays, the next
+        // refresh asks again. Without: no row until the panel opens again.
+        if (!root.macExtraShown) root.macExtraAsk = false
       }
     }
   }
@@ -373,11 +375,12 @@ EXTRA_FUNCS = """  // ---- OmacVM.app: the Mac's Extra brightness (an XDR displa
       waitForEnd: true
       onStreamFinished: {
         root.macExtraBusy = false
-        // Refused (the VM's window not in front, too quick) or no answer: the real state.
-        if (!root.macExtraAnswer(text)) {
-          root.macExtraAsk = true
-          root.askMacExtra()
-        }
+        if (root.macExtraAnswer(text)) return
+        // Refused (the VM's window not in front, too quick) or no answer:
+        // back as it was, then the app's own state.
+        root.macExtraOn = !root.macExtraOn
+        root.macExtraAsk = true
+        root.askMacExtra()
       }
     }
   }

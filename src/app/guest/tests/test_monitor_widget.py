@@ -142,6 +142,14 @@ class Build(unittest.TestCase):
         self.assertIn("if (!root.macExtraAsk || root.macExtraBusy || macExtraProc.running) return\n"
                       "    macExtraProc.seq = root.macExtraSeq\n", text)
         self.assertIn("if (macExtraProc.seq !== root.macExtraSeq || root.macExtraBusy) return\n", text)
+        # No answer: no row only when there was none; a busy port keeps the row.
+        self.assertIn("        if (!root.macExtraShown) root.macExtraAsk = false\n", text)
+        self.assertNotIn("root.macExtraShown = false", text)
+        # A refused or unanswered click: the switch back as it was, then the app's state.
+        self.assertIn("        if (root.macExtraAnswer(text)) return\n"
+                      "        // Refused (the VM's window not in front, too quick) or no answer:\n"
+                      "        // back as it was, then the app's own state.\n"
+                      "        root.macExtraOn = !root.macExtraOn\n", text)
         # Its row: right under BRIGHTNESS (before TEXT SIZE), Omarchy's colours as Commons.Color (#376).
         self.assertLess(text.index("id: macExtraRow"), text.index("// ---------- Text size ----------"))
         row = text[text.index("id: macExtraRow"):text.index("// ---------- Text size ----------")]
