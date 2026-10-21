@@ -6,7 +6,10 @@
 Copies Omarchy's own display widget (/usr/share/omarchy/shell/plugins/panels/
 monitor) into OUT_DIR, so it follows the installed Omarchy, and adds a "MAC
 DISPLAYS" section with "Use external displays" (omacvm-displays external
-toggle), and on a display 4K wide or more a line under the scale presets: 2x
+toggle), under BRIGHTNESS the Mac's Extra brightness (an XDR display: Omarchy's
+own switch, `omacvm extra-brightness`, with the use-with-care text in its (i);
+left out when the installed Omarchy lacks the parts or the anchors), and on
+a display 4K wide or more a line under the scale presets: 2x
 is the sharp one there. In "Full screen including notch" every one of
 Omarchy's scale presets on that output, set through `omacvm-displays scale`
 (the Mac gives the output a size that fits it first, #355). Omanotch's hidden NOTCH output is left out of its
@@ -23,6 +26,7 @@ import importlib.util
 import pathlib
 import shutil
 import sys
+import textwrap
 
 HERE = pathlib.Path(__file__).resolve().parent
 DEFAULT_SOURCE = "/usr/share/omarchy/shell/plugins/panels/monitor"
@@ -267,6 +271,275 @@ OPTIONAL_EDITS = [
 ]
 
 
+# ---- The Mac's Extra brightness (OmacVM.app, an XDR display) ----
+# A row right under BRIGHTNESS built like Omarchy's own `Toggle`: its
+# ToggleSwitch at the end, the row owning the click and the keyboard cursor
+# (section "extra": j/k, Enter, Space), an (i) with Omarchy's PanelToolTip.
+# `omacvm extra-brightness` asks OmacVM.app over this VM's control port; the
+# app answers itself (ADR 0031). No answer (an app before 3.1.30, not an app
+# VM, the control centre off): no row, and no more asking until the panel
+# opens again. All or nothing: Omarchy without the parts or the anchors keeps
+# the panel without the row.
+EXTRA_CAPTION = "Up to 2x on this Mac's XDR display. Use with care."
+EXTRA_SAFE = "Off while GPU safe mode is on."
+# The HDR sentence is word for word the app's row (SettingsRows.swift, ExtraBrightnessRow).
+EXTRA_TIP = ("Makes the VM's main window up to about twice as bright as the Mac's normal white, "
+             "with the extra brightness of this Mac's XDR display. Use with care: it uses much more "
+             "battery and makes the Mac warmer; macOS turns it down when the Mac gets hot. "
+             "With HDR and 10-bit colour on, this wins while it is on: the picture gets brighter, "
+             "HDR highlights do not. Off, HDR is back at once. "
+             "It ends when the VM stops. Experimental. The same switch as Extra brightness "
+             "in the VM's settings on the Mac.")
+# PanelToolTip's text has no width or wrap: the lines are broken here.
+EXTRA_TIP_WIDTH = 60
+EXTRA_CMD = '["/usr/bin/env", "/usr/local/bin/omacvm", "extra-brightness"'
+# The Omarchy parts the row uses, with the properties it sets.
+EXTRA_UI = {"ToggleSwitch.qml": ["property bool checked", "property bool busy", "property bool interactive",
+                                 "property bool hasCursor"],
+            "PanelToolTip.qml": ["ToolTip {"]}
+
+
+def qml_string(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
+
+
+def extra_tip() -> str:
+    return "\n".join(textwrap.wrap(EXTRA_TIP, EXTRA_TIP_WIDTH))
+
+
+EXTRA_PROPS = """  // OmacVM.app: the Mac's Extra brightness (omacvm extra-brightness).
+  property bool macExtraShown: false
+  property bool macExtraOn: false
+  property bool macExtraSafe: false
+  property bool macExtraBusy: false
+  // false after no answer (an older app, not an app VM): until the panel opens again
+  property bool macExtraAsk: true
+  readonly property string macExtraTip: """ + qml_string(extra_tip()) + "\n"
+
+EXTRA_FUNCS = """  // ---- OmacVM.app: the Mac's Extra brightness (an XDR display) ----
+  function toggleMacExtra() {
+    if (!root.macExtraShown || root.macExtraSafe || root.macExtraBusy) return
+    root.macExtraOn = !root.macExtraOn
+    root.macExtraBusy = true
+    macExtraSetProc.command = """ + EXTRA_CMD + """, root.macExtraOn ? "on" : "off", "--json"]
+    macExtraSetProc.running = true
+  }
+
+  // The answer of omacvm extra-brightness --json: the state, or a refusal
+  // ({"code"}). Anything else: no switch here.
+  function macExtraAnswer(text) {
+    var s = null
+    try { s = JSON.parse(String(text || "").trim()) } catch (e) { s = null }
+    if (s && typeof s.display === "boolean") {
+      root.macExtraShown = s.display
+      root.macExtraSafe = s.safe_mode === true
+      root.macExtraOn = s.on === true
+      return true
+    }
+    return false
+  }
+
+  function askMacExtra() {
+    if (root.macExtraAsk && !macExtraProc.running) macExtraProc.running = true
+  }
+
+  Process {
+    id: macExtraProc
+    command: """ + EXTRA_CMD + """, "--json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (!root.macExtraAnswer(text)) {
+        root.macExtraShown = false
+        root.macExtraAsk = false
+      }
+    }
+  }
+
+  Process {
+    id: macExtraSetProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.macExtraBusy = false
+        // Refused (the VM's window not in front, too quick) or no answer: the real state.
+        if (!root.macExtraAnswer(text)) {
+          root.macExtraAsk = true
+          root.askMacExtra()
+        }
+      }
+    }
+  }
+
+  Connections {
+    target: root
+    function onOpenedChanged() {
+      if (!root.opened) return
+      root.macExtraAsk = true
+      root.askMacExtra()
+    }
+  }
+
+"""
+
+EXTRA_ROW = """          // ---------- OmacVM.app: the Mac's Extra brightness ----------
+          PanelSeparator {
+            visible: root.macExtraShown && !root.brightnessAvailable
+            foreground: root.bar.foreground
+          }
+
+          CursorSurface {
+            id: macExtraRow
+            visible: root.macExtraShown
+            width: panelColumn.width
+            hasCursor: root.cursorActive && root.focusSection === "extra"
+            onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(macExtraRow)
+            foreground: root.bar.foreground
+            fill: Style.hoverFillFor(root.bar.foreground, Commons.Color.accent)
+            implicitHeight: macExtraInner.implicitHeight + Style.spacing.xl
+            opacity: root.macExtraSafe ? 0.45 : 1.0
+
+            Row {
+              id: macExtraInner
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(6)
+              anchors.rightMargin: Style.space(6)
+              spacing: Style.space(8)
+
+              Text {
+                text: "󰃠"
+                color: root.bar.foreground
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.title
+                width: Style.space(22)
+                horizontalAlignment: Text.AlignHCenter
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Column {
+                width: parent.width - Style.space(22) - macExtraInfo.width - macExtraSwitch.width - 3 * parent.spacing
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Extra brightness"
+                  color: root.bar.foreground
+                  font.family: root.bar.fontFamily
+                  font.pixelSize: Style.font.body
+                  elide: Text.ElideRight
+                  width: parent.width
+                }
+
+                Text {
+                  textFormat: Text.PlainText
+                  text: root.macExtraSafe ? """ + qml_string(EXTRA_SAFE) + """ : """ + qml_string(EXTRA_CAPTION) + """
+                  color: Qt.darker(root.bar.foreground, 1.4)
+                  font.family: root.bar.fontFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                  width: parent.width
+                }
+              }
+
+              Text {
+                id: macExtraInfo
+                textFormat: Text.PlainText
+                text: "󰋽"
+                color: Qt.darker(root.bar.foreground, 1.4)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.body
+                anchors.verticalCenter: parent.verticalCenter
+
+                PanelToolTip {
+                  visible: macExtraRow.hasCursor
+                  text: root.macExtraTip
+                  fontFamily: root.bar.fontFamily
+                }
+              }
+
+              // The row owns the click and the cursor, as in Omarchy's Toggle.
+              ToggleSwitch {
+                id: macExtraSwitch
+                checked: root.macExtraOn
+                busy: root.macExtraBusy
+                interactive: false
+                foreground: root.bar.foreground
+                accent: Commons.Color.accent
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: root.macExtraSafe ? Qt.ArrowCursor : Qt.PointingHandCursor
+              onContainsMouseChanged: if (containsMouse && !root.reflowingText) {
+                root.cursorActive = true
+                root.focusSection = "extra"
+                root.selectedIndex = 0
+              }
+              onClicked: root.toggleMacExtra()
+            }
+          }
+
+"""
+
+# (anchor, replacement) on the panel after EDITS: Omarchy's lines and the ones EDITS wrote.
+EXTRA_EDITS = [
+    ('  property string macFullPanel: ""\n', '  property string macFullPanel: ""\n' + EXTRA_PROPS),
+    ('    if (brightnessAvailable) list.push("brightness")\n',
+     '    if (brightnessAvailable) list.push("brightness")\n'
+     '    if (macExtraShown) list.push("extra")\n'),
+    ('    if (section === "mac") return 1\n',
+     '    if (section === "mac") return 1\n'
+     '    if (section === "extra") return 1\n'),
+    ('section === "scale" || section === "mac"\n', 'section === "scale" || section === "mac" || section === "extra"\n'),
+    ('    if (focusSection === "mac") {\n',
+     '    if (focusSection === "extra") {\n'
+     '      toggleMacExtra()\n'
+     '      return\n'
+     '    }\n'
+     '    if (focusSection === "mac") {\n'),
+    ("    if (!macFullPanelProc.running) macFullPanelProc.running = true\n",
+     "    if (!macFullPanelProc.running) macFullPanelProc.running = true\n"
+     "    root.askMacExtra()\n"),
+    ("  BarIconButton {\n    id: button\n", EXTRA_FUNCS + "  BarIconButton {\n    id: button\n"),
+    ("          // ---------- Text size ----------\n", EXTRA_ROW + "          // ---------- Text size ----------\n"),
+]
+
+
+def extra_ui_missing(source: pathlib.Path) -> str:
+    """The Omarchy parts the row needs, in its shell's Ui folder ("" = all there)."""
+    ui = source.parents[2] / "Ui" if len(source.parents) > 2 else source / "Ui"
+    for name, needs in EXTRA_UI.items():
+        try:
+            text = (ui / name).read_text()
+        except OSError:
+            return name
+        for need in needs:
+            if need not in text:
+                return f"{name} ({need})"
+    return ""
+
+
+def add_extra(panel: str, source: pathlib.Path) -> str:
+    """The Extra brightness row, or the panel as it is (and why, on stderr)."""
+    missing = extra_ui_missing(source)
+    if missing:
+        print(f"omacvm.monitor: no Extra brightness switch (Omarchy has no {missing})", file=sys.stderr)
+        return panel
+    for anchor, _ in EXTRA_EDITS:
+        if panel.count(anchor) != 1:
+            print(f"omacvm.monitor: no Extra brightness switch (Omarchy's panel changed: {anchor.strip()[:50]!r})",
+                  file=sys.stderr)
+            return panel
+    for anchor, replacement in EXTRA_EDITS:
+        panel = panel.replace(anchor, replacement)
+    return panel
+
+
 def hide_notch(panel: str) -> str:
     """Leave Omanotch's NOTCH output out; the panel as it is if that fails."""
     try:
@@ -304,6 +577,7 @@ def main() -> int:
     else:
         print("omacvm.monitor: Omarchy's scale buttons changed: in full screen including notch "
               "only the scales its size fits", file=sys.stderr)
+    panel = add_extra(panel, source)
     panel = hide_notch(panel)
     out.mkdir(parents=True, exist_ok=True)
     for item in source.iterdir():
