@@ -159,6 +159,17 @@ check(!DisplayPick.validBox(CGRect(x: 0, y: 0, width: 0, height: 10)), "zero wid
 check(!DisplayPick.validBox(CGRect(x: 1e9, y: 0, width: 10, height: 10)), "far away refused")
 check(!DisplayPick.validBox(CGRect(x: 0, y: 0, width: CGFloat.infinity, height: 10)), "infinite refused")
 
+// ---- the guest's brightness path: the built-in display through macOS's control, the others while on ----
+check(OutputBrightness.route(builtin: true, externalOn: true) == .builtin &&
+      OutputBrightness.route(builtin: true, externalOn: false) == .builtin,
+      "the built-in display: macOS's own control (Omarchy's slider), also with external_brightness off")
+check(OutputBrightness.route(builtin: false, externalOn: true) == .external, "an external display: ExternalBrightness")
+check(OutputBrightness.route(builtin: false, externalOn: false) == .off, "an external display with external_brightness off: refused")
+check(OutputBrightness.target(now: 0.4, percent: 5, delta: nil) == 0.05, "a level: 5 % = 0.05 (the slider)")
+check(abs(OutputBrightness.target(now: 0.4, percent: nil, delta: 5) - 0.45) < 1e-9, "a move: +5 from 40 %")
+check(OutputBrightness.target(now: 0.98, percent: nil, delta: 5) == 1 && OutputBrightness.target(now: 0.02, percent: nil, delta: -5) == 0,
+      "clamped to 0...1")
+
 // ---- when to look at a display again (the key path, the VM's requests and omacvm check alike) ----
 let t0 = Date(timeIntervalSince1970: 1_000_000)
 check(ProbeRule.due(works: nil, probedAt: .distantPast, now: t0, retry: 60), "never looked: look")

@@ -5,6 +5,11 @@ in more words.
 
 ## Unreleased
 
+- **Brightness and Extra brightness in the VM's Display panel.** Omarchy's brightness slider now
+  also sets the MacBook's own display (through the Bridge, as the brightness keys), and on a Mac
+  with an XDR display an Omarchy-style **Extra brightness** switch sits right under it, with the
+  same use-with-care (i), in step with the app's row (OmacVM.app; switches only while that VM's
+  window is in front). In the VM's terminal: `omacvm extra-brightness [on|off]`.
 - **Extra brightness works with HDR.** With "HDR and 10-bit colour" on, Extra brightness now wins
   while it is on: the VM's picture gets up to 2x brighter, HDR highlights do not; turned off, HDR
   is back at once, in a running VM. Before, it stayed off over HDR ("not with HDR yet").

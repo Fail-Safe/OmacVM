@@ -51,6 +51,8 @@ PY
   t "1 fill: Style.hoverFillFor(root.bar.foreground, Commons.Color.accent)" \
     "$(grep -c '^import qs.Commons as Commons$' "$T/mon/Panel.qml") $(awk '/id: macExternalRow/ {on = 1} on && /fill:/ {sub(/^ */, ""); print; exit}' "$T/mon/Panel.qml")" \
     "  its own row's colour is Commons.Color (Qt 6.12)"
+  t "1 1" "$(grep -c 'id: macExtraRow' "$T/mon/Panel.qml") $(grep -c '^ *ToggleSwitch {$' "$T/mon/Panel.qml")" \
+    "  the Extra brightness row with Omarchy's own switch (shell/Ui here)"
 done
 
 # --- The Bridge's night light: Omarchy's indicators less NightLight ---

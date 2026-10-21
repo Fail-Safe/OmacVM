@@ -3,8 +3,8 @@
 # Omarchy's DDC/CI path (omarchy-brightness-display-ddc runs ddcutil) against
 # OmacVM's ddcutil (src/bridge/guest/omacvm-ddcutil) and the Bridge client,
 # with a stand-in Bridge that checks the token proof and records each request.
-# 1. detect lists the VM's connected outputs as buses (Virtual-2: bus 2), not
-#    the one on the Mac's built-in display, in the lines Omarchy's awk reads.
+# 1. detect lists the VM's connected outputs as buses (Virtual-2: bus 2), the
+#    one on the Mac's built-in display too, in the lines Omarchy's awk reads.
 # 2. getvcp/setvcp 10 on OmacVM.app: the output's box from the app's layout goes
 #    to the Bridge; the answer in ddcutil's --brief form.
 # 3. Elsewhere (no layout): only Hyprland's focused output may ask.
@@ -29,7 +29,7 @@ cat > "$T/run/omacvm/displays.json" <<'J'
 J
 # The stand-in Bridge: /proof as the real one, the brightness at 35.
 cat > "$T/bridge.py" <<'PY'
-import hashlib, hmac, http.server, json, sys, urllib.parse
+import hashlib, hmac, http.server, json, os, sys, urllib.parse
 token = open(sys.argv[1]).read().strip()
 log = open(sys.argv[2], "a")
 level = [35]
@@ -46,6 +46,8 @@ class H(http.server.BaseHTTPRequestHandler):
         if self.headers.get("Authorization") != f"Bearer {token}":
             return self.reply(401, {"error": "token"})
         log.write(f"{self.command} {self.path} {body}\n"); log.flush()
+        if os.path.exists(sys.argv[3]) and "width=1728" in self.path:   # an older Bridge
+            return self.reply(409, {"error": "the built-in display: its brightness stays macOS's"})
         if body:
             o = json.loads(body)
             level[0] = max(0, min(100, round(o.get("brightness", level[0] + o.get("delta", 0)))))
@@ -56,7 +58,7 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H)
 print(s.server_port, flush=True)
 s.serve_forever()
 PY
-python3 "$T/bridge.py" "$T/token" "$T/requests" > "$T/port" & PID=$!
+python3 "$T/bridge.py" "$T/token" "$T/requests" "$T/refuse-builtin" > "$T/port" & PID=$!
 for _ in $(seq 300); do [[ -s $T/port ]] && break; sleep 0.1; done
 PORT=$(cat "$T/port"); [[ $PORT =~ ^[0-9]+$ ]] || { echo "FAIL  the stand-in Bridge did not start"; exit 1; }
 touch "$T/requests"
@@ -80,7 +82,7 @@ bus_of() {
       if (connector == monitor && bus != "") { print bus; exit } bus = "" }'
 }
 is "$(bus_of Virtual-2)" 2 "detect: Virtual-2 is bus 2"
-is "$(bus_of Virtual-1)" "" "detect: not the output on the Mac's built-in display"
+is "$(bus_of Virtual-1)" 1 "detect: the output on the Mac's built-in display too (the Bridge sets it through macOS)"
 is "$(bus_of Virtual-3)" "" "detect: not a disconnected output"
 
 # 2. OmacVM.app: the box goes along.
@@ -95,6 +97,18 @@ is "$(ddc --bus 2 getvcp 10 --brief)" "VCP 10 C 44 100" "read back 44"
 env XDG_RUNTIME_DIR="$T/run" OMACVM_VM_TYPE=app OMACVM_BRIDGE_URL="http://127.0.0.1:$PORT" OMACVM_BRIDGE_TOKEN_FILE="$T/token" \
   bash "$R/src/bridge/guest/omacvm-bridge" external-brightness --output Virtual-2 +05 >/dev/null
 is "$(last | cut -d' ' -f3-)" '{"delta": 5}' "client: +05 is a delta of 5 (valid JSON)"
+
+# The built-in display's output: its box goes along; the Bridge answers for it (method builtin).
+is "$(ddc --bus 1 getvcp 10 --brief)" "VCP 10 C 49 100" "getvcp 10 on the built-in display's output"
+is "$(last)" "GET /display/external-brightness?x=96&y=1238&width=1728&height=1079 " "  Virtual-1's box from the layout"
+ddc --bus 1 setvcp 10 5 >/dev/null
+is "$(last)" 'POST /display/external-brightness?x=96&y=1238&width=1728&height=1079 {"brightness": 5}' "  setvcp 10 5: 5 %"
+# An older Bridge refuses the built-in display (409): no level, so Omarchy shows no slider there.
+touch "$T/refuse-builtin"
+rc=0; out=$(ddc --bus 1 getvcp 10 --brief) || rc=$?
+is "$rc:$out" "1:" "an older Bridge's 409 for the built-in display: no answer, no slider"
+rm "$T/refuse-builtin"
+ddc --bus 2 setvcp 10 49 >/dev/null
 
 # 3. Parallels, UTM, Fusion: no box; only the focused output.
 TYPE=parallels

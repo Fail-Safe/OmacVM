@@ -575,6 +575,23 @@ Use it with care: it uses much more battery and makes the Mac warmer.
   -bool true` (a running VM follows at once).
 - How it works: [ADR 0050](../adr/0050-extra-brightness.md).
 
+### In the VM's Display panel
+
+The Display panel in Omarchy's bar (the monitor icon) has the same switches
+from the VM:
+
+- **Brightness**: Omarchy's own slider sets the brightness of the Mac
+  display the VM's window is on, the MacBook's own display too (through
+  macOS, as the brightness keys). The keys and the slider stay in step. It
+  needs **External display brightness** (on by default) and the Bridge.
+- **Extra brightness**, right under it, only on a Mac with an XDR display:
+  Omarchy's own switch, with the same use-with-care (i) as the app's row.
+  Click it, or walk to it with j/k and press Return or Space. It is the
+  app's setting, so the VM window's row and the panel always agree, and it
+  switches only while that VM's window is in front. GPU safe mode dims it.
+  It needs the control centre (on by default). In the VM's terminal:
+  `omacvm extra-brightness [on|off]`.
+
 ## Fast network (experimental, off by default)
 
 `omacvm enable fast-network --vm NAME`, or the **Fast network
