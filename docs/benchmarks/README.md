@@ -11,9 +11,11 @@ end. The tools are in [`src/bench/`](../../src/bench).
 |---|---|---|---|
 | Geekbench 7 CPU | CPU, single-core and multi-core | ✓ | ✓ (Linux ARM preview) |
 | Speedometer 3.1 | web apps: browser and CPU together | ✓ | ✓ |
+| JetStream 2.2 | JavaScript and WebAssembly | ✓ | ✓ |
 | MotionMark 1.3.1 | 2D graphics drawn through the browser | ✓ | ✓ |
 | WebGL Aquarium, 30,000 fish | 3D in the browser, frames per second | ✓ | ✓ |
 | Basemark Web 3.0 | the GPU in the browser: WebGL, canvas, SVG, plus some JavaScript and page tests | ✓ | ✓ |
+| Scrolling (`browser-bench.py scroll`) | Chrome scrolls a long Wikipedia page with its own gesture at 1500 px/s: frames per second, frame-time percentiles and late frames | ✓ | ✓ |
 | Geekbench 7 GPU | GPU compute | ✓ (Metal, OpenCL) | only OmacVM.app with Venus, see below |
 | WebGPU matmul (`browser-bench.py webgpu`) | GPU compute in the browser, GFLOPS | ✓ | only OmacVM.app with Venus |
 | glmark2 | OpenGL ES in the VM, absolute score | ✗ no macOS build | ✓ |
@@ -94,7 +96,7 @@ OmacVM copies its tools into the VM, so they are in
 ### Options
 
 ```text
-bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,basemark,gpu,glmark2] [OUT.jsonl]
+bench.sh [--runs N] [--only geekbench,speedometer,jetstream,motionmark,aquarium,basemark,webgpu,scroll,gpu,glmark2] [OUT.jsonl]
 ```
 
 Each result is one JSON line: host, OS, test, run, value, and the browser
@@ -247,6 +249,46 @@ scores from the page. Geekbench's site turns away plain downloads, so curl
 does not work. Your results are public on Geekbench's site.
 
 ## Results
+
+### Browser, Mac mini M4, OmacVM.app 3.1.27 (2026-10-21)
+
+Mac mini M4 (4 performance + 6 efficiency cores, 16 GB), macOS 27.0, LG UltraFine at 3200x1800 (60 Hz).
+Google Chrome 156 on both sides (the Mac 156.0.8078.48, the VM 156.0.8078.47 with Omarchy's own Chromium
+flags: Wayland, ANGLE on GL over virgl), full screen, the page 1600x870 at 2x on both. The VM: 4 CPUs / 8 GB
+(the mini's Balanced tier), Graphics Automatic (Vulkan on KosmicKrisp; Chrome itself draws with GL). Median of 3;
+a CI job ran during some runs on both sides (marked in the raw data). The tests are `browser-bench.py`'s; each VM
+run also recorded where the time went: QEMU's threads on the Mac and the VM's processes.
+
+| Test | Mac | VM | VM as % of the Mac |
+|---|---|---|---|
+| Speedometer 3.1 | 58.1 | 38.6 | 66 % |
+| JetStream 2.2 | 595 | 487 | 82 % |
+| MotionMark 1.3.1 | 9890 | 3015 | 30 % |
+| WebGL Aquarium, 30,000 fish (fps) | 60.0 (display cap) | 38.6 | 64 % of the cap |
+| Basemark Web 3.0 | 2376 | 1886 | 79 % |
+| WebGPU matmul (GFLOPS) | 1612 | no adapter (1177 in "Chromium (WebGPU)") | - |
+| Scrolling (fps, late frames) | 60.1, 0 % | 60.2, 0 % | 100 % |
+
+Where the time goes in the VM (cores busy on the Mac, QEMU's threads): Speedometer and JetStream are the vCPUs
+(1.0-1.4 cores, the main loop 0.07); WebGL Aquarium is QEMU's main loop (0.85 core: virgl's GL work, the limit),
+plus 0.75 for the vCPUs; MotionMark 1.25 vCPUs + 0.29 main loop. MotionMark per subtest: Paths 8 %, Suits 11 %,
+Canvas Arcs 16 % of the Mac, the rest 30-68 % (2D canvas paths in Skia's GL renderer).
+
+Tried on the same VM, one at a time (median of 3 against the row above):
+
+| Candidate | Result |
+|---|---|
+| Graphite on Dawn-Vulkan, X11 (the "Chromium (WebGPU)" flags, at scale 2) | WebGPU 1177 GFLOPS; Aquarium 23.9 (-38 %), MotionMark 2676 (-11 %: Paths x3.3, Suits x3.3, but Images and Canvas Lines far lower), scrolling 53 fps with 2-6 % late frames: stays a separate entry |
+| Mesa's GL thread for Chrome (`mesa_glthread=true`) | no change (Aquarium 38.5, MotionMark 2983); Chrome's GPU process does not start the thread from the variable |
+| `--enable-zero-copy` | no change (Aquarium 38.8, scrolling the same) |
+| `--ignore-gpu-blocklist`, `--use-angle=gles` | nothing to change: GPU raster is already on and ANGLE already on GLES under Wayland |
+| Chrome fully on Vulkan (ANGLE on Venus, X11) | WebGL 2 works, Aquarium about 40 % lower (MacBook Pro, indication) |
+| 6 vCPUs instead of 4 (mini: 4 performance cores) | Speedometer 39.3 (+2 %, a CI job ran); the guest's page work is one busy thread (Chrome's renderer about 0.8 core) |
+| 4 / 6 / 8 vCPUs (MacBook Pro M4 Max, CPU tests only) | Speedometer 38.2 / 38.6 / 38.8, JetStream 497 / 497 / 474: no gain from more vCPUs |
+
+JetStream's page now and then stops with "Errors were encountered during page load" in the VM (also on the
+MacBook Pro; never on the Mac): `browser-bench.py` loads it once more, and a run that still fails counts as no
+result.
 
 ### MacBook Pro M4 Max, every route (2026-10-09)
 

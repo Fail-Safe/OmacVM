@@ -487,11 +487,17 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   xb=$(grep -o 'cocoa: extra brightness: .*' "$miclog" | grep -v 'display from OMACVM_TEST_EDR' | tail -1)
   xb=${xb#cocoa: extra brightness: }
   [[ -n $xb ]] || xb=$(sed -n 's/^OmacVM: extra brightness: \(off (.*)\)$/\1/p' "$miclog" | grep -v '^off (switch off)$' | tail -1)
+  # ", over HDR": it wins over the VM's HDR while it is on (3.1.30); an older app said "not with HDR yet".
+  xbover=
+  if [[ $xb == *", over HDR" ]]; then
+    xb=${xb%, over HDR}
+    xbover=", over HDR: no HDR highlights while it is on"
+  fi
   case $xb in
-    "on, "*) ok "Extra brightness" "on (${xb#on, } now, experimental)" ;;
-    "held back by macOS, "*) ok "Extra brightness" "on, held back by macOS to ${xb#held back by macOS, } now (the Mac is warm or the panel is bright)" ;;
+    "on, "*) ok "Extra brightness" "on (${xb#on, } now$xbover, experimental)" ;;
+    "held back by macOS, "*) ok "Extra brightness" "on, held back by macOS to ${xb#held back by macOS, } now (the Mac is warm or the panel is bright$xbover)" ;;
     "not on this display"*) skip "Extra brightness" "the VM window's display has no extra brightness ${xb#not on this display }" ;;
-    "not with HDR yet"*) skip "Extra brightness" "off while the VM shows HDR (not with HDR yet)" ;;
+    "not with HDR yet"*) skip "Extra brightness" "off while the VM shows HDR (OmacVM.app before 3.1.30)" ;;
     "off (switch off)"|"") ;;
     "off ("*) warn "Extra brightness" "extra brightness is on, but this run has none ${xb#off }" ;;
   esac

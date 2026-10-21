@@ -2,9 +2,10 @@
 # Extra brightness (ADR 0050, omacvm-cocoa-extra-brightness-logic.patch,
 # omacvm-cocoa-extra-brightness.patch): the logic patch makes
 # ui/omacvm-bright.h in an empty folder, test-extra-brightness.c runs its
-# rules and test-extra-brightness-shader.m its shader on the software renderer. With ui/cocoa.m as argument (the runtime build, after the wiring
-# patch): also that the patched file is wired as tested (and the checks
-# catch code without it).
+# rules and test-extra-brightness-shader.m its shader (sRGB and PQ frames)
+# on the software renderer. With ui/cocoa.m as argument (the runtime build,
+# after the wiring patch): also that the patched file is wired as tested
+# (and the checks catch code without it, and 3.1.29's, where HDR won).
 #   test-extra-brightness.sh                       (CI)
 #   test-extra-brightness.sh <patched ui/cocoa.m>  (the runtime build)
 set -euo pipefail
@@ -22,7 +23,7 @@ cc -fobjc-arc -Wall -Wextra -Werror -I"$work/ui" "$here/test-extra-brightness-sh
 
 bodyx() { awk -v h="$2" '$0 == h {on=1} on {print} on && /^}$/ {exit}' "$1"; }
 problems() {
-  local m=$1 present alloc follow look splash seen init
+  local m=$1 present alloc follow look splash seen init edrnow
   present=$(bodyx "$m" 'static bool cocoa_gl_present(void)')
   alloc=$(bodyx "$m" 'static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear)')
   follow=$(bodyx "$m" 'static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf, bool linear)')
@@ -30,6 +31,7 @@ problems() {
   splash=$(awk '/^static void omacvm_splash_draw_with\(/ {on=1} on {print} on && /^}$/ {exit}' "$m")
   seen=$(bodyx "$m" '- (void)omacvmWindowSeen:(NSNotification *)note')
   init=$(bodyx "$m" 'static void omacvm_bright_init(void)')
+  edrnow=$(bodyx "$m" 'static double omacvm_edr_now(void)')
   grep -q '#include "ui/omacvm-bright.h"' "$m" || echo "ui/omacvm-bright.h is not used"
   # The switch: the app's key, read live (KVO), again when seen; the env for a QEMU not started as the app.
   grep -q 'boolForKey:@"extraBrightness"' "$m" || echo "the app's extraBrightness key is not read"
@@ -50,13 +52,23 @@ problems() {
     echo "the layer does not ask for 2x only (macOS 26+): the panel goes to its most, HDR is capped"
   # Every draw into the present surfaces follows the kind the surfaces have.
   grep -q 'bool boost = present_linear;' <<<"$present" || echo "the kind drawn follows the switch, not the surfaces"
-  grep -q 'omacvm_bright_blit(flip, linear ? gain : OMACVM_BRIGHT_ONE)' <<<"$present" ||
-    echo "the guest's frames skip the gain shader"
+  grep -q 'omacvm_bright_blit(flip, linear ? gain : OMACVM_BRIGHT_ONE, pq)' <<<"$present" ||
+    echo "the guest's frames skip the gain shader (or its PQ decode)"
   grep -q 'omacvm_splash_draw_with(present_gls, present_w, present_h,' <<<"$present" &&
     grep -q '!omacvm_desktop_up, true, boost);' <<<"$present" || echo "the boot logo does not know the surfaces' kind"
   grep -q 'rgb\[i\] = omacvm_bright_linear(rgb\[i\]);' <<<"$splash" || echo "the boot logo's clear colour is not decoded in linear surfaces"
-  grep -q 'omacvm_bright_blit(top_first, OMACVM_BRIGHT_ONE)' <<<"$splash" || echo "the boot logo skips the gain shader in linear surfaces"
-  grep -q 'bool linear = !splash && !pq' <<<"$present" || echo "the boot logo or PQ frames are boosted"
+  grep -q 'omacvm_bright_blit(top_first, OMACVM_BRIGHT_ONE, false)' <<<"$splash" || echo "the boot logo skips the gain shader in linear surfaces"
+  # It wins over HDR: PQ frames are boosted too (decoded, clipped at SDR white), the boot logo is not.
+  grep -q 'bool linear = !splash && qatomic_read(&omacvm_bright_wanted)' <<<"$present" || echo "the boot logo is boosted"
+  ! grep -q 'bool linear = !splash && !pq' <<<"$present" || echo "PQ frames are not boosted (HDR wins: not with HDR yet)"
+  grep -q 'glUniform1f(omacvm_bright_u_pq, pq ? 1.0f : 0.0f);' "$m" || echo "the shader is not told which frames are PQ"
+  # The guest is told headroom 1 while boosted, only after the cases where PQ cannot be shown at all.
+  grep -q 'qatomic_read(&omacvm_bright_wanted)' <<<"$edrnow" || echo "the guest is not told headroom 1 while boosted"
+  awk '/return -1;/ {a=NR} /return 0;/ {b=NR} /qatomic_read\(&omacvm_bright_wanted\)/ {c=NR}
+       END {exit !(a && b && c && a < c && b < c)}' <<<"$edrnow" ||
+    echo "headroom 1 for the boost comes before 'HDR not wanted' or 'PQ cannot be shown'"
+  grep -q 'omacvm_edr_look();' <<<"$look" && grep -q 'want != was && omacvm_guest_ready' <<<"$look" ||
+    echo "turning it on or off does not tell the guest its headroom at once"
   [[ $(grep -c 'qemu_gl_run_texture_blit(present_gls' "$m") == 1 ]] || echo "another blit into the present surfaces"
   # Each frame's kind reaches the layer with the frame.
   grep -q 'cocoa_gl_present_queue_frame(surf, filter, flushed, boost);' "$m" &&
@@ -69,12 +81,12 @@ problems() {
   # A redraw on a change, in both present modes; the look stops when not needed.
   grep -q 'omacvm_bright_bh = aio_bh_new(iohandler_get_aio_context(),' "$m" || echo "no redraw on a change (static desktop)"
   grep -q 'qemu_bh_schedule(omacvm_bright_bh);' <<<"$look" || echo "a change does not redraw"
-  grep -q 'omacvm_bright_timer_run(want && !pq && seen);' <<<"$look" || echo "the look does not stop when off, unseen or not on this display"
+  grep -q 'omacvm_bright_timer_run(want && seen);' <<<"$look" || echo "the look does not run over HDR, or does not stop when off, unseen or not on this display"
   grep -q 'omacvm_bright_gain(now, potential)' <<<"$look" || echo "the gain is not the window's display's"
   grep -q 'getenv("OMACVM_TEST_EDR")' "$m" || echo "no test hook for the display"
 }
 
-# The checks catch code without it (3.1.27's present).
+# The checks catch code without it (3.1.27's present), and 3.1.29's (PQ frames never boosted).
 cat > "$work/old.m" <<'EOF2'
 static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf)
 {
@@ -98,6 +110,50 @@ old=$(problems "$work/old.m")
 for want in "key is not read" "not watched" "no EDR for extra brightness" "skip the gain shader" "clear colour" "no redraw"; do
   [[ $old == *"$want"* ]] || { echo "test-extra-brightness: the checks miss the old code: $want" >&2; exit 1; }
 done
+cat > "$work/old3129.m" <<'EOF2'
+static bool cocoa_gl_present(void)
+{
+    bool linear = !splash && !pq && qatomic_read(&omacvm_bright_wanted) &&
+                  !qatomic_read(&present_deep_failed) && omacvm_bright_program();
+        if (!boost || !omacvm_bright_blit(flip, linear ? gain : OMACVM_BRIGHT_ONE)) {
+            qemu_gl_run_texture_blit(present_gls, flip);
+        }
+}
+static double omacvm_edr_now(void)
+{
+    if (!cocoa_gl_present_hdr_wanted()) {
+        return -1;
+    }
+    if (!present_ctx || qatomic_read(&present_deep_failed) || present_color == 0) {
+        return 0;
+    }
+}
+static void omacvm_bright_look(void)
+{
+    omacvm_bright_timer_run(want && !pq && seen);
+}
+EOF2
+old=$(problems "$work/old3129.m")
+for want in "PQ frames are not boosted" "its PQ decode" "not told which frames are PQ" "not told headroom 1" "does not run over HDR" "at once"; do
+  [[ $old == *"$want"* ]] || { echo "test-extra-brightness: the checks miss 3.1.29's code: $want" >&2; exit 1; }
+done
+# The order in omacvm_edr_now: headroom 1 before "PQ cannot be shown" is caught.
+cat > "$work/order.m" <<'EOF2'
+static double omacvm_edr_now(void)
+{
+    if (qatomic_read(&omacvm_bright_wanted)) {
+        return 1;
+    }
+    if (!cocoa_gl_present_hdr_wanted()) {
+        return -1;
+    }
+    if (!present_ctx || qatomic_read(&present_deep_failed) || present_color == 0) {
+        return 0;
+    }
+}
+EOF2
+[[ $(problems "$work/order.m") == *"comes before 'HDR not wanted'"* ]] ||
+  { echo "test-extra-brightness: the checks miss headroom 1 put before the cases where PQ cannot be shown" >&2; exit 1; }
 
 (( $# )) || exit 0
 m=$1

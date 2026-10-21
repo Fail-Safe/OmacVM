@@ -2,19 +2,22 @@ From: OmacVM
 Subject: [PATCH] ui: extra brightness's gain and shader, tested without AppKit
 
 What: a header with no AppKit in it, for extra brightness (ADR 0050): the
-gain QEMU gives the guest's SDR frames (the window's display's EDR
-headroom now, at most 2x, never above it, only on a display whose EDR
-potential is above 2.05), when the newest frame is drawn again (a move of
-0.02 or more), the states qemu.log names (on and "held back" with a
-little hysteresis), the sRGB decode, and the GLSL of the shader that
-decodes the guest's sRGB frames to linear light and multiplies them.
-Used by omacvm-cocoa-extra-brightness.patch (which explains the why).
+gain QEMU gives the guest's frames (the window's display's EDR headroom
+now, at most 2x, never above it, only on a display whose EDR potential is
+above 2.05), when the newest frame is drawn again (a move of 0.02 or
+more), the states qemu.log names (on and "held back" with a little
+hysteresis), the sRGB and PQ decodes, and the GLSL of the shader that
+decodes the guest's frames to linear light and multiplies them. A PQ
+frame (the guest's HDR) is decoded to nits, SDR white (203 nits) is 1,
+each channel is clipped there and turned from BT.2020 to sRGB's
+primaries: so extra brightness wins over HDR. Used by
+omacvm-cocoa-extra-brightness.patch (which explains the why).
 
 Why its own file: so the rules and the shader are tested without QEMU or
 a window (app/runtime/Tests/display/test-extra-brightness.sh applies this
 patch to an empty folder, at build time and in CI;
 test-extra-brightness-shader.m runs the same GLSL on Apple's software
-renderer).
+renderer, with every 8-bit sRGB and 10-bit PQ code).
 
 Upstream: OmacVM only.
 Test: app/runtime/Tests/display/test-extra-brightness.c,
@@ -24,20 +27,25 @@ diff --git a/ui/omacvm-bright.h b/ui/omacvm-bright.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-bright.h
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,203 @@
 +/*
 + * OmacVM, extra brightness (ADR 0050): the gain QEMU's present gives the
-+ * guest's SDR frames on a display with EDR headroom above 2x (an XDR
-+ * panel). No AppKit in here, so it is tested on its own
++ * guest's frames on a display with EDR headroom above 2x (an XDR panel).
++ * No AppKit in here, so it is tested on its own
 + * (app/runtime/Tests/display/test-extra-brightness.sh); ui/cocoa.m feeds it
 + * NSScreen's values and compiles the shader below on its present context.
 + *
 + * With the app's switch the frames go through the shader into half-float
-+ * surfaces in extended linear sRGB: decoded from sRGB, times g. g follows
-+ * the window's display's headroom now, at most 2 (OMACVM_BRIGHT_TARGET),
-+ * never above what the display shows now, so nothing is clipped. macOS
-+ * lowers the headroom when the Mac is hot or the panel is bright; g follows
-+ * it down.
++ * surfaces in extended linear sRGB: decoded to linear light, times g. g
++ * follows the window's display's headroom now, at most 2
++ * (OMACVM_BRIGHT_TARGET), never above what the display shows now, so
++ * nothing is clipped. macOS lowers the headroom when the Mac is hot or the
++ * panel is bright; g follows it down.
++ *
++ * It wins over HDR: a PQ frame (the guest's HDR, ADR 0049) is decoded to
++ * nits, SDR white (203 nits, the Mac's white) is 1, everything above it
++ * is clipped there, and then times g as an SDR frame. So SDR white is at g
++ * and HDR highlights are no brighter than it while the switch is on.
 + */
 +#ifndef OMACVM_BRIGHT_H
 +#define OMACVM_BRIGHT_H
@@ -56,6 +64,15 @@ new file mode 100644
 +#define OMACVM_BRIGHT_MIN_POTENTIAL 2.05
 +/* Gains are in hundredths: 100 = the Mac's white as it is. */
 +#define OMACVM_BRIGHT_ONE 100
++
++/* BT.2100 PQ (SMPTE ST 2084): the decode's constants. */
++#define OMACVM_BRIGHT_PQ_M1 0.1593017578125     /* 2610 / 16384 */
++#define OMACVM_BRIGHT_PQ_M2 78.84375            /* 2523 / 4096 x 128 */
++#define OMACVM_BRIGHT_PQ_C1 0.8359375           /* 3424 / 4096 */
++#define OMACVM_BRIGHT_PQ_C2 18.8515625          /* 2413 / 4096 x 32 */
++#define OMACVM_BRIGHT_PQ_C3 18.6875             /* 2392 / 4096 x 32 */
++/* SDR white in a PQ frame: BT.2408's 203 nits, the Mac's white (ADR 0049). */
++#define OMACVM_BRIGHT_SDR_NITS 203.0
 +
 +/* The window's display can show it. */
 +static inline bool omacvm_bright_display(double potential)
@@ -92,17 +109,17 @@ new file mode 100644
 +    OMACVM_BRIGHT_ON,           /* at about the target */
 +    OMACVM_BRIGHT_HELD,         /* macOS gives less headroom now */
 +    OMACVM_BRIGHT_NO_DISPLAY,   /* the window's display has no headroom above 2x */
-+    OMACVM_BRIGHT_NO_HDR,       /* the guest sends PQ (HDR): not with HDR yet */
 +    OMACVM_BRIGHT_NO_PATH,      /* no IOSurface present, no half-float surfaces, no shader */
 +} OmacVMBright;
 +
 +/*
 + * The state for the log. "On" from 1.95x, "held back" below 1.90x; in
 + * between it stays what it was, so a headroom that wobbles around 1.9
-+ * does not fill the log.
++ * does not fill the log. The same with SDR and PQ frames (cocoa.m adds
++ * "over HDR" to the line).
 + */
 +static inline OmacVMBright omacvm_bright_state(OmacVMBright prev, bool on, bool path,
-+                                               double potential, bool pq, int gain)
++                                               double potential, int gain)
 +{
 +    if (!on) {
 +        return OMACVM_BRIGHT_OFF;
@@ -112,9 +129,6 @@ new file mode 100644
 +    }
 +    if (!omacvm_bright_display(potential)) {
 +        return OMACVM_BRIGHT_NO_DISPLAY;
-+    }
-+    if (pq) {
-+        return OMACVM_BRIGHT_NO_HDR;
 +    }
 +    if (gain >= 195) {
 +        return OMACVM_BRIGHT_ON;
@@ -132,11 +146,53 @@ new file mode 100644
 +    return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
 +}
 +
++/* A PQ-encoded 0..1 to nits (ST 2084), as the shader does. */
++static inline double omacvm_bright_pq_nits(double e)
++{
++    double p;
++
++    e = e < 0 ? 0 : e > 1 ? 1 : e;
++    p = pow(e, 1.0 / OMACVM_BRIGHT_PQ_M2);
++    return 10000.0 * pow(fmax(p - OMACVM_BRIGHT_PQ_C1, 0.0) /
++                         (OMACVM_BRIGHT_PQ_C2 - OMACVM_BRIGHT_PQ_C3 * p),
++                         1.0 / OMACVM_BRIGHT_PQ_M1);
++}
++
++/*
++ * BT.2020 to BT.709 (sRGB's primaries), linear light, by rows (BT.2087).
++ * The shader's mat3 has the same numbers by columns. Colours outside sRGB
++ * come out below 0 or above 1 and stay so: the surfaces are extended
++ * linear sRGB.
++ */
++#define OMACVM_BRIGHT_2020_TO_709 { \
++    {  1.6604910, -0.5876411, -0.0728499 }, \
++    { -0.1245505,  1.1328999, -0.0083494 }, \
++    { -0.0181508, -0.1005789,  1.1187297 } }
++
++/*
++ * A PQ pixel (BT.2020) to linear light in sRGB's primaries at 1x, as the
++ * shader's PQ branch: each channel to nits, over SDR white, clipped at 1
++ * (SDR white: nothing brighter, as Hyprland's own clamp), then to BT.709.
++ */
++static inline void omacvm_bright_pq_linear(const double e[3], double out[3])
++{
++    static const double m[3][3] = OMACVM_BRIGHT_2020_TO_709;
++    double n[3];
++
++    for (int i = 0; i < 3; i++) {
++        n[i] = fmin(omacvm_bright_pq_nits(e[i]) / OMACVM_BRIGHT_SDR_NITS, 1.0);
++    }
++    for (int i = 0; i < 3; i++) {
++        out[i] = m[i][0] * n[0] + m[i][1] * n[1] + m[i][2] * n[2];
++    }
++}
++
 +/*
 + * The shader (desktop GL core, as QEMU's own blit): the bound texture
 + * into the bound framebuffer. yflip -1: the texture's first row is the
-+ * top (QEMU's texture_blit), 1: the bottom (texture_blit_flip). The
-+ * guest's sRGB values are decoded to linear light and multiplied by gain.
++ * top (QEMU's texture_blit), 1: the bottom (texture_blit_flip). pq 0: the
++ * guest's sRGB values are decoded to linear light; pq 1: its PQ values
++ * (BT.2020) as omacvm_bright_pq_linear. Then times gain.
 + */
 +#define OMACVM_BRIGHT_VERT \
 +    "#version 140\n" \
@@ -152,13 +208,25 @@ new file mode 100644
 +    "#version 140\n" \
 +    "uniform sampler2D image;\n" \
 +    "uniform float gain;\n" \
++    "uniform float pq;\n" \
 +    "in vec2 ex_tex_coord;\n" \
 +    "out vec4 out_frag_color;\n" \
++    "const mat3 to709 = mat3( 1.6604910, -0.1245505, -0.0181508,\n" \
++    "                        -0.5876411,  1.1328999, -0.1005789,\n" \
++    "                        -0.0728499, -0.0083494,  1.1187297);\n" \
 +    "void main(void) {\n" \
 +    "    vec4 c = texture(image, ex_tex_coord);\n" \
 +    "    vec3 s = clamp(c.rgb, 0.0, 1.0);\n" \
-+    "    vec3 lin = mix(pow((s + 0.055) / 1.055, vec3(2.4)), s / 12.92,\n" \
-+    "                   vec3(lessThanEqual(s, vec3(0.04045))));\n" \
++    "    vec3 lin;\n" \
++    "    if (pq > 0.5) {\n" \
++    "        vec3 p = pow(s, vec3(1.0 / 78.84375));\n" \
++    "        vec3 nits = 10000.0 * pow(max(p - 0.8359375, 0.0) / (18.8515625 - 18.6875 * p),\n" \
++    "                                  vec3(1.0 / 0.1593017578125));\n" \
++    "        lin = to709 * min(nits / 203.0, vec3(1.0));\n" \
++    "    } else {\n" \
++    "        lin = mix(pow((s + 0.055) / 1.055, vec3(2.4)), s / 12.92,\n" \
++    "                  vec3(lessThanEqual(s, vec3(0.04045))));\n" \
++    "    }\n" \
 +    "    out_frag_color = vec4(lin * gain, c.a);\n" \
 +    "}\n"
 +

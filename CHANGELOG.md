@@ -3,7 +3,25 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 3.1.30
+
+- **Brightness and Extra brightness in the VM's Display panel.** Omarchy's brightness slider now
+  also sets the MacBook's own display (through the Bridge, as the brightness keys), and on a Mac
+  with an XDR display an Omarchy-style **Extra brightness** switch sits right under it, with the
+  same use-with-care (i), in step with the app's row (OmacVM.app; switches only while that VM's
+  window is in front). In the VM's terminal: `omacvm extra-brightness [on|off]`.
+- **Extra brightness works with HDR.** With "HDR and 10-bit colour" on, Extra brightness now wins
+  while it is on: the VM's picture gets up to 2x brighter, HDR highlights do not; turned off, HDR
+  is back at once, in a running VM. Before, it stayed off over HDR ("not with HDR yet").
+- **Extra brightness keeps your setting.** On or off, it stays as you last set it in the app or
+  the VM's Display panel: through a restart of the VM or the Mac, Update VM and app updates, HDR
+  or GPU safe mode switched, and a start on a display without it. Its (i) says so now.
+- **Chromium (WebGPU) at the display's scale.** The "Chromium (WebGPU)" menu entry runs Chromium
+  on X11, which does not see Omarchy's display scale: on a Retina display its pages and menus came
+  out at half size. It now opens at the scale of the display it starts on (a scale you set
+  yourself, on its command line or in `chromium-flags.conf`, still wins).
+
+## 3.1.29
 
 - **Extra brightness (experimental, off by default).** On a MacBook Pro's XDR display (or another
   display with more than 2x headroom), the VM window's Display settings have a switch that makes

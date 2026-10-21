@@ -86,6 +86,10 @@ on the branch.
   drops, which needs steady frame timing. Chrome's frames on the virgl routes
   come too unevenly for that, even at the lowest complexity. Animations and
   scrolling still look smooth in use; the benchmark can't settle.
+- **Since:** OmacVM.app 3.1.27 (Mac mini M4, Chrome 156, 2026-10-21) it
+  settles: 2981, 3015 and 3069 at 60 fps (±2.8 %), 30 % of Chrome on the Mac
+  (9890). Per subtest, 2D canvas paths are the gap: Paths 8 %, Suits 11 %,
+  Canvas Arcs 16 % of the Mac, the others 30 to 68 %.
 - **Where:** `src/bench/browser-bench.py` prints the subtest breakdown.
 
 ## 17. Security review of the Mac and guest sides

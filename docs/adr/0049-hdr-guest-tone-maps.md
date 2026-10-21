@@ -2,8 +2,10 @@
 
 Status: accepted, built (`hdr`), behind the app's experimental switch
 "HDR and 10-bit colour" (`hdr`, off). Amends
-[0021](0021-colour-deep-colour-hdr.md). Notes and numbers:
-work/tracks/hdr.md.
+[0021](0021-colour-deep-colour-hdr.md). Amended by
+[0050](0050-extra-brightness.md) (2026-10-21): while Extra brightness is
+on, the guest is told headroom 1 and its PQ frames end at SDR white.
+Notes and numbers: work/tracks/hdr.md.
 
 ## Context
 

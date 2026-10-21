@@ -282,6 +282,21 @@ wg --nonsense; [[ $? == 2 ]] && pass "webgpu.sh: unknown option: usage" || fail 
 wg; has && [[ ! -e $W/usr/share/applications/omacvm-chromium-webgpu.desktop ]] &&
   pass "webgpu.sh without Chromium: launcher, no menu entry" || fail "webgpu.sh without Chromium"
 
+# The launcher on X11 gets the scale of the focused display (Chrome on X11 does not see Hyprland's;
+# on a Retina display it drew at half size), unless its command line or the flags file sets one.
+mkdir -p "$T/lb" "$T/lh/.config"
+printf '#!/bin/bash\necho "$@"\n' > "$T/lb/chromium"
+printf '#!/bin/bash\necho %s\n' "'[{\"focused\":false,\"scale\":1},{\"focused\":true,\"scale\":1.6}]'" > "$T/lb/hyprctl"
+chmod +x "$T/lb/chromium" "$T/lb/hyprctl"
+lw() { HOME=$T/lh XDG_CONFIG_HOME= DISPLAY=:0 PATH="$T/lb:$PATH" "$D/omacvm-chromium-webgpu" "$@"; }
+[[ $(lw https://a.example) == "--ozone-platform=x11 --enable-skia-graphite --skia-graphite-dawn-backend=vulkan --force-device-scale-factor=1.6 https://a.example" ]] &&
+  pass "WebGPU launcher: the focused display's scale" || fail "WebGPU launcher: scale missing ($(lw https://a.example))"
+[[ $(lw --force-device-scale-factor=2) != *1.6* ]] && pass "WebGPU launcher: a scale on its command line wins" ||
+  fail "WebGPU launcher overrode the command line's scale"
+echo "--force-device-scale-factor=1.25" > "$T/lh/.config/chromium-flags.conf"
+[[ $(lw) != *force-device-scale-factor* ]] && pass "WebGPU launcher: a scale in chromium-flags.conf wins" ||
+  fail "WebGPU launcher overrode chromium-flags.conf's scale"
+
 # mpv's defaults (venus/mpv.sh): vo=gpu in every app VM (gpu-next leaks a fence fd per frame on
 # virgl), gpu-api=opengl while the VM has Venus; a marked block of the system mpv.conf that keeps the
 # rest of the file.

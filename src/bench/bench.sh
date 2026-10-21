@@ -1,13 +1,13 @@
 #!/bin/bash
 # Benchmarks, the same way on the Mac and in a VM, so the routes compare.
-#   bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,basemark,webgpu,gpu,glmark2] [OUT.jsonl]
+#   bench.sh [--runs N] [--only geekbench,speedometer,jetstream,motionmark,aquarium,basemark,webgpu,scroll,gpu,glmark2] [OUT.jsonl]
 # Google Chrome everywhere (in a VM: install-chrome.sh first), run as the
 # desktop user in the session. Each test runs N times (default 3); every result is a
 # JSON line in OUT (default ./bench-<host>-<date>.jsonl).
 # Geekbench's free version uploads each result to browser.geekbench.com.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-RUNS=3; ONLY=geekbench,speedometer,motionmark,aquarium,basemark,gpu
+RUNS=3; ONLY=geekbench,speedometer,jetstream,motionmark,aquarium,basemark,scroll,gpu
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --runs) RUNS=$2; shift 2 ;;
@@ -94,7 +94,7 @@ if want gpu; then
   done
 fi
 
-# ---- browser: Speedometer 3.1, MotionMark 1.3.1, WebGL Aquarium, Basemark Web 3.0 ----
+# ---- browser: Speedometer 3.1, JetStream 2.2, MotionMark 1.3.1, WebGL Aquarium, Basemark Web 3.0, scrolling ----
 browser_start() {
   PROFILE=$(mktemp -d)
   if [[ $OS == Darwin ]]; then
@@ -102,7 +102,7 @@ browser_start() {
     mkdir -p "$PROFILE/Default"
     echo '{"browser":{"show_fullscreen_toolbar":false}}' > "$PROFILE/Default/Preferences"
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --user-data-dir="$PROFILE" \
-      --remote-debugging-port=9222 --no-first-run --no-default-browser-check --start-fullscreen about:blank \
+      --remote-debugging-port=9222 --no-first-run --no-default-browser-check --start-fullscreen --enable-gpu-benchmarking about:blank \
       >/dev/null 2>&1 &
   else
     # Google Chrome, as on the Mac (install-chrome.sh); Arch's Chromium is slower.
@@ -123,17 +123,17 @@ browser_start() {
       envs=(MESA_VK_WSI_DEBUG=sw DISPLAY="${DISPLAY:-:0}")
     fi
     env ${envs[@]+"${envs[@]}"} /opt/google/chrome/google-chrome "${flags[@]}" "${plat[@]}" --user-data-dir="$PROFILE" --remote-debugging-port=9222 \
-      --no-first-run --no-default-browser-check --start-fullscreen about:blank >/dev/null 2>&1 &
+      --no-first-run --no-default-browser-check --start-fullscreen --enable-gpu-benchmarking about:blank >/dev/null 2>&1 &
   fi
   BROWSER=$!
   for _ in $(seq 30); do curl -fs http://127.0.0.1:9222/json/version >/dev/null && return 0; sleep 1; done
   echo "the browser did not start" >&2; return 1
 }
 browser_stop() { kill "$BROWSER" 2>/dev/null; wait "$BROWSER" 2>/dev/null; rm -rf "$PROFILE" "$PROFILE.err"; }
-if want speedometer || want motionmark || want aquarium || want basemark || want webgpu; then
+if want speedometer || want jetstream || want motionmark || want aquarium || want basemark || want webgpu || want scroll; then
   browser_start || exit 1
   version=$(curl -fs http://127.0.0.1:9222/json/version | python3 -c 'import json,sys; print(json.load(sys.stdin)["Browser"])')
-  for t in speedometer motionmark aquarium basemark webgpu; do
+  for t in speedometer jetstream motionmark aquarium basemark webgpu scroll; do
     want $t || continue
     for ((i = 1; i <= RUNS; i++)); do
       say "$t, run $i/$RUNS ($version)"
