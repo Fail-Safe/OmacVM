@@ -289,7 +289,8 @@ EXTRA_TIP = ("Makes the VM's main window up to about twice as bright as the Mac'
              "battery and makes the Mac warmer; macOS turns it down when the Mac gets hot. "
              "With HDR and 10-bit colour on, this wins while it is on: the picture gets brighter, "
              "HDR highlights do not. Off, HDR is back at once. "
-             "It ends when the VM stops. Experimental. The same switch as Extra brightness "
+             "It ends when the VM stops; the switch keeps your setting for the next start. "
+             "Experimental. The same switch as Extra brightness "
              "in the VM's settings on the Mac.")
 # PanelToolTip's text has no width or wrap: the lines are broken here.
 EXTRA_TIP_WIDTH = 60

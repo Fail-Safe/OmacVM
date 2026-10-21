@@ -756,5 +756,39 @@ expect(rate.take(at: 11.05), "VM switch: a second after the first: allowed again
 var rate2 = WriteRate()
 expect(rate2.take(at: 100) && rate2.take(at: 50), "VM switch: the clock going back does not lock it")
 
+// MARK: The switch keeps the user's setting: only a POST from the user's own switch writes, and only the value it names.
+
+var ebContexts: [ExtraBrightnessGuest.Context] = []
+for display in [false, true] { for safe in [false, true] { for front in [false, true] { for on in [false, true] {
+    ebContexts.append(ExtraBrightnessGuest.Context(display: display, safeMode: safe, front: front, on: on))
+} } } }
+var ebReadWrites = 0, ebReadAsked = 0, ebWrongValue = 0, ebStateLies = 0
+for c in ebContexts {
+    // Reading (the panel opening, its 1 s refresh, `omacvm extra-brightness`) never writes and never takes a write slot.
+    if case .set = ExtraBrightnessGuest.decide(method: "GET", path: ebPath, body: nil, c, writeAllowed: { ebReadAsked += 1; return true }) {
+        ebReadWrites += 1
+    }
+    // A write is exactly the value the switch sent, whatever the switch is now: never a toggle, never a default.
+    for want in [false, true] {
+        let d = ExtraBrightnessGuest.decide(method: "POST", path: ebPath, body: ebBody(want ? #"{"on": true}"# : #"{"on": false}"#), c) { true }
+        if case .set(let v) = d, v != want { ebWrongValue += 1 }
+    }
+    // The answer is the stored switch as it is, also with no display or GPU safe mode (the panel shows the user's setting).
+    if ExtraBrightnessGuest.state(c)["on"] as? Bool != c.on { ebStateLies += 1 }
+}
+expect(ebReadWrites == 0 && ebReadAsked == 0, "VM switch: reading never writes, in any state (16 cases)")
+expect(ebWrongValue == 0, "VM switch: a write is the value sent, never the opposite or a default")
+expect(ebStateLies == 0, "VM switch: the answer's on is the stored switch, also without a display or in GPU safe mode")
+let ebRefused = ebContexts.filter { !$0.display || $0.safeMode || !$0.front }
+expect(ebRefused.allSatisfy { c in
+    [#"{"on": true}"#, #"{"on": false}"#].allSatisfy {
+        if case .refuse(409, _) = ExtraBrightnessGuest.decide(method: "POST", path: ebPath, body: ebBody($0), c, writeAllowed: { true }) { return true }
+        return false
+    }
+}, "VM switch: no display, GPU safe mode or another VM in front: refused, the stored switch stays")
+expect(ExtraBrightness.start(on: true, display: false, gpuSafeMode: false, layerPresent: false).why == "no display with extra brightness"
+       && ExtraBrightness.start(on: true, display: true, gpuSafeMode: true, layerPresent: false).why == "GPU safe mode",
+       "extra brightness: a start without it says why; the switch is not touched (the start only reads it)")
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)

@@ -564,7 +564,11 @@ Use it with care: it uses much more battery and makes the Mac warmer.
   turns it down when the Mac gets hot or the panel is already bright, and
   gives none at the display's lowest brightness.
 - It ends by itself when the VM stops, its window is hidden or on another
-  Space, or you turn it off. The switch stays as you set it.
+  Space, or you turn it off. The switch keeps your setting, on or off, from
+  the app or the VM's panel: through a restart of the VM or the Mac, Update
+  VM and app updates, HDR or GPU safe mode switched, and a start on a
+  display without it (no switch shown there; it works again on the XDR
+  display). Only you change it.
 - Only the VM's main window; the rest of the screen, other displays and
   screenshots stay at normal brightness.
 - With HDR and 10-bit colour on, this wins while it is on: the picture

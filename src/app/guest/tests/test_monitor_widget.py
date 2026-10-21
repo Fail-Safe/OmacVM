@@ -6,6 +6,7 @@
 import importlib.machinery
 import importlib.util
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -160,6 +161,43 @@ class Build(unittest.TestCase):
         self.assertIn("Commons.Color.accent", row)
         self.assertNotIn(" Color.accent", row.replace("Commons.Color.accent", ""))
 
+    def test_extra_brightness_writes_only_on_a_click(self):
+        # The switch keeps the user's setting: the panel writes it only from its own click or key, as the
+        # opposite of what the app last answered. Opening, the 1 s refresh, Omarchy's refresh and a VM start
+        # only read; before the app's first answer there is no row, so nothing can be written back.
+        self.assertEqual(self.build(), 0)
+        text = (self.out / "Panel.qml").read_text()
+        toggle = text[text.index("  function toggleMacExtra() {"):text.index("  function macExtraAnswer(text)")]
+        # One write in the whole panel, in toggleMacExtra, behind its guard.
+        self.assertEqual(text.count('root.macExtraOn ? "on" : "off"'), 1)
+        self.assertEqual(text.count("macExtraSetProc.running = true"), 1)
+        self.assertIn('root.macExtraOn ? "on" : "off"', toggle)
+        self.assertIn("macExtraSetProc.running = true", toggle)
+        self.assertEqual(toggle.split("\n")[1],
+                         "    if (!root.macExtraShown || root.macExtraSafe || root.macExtraBusy) return")
+        # No row (and no switch) until the app has answered: shown only from an answer.
+        self.assertIn("  property bool macExtraShown: false\n", text)
+        self.assertEqual(re.findall(r"root\.macExtraShown = [^\n]*", text), ["root.macExtraShown = s.display"])
+        # The switch shows the app's answer, a click, or a refused click undone; nothing else sets it.
+        self.assertEqual(sorted(re.findall(r"root\.macExtraOn = [^\n]*", text)),
+                         ["root.macExtraOn = !root.macExtraOn", "root.macExtraOn = !root.macExtraOn",
+                          "root.macExtraOn = s.on === true"])
+        self.assertIn("    root.macExtraOn = !root.macExtraOn\n    root.macExtraBusy = true\n", toggle)
+        # The reader only asks.
+        self.assertIn('    command: ["/usr/bin/env", "/usr/local/bin/omacvm", "extra-brightness", "--json"]\n', text)
+        # Called from the row's click and Return/Space on its row only.
+        lines = text.split("\n")
+        calls = [i for i, line in enumerate(lines) if "toggleMacExtra()" in line and "function" not in line]
+        self.assertEqual([lines[i].strip() for i in calls], ["toggleMacExtra()", "onClicked: root.toggleMacExtra()"])
+        self.assertEqual(lines[calls[0] - 1].strip(), 'if (focusSection === "extra") {')
+        # Opening the panel and the timer ask, never switch.
+        opened = text[text.index("    function onOpenedChanged() {"):text.index("  // The app's own row")]
+        timer = text[text.index("  Timer {\n    interval: 1000"):text.index("  BarIconButton {")]
+        for part in (opened, timer):
+            self.assertIn("askMacExtra()", part)
+            self.assertNotIn("toggleMacExtra", part)
+            self.assertNotIn('"on"', part)
+
     def test_extra_brightness_tip(self):
         # PanelToolTip neither wraps nor limits its width: the text comes in lines.
         tip = build.extra_tip()
@@ -173,6 +211,10 @@ class Build(unittest.TestCase):
         rows = APP_ROWS.read_text() if APP_ROWS.is_file() else ""
         if "With HDR and 10-bit colour on" in rows:
             self.assertIn(hdr, rows)
+        # Both say the switch stays as the user set it.
+        self.assertIn("the switch keeps your setting for the next start", " ".join(tip.split("\n")))
+        if rows:
+            self.assertIn("The switch keeps your setting for the next start", rows)
 
     def test_extra_brightness_needs_omarchys_parts(self):
         # Without Omarchy's ToggleSwitch (or one without busy) or PanelToolTip the

@@ -192,4 +192,35 @@ dump
 expect "omacvm notch --skip off: Alpha off, Beta on" "false true" "$(val vms.0.notchSkip) $(val vms.1.notchSkip)"
 expect "  the file the window and the CLI share" "on" "$(cat "$V/Beta/notch-skip")"
 
+# (f) Extra brightness keeps the user's setting, off as well as on. Only the user's switches write
+# it (the row, the VM's Display panel, defaults write); a start reads it. Each step: what a start
+# reads (`t start`, as Runner.start), then a new launch's dump. OMACVM_TEST_EDR stands in for the
+# display: 16,2.4 an XDR panel, 1,1 an SDR monitor (a MacBook in clamshell: no row, no extra brightness).
+defaults delete "$D" hdr
+for want in false true; do
+  run set extraBrightness $want || { echo "FAIL set extraBrightness $want"; fail=1; }
+  for step in "XDR" "GPU safe mode on" "GPU safe mode off" "HDR on" "HDR off" "an SDR monitor only" "XDR again" "a second VM's start"; do
+    case $step in
+      "GPU safe mode on") defaults write "$D" gpuSafeMode -bool true ;;
+      "GPU safe mode off") defaults delete "$D" gpuSafeMode ;;
+      "HDR on") run set hdr true ;;
+      "HDR off") run set hdr false ;;
+    esac
+    edr=16,2.4; [[ $step == "an SDR monitor only" ]] && edr=1,1
+    s=$(OMACVM_TEST_EDR=$edr run start)
+    case $want/$step in
+      false/*) w="extra false (switch off)" ;;
+      true/"GPU safe mode on") w="extra false (GPU safe mode)" ;;
+      true/"an SDR monitor only") w="extra false (no display with extra brightness)" ;;
+      true/*) w="extra true (up to 2x on a display with the headroom)" ;;
+    esac
+    expect "Extra brightness $want, $step: the start's answer" "$w" "${s%%, hdr*}"
+    dump
+    expect "Extra brightness $want, $step: the switch still $want" $want "$(val app.extraBrightness)"
+  done
+  expect "Extra brightness $want: the key as the switch left it" "$([[ $want == true ]] && echo 1 || echo 0)" \
+    "$(defaults read "$D" extraBrightness)"
+done
+expect "Extra brightness: HDR's own switch as set last" false "$(val app.hdr)"
+
 exit $fail
