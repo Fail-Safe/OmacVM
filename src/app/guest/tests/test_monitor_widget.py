@@ -136,6 +136,10 @@ class Build(unittest.TestCase):
         self.assertIn("    root.askMacExtra()\n", text)
         self.assertIn("root.macExtraAsk = false", text)
         self.assertIn("function onOpenedChanged()", text)
+        # The app's row switched on the Mac: the open panel asks every second (Omarchy's refresh is 5 s),
+        # and not at all once there is no app answer.
+        self.assertIn("  Timer {\n    interval: 1000\n    running: root.opened && root.macExtraAsk\n"
+                      "    repeat: true\n    onTriggered: root.askMacExtra()\n  }\n", text)
         # A reading that started before a click (the 5 s refresh) is dropped, and none starts while
         # a click is on its way: the switch never jumps back to the old state.
         self.assertIn("    root.macExtraSeq += 1\n    root.macExtraOn = !root.macExtraOn\n", text)

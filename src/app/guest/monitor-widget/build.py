@@ -394,6 +394,16 @@ EXTRA_FUNCS = """  // ---- OmacVM.app: the Mac's Extra brightness (an XDR displa
     }
   }
 
+  // The app's own row (or defaults write) switches it on the Mac too: asked
+  // every second while the panel is open, so the switch follows within about
+  // a second (Omarchy's refresh comes every 5 s). Not without an app answer.
+  Timer {
+    interval: 1000
+    running: root.opened && root.macExtraAsk
+    repeat: true
+    onTriggered: root.askMacExtra()
+  }
+
 """
 
 EXTRA_ROW = """          // ---------- OmacVM.app: the Mac's Extra brightness ----------
