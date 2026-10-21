@@ -935,6 +935,18 @@ bench lock and are indications only):
   layer's `toneMapMode` is never, so macOS does not tone-map again and PQ
   203 nits is the Mac's white at any headroom (automatic put it at 0.50 at
   headroom 1). Only a `GL_RGB10_A2` scanout is PQ.
+- **Extra brightness** (the app's experimental `extraBrightness`, ADR 0050):
+  while it is on and the window's display has more than 2x headroom, the
+  present draws the guest's SDR frames through a shader (`ui/omacvm-bright.h`)
+  into half-float surfaces in extended linear sRGB, times g = the display's
+  headroom now (at most 2, looked at every 250 ms while seen; a move of 0.02
+  redraws at once through `omacvm_bright_bh`), with EDR, `toneMapMode` never,
+  `kIOSurfaceContentHeadroom` 2.0 and (macOS 26+) the layer's
+  `contentsHeadroom` 2 (untagged EDR content took an M1 Max's panel to 16x).
+  QEMU reads the app's key live (KVO).
+  The surfaces there decide how a frame is drawn (realloc hold-off), the
+  boot logo stays at 1x, PQ frames are never boosted. Off, hidden or on an
+  SDR display: the 8-bit path.
 - **HDR clients**: an app must hand Hyprland a PQ image description
   (`wp_color_manager_v1`). GStreamer's `waylandsink` does; mpv 0.41 with
   `--gpu-api=opengl` does not (mpv's master does, with `vo=gpu-next`; app

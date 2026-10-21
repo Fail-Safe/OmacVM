@@ -480,6 +480,22 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     "off "*) warn "HDR" "HDR is on, but this start got none: $hdrwhy" ;;
   esac
 fi
+# Extra brightness (experimental: the app's extraBrightness switch, ADR 0050).
+# QEMU follows the switch while the VM runs and says what it does now (its
+# last line wins); else the app's line from the start. Nothing when it is off.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  xb=$(grep -o 'cocoa: extra brightness: .*' "$miclog" | grep -v 'display from OMACVM_TEST_EDR' | tail -1)
+  xb=${xb#cocoa: extra brightness: }
+  [[ -n $xb ]] || xb=$(sed -n 's/^OmacVM: extra brightness: \(off (.*)\)$/\1/p' "$miclog" | grep -v '^off (switch off)$' | tail -1)
+  case $xb in
+    "on, "*) ok "Extra brightness" "on (${xb#on, } now, experimental)" ;;
+    "held back by macOS, "*) ok "Extra brightness" "on, held back by macOS to ${xb#held back by macOS, } now (the Mac is warm or the panel is bright)" ;;
+    "not on this display"*) skip "Extra brightness" "the VM window's display has no extra brightness ${xb#not on this display }" ;;
+    "not with HDR yet"*) skip "Extra brightness" "off while the VM shows HDR (not with HDR yet)" ;;
+    "off (switch off)"|"") ;;
+    "off ("*) warn "Extra brightness" "extra brightness is on, but this run has none ${xb#off }" ;;
+  esac
+fi
 # OmacVM.app's Graphics setting: what this start got (the app says so in
 # qemu.log), and whether the next start gets something else.
 if [[ $TYPE == app ]] && gd=$(app_dir "$VM" 2>/dev/null); then

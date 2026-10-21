@@ -236,6 +236,26 @@ struct HDRRow: View {
     }
 }
 
+/// Extra brightness (Settings.extraBrightness, experimental, ADR 0050): only
+/// with a display that has the headroom (Mac.hasExtraBrightnessDisplay).
+/// QEMU reads the key itself, so a running VM follows the switch at once.
+struct ExtraBrightnessRow: View {
+    var tick = 0
+    @State private var on = Settings.extraBrightness
+
+    static let info = "Makes the VM's main window up to about twice as bright as the Mac's normal white, with the extra brightness of this Mac's XDR display. For when you need it, for example in bright light. Use with care: it uses much more battery and a little more memory, and makes the Mac warmer; macOS turns it down when the Mac gets hot. It ends by itself when the VM stops, its window is hidden or you turn this off, and works at once in a running VM. Only the VM's main window: the rest of the screen stays as it is, and screenshots show it at normal brightness. While the VM shows HDR it stays off for now. Experimental. GPU safe mode turns it off."
+
+    var body: some View {
+        SettingRow(title: "Extra brightness", badge: "experimental",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Up to twice as bright as normal white. Uses much more battery.",
+                   info: Self.info, probe: "extra-brightness") {
+            RowSwitch(title: "Extra brightness", isOn: $on, enabled: !Settings.gpuSafeMode)
+        }
+        .onChange(of: on) { _, v in if v != Settings.extraBrightness { Settings.extraBrightness = v } }
+        .onChange(of: tick) { _, _ in on = Settings.extraBrightness }
+    }
+}
+
 /// The sound on its own thread (Settings.audioThread, on by default from
 /// 3.1.17): read by each start of the VM, so a change counts from the next one.
 struct SoundThreadRow: View {

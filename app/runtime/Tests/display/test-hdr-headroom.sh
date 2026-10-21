@@ -20,6 +20,8 @@ bodyx() { awk -v h="$2" '$0 == h {on=1} on {print} on && /^}$/ {exit}' "$1"; }
 problems() {
   local m=$1 follow now
   follow=$(bodyx "$m" 'static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf)')
+  # After omacvm-cocoa-extra-brightness.patch the commit thread also passes the frame's kind.
+  [[ -n $follow ]] || follow=$(bodyx "$m" 'static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf, bool linear)')
   now=$(bodyx "$m" 'static double omacvm_edr_now(void)')
   grep -q '#include "ui/omacvm-edr.h"' "$m" || echo "ui/omacvm-edr.h is not used"
   grep -q 'setToneMapMode:hdr ? CAToneMapModeNever' <<<"$follow" || echo "macOS tone-maps the guest's PQ again"

@@ -388,6 +388,8 @@ final class Runner {
         notchSkip = NotchSkip.read(folder: c.folder)
         // HDR and 10-bit colour: one answer for the guest, QEMU and qemu.log.
         hdr = Settings.hdrStart()
+        // Extra brightness: QEMU follows the switch itself; this is the start's answer.
+        extraBright = Settings.extraBrightnessStart()
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
         env["OMACVM_PRODUCT_NAME"] = Product.name
@@ -471,6 +473,13 @@ final class Runner {
         if hdr.on {
             env["OMACVM_GL_EDR"] = "1"
         }
+        // Extra brightness (ADR 0050): QEMU started as the app reads the switch
+        // live from the app's defaults; this covers a QEMU that is not.
+        if extraBright.on { env["OMACVM_EXTRA_BRIGHT"] = "1" } else { env.removeValue(forKey: "OMACVM_EXTRA_BRIGHT") }
+        // A test build may stand in for the window's display (potential,headroom).
+        if TestHooks.value("OMACVM_TEST_EDR", bundleID: Bundle.main.bundleIdentifier) == nil {
+            env.removeValue(forKey: "OMACVM_TEST_EDR")
+        }
         // QEMU puts its main loop (sound card timers, virgl) at user-interactive
         // QoS and logs which one it got; audioClassic keeps the default.
         if Settings.audioClassic {
@@ -538,6 +547,10 @@ final class Runner {
         // HDR for omacvm check: on, or why not while the switch is on.
         if hdr.on || Settings.hdr {
             log.write(Data("OmacVM: HDR: \(hdr.on ? "on" : "off") (\(hdr.why))\n".utf8))
+        }
+        // Extra brightness for omacvm check, while the switch is on (QEMU's own lines follow it).
+        if Settings.extraBrightness {
+            log.write(Data("OmacVM: extra brightness: \(extraBright.on ? "on" : "off") (\(extraBright.why))\n".utf8))
         }
         p.standardOutput = log
         p.standardError = log
@@ -689,6 +702,8 @@ final class Runner {
     private(set) var notchSkip = false
     /// HDR and 10-bit colour at this start (Settings.hdrStart), set in start().
     private(set) var hdr: (on: Bool, why: String) = (false, "switch off")
+    /// Extra brightness at this start (Settings.extraBrightnessStart), set in start().
+    private(set) var extraBright: (on: Bool, why: String) = (false, "switch off")
     private(set) var notchGeometry: NotchGeometry?
 
     /// omacvm-netd may still refuse QEMU (another build, the limit), vmnet

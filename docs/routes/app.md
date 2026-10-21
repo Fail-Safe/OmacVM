@@ -551,6 +551,28 @@ the 8-bit path.
 - GPU safe mode turns it off. `omacvm check` has an "HDR" line.
 - How it works: [ADR 0049](../adr/0049-hdr-guest-tone-maps.md).
 
+## Extra brightness (experimental, off by default)
+
+On a Mac with an XDR display (a 14- or 16-inch MacBook Pro, a Pro Display
+XDR, an HDR monitor with more than 2x headroom), the VM window's Display
+settings have **Extra brightness**. It makes the VM's main window up to
+about twice as bright as the Mac's normal white, at once, in a running VM.
+Use it with care: it uses much more battery and makes the Mac warmer.
+
+- How bright: as far as the display can go right now, at most 2x. macOS
+  turns it down when the Mac gets hot or the panel is already bright, and
+  gives none at the display's lowest brightness.
+- It ends by itself when the VM stops, its window is hidden or on another
+  Space, or you turn it off. The switch stays as you set it.
+- Only the VM's main window; the rest of the screen, other displays and
+  screenshots stay at normal brightness.
+- Not with HDR yet: while the VM shows HDR, it stays off.
+- A MacBook Air and SDR monitors do not show the switch. GPU safe mode
+  turns it off. `omacvm check` has an "Extra brightness" line.
+- From the command line: `defaults write org.omacvm.app extraBrightness
+  -bool true` (a running VM follows at once).
+- How it works: [ADR 0050](../adr/0050-extra-brightness.md).
+
 ## Fast network (experimental, off by default)
 
 `omacvm enable fast-network --vm NAME`, or the **Fast network
