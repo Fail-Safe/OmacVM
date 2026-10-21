@@ -566,7 +566,8 @@ Use it with care: it uses much more battery and makes the Mac warmer.
   Space, or you turn it off. The switch stays as you set it.
 - Only the VM's main window; the rest of the screen, other displays and
   screenshots stay at normal brightness.
-- Not with HDR yet: while the VM shows HDR, it stays off.
+- With HDR and 10-bit colour on, this wins while it is on: the picture
+  gets brighter, HDR highlights do not. Off, HDR is back at once.
 - A MacBook Air and SDR monitors do not show the switch. GPU safe mode
   turns it off. `omacvm check` has an "Extra brightness" line.
 - From the command line: `defaults write org.omacvm.app extraBrightness
