@@ -4,7 +4,7 @@
   "name": "Display (OmacVM.app)",
   "version": "1.0.0",
   "author": "Omarchy, with OmacVM's Mac displays switch",
-  "description": "Omarchy's display panel, plus \"Use external displays\": in full screen, Omarchy on every Mac display",
+  "description": "Omarchy's display panel, plus \"Use external displays\": in full screen, Omarchy on every Mac display, and the Mac's Extra brightness",
   "kinds": [
     "bar-widget"
   ],
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Display (OmacVM.app)",
-    "description": "Brightness, scale, displays, and Omarchy on every Mac display",
+    "description": "Brightness, Extra brightness, scale, displays, and Omarchy on every Mac display",
     "category": "System",
     "allowMultiple": false
   },

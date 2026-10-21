@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import OmacVMAuth
 import OmacVMUpdate
+import OmacVMWindow
 
 /// The control centre for this app's VMs (docs/adr/0031): the virtio port
 /// org.omacvm.control carries the VM's requests, one JSON line each
@@ -20,6 +21,10 @@ import OmacVMUpdate
 /// The guest is untrusted: lines over 8 KB are dropped, only GET and POST to
 /// /omacvm/... with a JSON object body go on, at most 4 requests at a time.
 /// Status 0 in an answer: the Bridge did not answer.
+///
+/// /omacvm/app/... is the app's own and never goes to the Bridge: the VM's
+/// Extra brightness switch (ExtraBrightnessGuest, its Display panel),
+/// answered on the main thread.
 final class NativeControlBridge: @unchecked Sendable {
     static let maximumLineBytes = 8192
     /// The Bridge's port (OMACVM_BRIDGE_PORT as for the Bridge itself: tests).
@@ -34,10 +39,20 @@ final class NativeControlBridge: @unchecked Sendable {
     private let stopLock = NSLock()
     private var stopped = false
 
-    init(socketPath: String, vmName: String, gpuMemoryFile: URL? = nil) throws {
+    /// The app's own answers (Runner): what it knows now and the switch.
+    /// Both are called on the main thread.
+    struct AppSide {
+        let extraBrightness: @MainActor () -> ExtraBrightnessGuest.Context
+        let setExtraBrightness: @MainActor (Bool) -> Void
+    }
+    private let app: AppSide?
+    private var writes = WriteRate()   // main thread only
+
+    init(socketPath: String, vmName: String, gpuMemoryFile: URL? = nil, app: AppSide? = nil) throws {
         descriptor = try NativeBridgeSocket.connectSecure(path: socketPath, label: "control port")
         self.vmName = vmName
         self.gpuMemoryFile = gpuMemoryFile
+        self.app = app
     }
 
     /// GET /omacvm/gpu-memory: the app reads the VM's graphics memory file and
@@ -117,12 +132,36 @@ final class NativeControlBridge: @unchecked Sendable {
         slots.wait()   // in step with the reads: a VM that floods waits for its answers
         DispatchQueue.global(qos: .utility).async { [self] in
             defer { slots.signal() }
-            let (status, body) = relay(r)
+            let (status, body) = ExtraBrightnessGuest.isApp(r.path) ? answerApp(r) : relay(r)
             var answer = Data((try? JSONSerialization.data(withJSONObject: ["id": r.id, "status": status, "body": body])) ?? Data("{}".utf8))
             answer.append(0x0A)
             writeLock.lock(); defer { writeLock.unlock() }
             do { try NativeBridgeSocket.writeAll(answer, to: descriptor, label: "control") }
             catch { fputs("[control] \(error.localizedDescription)\n", stderr) }
+        }
+    }
+
+    /// A request the app answers itself (ExtraBrightnessGuest), on the main
+    /// thread: the switch, the front window and the rate limit live there.
+    private func answerApp(_ r: Request) -> (Int, [String: Any]) {
+        guard let app else { return (404, ["code": "not-found", "error": ExtraBrightnessGuest.error("not-found")]) }
+        return DispatchQueue.main.sync {
+            MainActor.assumeIsolated {
+                var c = app.extraBrightness()
+                let d = ExtraBrightnessGuest.decide(method: r.method, path: r.path, body: r.body, c) {
+                    writes.take(at: ProcessInfo.processInfo.systemUptime)
+                }
+                switch d {
+                case .answer:
+                    return (200, ExtraBrightnessGuest.state(c))
+                case .set(let on):
+                    app.setExtraBrightness(on)
+                    c.on = on
+                    return (200, ExtraBrightnessGuest.state(c))
+                case .refuse(let status, let code):
+                    return (status, ["code": code, "error": ExtraBrightnessGuest.error(code)])
+                }
+            }
         }
     }
 

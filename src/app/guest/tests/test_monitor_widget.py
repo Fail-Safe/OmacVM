@@ -13,6 +13,8 @@ import unittest
 from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
+OMARCHY_COPIES = HERE.parents[2] / "tests/omarchy-shell"
+APP_ROWS = HERE.parents[3] / "app/app/Sources/OmacVM/SettingsRows.swift"
 loader = importlib.machinery.SourceFileLoader("monitor_widget_build", str(HERE.parent / "monitor-widget/build.py"))
 spec = importlib.util.spec_from_loader("monitor_widget_build", loader)
 build = importlib.util.module_from_spec(spec)
@@ -24,6 +26,7 @@ NOTCH_LINE = "// omarchy-notch-bar display panel patch v"
 def panel(optional=True):
     """A stand-in for Omarchy's Panel.qml: every line build.py and Omanotch's patch change."""
     lines = [a for a, _ in build.EDITS] + ([a for a, _ in build.OPTIONAL_EDITS] if optional else [])
+    lines += ['    if (brightnessAvailable) list.push("brightness")\n', "          // ---------- Text size ----------\n"]
     lines += ["  property var displays: []\n",
               "    var parsed = Model.parseDisplays(displaysJson)\n",
               '    text: Quickshell.screens.length > 1 ? "󰍺" : "󰍹"\n']
@@ -34,8 +37,15 @@ class Build(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp)
-        self.source = self.tmp / "monitor"
-        self.source.mkdir()
+        # As in Omarchy: shell/plugins/panels/monitor, the parts in shell/Ui.
+        self.source = self.tmp / "shell/plugins/panels/monitor"
+        self.source.mkdir(parents=True)
+        self.ui = self.tmp / "shell/Ui"
+        self.ui.mkdir()
+        (self.ui / "ToggleSwitch.qml").write_text(
+            "Item {\n  property bool checked: false\n  property bool busy: false\n"
+            "  property bool interactive: true\n  property bool hasCursor: false\n}\n")
+        (self.ui / "PanelToolTip.qml").write_text("ToolTip {\n}\n")
         (self.source / "Panel.qml").write_text(panel())
         (self.source / "Model.js").write_text("")
         (self.source / "manifest.json").write_text("{}")
@@ -102,6 +112,97 @@ class Build(unittest.TestCase):
         self.assertEqual((self.out / "Panel.qml").read_text().count(build.COMMONS_ALIAS), 1)
         (self.source / "Panel.qml").write_text(panel().replace(build.COMMONS, ""))
         self.assertEqual(self.build(), 1)
+
+    def test_extra_brightness_row(self):
+        # Under BRIGHTNESS: Omarchy's ToggleSwitch at the end of a row that owns
+        # the click and the keyboard cursor, an (i) with the use-with-care text.
+        self.assertEqual(self.build(), 0)
+        text = (self.out / "Panel.qml").read_text()
+        self.assertIn('text: "Extra brightness"', text)
+        self.assertIn('    if (brightnessAvailable) list.push("brightness")\n    if (macExtraShown) list.push("extra")\n', text)
+        self.assertIn('    if (section === "extra") return 1\n', text)
+        self.assertIn('section === "scale" || section === "mac" || section === "extra"\n', text)
+        self.assertIn('    if (focusSection === "extra") {\n      toggleMacExtra()\n', text)
+        self.assertIn('hasCursor: root.cursorActive && root.focusSection === "extra"', text)
+        self.assertIn("ToggleSwitch {\n                id: macExtraSwitch", text)
+        self.assertIn("interactive: false", text)
+        self.assertIn("PanelToolTip {\n                  visible: macExtraRow.hasCursor", text)
+        self.assertIn(build.qml_string(build.EXTRA_CAPTION), text)
+        self.assertIn(build.qml_string(build.EXTRA_SAFE), text)
+        self.assertIn("opacity: root.macExtraSafe ? 0.45 : 1.0", text)
+        self.assertIn('["/usr/bin/env", "/usr/local/bin/omacvm", "extra-brightness", "--json"]', text)
+        self.assertIn('"extra-brightness", root.macExtraOn ? "on" : "off", "--json"]', text)
+        # Asked at each refresh only while it answers; again when the panel opens.
+        self.assertIn("    root.askMacExtra()\n", text)
+        self.assertIn("root.macExtraAsk = false", text)
+        self.assertIn("function onOpenedChanged()", text)
+        # A reading that started before a click (the 5 s refresh) is dropped, and none starts while
+        # a click is on its way: the switch never jumps back to the old state.
+        self.assertIn("    root.macExtraSeq += 1\n    root.macExtraOn = !root.macExtraOn\n", text)
+        self.assertIn("if (!root.macExtraAsk || root.macExtraBusy || macExtraProc.running) return\n"
+                      "    macExtraProc.seq = root.macExtraSeq\n", text)
+        self.assertIn("if (macExtraProc.seq !== root.macExtraSeq || root.macExtraBusy) return\n", text)
+        # No answer: no row only when there was none; a busy port keeps the row.
+        self.assertIn("        if (!root.macExtraShown) root.macExtraAsk = false\n", text)
+        self.assertNotIn("root.macExtraShown = false", text)
+        # A refused or unanswered click: the switch back as it was, then the app's state.
+        self.assertIn("        if (root.macExtraAnswer(text)) return\n"
+                      "        // Refused (the VM's window not in front, too quick) or no answer:\n"
+                      "        // back as it was, then the app's own state.\n"
+                      "        root.macExtraOn = !root.macExtraOn\n", text)
+        # Its row: right under BRIGHTNESS (before TEXT SIZE), Omarchy's colours as Commons.Color (#376).
+        self.assertLess(text.index("id: macExtraRow"), text.index("// ---------- Text size ----------"))
+        row = text[text.index("id: macExtraRow"):text.index("// ---------- Text size ----------")]
+        self.assertIn("Commons.Color.accent", row)
+        self.assertNotIn(" Color.accent", row.replace("Commons.Color.accent", ""))
+
+    def test_extra_brightness_tip(self):
+        # PanelToolTip neither wraps nor limits its width: the text comes in lines.
+        tip = build.extra_tip()
+        self.assertTrue(all(len(line) <= 64 for line in tip.split("\n")), tip)
+        self.assertGreater(tip.count("\n"), 4)
+        self.assertIn("Use with care", tip.replace("\n", " "))
+        hdr = ("With HDR and 10-bit colour on, this wins while it is on: the picture gets brighter, "
+               "HDR highlights do not. Off, HDR is back at once.")
+        self.assertIn(hdr, " ".join(tip.split("\n")))
+        # The same sentence as the app's own row, once the app says it.
+        rows = APP_ROWS.read_text() if APP_ROWS.is_file() else ""
+        if "With HDR and 10-bit colour on" in rows:
+            self.assertIn(hdr, rows)
+
+    def test_extra_brightness_needs_omarchys_parts(self):
+        # Without Omarchy's ToggleSwitch (or one without busy) or PanelToolTip the
+        # panel would not load at all: it is built without the row.
+        for broken in ("ToggleSwitch.qml", "PanelToolTip.qml", "busy"):
+            if broken == "busy":
+                (self.ui / "ToggleSwitch.qml").write_text("Item {\n  property bool checked: false\n}\n")
+            else:
+                (self.ui / broken).unlink()
+            self.assertEqual(self.build(), 0)
+            text = (self.out / "Panel.qml").read_text()
+            self.assertIn('"MAC DISPLAYS"', text)
+            self.assertNotIn("macExtra", text)
+            self.setUp()
+
+    def test_extra_brightness_anchors_all_or_nothing(self):
+        for anchor in ('    if (brightnessAvailable) list.push("brightness")\n', "          // ---------- Text size ----------\n"):
+            (self.source / "Panel.qml").write_text(panel().replace(anchor, ""))
+            self.assertEqual(self.build(), 0)
+            text = (self.out / "Panel.qml").read_text()
+            self.assertIn('"MAC DISPLAYS"', text)
+            self.assertNotIn("macExtra", text)
+
+    def test_extra_brightness_on_omarchys_panels(self):
+        # Omarchy's own files: omarchy-mac's and upstream's newer shell.
+        for v in ("omarchy-mac-ba546a61", "omarchy-a06ec133"):
+            source = OMARCHY_COPIES / v / "shell/plugins/panels/monitor"
+            out = self.tmp / v
+            with mock.patch.object(sys, "argv", ["build.py", str(out), str(source)]), mock.patch("sys.stderr"):
+                self.assertEqual(build.main(), 0, v)
+            text = (out / "Panel.qml").read_text()
+            self.assertIn("id: macExtraRow", text, v)
+            self.assertIn('"MAC DISPLAYS"', text, v)
+            self.assertEqual(text.count("toggleMacExtra()"), 3, v)   # defined, Enter/Space, click
 
     def test_patch_path(self):
         # The same copy of src/ in the repository and in the VM (/usr/local/share/omacvm).
