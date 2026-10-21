@@ -3,6 +3,12 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Extra brightness works with HDR.** With "HDR and 10-bit colour" on, Extra brightness now wins
+  while it is on: the VM's picture gets up to 2x brighter, HDR highlights do not; turned off, HDR
+  is back at once, in a running VM. Before, it stayed off over HDR ("not with HDR yet").
+
 ## 3.1.29
 
 - **Extra brightness (experimental, off by default).** On a MacBook Pro's XDR display (or another
