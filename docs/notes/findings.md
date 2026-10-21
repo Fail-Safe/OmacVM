@@ -160,3 +160,64 @@ How: Geekbench and the first Speedometer runs by hand; later Speedometer runs
 driven over Chrome's DevTools protocol; memory with a small C program (1 GiB
 random reads, first-touch faults); wake-ups with two processes ping-ponging a
 byte over pipes, pinned to the same or different CPUs.
+
+## Disk in an OmacVM.app VM: the guest's btrfs sets the speed (October 2026)
+
+Night run on 2026-10-21, MacBook Pro M1 Max (32 GB, macOS 27.0.1), VM with
+8 vCPUs / 16 GB, fio 3.42 on both sides, median of 3:
+
+| Test | Mac | VM | VM as % of the Mac |
+|---|---|---|---|
+| Seq write 1M, QD8, direct | 6461 MB/s | 726 MB/s | 11 % |
+| Random read 4k, QD32 | 181k IOPS | 64.5k IOPS | 36 % |
+| Random read 4k, QD1 | 15.4k IOPS | 11.75k IOPS | 76 % |
+| Random write 4k, QD32 | 39.7k IOPS | 8.8k IOPS | 22 % |
+| Write 4k + fsync | 21–36 µs | 431–457 µs | ~6 % |
+| Seq read 1M | 6481 MB/s | 12227 MB/s | from the Mac's file cache |
+
+- **Everyday work barely sees it.** Same Mac and VM: building rust-analyzer
+  102 %, `git status` on 180k files 384 %, `git log` 95 %, `uv pip install`
+  of 24k files 176 %. ADR 0039: git clone, checkout and pacman took the same
+  time on a disk 40 % faster at small reads; they wait on the CPU.
+- **Where a user would notice:** writing many GB (10 GB takes about 14 s
+  instead of under 2 s), unpacking big archives, container image pulls,
+  databases that commit thousands of times a second.
+- **Not QEMU.** ADR 0039 measured the same NVMe disk without a file system at
+  200k / 154k IOPS (4k QD32) and 7 GB/s seq write (Mac mini M4). In the VM,
+  btrfs (copy on write, checksums, zstd:1) costs most of it: with `chattr +C`
+  (nodatacow) on the test folder, seq write went from 730 MB/s to 1.6 GB/s.
+- **Rollback today:** omarchy-mac snapshots `/` with snapper before each
+  update, OmacVM keeps 2 (`src/guest/disk-space.sh`), and GRUB lists them for
+  2 s at every start (grub-btrfsd). `/home` is not in them.
+
+Options for later (none started; parked on 2026-10-21):
+
+1. **nodatacow and no compression on heavy-write folders** (containers,
+   databases, Downloads, caches): about 2x seq write there. Those files lose
+   btrfs checksums and compression; snapshots of `/` keep working.
+2. **`compress=no` alone:** not measured.
+3. **virtio-blk + iothread:** +40 % 4k IOPS, blocked by the hang after pause
+   and resume (ADR 0039).
+4. **ext4 or xfs as the root, the Mac takes the snapshots:** an APFS clone of
+   `disk.img` (`cp -c`, instant, no space until blocks change) at each VM
+   start, a few kept, "go back" in the app. Expected close to the raw disk;
+   ext4 itself not measured. What it costs:
+   - a whole-disk rollback also takes back the user's own files (snapper
+     leaves `/home` alone), so a separate home disk or a clear warning;
+   - no compression: more space on the Mac (measure with `compsize` in a real VM);
+   - "make the disk smaller" shrinks btrfs while the VM runs; ext4 shrinks only
+     offline, xfs never;
+   - omarchy-mac expects btrfs and snapper (update snapshots, the GRUB menu):
+     switched off and kept off through its updates;
+   - a new image, so new VMs only; existing VMs would need their files copied;
+   - no checksums on file data (macOS has none on file data either).
+
+   First step if picked up: an ext4 test disk beside btrfs in a test VM, with
+   fio, the everyday tests above and `compsize`.
+5. **Flushes and power cuts:** a guest flush becomes `fdatasync()` on APFS, not
+   `F_BARRIERFSYNC` or `F_FULLFSYNC`. It reaches the file system but not the
+   SSD's cache, so only a hard power cut can lose the last writes. Measured on
+   the M1 Max per call: fsync 21–36 µs, `F_BARRIERFSYNC` 0.66–0.75 ms,
+   `F_FULLFSYNC` 5.7–6.0 ms. With `F_BARRIERFSYNC` a guest fsync would go from
+   about 0.45 ms to roughly 1.1–1.9 ms (estimate: btrfs sends 1–2 flushes per
+   fsync). Not decided.
