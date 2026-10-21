@@ -34,6 +34,7 @@ source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 source "$R/src/lib/graphics.sh"
 source "$R/src/lib/notch.sh"
+source "$R/src/lib/mac-setup.sh"
 export OMA_KEY=$KEY
 # stop RC MESSAGE: no VM to check. With --json also the JSON, one failed check.
 stop() {
@@ -282,6 +283,25 @@ if [[ $TYPE == app ]]; then
   else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
 fi
 
+# OmacVM.app: is this Mac set up for the VM (src/lib/mac-setup.sh; the app
+# asks the same before each start)? A VM folder copied from another Mac has
+# no helpers here and the other Mac's token until Update VM.
+HELPER_FIX="src/mac/install.sh"
+if [[ $TYPE == app ]] && msd=$(app_dir "$VM" 2>/dev/null); then
+  HELPER_FIX="Update VM in OmacVM, or omacvm apply --vm \"$VM\""
+  [[ -n ${FN[*]:-} ]] || features_load
+  FEATURE=""
+  mac_setup_state "$msd"
+  case $MS_VERDICT in
+    ok) ok "Mac setup" "$MS_TEXT" ;;
+    permission) ok "Mac setup" "set up for this Mac: ${MS_NEEDED//|/, } (their permissions: below)" ;;
+    none) skip "Mac setup" "$MS_TEXT" ;;
+    setup) if [[ $MS_FIX == update-app ]]; then bad "Mac setup" "$MS_TEXT, then Update VM in OmacVM"
+           else bad "Mac setup" "$MS_TEXT: $HELPER_FIX"; fi ;;
+    login-items) bad "Mac setup" "$MS_TEXT" human ;;
+  esac
+fi
+
 FEATURE=bridge
 if [[ $BRIDGE == on ]]; then
   if running "$L_BRIDGE"; then
@@ -289,7 +309,7 @@ if [[ $BRIDGE == on ]]; then
     if [[ " $a " == *" * "* || $a == *0.0.0.0* ]]; then bad "Bridge" "listens on every interface: $a"
     elif [[ " $a " == *" $HOST "* ]]; then ok "Bridge" "listening on $a"
     else bad "Bridge" "not listening on $HOST (only: ${a:-nothing})"; fi
-  else bad "Bridge" "OmacVM Bridge is not running (src/mac/install.sh)"; fi
+  else bad "Bridge" "OmacVM Bridge is not running ($HELPER_FIX)"; fi
   T=$OMA_BRIDGE_SUPPORT/token
   if [[ -s $T ]]; then
     [[ $(stat -f %Lp "$T") == 600 ]] && ok "token" "private (600)" || bad "token" "readable by others: chmod 600"
@@ -307,7 +327,7 @@ if [[ $BRIDGE == on ]]; then
       "") bad "Bluetooth" "the Bridge does not answer /bluetooth: src/mac/install.sh" ;;
       *) bad "Bluetooth" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Bluetooth)" human ;;
     esac
-  else bad "token" "missing (src/mac/install.sh)"; fi
+  else bad "token" "missing ($HELPER_FIX)"; fi
   m=$(last_line "$BRIDGE_LOG" 'media keys: (event tap|waiting|cannot)')
   if [[ $(jq -r '.capture_keys == false' "$OMA_BRIDGE_SUPPORT/config.json" 2>/dev/null) == true ]]; then
     skip "media keys" "off: macOS keeps them (capture_keys false in config.json)"
@@ -634,7 +654,7 @@ if [[ $GESTURES == on ]]; then
       [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
         || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
     fi
-  else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
+  else bad "Gestures" "OmacVM Gestures is not running ($HELPER_FIX)"; fi
 else FEATURE=gestures; skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
 FEATURE=battery
 # The Mac's battery: the Bridge serves it to UTM and Fusion VMs, OmacVM.app

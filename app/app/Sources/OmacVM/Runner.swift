@@ -331,6 +331,10 @@ final class Runner {
     var userNetwork: String?
     /// The VM asks for more than this Mac allows (VMConfig.startSizeNote): logged at the start.
     var sizeNote: String?
+    /// Is this Mac set up for the VM, and what was asked before this start
+    /// (AppDelegate.askMacHelpers): logged at the start. nil: not looked at
+    /// (a restart of the same start).
+    var helpersNote: String?
 
     private func networkArguments() -> [String] {
         let c = config
@@ -514,6 +518,7 @@ final class Runner {
         // (SSH: the VM's vmnet address, else 127.0.0.1:SSH_PORT).
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
         log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
+        if let h = helpersNote { log.write(Data("OmacVM: Mac helpers: \(h)\n".utf8)) }
         log.write(Data("\(NotchArea.logPrefix)\(notchStart.record)\n".utf8))
         if notchSkip { log.write(Data("OmacVM: skip the notch: on\n".utf8)) }
         log.write(Data("OmacVM: Mac proxy: \(proxy.record(fastNetwork: network.vmnet))\n".utf8))

@@ -124,7 +124,7 @@ fi
 read -r SW SH < <(osascript -l JavaScript -e 'ObjC.import("AppKit"); var f = $.NSScreen.mainScreen.frame; Math.round(f.size.width) + " " + Math.round(f.size.height)')
 post path $(( SW / 2 )) $(( SH / 2 )) $(( SW / 2 )) $(( SH / 2 )) 0 10
 rm -f "$VMD/running"
-open -n --env OMACVM_POINTER_DEBUG=1 --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.pointer-reveal "$APP" --args --start --vm "$VM"
+open -n --env OMACVM_POINTER_DEBUG=1 --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.pointer-reveal --env OMACVM_TEST_HELPERS_ANSWER=later "$APP" --args --start --vm "$VM"
 
 # The boot: before the guest draws its pointer the Mac's cursor is the arrow when
 # it moves (macOS may hide a resting one around the window's start). Every 2 s a

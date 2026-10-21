@@ -5,6 +5,13 @@ in more words.
 
 ## Unreleased
 
+- **A VM from another Mac says what it needs.** When OmacVM Gestures or the Bridge aren't set up
+  on this Mac (a VM folder copied to a new Mac), OmacVM says so before the start and in the
+  window, and offers Update VM, which sets them up and lets them ask macOS for their
+  permissions; the VM then starts. Before, nothing said so and gestures just didn't work. A
+  helper that is not allowed yet, or switched off in Login Items, gets the right System Settings
+  button. Nothing is installed without you, and Later starts the VM as it is. `omacvm check` has
+  the same answer in its new "Mac setup" line.
 - **Chromium (WebGPU) at the display's scale.** The "Chromium (WebGPU)" menu entry runs Chromium
   on X11, which does not see Omarchy's display scale: on a Retina display its pages and menus came
   out at half size. It now opens at the scale of the display it starts on (a scale you set
