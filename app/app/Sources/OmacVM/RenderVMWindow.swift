@@ -38,6 +38,8 @@ enum RenderVMWindow {
         var disk: (need: DiskSize.Need, gb: Int)? = nil
         /// Skip the notch's (i) open.
         var notchSkipInfo: Bool? = nil
+        /// This Mac not set up for the VM (the notice, the header's Update VM).
+        var macSetup: MacSetup? = nil
     }
 
     static func allowed(bundleID: String?) -> Bool {
@@ -190,6 +192,22 @@ enum RenderVMWindow {
         sheet("sheet-1-whats-new") { WhatsNewSheet(updater: u, running: false) {} }
         u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil)
 
+        // This Mac not set up for the VM: a folder copied from another Mac
+        // (the notice and the header's Update VM), the same with a VM from a
+        // newer OmacVM, Gestures not allowed yet, the Bridge off in Login Items.
+        var notSetUp = usual
+        notSetUp.macSetup = MacSetup.parse("verdict\tsetup\nfix\tupdate-vm\nwhy\tother-mac\nhelpers\tOmacVM Bridge|OmacVM Gestures\n"
+            + "helper\tOmacVM Bridge\tmissing\tnot installed\nhelper\tOmacVM Gestures\tmissing\tnot installed\n")
+        window("window-22-mac-setup-copied", state, notSetUp)
+        notSetUp.macSetup = MacSetup.parse("verdict\tsetup\nfix\tupdate-app\nwhy\tother-mac\nhelpers\tOmacVM Gestures\nversion\t3.1.28\nvm-version\t3.2.0\n")
+        window("window-23-mac-setup-newer-vm", state, notSetUp)
+        notSetUp.macSetup = MacSetup.parse("verdict\tpermission\nfix\tsettings\nhelpers\tOmacVM Gestures\nmissing\tAccessibility, Input Monitoring\n"
+            + "helper\tOmacVM Gestures\tpermission\trunning, but Accessibility, Input Monitoring is off\n")
+        window("window-24-mac-setup-permission", state, notSetUp)
+        notSetUp.macSetup = MacSetup.parse("verdict\tlogin-items\nfix\tlogin-items\nhelpers\tOmacVM Bridge\n")
+        notSetUp.running = true
+        window("window-25-mac-setup-login-items-vm-runs", state, notSetUp)
+
         // Long names: a VM name of 62 characters, a deep VMs folder, a
         // message, an older OmacVM in the VM (Update VM).
         let longRoot = tmp.appendingPathComponent("A folder with a rather long name for the VMs of this Mac/and-one-more-level-light-test/vms")
@@ -333,7 +351,7 @@ enum RenderVMWindow {
     /// (16 pt in from the card), the header's buttons at its margin.
     private static func sides(_ name: String, height: Double) {
         // The strips under the header and the sidebar run edge to edge.
-        let boxes = LayoutProbe.boxes().filter { !["update-banner", "message"].contains($0.name) && !$0.name.hasPrefix("nav-") }
+        let boxes = LayoutProbe.boxes().filter { !["update-banner", "message", "notice"].contains($0.name) && !$0.name.hasPrefix("nav-") }
         let rowEnd = WindowLayout.width - WindowLayout.contentInset - WindowLayout.rowInset
         var problems = WindowLayout.problems(boxes, width: WindowLayout.width, trailing: ["start"])
         let rows = boxes.filter { $0.name.hasPrefix("trailing-") }

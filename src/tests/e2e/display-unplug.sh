@@ -146,7 +146,7 @@ start() {   # window|full|fullpanel, on the virtual display; head: full on the o
   (source "$HERE/test-vms.sh" && e2e_vm_guard "$APPID" "$VM") >/dev/null || return 1
   # A QEMU that crashed (an earlier round) left the run marker: the start would ask "Start Anyway".
   [[ -z $(qemu_pid) ]] && rm -f "$VMD/running"
-  open -n "${env[@]}" "$APP" --args --start --vm "$VM"
+  open -n "${env[@]}" --env OMACVM_TEST_HELPERS_ANSWER=later "$APP" --args --start --vm "$VM"
   for ((i = 0; i < 40; i++)); do [[ -n $(qemu_pid) ]] && break; sleep 1; done
   [[ -n $(qemu_pid) ]] || return 1
   # The desktop up (its display agent moves the outputs), then a moment for full screen.

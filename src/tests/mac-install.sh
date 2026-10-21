@@ -60,7 +60,9 @@ expect "a helpers' sum is the same in any locale" "$(LC_ALL=en_US.UTF-8 bash -c 
   "$(env -u LANG -u LC_ALL bash -c "source '$T/src/lib/helpers.sh'; helpers_src_sum '$T/src' bridge/mac")"
 # apply: the helper each feature needs (a run that turns it on stops when
 # that helper did not build).
-eval "$(sed -n '/^helper_of() {/,/^}/p' "$R/src/cmd/apply.sh")"
+# One map for apply, check and the app (src/lib/mac-setup.sh).
+source "$R/src/lib/mac-setup.sh"
+eval "$(grep '^helper_of() {' "$R/src/cmd/apply.sh")"
 TYPE=parallels
 expect "helper of bridge" "OmacVM Bridge" "$(helper_of bridge)"
 expect "helper of control-centre" "OmacVM Bridge" "$(helper_of control-centre)"

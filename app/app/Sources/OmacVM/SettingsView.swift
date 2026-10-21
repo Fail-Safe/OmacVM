@@ -31,6 +31,8 @@ struct ReadyView: View {
     }
 
     private var running: Bool { preview?.running ?? state.vmRunning() }
+    /// Is this Mac set up for the VM (MacSetup): the window pictures' own.
+    private var macSetup: MacSetup? { preview?.macSetup ?? state.macSetup }
 
     var body: some View {
         WindowShell(nav: SettingsNav.items) {
@@ -62,7 +64,11 @@ struct ReadyView: View {
         // setting meanwhile: read them again (every row follows state.tick).
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             state.reloadSettings()
+            // Back from System Settings, or a helper installed meanwhile.
+            if preview == nil { state.refreshMacSetup() }
         }
+        .onAppear { if preview == nil { state.refreshMacSetup() } }
+        .onChange(of: state.config.folder) { _, _ in if preview == nil { state.refreshMacSetup() } }
         .task {
             while !Task.isCancelled && preview == nil {
                 try? await Task.sleep(for: .seconds(3))
@@ -84,16 +90,22 @@ struct ReadyView: View {
                      factsInfo: factsInfo) {
             AppIconButton()
         } trailing: {
-            if let app = preview?.appVersion ?? OmacVMVersion.app, OmacVMVersion.vmIsBehind(state.config.guestVersion, app: app) {
+            let app = preview?.appVersion ?? OmacVMVersion.app
+            let behind = app.map { OmacVMVersion.vmIsBehind(state.config.guestVersion, app: $0) } ?? false
+            // Also when this Mac's helpers are not set up for the VM (a VM
+            // copied at the same version had no Update VM anywhere).
+            if behind || macSetup?.wantsUpdateVM == true {
                 Button {
-                    updateVM()
+                    state.updateVM()
                 } label: {
                     HStack(spacing: 6) {
                         Circle().fill(Look.orange).frame(width: 6, height: 6)
                         Text("Update VM")
                     }
                 }
-                .help("OmacVM in this VM is \(state.config.guestVersion.map { "\($0)" } ?? "from an older app"); this app has \(app). Update VM starts the VM without a window, updates OmacVM in it and its helpers on the Mac (a few minutes) and shuts it down. Your files and settings in Omarchy stay.")
+                .help(behind
+                      ? "OmacVM in this VM is \(state.config.guestVersion.map { "\($0)" } ?? "from an older app"); this app has \(app ?? ""). Update VM starts the VM without a window, updates OmacVM in it and its helpers on the Mac (a few minutes) and shuts it down. Your files and settings in Omarchy stay."
+                      : "\(macSetup?.title(vm: state.config.name) ?? ""). Update VM starts the VM without a window, sets up its helpers on this Mac and gives the VM this Mac's token (a few minutes), then shuts it down. Your files and settings in Omarchy stay.")
                 .disabled(state.storage.moving != nil || state.config.filesProblem != nil || running)
                 .layoutProbe("update-vm")
             }
@@ -116,18 +128,6 @@ struct ReadyView: View {
         return "Set when the VM was made. CPUs and memory change under General, the disk under Storage. \(gpu)\n\n\(GPUMemory.explanation)"
     }
 
-    /// A VM made by an older app keeps its OmacVM when the app is replaced:
-    /// Update VM brings it up to this app's.
-    private func updateVM() {
-        // A test build never updates a VM of the installed app.
-        if let why = Paths.startProblem(state.config.folder) { state.say(why); return }
-        // Not shut down cleanly, or copied while it ran: asked first.
-        guard RunMarker.confirmStart(state.config) else { return }
-        state.message = nil
-        state.creator.update(config: state.config)
-        state.screen = .building
-    }
-
     // MARK: Notices under the header
 
     @ViewBuilder private var notices: some View {
@@ -140,6 +140,15 @@ struct ReadyView: View {
         }
         if let p = state.config.filesProblem {
             MessageStrip(text: p, error: true)
+        }
+        // This Mac is not set up for the VM (a folder copied from another
+        // Mac, a helper not allowed): said here as long as it is so, with
+        // what fixes it. Later in the question before a start does not hide it.
+        if let s = macSetup, s.needsAction, state.config.filesProblem == nil {
+            NoticeStrip(text: s.notice(vm: state.config.name), info: s.info(vm: state.config.name), action: s.button,
+                        disabled: s.fix == .updateVM && (running || state.storage.moving != nil)) {
+                state.fixMacSetup(s)
+            }
         }
     }
 }
