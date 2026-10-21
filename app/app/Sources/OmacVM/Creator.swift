@@ -43,6 +43,9 @@ final class Creator: ObservableObject {
     private var logFile: SharedLog?
     /// An update's stdin: the answer to its question goes there.
     private var answers: FileHandle?
+    /// The build or update ended: true when it worked (AppState.buildEnded),
+    /// whether or not the window shows it.
+    var onEnded: ((Bool) -> Void)?
 
     /// Update VM's question (update-vm.sh's "ASK kernel HAVE LATEST CPUS LOW
     /// HIGH"): Arch Linux ARM has a newer kernel than the VM's memory-optimized
@@ -219,6 +222,7 @@ final class Creator: ObservableObject {
             reader?.readabilityHandler = nil
             reader = nil
             failed = "Could not start the \(job == .build ? "build" : "update"): \(error.localizedDescription)"
+            onEnded?(false)
         }
     }
 
@@ -252,8 +256,12 @@ final class Creator: ObservableObject {
             // Step times are kept for builds only (an update has other steps).
             if job == .build { StepTimes.remember(stepSeconds, route: route) }
             finished = true
-        } else if failed == nil {
-            failed = "The \(job == .build ? "build" : "update") stopped (exit \(status)). Log: \(logURL?.path ?? "")"
+            onEnded?(true)
+        } else {
+            if failed == nil {
+                failed = "The \(job == .build ? "build" : "update") stopped (exit \(status)). Log: \(logURL?.path ?? "")"
+            }
+            onEnded?(false)
         }
     }
 

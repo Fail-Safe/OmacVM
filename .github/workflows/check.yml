@@ -221,6 +221,8 @@ jobs:
         run: src/tests/gestures-state.sh
       - name: omacvm check finds the Bridge and Gestures by process and reads only their own log lines
         run: src/tests/helper-running.sh
+      - name: Is this Mac set up for an app VM (its helpers, their permissions, its token)
+        run: src/tests/mac-setup.sh
 
       - name: omacvm vms never waits on UTM's data
         run: src/tests/vms-no-container.sh < /dev/null

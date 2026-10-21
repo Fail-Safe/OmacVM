@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **A VM from another Mac says what it needs.** When OmacVM Gestures or the Bridge aren't set up
+  on this Mac (a VM folder copied to a new Mac), OmacVM says so before the start and in the
+  window, and offers Update VM, which sets them up and lets them ask macOS for their
+  permissions; the VM then starts. Before, nothing said so and gestures just didn't work. A
+  helper that is not allowed yet, or switched off in Login Items, gets the right System Settings
+  button. Nothing is installed without you, and Later starts the VM as it is. `omacvm check` has
+  the same answer in its new "Mac setup" line.
+
 ## 3.1.27
 
 - **Vendor HID devices is gone.** The experimental switch under USB devices (3.1.14, by

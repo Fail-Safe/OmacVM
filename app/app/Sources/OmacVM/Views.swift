@@ -53,6 +53,98 @@ final class AppState: ObservableObject {
     var showVM: () -> Void = {}
     /// This app's VM runs (main.swift sets it).
     var vmRunning: () -> Bool = { false }
+    /// Check for Updates (main.swift sets it): a VM with a newer OmacVM.
+    var checkForUpdates: () -> Void = {}
+
+    /// Is this Mac set up for the shown VM (MacSetup: its helpers, their
+    /// permissions, its token): the notice under the header and the header's
+    /// Update VM. Looked at when the window shows, comes to the front or
+    /// shows another VM, and before each start; nil until known.
+    @Published private(set) var macSetup: MacSetup?
+    private var macSetupRun = 0
+    /// Update VM was chosen in the question before a start: start the VM
+    /// when it is done (BuildView), with no helper question that time (the
+    /// helpers just installed have macOS's own questions open).
+    var startAfterUpdate = false
+    var helpersQuietOnce = false
+
+    func refreshMacSetup() {
+        guard screen == .ready else { return }
+        let c = config, notch = Mac.hasNotch
+        macSetupRun += 1
+        let run = macSetupRun
+        DispatchQueue.global(qos: .utility).async {
+            let s = MacSetup.probe(c, notch: notch)
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.macSetupFound(s, folder: c.folder, run: run) }
+            }
+        }
+    }
+
+    /// A look's answer (also the one before a start), for the VM it was about.
+    func macSetupFound(_ s: MacSetup?, folder: URL, run: Int? = nil) {
+        if let run, run != macSetupRun { return }
+        guard folder.standardizedFileURL == config.folder.standardizedFileURL else { return }
+        if s != macSetup { macSetup = s }
+    }
+
+    /// A build or Update VM ended (Creator.onEnded), with the window or
+    /// without it (a hidden run). A failed one stays on its screen (Back).
+    func buildEnded(ok: Bool) {
+        guard ok else { startAfterUpdate = false; return }
+        let updated = creator.job == .update
+        // Update VM shut the VM down cleanly: no run marker to warn about.
+        if updated { try? FileManager.default.removeItem(at: config.folder.appendingPathComponent(RunMarker.fileName)) }
+        screen = .ready
+        if updated { reload() }   // its sizes; the VM stays the one shown
+        if let w = creator.warning {
+            say(w)
+        } else if updated, let v = config.guestVersion {
+            tell("OmacVM in \(config.name) is now \(v).")
+        } else {
+            message = nil
+        }
+        // Update VM from the question before a start: that start now (not
+        // after a warning: the window keeps it in view).
+        if updated, startAfterUpdate {
+            startAfterUpdate = false
+            if creator.warning == nil {
+                // Read as the start asks (askMacHelpers), and gone after it
+                // either way: a start that stopped early leaves no quiet one behind.
+                helpersQuietOnce = true
+                startVM()
+                helpersQuietOnce = false
+            }
+        }
+    }
+
+    /// The notice's button and the question's: what fixes it. Update VM
+    /// asks about the run marker unless the start just did.
+    func fixMacSetup(_ s: MacSetup, askMarker: Bool = true) {
+        switch s.fix {
+        case .updateVM:
+            updateVM(askMarker: askMarker)
+        case .updateApp:
+            checkForUpdates()
+        case .settings, .loginItems:
+            if let u = s.settingsURL.flatMap(URL.init(string:)) { NSWorkspace.shared.open(u) }
+        case .none:
+            break
+        }
+    }
+
+    /// Update VM (the header's button, the notice's, the question before a
+    /// start): the VM started without a window, OmacVM and its Mac helpers
+    /// brought up to this app's, shut down.
+    func updateVM(askMarker: Bool = true) {
+        // A test build never updates a VM of the installed app.
+        if let why = Paths.startProblem(config.folder) { say(why); startAfterUpdate = false; return }
+        // Not shut down cleanly, or copied while it ran: asked first.
+        if askMarker, !RunMarker.confirmStart(config) { startAfterUpdate = false; return }
+        message = nil
+        creator.update(config: config)
+        screen = .building
+    }
 
     /// watchDrives false: the window pictures, which must not switch to a
     /// VM of this Mac when a drive comes or goes meanwhile.
@@ -74,6 +166,7 @@ final class AppState: ObservableObject {
         }
         // The views read the storage through this state too (Start waits for a move).
         storageChanges = storage.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        creator.onEnded = { [weak self] ok in self?.buildEnded(ok: ok) }
     }
     private var storageChanges: AnyCancellable?
     private var driveObservers: [NSObjectProtocol] = []
@@ -483,7 +576,10 @@ struct BuildView: View {
                     Button("Show Log") {
                         NSWorkspace.shared.open(creator.log ?? state.config.folder.appendingPathComponent("create.log"))
                     }
-                    Button("Back") { state.screen = creator.job == .build ? .setup : .ready }
+                    Button("Back") {
+                        state.startAfterUpdate = false
+                        state.screen = creator.job == .build ? .setup : .ready
+                    }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
                         .layoutProbe("start")
@@ -519,21 +615,6 @@ struct BuildView: View {
                 }
                 .padding(.top, 14)
                 .padding(.leading, 2)
-            }
-        }
-        .onChange(of: creator.finished) { _, done in
-            guard done else { return }
-            let updated = creator.job == .update
-            // Update VM shut the VM down cleanly: no run marker to warn about.
-            if updated { try? FileManager.default.removeItem(at: state.config.folder.appendingPathComponent(RunMarker.fileName)) }
-            state.screen = .ready
-            if updated { state.reload() }   // its sizes; the VM stays the one shown
-            if let w = creator.warning {
-                state.say(w)
-            } else if updated, let v = state.config.guestVersion {
-                state.tell("OmacVM in \(state.config.name) is now \(v).")
-            } else {
-                state.message = nil
             }
         }
     }

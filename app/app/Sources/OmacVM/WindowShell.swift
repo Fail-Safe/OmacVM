@@ -119,6 +119,38 @@ struct MessageStrip: View {
     }
 }
 
+/// A problem under the header with what fixes it: the text, an (i) and a
+/// button (Update VM, a System Settings pane). It stays while the problem
+/// does: no ×.
+struct NoticeStrip: View {
+    let text: String
+    let info: String
+    let action: String
+    var disabled = false
+    let run: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Look.red)
+            Text(text)
+                .font(.callout)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            InfoButton(topic: "this Mac's setup", text: info)
+            Button(action, action: run)
+                .disabled(disabled)
+                .fixedSize()
+                .layoutProbe("notice-action")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Look.red.opacity(0.08), ignoresSafeAreaEdges: [])
+        .overlay(alignment: .bottom) { Rectangle().fill(Look.hairline).frame(height: 1) }
+        .layoutProbe("notice")
+    }
+}
+
 /// Where each section starts in the settings' content.
 private struct SectionTops: PreferenceKey {
     static let defaultValue: [String: CGFloat] = [:]
