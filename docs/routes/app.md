@@ -548,6 +548,7 @@ the 8-bit path.
 - Which Linux apps send HDR (October 2026): GStreamer does; mpv and
   Chromium show HDR video as SDR for now.
 - Only the main window; windows on other displays stay 8-bit.
+- Extra brightness (below) wins while it is on: no HDR highlights then.
 - GPU safe mode turns it off. `omacvm check` has an "HDR" line.
 - How it works: [ADR 0049](../adr/0049-hdr-guest-tone-maps.md).
 
@@ -566,7 +567,8 @@ Use it with care: it uses much more battery and makes the Mac warmer.
   Space, or you turn it off. The switch stays as you set it.
 - Only the VM's main window; the rest of the screen, other displays and
   screenshots stay at normal brightness.
-- Not with HDR yet: while the VM shows HDR, it stays off.
+- With HDR and 10-bit colour on, this wins while it is on: the picture
+  gets brighter, HDR highlights do not. Off, HDR is back at once.
 - A MacBook Air and SDR monitors do not show the switch. GPU safe mode
   turns it off. `omacvm check` has an "Extra brightness" line.
 - From the command line: `defaults write org.omacvm.app extraBrightness

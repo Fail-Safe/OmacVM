@@ -931,13 +931,14 @@ bench lock and are indications only):
   otherwise and on any failure; `/run/omacvm/virtio-gpu` says which) and
   `omacvm-display-sync` runs Virtual-1 at 10 bits: PQ with
   `max_luminance = 203 x edr` while QEMU sends the window display's
-  headroom (`"edr"`, once a second, on a 10 % move), sRGB otherwise. The
+  headroom (`"edr"`, once a second, on a 10 % move; 1 while Extra
+  brightness is on, below), sRGB otherwise. The
   layer's `toneMapMode` is never, so macOS does not tone-map again and PQ
   203 nits is the Mac's white at any headroom (automatic put it at 0.50 at
   headroom 1). Only a `GL_RGB10_A2` scanout is PQ.
 - **Extra brightness** (the app's experimental `extraBrightness`, ADR 0050):
   while it is on and the window's display has more than 2x headroom, the
-  present draws the guest's SDR frames through a shader (`ui/omacvm-bright.h`)
+  present draws the guest's frames through a shader (`ui/omacvm-bright.h`)
   into half-float surfaces in extended linear sRGB, times g = the display's
   headroom now (at most 2, looked at every 250 ms while seen; a move of 0.02
   redraws at once through `omacvm_bright_bh`), with EDR, `toneMapMode` never,
@@ -945,9 +946,13 @@ bench lock and are indications only):
   `contentsHeadroom` 2 (untagged EDR content took an M1 Max's panel to 16x).
   QEMU reads the app's key live (KVO).
   The surfaces there decide how a frame is drawn (realloc hold-off), the
-  boot logo stays at 1x, PQ frames are never boosted. Off or on an SDR
-  display: the 8-bit path. Hidden: no frames, and macOS drops the headroom
-  about 15 s later; fully covered: no frames, but macOS keeps 2x headroom.
+  boot logo stays at 1x. It wins over HDR: PQ frames are decoded to nits,
+  203 nits (SDR white) is 1, each channel is clipped there, BT.2020 goes
+  to sRGB's primaries, then times g; the guest is told `"edr"` 1 meanwhile,
+  so it fits its HDR into SDR white itself. Off or on an SDR display: the
+  frames' own path (8-bit, or PQ with HDR at once). Hidden: no frames, and
+  macOS drops the headroom about 15 s later; fully covered: no frames, but
+  macOS keeps 2x headroom.
 - **HDR clients**: an app must hand Hyprland a PQ image description
   (`wp_color_manager_v1`). GStreamer's `waylandsink` does; mpv 0.41 with
   `--gpu-api=opengl` does not (mpv's master does, with `vo=gpu-next`; app

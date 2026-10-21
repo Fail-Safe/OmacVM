@@ -38,7 +38,12 @@ expect "GPU safe mode (QEMU's line)" "warn | Extra brightness | extra brightness
   "OmacVM: extra brightness: off (GPU safe mode)" "${p}cocoa: extra brightness: off (frames in a CAOpenGLLayer: GPU safe mode or OMACVM_GL_PRESENT=layer)"
 expect "GPU safe mode (only the app's line)" "warn | Extra brightness | extra brightness is on, but this run has none (GPU safe mode)" \
   "OmacVM: extra brightness: off (GPU safe mode)"
-expect "HDR" "skip | Extra brightness | off while the VM shows HDR" "${p}cocoa: extra brightness: not with HDR yet (the guest sends PQ)"
+expect "over HDR" "ok   | Extra brightness | on (2.00x now, over HDR: no HDR highlights while it is on, experimental)" \
+  "${p}cocoa: extra brightness: on, 2.00x" "${p}cocoa: extra brightness: on, 2.00x, over HDR"
+expect "held back over HDR" "ok   | Extra brightness | on, held back by macOS to 1.40x now (the Mac is warm or the panel is bright, over HDR" \
+  "${p}cocoa: extra brightness: on, 2.00x, over HDR" "${p}cocoa: extra brightness: held back by macOS, 1.40x, over HDR"
+expect "an older app over HDR" "skip | Extra brightness | off while the VM shows HDR (OmacVM.app before 3.1.30)" \
+  "${p}cocoa: extra brightness: not with HDR yet (the guest sends PQ)"
 expect "turned off while it ran: nothing" "" "${p}cocoa: extra brightness: on, 2.00x" "${p}cocoa: extra brightness: off (switch off)"
 expect "switch off: nothing" "" "${p}cocoa: GL frames shown as IOSurfaces"
 expect "the test hook's line is no state" "ok   | Extra brightness | on (2.00x now" \

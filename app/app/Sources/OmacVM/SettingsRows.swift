@@ -243,7 +243,7 @@ struct ExtraBrightnessRow: View {
     var tick = 0
     @State private var on = Settings.extraBrightness
 
-    static let info = "Makes the VM's main window up to about twice as bright as the Mac's normal white, with the extra brightness of this Mac's XDR display. For when you need it, for example in bright light. Use with care: it uses much more battery and a little more memory, and makes the Mac warmer; macOS turns it down when the Mac gets hot. It ends by itself when the VM stops, its window is hidden or you turn this off, and works at once in a running VM. Only the VM's main window: the rest of the screen stays as it is, and screenshots show it at normal brightness. While the VM shows HDR it stays off for now. Experimental. GPU safe mode turns it off."
+    static let info = "Makes the VM's main window up to about twice as bright as the Mac's normal white, with the extra brightness of this Mac's XDR display. For when you need it, for example in bright light. Use with care: it uses much more battery and a little more memory, and makes the Mac warmer; macOS turns it down when the Mac gets hot. It ends by itself when the VM stops, its window is hidden or you turn this off, and works at once in a running VM. Only the VM's main window: the rest of the screen stays as it is, and screenshots show it at normal brightness. With HDR and 10-bit colour on, this wins while it is on: the picture gets brighter, HDR highlights do not. Off, HDR is back at once. Experimental. GPU safe mode turns it off."
 
     var body: some View {
         SettingRow(title: "Extra brightness", badge: "experimental",
