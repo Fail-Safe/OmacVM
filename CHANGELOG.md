@@ -3,6 +3,12 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Small GPU jobs come back sooner.** The Mac side of Venus looks for the VM's next GPU job a
+  little longer before it sleeps (macOS wakes it late): a job and its wait take 170 instead of
+  185 us. While the GPU works QEMU uses about 10 % more CPU; an idle VM costs the same.
+
 ## 3.1.27
 
 - **Vendor HID devices is gone.** The experimental switch under USB devices (3.1.14, by
