@@ -1,0 +1,77 @@
+Mesa (KosmicKrisp): unroll loops before local arrays are lowered
+
+What: kk_nir_options gets max_unroll_iterations = 32 (as Asahi's compiler for
+the same GPUs), and msl_preprocess_nir unrolls loops with a known trip count
+(nir_opt_loop_unroll in a small optimisation loop) before function-temp arrays
+are lowered to scratch memory or to if-else trees.
+Why: KosmicKrisp never unrolled a loop (max_unroll_iterations was 0, so
+nir_opt_loop_unroll did nothing), and it lowers local arrays early. A loop
+whose trip count comes from specialization constants, such as llama.cpp's
+Vulkan matmul (mul_mm.comp: 2 x 2 inner loops over cache_a/cache_b and the
+sums array), then indexed its arrays with a loop counter: the sums went to
+'uchar scratch[128]' (thread memory, 1-byte aligned) and the caches became
+if-else trees of selects, in the hottest loop. Unrolled first, the indices
+are constants and the arrays become registers (no scratch left in the
+kernel's MSL, MESA_KK_DEBUG=msl).
+Numbers, natively on the Mac, base vs this patch alternating, nothing else
+running. Mac mini M4 (macOS 27.0): llama.cpp b11760 Vulkan, Llama 3.2 3B
+Q4_K_M, prompt pp512 / generation tg128 t/s 160 -> 196 / 45 -> 45 (MoltenVK
+403 / 42, Metal 550 / 46); Dawn's WebGPU matmul (the harness of
+mesa-kosmickrisp-shared-align.patch, robust access) 1162 -> 1162 GFLOPS.
+MacBook Air M2 (macOS 27.0.1): llama.cpp Llama 3.2 1B Q4_K_M (-ub 128) pp512
+141 -> 327, tg128 62.3 -> 63.4 t/s; Dawn's WebGPU matmul 758 -> 545-577 GFLOPS
+(-24 to -28 %, likely register pressure). MacBook Pro M1 Max (macOS 27.0.1):
+llama.cpp 3B pp512 137.5 / 137.6 -> 316.6 / 316.2, tg128 ~56 -> ~57 t/s; Dawn's
+WebGPU matmul 2043-2045 -> 2045-2046 GFLOPS (no change). In a VM on the M4
+(4 CPU / 6 GB, Venus): llama.cpp pp512 159 -> 194 t/s, whisper.cpp v1.9.5
+base.en encoder 104 -> 76 ms (two separate VM sessions).
+Trade-off: WebGPU matmul on the M2 (WebGPU in the VM is the opt-in launcher).
+Upstream: not sent yet.
+Tests: Vulkan CTS 1.4.7.0 on KosmicKrisp before and after, natively on a
+MacBook Air M2 (macOS 27.0.1), the lists of mesa-kosmickrisp-shared-align.patch
+(compute pipelines, memory model, SPIR-V compute, GLSL loops/arrays/indexing,
+graphicsfuzz, samples of subgroups and tessellation/geometry): 50,788 cases
+listed, 18,176 of them ran (the rest NotSupported), the same result for every
+case (18,175 Pass, 1 Fail that fails before too). llama.cpp and the matmul
+harness as above.
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -2272,6 +2272,28 @@
+    NIR_PASS(_, nir, nir_lower_var_copies);
+    NIR_PASS(_, nir, nir_split_var_copies);
+    NIR_PASS(_, nir, nir_lower_memcpy);
++
++   /* Unroll loops with a known trip count before the arrays they index are
++    * lowered to scratch or to if-else trees below: once unrolled, the indices
++    * are constants and nir_split_array_vars turns small per-thread arrays
++    * (a matmul's accumulators and caches) into registers.
++    */
++   bool unrolled;
++   do {
++      unrolled = false;
++      NIR_PASS(unrolled, nir, nir_lower_vars_to_ssa);
++      NIR_PASS(unrolled, nir, nir_opt_copy_prop);
++      NIR_PASS(unrolled, nir, nir_opt_dce);
++      NIR_PASS(unrolled, nir, nir_opt_dead_cf);
++      NIR_PASS(unrolled, nir, nir_opt_cse);
++      NIR_PASS(unrolled, nir, nir_opt_deref);
++      NIR_PASS(unrolled, nir, nir_opt_constant_folding);
++      NIR_PASS(unrolled, nir, nir_opt_algebraic);
++      NIR_PASS(unrolled, nir, nir_opt_if, 0);
++      NIR_PASS(unrolled, nir, nir_opt_remove_phis);
++      NIR_PASS(unrolled, nir, nir_opt_loop);
++      NIR_PASS(unrolled, nir, nir_opt_loop_unroll);
++   } while (unrolled);
+ 
+    NIR_PASS(_, nir, nir_split_array_vars,
+             nir_var_function_temp | nir_var_shader_in | nir_var_shader_out);
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -129,6 +129,7 @@
+    .lower_uadd_carry = true,
+    .lower_usub_borrow = true,
+    .compact_arrays = true,
++   .max_unroll_iterations = 32,
+    /* Metal does not support double. */
+    .lower_doubles_options = (nir_lower_doubles_options)(~0),
+    .lower_int64_options = nir_lower_ufind_msb64 | nir_lower_subgroup_shuffle64,

@@ -216,6 +216,11 @@ commit 82927e9. Changes here:
   `mesa-kosmickrisp-shared-align.patch` declares a compute shader's shared
   memory 16-byte aligned; as a plain char array the MSL compiler made every
   access to it slow (WebGPU matmul in a VM on an M2: ~256 -> ~757 GFLOPS, MoltenVK ~895)
+  `mesa-kosmickrisp-unroll-loops.patch` unrolls loops with a known trip count
+  (up to 32) before local arrays are lowered, so a matmul's accumulators stay in
+  registers instead of scratch memory (llama.cpp prompt processing natively: M4
+  160 -> 196 t/s, M1 Max 138 -> 316, M2 141 -> 327; but Dawn's WebGPU matmul on
+  the M2 758 -> ~560 GFLOPS, M1 Max and M4 unchanged)
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked
