@@ -173,6 +173,10 @@ class Build(unittest.TestCase):
         rows = APP_ROWS.read_text() if APP_ROWS.is_file() else ""
         if "With HDR and 10-bit colour on" in rows:
             self.assertIn(hdr, rows)
+        # Both say the switch stays as the user set it.
+        self.assertIn("the switch keeps your setting for the next start", " ".join(tip.split("\n")))
+        if rows:
+            self.assertIn("The switch keeps your setting for the next start", rows)
 
     def test_extra_brightness_needs_omarchys_parts(self):
         # Without Omarchy's ToggleSwitch (or one without busy) or PanelToolTip the
