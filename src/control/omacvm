@@ -12,6 +12,10 @@
   omacvm update-system [--yes]
                              update the VM's own system (omarchy update, not
                              OmacVM), then check the graphics before a restart
+  omacvm extra-brightness [on|off] [--json]
+                             OmacVM.app on a Mac with an XDR display: the VM's
+                             main window up to 2x as bright (the Display panel's
+                             switch); use with care: much more battery
   omacvm --version
   omacvm --window            what the menu, the bar item and the launcher run:
                              as omacvm, and the window waits for Return before
@@ -91,6 +95,54 @@ def report_cli(args: list) -> int:
         except OSError:
             pass
     subprocess.Popen(["open" if mac else "xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return 0
+
+
+def extra_brightness(args: list) -> int:
+    """OmacVM.app's Extra brightness, read or switched from the VM (the Display
+    panel runs this). The app answers on this VM's control port; nothing goes
+    to the Bridge. Exit 0 done, 1 no answer or an app without it, 2 usage,
+    3 not an OmacVM.app VM (or no control port), 4 the app said no (no XDR
+    display, GPU safe mode, the VM's window not in front, too many changes)."""
+    import json
+
+    want, as_json = None, False
+    for a in args:
+        if a in ("on", "off") and want is None:
+            want = a == "on"
+        elif a == "--json":
+            as_json = True
+        else:
+            print("omacvm extra-brightness [on|off] [--json]", file=sys.stderr)
+            return 2
+    from omacvm_cc import local
+    from omacvm_cc import state as S
+    from omacvm_cc.bridge import Bridge, BridgeError
+
+    env = S.parse_env(local.read(local.env_file()))
+    b = Bridge(env, local.read(os.path.join(local.share(), "VERSION")).strip())
+    if env.get("OMACVM_VM_TYPE") != "app" or not b.port_path:
+        print("omacvm extra-brightness: only in an OmacVM.app VM (its control port)", file=sys.stderr)
+        return 3
+    try:
+        a = b.extra_brightness(want)
+    except BridgeError as e:
+        if e.status in (400, 409, 429):
+            if as_json:
+                print(json.dumps({"error": str(e), "code": e.code}))
+            print(f"omacvm extra-brightness: {e}", file=sys.stderr)
+            return 4
+        print(f"omacvm extra-brightness: {e} (OmacVM.app 3.1.30 or newer answers this)", file=sys.stderr)
+        return 1
+    state = {k: a.get(k) is True for k in ("display", "safe_mode", "on", "available")}
+    if as_json:
+        print(json.dumps(state))
+    elif not state["display"]:
+        print("Extra brightness: not on this Mac (it needs an XDR display)")
+    elif state["safe_mode"]:
+        print("Extra brightness: off while GPU safe mode is on")
+    else:
+        print(f"Extra brightness: {'on' if state['on'] else 'off'}")
     return 0
 
 
@@ -222,6 +274,8 @@ def main(args: list) -> int:
     if cmd == "status":
         from omacvm_cc import plain
         return plain.status("--json" in args)
+    if cmd == "extra-brightness":
+        return extra_brightness(args[1:])
     if cmd == "update-system":
         from omacvm_cc import system
         rc = system.run(yes="--yes" in args)

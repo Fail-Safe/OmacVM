@@ -287,13 +287,13 @@ func audioControl(_ path: String, _ body: [String: Any]) throws -> String {
   }
 }
 
-/// GET or POST /display/external-brightness: the external display the VM is
-/// on. Everything from the VM is checked: a box (x, y, width, height: an
+/// GET or POST /display/external-brightness: the Mac display the VM (output)
+/// is on. Everything from the VM is checked: a box (x, y, width, height: an
 /// OmacVM.app output from its layout) only picks among the displays that show
-/// an OmacVM.app window, without one the VM app in front decides; the display
-/// must be external and settable; levels are 0-100.
+/// an OmacVM.app window, without one the VM app in front decides; levels are
+/// 0-100. An external display must be settable and external_brightness on;
+/// the built-in display goes through macOS's own control (OutputBrightness).
 func externalBrightnessRequest(_ query: [URLQueryItem], body: Data?) throws -> [String: Any] {
-  guard config.externalBrightness else { throw APIError(409, "off on this Mac (external_brightness in the Bridge's config.json)") }
   let names = ["x", "y", "width", "height"]
   let given = names.compactMap { n in query.first { $0.name == n }?.value }
   var box: CGRect?
@@ -321,8 +321,12 @@ func externalBrightnessRequest(_ query: [URLQueryItem], body: Data?) throws -> [
     return VMScreens.front(windowed: true)?.display
   }
   guard let t = target else { throw APIError(404, "no VM window in front on a display (or this output is not on one)") }
-  guard !t.builtin else { throw APIError(409, "the built-in display: its brightness stays macOS's") }
-  return body == nil ? try externalBrightness.get(t.id) : try externalBrightness.set(t.id, percent: percent, delta: delta)
+  switch OutputBrightness.route(builtin: t.builtin, externalOn: config.externalBrightness) {
+  case .off: throw APIError(409, ExternalBrightness.off)
+  case .builtin: return try builtinBrightness(t.id, percent: percent, delta: delta, set: body != nil)
+  case .external:
+    return body == nil ? try externalBrightness.get(t.id) : try externalBrightness.set(t.id, percent: percent, delta: delta)
+  }
 }
 
 func handle(_ fd: Int32, peer: String) {

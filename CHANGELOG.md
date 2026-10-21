@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Brightness and Extra brightness in the VM's Display panel.** Omarchy's brightness slider now
+  also sets the MacBook's own display (through the Bridge, as the brightness keys), and on a Mac
+  with an XDR display an Omarchy-style **Extra brightness** switch sits right under it, with the
+  same use-with-care (i), in step with the app's row (OmacVM.app; switches only while that VM's
+  window is in front). In the VM's terminal: `omacvm extra-brightness [on|off]`.
+
 ## 3.1.29
 
 - **Extra brightness (experimental, off by default).** On a MacBook Pro's XDR display (or another

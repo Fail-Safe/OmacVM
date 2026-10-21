@@ -158,6 +158,25 @@ enum NotSettable {
     "(delete ddc-unsafe.json in the Bridge's folder to try again)"
 }
 
+/// Which way a guest's brightness request (/display/external-brightness:
+/// Omarchy's slider, keys and `omarchy brightness display` through OmacVM's
+/// ddcutil) goes, by the Mac display its output is on. The built-in display
+/// through macOS's own control, as the Bridge's brightness keys set it: the
+/// guest could already set it (/display/brightness). The others through
+/// ExternalBrightness, only while external_brightness is on.
+enum OutputBrightness {
+  enum Route: Equatable { case builtin, external, off }
+  static func route(builtin: Bool, externalOn: Bool) -> Route {
+    if builtin { return .builtin }
+    return externalOn ? .external : .off
+  }
+
+  /// The level the guest asked for, 0...1: a level in percent, or a move from `now`.
+  static func target(now: Double, percent: Double?, delta: Double?) -> Double {
+    max(0, min(1, percent.map { $0 / 100 } ?? (now + (delta ?? 0) / 100)))
+  }
+}
+
 /// The on-screen normal windows (layer 0, bigger than 100x100) of one process,
 /// front to back, from one copy of macOS's window list.
 enum WindowList {

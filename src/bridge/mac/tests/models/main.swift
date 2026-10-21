@@ -374,6 +374,12 @@ for p in pending where !held.macOSDidIt(1, pressAt: p.at, before: p.before, afte
 check(stepsDone == 20, "hid: a held key's 20 repeats: 20 steps (\(stepsDone))")
 check(own.macOSDidIt(2, pressAt: 20.2, before: 0.5, after: 0.5625), "hid: another display: its own check (macOS's change counts)")
 check(own.macOSDidIt(1, pressAt: 25, before: 0.5, after: 0.5625), "hid: a press 4 s after the last step: the check is back")
+// The VM's slider set the built-in display (MediaKeys.vmSet records it as the Bridge's own): a key pressed
+// just before or after it still steps, from the new level.
+var slider = OwnSteps()
+slider.stepped(1, at: 40.1)   // the slider's set, 0.1 s after the press
+check(!slider.macOSDidIt(1, pressAt: 40, before: 0.5, after: 0.05), "hid: a slider set right after a key press: not macOS's, the key steps")
+check(!slider.macOSDidIt(1, pressAt: 40.3, before: 0.05, after: 0.05), "hid: a key press 0.2 s after a slider set: steps from the new level")
 
 // ---- Shift and Option with the brightness keys (BrightnessCombo, KeyHold) ----
 let none = KeyMods(), shift = KeyMods(shift: true), opt = KeyMods(option: true), shiftOpt = KeyMods(shift: true, option: true)

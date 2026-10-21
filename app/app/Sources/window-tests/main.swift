@@ -707,5 +707,54 @@ expect(ExtraBrightness.start(on: true, display: true, gpuSafeMode: false, layerP
 expect(ExtraBrightness.start(on: true, display: true, gpuSafeMode: false, layerPresent: false).on,
        "extra brightness: switch on, an XDR display: on")
 
+// MARK: The VM's own Extra brightness switch (its Display panel): /omacvm/app/extra-brightness, the app's answer.
+
+let ebPath = ExtraBrightnessGuest.path
+let ebFront = ExtraBrightnessGuest.Context(display: true, safeMode: false, front: true, on: false)
+func ebBody(_ s: String) -> Data { Data(s.utf8) }
+func ebDecide(_ method: String, _ path: String = ebPath, _ body: String? = nil,
+              _ c: ExtraBrightnessGuest.Context = ebFront, allowed: Bool = true) -> ExtraBrightnessGuest.Decision {
+    ExtraBrightnessGuest.decide(method: method, path: path, body: body.map(ebBody), c) { allowed }
+}
+expect(ebDecide("GET") == .answer, "VM switch: GET answers the state")
+let ebState = ExtraBrightnessGuest.state(ExtraBrightnessGuest.Context(display: true, safeMode: true, front: false, on: true))
+expect(ebState["display"] as? Bool == true && ebState["safe_mode"] as? Bool == true && ebState["on"] as? Bool == true
+       && ebState["available"] as? Bool == false && ebState.count == 4,
+       "VM switch: the state is {display, safe_mode, on, available}; GPU safe mode: not available")
+expect(ExtraBrightnessGuest.state(ebFront)["available"] as? Bool == true, "VM switch: an XDR display, no safe mode: available")
+expect(ebDecide("POST", ebPath, #"{"on": true}"#) == .set(true) && ebDecide("POST", ebPath, #"{"on": false}"#) == .set(false),
+       "VM switch: POST {\"on\": true|false} sets it")
+for bad in [#"{"on": 1}"#, #"{"on": 0}"#, #"{"on": "true"}"#, #"{"on": null}"#, #"{}"#, #"{"on": true, "x": 1}"#,
+            #"{"On": true}"#, #"[true]"#, "true", ""] {
+    expect(ebDecide("POST", ebPath, bad) == .refuse(400, "bad-request"), "VM switch: body \(bad.isEmpty ? "(empty)" : bad): 400")
+}
+expect(ebDecide("POST") == .refuse(400, "bad-request"), "VM switch: POST without a body: 400")
+expect(ebDecide("GET", ebPath, #"{"on": true}"#) == .refuse(400, "bad-request"), "VM switch: GET with a body: 400")
+for p in [ebPath + "?x", ebPath + "/", ebPath + "s", "/omacvm/app/", "/omacvm/app/hdr", "/omacvm/app/extra-brightness/on"] {
+    expect(ebDecide("GET", p) == .refuse(404, "not-found") && ExtraBrightnessGuest.isApp(p),
+           "VM switch: \(p): 404, and the app's own (never relayed)")
+}
+expect(!ExtraBrightnessGuest.isApp("/omacvm/status") && !ExtraBrightnessGuest.isApp("/omacvm/apps")
+       && !ExtraBrightnessGuest.isApp("/omacvm/app-update"), "VM switch: the Bridge's requests still go on (app-update too)")
+expect(ebDecide("POST", ebPath, #"{"on": true}"#, ExtraBrightnessGuest.Context(display: false, safeMode: false, front: true, on: false))
+       == .refuse(409, "no-display"), "VM switch: no XDR display: 409")
+expect(ebDecide("POST", ebPath, #"{"on": true}"#, ExtraBrightnessGuest.Context(display: true, safeMode: true, front: true, on: false))
+       == .refuse(409, "safe-mode"), "VM switch: GPU safe mode (this run): 409")
+expect(ebDecide("POST", ebPath, #"{"on": true}"#, ExtraBrightnessGuest.Context(display: true, safeMode: false, front: false, on: false))
+       == .refuse(409, "not-front"), "VM switch: a VM whose window is not in front: 409 (it would switch the one the user looks at)")
+expect(ebDecide("GET", ebPath, nil, ExtraBrightnessGuest.Context(display: true, safeMode: false, front: false, on: true)) == .answer,
+       "VM switch: reading needs no window in front")
+expect(ebDecide("POST", ebPath, #"{"on": true}"#, allowed: false) == .refuse(429, "busy"), "VM switch: over the rate: 429")
+expect(ebDecide("PUT") == .refuse(405, "method"), "VM switch: other methods: 405")
+var ebAsked = false
+_ = ExtraBrightnessGuest.decide(method: "POST", path: ebPath, body: ebBody(#"{"on": 2}"#), ebFront) { ebAsked = true; return true }
+expect(!ebAsked, "VM switch: a refused request does not count against the rate")
+var rate = WriteRate()
+expect((0..<4).allSatisfy { rate.take(at: 10 + Double($0) * 0.1) } && !rate.take(at: 10.5),
+       "VM switch: 4 writes in a second, the 5th refused")
+expect(rate.take(at: 11.05), "VM switch: a second after the first: allowed again")
+var rate2 = WriteRate()
+expect(rate2.take(at: 100) && rate2.take(at: 50), "VM switch: the clock going back does not lock it")
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
