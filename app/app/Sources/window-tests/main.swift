@@ -687,5 +687,25 @@ do {
     expect(false, "ssh command test: \(error)")
 }
 
+// MARK: Extra brightness (ADR 0050): the row only with a display above 2x; the start's answer.
+
+expect(!ExtraBrightness.available(potentials: [1]), "extra brightness: an SDR monitor (potential 1): no row")
+expect(!ExtraBrightness.available(potentials: [2]), "extra brightness: a MacBook Air (potential 2): no row")
+expect(ExtraBrightness.available(potentials: [16]), "extra brightness: an XDR panel (potential 16): the row")
+expect(ExtraBrightness.available(potentials: [1, 16]), "extra brightness: an SDR monitor beside an XDR panel: the row")
+expect(!ExtraBrightness.available(potentials: []) && !ExtraBrightness.available(potentials: [.nan, .infinity]),
+       "extra brightness: no displays or no numbers: no row")
+expect(ExtraBrightness.minPotential == 2.05, "extra brightness: the same threshold as QEMU (OMACVM_BRIGHT_MIN_POTENTIAL)")
+expect(ExtraBrightness.start(on: false, display: true, gpuSafeMode: false, layerPresent: false) == (false, "switch off"),
+       "extra brightness: switch off")
+expect(ExtraBrightness.start(on: true, display: false, gpuSafeMode: false, layerPresent: false).on == false,
+       "extra brightness: no display with the headroom: off")
+expect(ExtraBrightness.start(on: true, display: true, gpuSafeMode: true, layerPresent: false) == (false, "GPU safe mode"),
+       "extra brightness: GPU safe mode: off, and says so")
+expect(ExtraBrightness.start(on: true, display: true, gpuSafeMode: false, layerPresent: true).on == false,
+       "extra brightness: frames in a CAOpenGLLayer: off")
+expect(ExtraBrightness.start(on: true, display: true, gpuSafeMode: false, layerPresent: false).on,
+       "extra brightness: switch on, an XDR display: on")
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)

@@ -5,6 +5,12 @@ in more words.
 
 ## Unreleased
 
+- **Extra brightness (experimental, off by default).** On a MacBook Pro's XDR display (or another
+  display with more than 2x headroom), the VM window's Display settings have a switch that makes
+  the VM's window up to about twice as bright as the Mac's normal white, for bright light. It acts
+  at once in a running VM and ends by itself when the VM stops, its window is hidden or you turn
+  it off. Use it with care: it uses much more battery and makes the Mac warmer; its (i) says so.
+  Not with HDR yet. A MacBook Air does not show it. `omacvm check` has a line for it.
 - **Chromium (WebGPU) at the display's scale.** The "Chromium (WebGPU)" menu entry runs Chromium
   on X11, which does not see Omarchy's display scale: on a Retina display its pages and menus came
   out at half size. It now opens at the scale of the display it starts on (a scale you set

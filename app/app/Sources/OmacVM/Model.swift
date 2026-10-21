@@ -4,6 +4,7 @@ import Foundation
 import OmacVMUpdate
 import OmacVMFeatures
 import OmacVMAudio
+import OmacVMWindow
 
 enum HelperError: LocalizedError, Equatable {
     case io(String)
@@ -613,6 +614,22 @@ enum Settings {
         }
         return (true, "10-bit, HDR where the window's display can show it")
     }
+    /// Extra brightness (experimental, off by default, ADR 0050): the VM's
+    /// main window up to twice as bright as the Mac's white on an XDR
+    /// display. QEMU reads this key itself while the VM runs (it runs as the
+    /// app), so a change counts at once. The VM window's switch
+    /// (ExtraBrightnessRow) or defaults write org.omacvm.app extraBrightness -bool true
+    static var extraBrightness: Bool {
+        get { UserDefaults.standard.bool(forKey: ExtraBrightness.key) }
+        set { UserDefaults.standard.set(newValue, forKey: ExtraBrightness.key) }
+    }
+    /// Extra brightness at a start of the VM (ExtraBrightness.start): QEMU's
+    /// OMACVM_EXTRA_BRIGHT (for a QEMU not started as the app) and the
+    /// qemu.log line. Main thread (NSScreen).
+    @MainActor static func extraBrightnessStart() -> (on: Bool, why: String) {
+        ExtraBrightness.start(on: extraBrightness, display: Mac.hasExtraBrightnessDisplay, gpuSafeMode: gpuSafeMode,
+                              layerPresent: ProcessInfo.processInfo.environment["OMACVM_GL_PRESENT"] == "layer")
+    }
     /// macOS's own shortcuts (screenshots, Mission Control, Spotlight,
     /// Cmd+Tab ...) stay with macOS even while the VM has the keyboard: the
     /// default since RC11. Off (experimental): they all go to the VM while it
@@ -697,6 +714,14 @@ extension Mac {
     /// without one (MacBook Air, SDR monitors) keep the 8-bit SDR path.
     static var hasHDRDisplay: Bool {
         NSScreen.screens.contains { $0.maximumPotentialExtendedDynamicRangeColorComponentValue > 1 }
+    }
+
+    /// A display with EDR headroom above 2x (an XDR panel, an HDR monitor):
+    /// extra brightness's row. A MacBook Air reports 2 and has none.
+    static var hasExtraBrightnessDisplay: Bool {
+        ExtraBrightness.available(potentials: NSScreen.screens.map {
+            Double($0.maximumPotentialExtendedDynamicRangeColorComponentValue)
+        })
     }
 
     /// A MacBook: its battery shows in Omarchy's bar.

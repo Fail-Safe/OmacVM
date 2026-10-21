@@ -983,6 +983,14 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hdr-headroom-
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hdr-headroom.patch"
 "$native_dir/Tests/display/test-hdr-headroom.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the HDR headroom is not wired as tested (test-hdr-headroom.sh)"
+# OmacVM, extra brightness (ADR 0050): the app's switch draws the guest's SDR
+# frames up to 2x on an XDR display (a shader into extended linear sRGB
+# surfaces, the layer with EDR). Its rules' and shader's tests (on Apple's
+# software renderer), then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-extra-brightness-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-extra-brightness.patch"
+"$native_dir/Tests/display/test-extra-brightness.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: extra brightness is not wired as tested (test-extra-brightness.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"

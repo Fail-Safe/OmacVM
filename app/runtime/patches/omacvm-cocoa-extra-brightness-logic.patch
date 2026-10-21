@@ -1,0 +1,165 @@
+From: OmacVM
+Subject: [PATCH] ui: extra brightness's gain and shader, tested without AppKit
+
+What: a header with no AppKit in it, for extra brightness (ADR 0050): the
+gain QEMU gives the guest's SDR frames (the window's display's EDR
+headroom now, at most 2x, never above it, only on a display whose EDR
+potential is above 2.05), when the newest frame is drawn again (a move of
+0.02 or more), the states qemu.log names (on and "held back" with a
+little hysteresis), the sRGB decode, and the GLSL of the shader that
+decodes the guest's sRGB frames to linear light and multiplies them.
+Used by omacvm-cocoa-extra-brightness.patch (which explains the why).
+
+Why its own file: so the rules and the shader are tested without QEMU or
+a window (app/runtime/Tests/display/test-extra-brightness.sh applies this
+patch to an empty folder, at build time and in CI;
+test-extra-brightness-shader.m runs the same GLSL on Apple's software
+renderer).
+
+Upstream: OmacVM only.
+Test: app/runtime/Tests/display/test-extra-brightness.c,
+app/runtime/Tests/display/test-extra-brightness-shader.m.
+
+diff --git a/ui/omacvm-bright.h b/ui/omacvm-bright.h
+new file mode 100644
+--- /dev/null
++++ b/ui/omacvm-bright.h
+@@ -0,0 +1,138 @@
++/*
++ * OmacVM, extra brightness (ADR 0050): the gain QEMU's present gives the
++ * guest's SDR frames on a display with EDR headroom above 2x (an XDR
++ * panel). No AppKit in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-extra-brightness.sh); ui/cocoa.m feeds it
++ * NSScreen's values and compiles the shader below on its present context.
++ *
++ * With the app's switch the frames go through the shader into half-float
++ * surfaces in extended linear sRGB: decoded from sRGB, times g. g follows
++ * the window's display's headroom now, at most 2 (OMACVM_BRIGHT_TARGET),
++ * never above what the display shows now, so nothing is clipped. macOS
++ * lowers the headroom when the Mac is hot or the panel is bright; g follows
++ * it down.
++ */
++#ifndef OMACVM_BRIGHT_H
++#define OMACVM_BRIGHT_H
++
++#include <math.h>
++#include <stdbool.h>
++#include <stdlib.h>
++
++/* The most: twice the Mac's white. Also the surfaces' content headroom. */
++#define OMACVM_BRIGHT_TARGET 2.0
++/*
++ * A display shows it only above this EDR potential: SDR panels report 2.0
++ * (MacBook Air), XDR panels 16. The app's row uses the same number
++ * (OmacVMWindow/ExtraBrightness.swift).
++ */
++#define OMACVM_BRIGHT_MIN_POTENTIAL 2.05
++/* Gains are in hundredths: 100 = the Mac's white as it is. */
++#define OMACVM_BRIGHT_ONE 100
++
++/* The window's display can show it. */
++static inline bool omacvm_bright_display(double potential)
++{
++    return isfinite(potential) && potential > OMACVM_BRIGHT_MIN_POTENTIAL;
++}
++
++/*
++ * The gain in hundredths for the window's display: its headroom now, at
++ * most the target and its potential, at least 1; rounded down, so never
++ * above the headroom now.
++ */
++static inline int omacvm_bright_gain(double now, double potential)
++{
++    double g;
++
++    if (!omacvm_bright_display(potential) || !isfinite(now) || now <= 1.0) {
++        return OMACVM_BRIGHT_ONE;
++    }
++    g = now < OMACVM_BRIGHT_TARGET ? now : OMACVM_BRIGHT_TARGET;
++    g = g < potential ? g : potential;
++    return (int)floor(g * 100.0 + 1e-9);
++}
++
++/* The newest frame is drawn again for a move of 0.02 or more. */
++static inline bool omacvm_bright_moved(int shown, int now)
++{
++    return abs(now - shown) >= 2;
++}
++
++/* What qemu.log says, once per change. */
++typedef enum {
++    OMACVM_BRIGHT_OFF,          /* the switch is off */
++    OMACVM_BRIGHT_ON,           /* at about the target */
++    OMACVM_BRIGHT_HELD,         /* macOS gives less headroom now */
++    OMACVM_BRIGHT_NO_DISPLAY,   /* the window's display has no headroom above 2x */
++    OMACVM_BRIGHT_NO_HDR,       /* the guest sends PQ (HDR): not with HDR yet */
++    OMACVM_BRIGHT_NO_PATH,      /* no IOSurface present, no half-float surfaces, no shader */
++} OmacVMBright;
++
++/*
++ * The state for the log. "On" from 1.95x, "held back" below 1.90x; in
++ * between it stays what it was, so a headroom that wobbles around 1.9
++ * does not fill the log.
++ */
++static inline OmacVMBright omacvm_bright_state(OmacVMBright prev, bool on, bool path,
++                                               double potential, bool pq, int gain)
++{
++    if (!on) {
++        return OMACVM_BRIGHT_OFF;
++    }
++    if (!path) {
++        return OMACVM_BRIGHT_NO_PATH;
++    }
++    if (!omacvm_bright_display(potential)) {
++        return OMACVM_BRIGHT_NO_DISPLAY;
++    }
++    if (pq) {
++        return OMACVM_BRIGHT_NO_HDR;
++    }
++    if (gain >= 195) {
++        return OMACVM_BRIGHT_ON;
++    }
++    if (gain < 190) {
++        return OMACVM_BRIGHT_HELD;
++    }
++    return prev == OMACVM_BRIGHT_HELD ? OMACVM_BRIGHT_HELD : OMACVM_BRIGHT_ON;
++}
++
++/* sRGB-encoded 0..1 to linear light, as the shader does (for the splash's clear colour and the tests). */
++static inline double omacvm_bright_linear(double c)
++{
++    c = c < 0 ? 0 : c > 1 ? 1 : c;
++    return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
++}
++
++/*
++ * The shader (desktop GL core, as QEMU's own blit): the bound texture
++ * into the bound framebuffer. yflip -1: the texture's first row is the
++ * top (QEMU's texture_blit), 1: the bottom (texture_blit_flip). The
++ * guest's sRGB values are decoded to linear light and multiplied by gain.
++ */
++#define OMACVM_BRIGHT_VERT \
++    "#version 140\n" \
++    "in vec2 in_position;\n" \
++    "uniform float yflip;\n" \
++    "out vec2 ex_tex_coord;\n" \
++    "void main(void) {\n" \
++    "    gl_Position = vec4(in_position, 0.0, 1.0);\n" \
++    "    ex_tex_coord = vec2(1.0 + in_position.x, 1.0 + yflip * in_position.y) * 0.5;\n" \
++    "}\n"
++
++#define OMACVM_BRIGHT_FRAG \
++    "#version 140\n" \
++    "uniform sampler2D image;\n" \
++    "uniform float gain;\n" \
++    "in vec2 ex_tex_coord;\n" \
++    "out vec4 out_frag_color;\n" \
++    "void main(void) {\n" \
++    "    vec4 c = texture(image, ex_tex_coord);\n" \
++    "    vec3 s = clamp(c.rgb, 0.0, 1.0);\n" \
++    "    vec3 lin = mix(pow((s + 0.055) / 1.055, vec3(2.4)), s / 12.92,\n" \
++    "                   vec3(lessThanEqual(s, vec3(0.04045))));\n" \
++    "    out_frag_color = vec4(lin * gain, c.a);\n" \
++    "}\n"
++
++#endif
