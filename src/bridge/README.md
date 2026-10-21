@@ -144,8 +144,9 @@ itself (Studio Display, Pro Display XDR, LG UltraFine; this wins over DDC/CI).
 Which one works is found per display
 when the Bridge starts, after every display change and, for a display where
 nothing worked, again a minute later when it is asked (keys, the VM, `omacvm
-check`); the built-in display is never set here. With `external_brightness:
-false` the Bridge sends no DDC/CI at all, not even reads.
+check`); the built-in display never over DDC/CI (it goes through macOS's own
+control, below). With `external_brightness: false` the Bridge sends no DDC/CI
+at all, not even reads.
 
 `GET /display/external`: every external display and how its brightness is
 set (`ddc`, `apple`, or `none` with the reason), for `omacvm check`:
@@ -171,7 +172,7 @@ before 3.1.30 answer `409`): Omarchy's brightness slider in the VM's Display
 panel. Such a set counts as the Bridge's own for the brightness keys (a key
 pressed at the same moment still steps) and sends no `osd` event.
 The VM only names its output and a level; it never reaches the I2C bus, and
-its writes go out at most every 250 ms (the latest level). A request shows
+its DDC/CI writes go out at most every 250 ms (the latest level). A request shows
 no popup from here (Omarchy's command shows its own). Off, `GET
 /display/external` answers `{"enabled": false, "displays": []}` without
 asking any display.
@@ -180,8 +181,8 @@ In the VM, `/usr/local/bin/ddcutil` (`guest/omacvm-ddcutil`) answers the three
 calls Omarchy's `omarchy-brightness-display-ddc` makes (`detect`, `getvcp 10`,
 `setvcp 10 N`; output Virtual-N is "bus" N, maximum 100) through this API, so
 Omarchy's brightness keys, `omarchy brightness display` and its monitor panel
-work on the output's Mac display, the built-in one too. Outside OmacVM.app only the focused output
-asks (the Mac goes by the window in front). Everything else goes to the real
+work on the output's Mac display, the built-in one too. Outside OmacVM.app
+only the focused output asks (the Mac goes by the window in front). Everything else goes to the real
 `/usr/bin/ddcutil`.
 
 ### Bluetooth
