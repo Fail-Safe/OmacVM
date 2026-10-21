@@ -20,6 +20,7 @@ static void report(const char *mode, const char *dev, double *v, int n, double p
 int main(int argc, char **argv) {
   @autoreleasepool {
     int N = argc > 1 ? atoi(argv[1]) : 2000;
+    if (N < 1) { fprintf(stderr, "N must be 1 or more\n"); return 2; }
     id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
     NSError *err = nil;
     id<MTLLibrary> lib = [dev newLibraryWithSource:@"kernel void inc(device uint *v [[buffer(0)]], uint i [[thread_position_in_grid]]) { v[i] += 1u; }"
@@ -30,7 +31,8 @@ int main(int argc, char **argv) {
     memset(buf.contents, 0, 256);
     id<MTLCommandQueue> q = [dev newCommandQueue];
     const char *dn = dev.name.UTF8String;
-    double *v = malloc(sizeof(double) * N);
+    /* v holds N sync times, max(N / 4, 50) rec64 times and 20 batch times */
+    double *v = malloc(sizeof(double) * (N > 50 ? N : 50));
     unsigned long long expect = 0;
     void (^run)(int) = ^(int k) {
       @autoreleasepool {

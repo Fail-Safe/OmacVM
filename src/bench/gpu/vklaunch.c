@@ -38,6 +38,7 @@ static void report(const char *mode, const char *dev, double *v, int n, double p
 
 int main(int argc, char **argv) {
   int N = argc > 1 ? atoi(argv[1]) : 2000, want = argc > 2 ? atoi(argv[2]) : -1;
+  if (N < 1) { fprintf(stderr, "N must be 1 or more\n"); return 2; }
   VkApplicationInfo ai = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .apiVersion = VK_API_VERSION_1_1 };
   const char *exts[] = { "VK_KHR_portability_enumeration" };
   VkInstanceCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &ai };
@@ -109,7 +110,8 @@ int main(int argc, char **argv) {
   VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT, .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT };
   VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cb };
   uint64_t expect = 0;
-  double *v = malloc(sizeof(double) * N);
+  /* v holds N sync/poll/submit times, max(N / 4, 50) rec64 times and 20 batch times */
+  double *v = malloc(sizeof(double) * (N > 50 ? N : 50));
 #define RECORD(k) do { CK(vkBeginCommandBuffer(cb, &cbbi)); vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe); \
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pl, 0, 1, &ds, 0, NULL); \
     for (int j_ = 0; j_ < (k); j_++) { if (j_) vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, NULL, 0, NULL); \

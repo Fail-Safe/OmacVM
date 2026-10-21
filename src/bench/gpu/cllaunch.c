@@ -30,6 +30,7 @@ static const char *src = "kernel void inc(global uint *v) { v[get_global_id(0)] 
 
 int main(int argc, char **argv) {
   int N = argc > 1 ? atoi(argv[1]) : 2000, pw = argc > 2 ? atoi(argv[2]) : -1;
+  if (N < 1) { fprintf(stderr, "N must be 1 or more\n"); return 2; }
   cl_uint np = 0; CK(clGetPlatformIDs(0, NULL, &np));
   cl_platform_id ps[8]; if (np > 8) np = 8; CK(clGetPlatformIDs(np, ps, NULL));
   cl_device_id d = NULL; char name[256] = "", pname[128] = "";
