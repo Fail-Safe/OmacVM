@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.29 (unreleased)
+## 3.1.29
 
 - **Extra brightness (experimental, off by default).** On a MacBook Pro's XDR display (or another
   display with more than 2x headroom), the VM window's Display settings have a switch that makes
