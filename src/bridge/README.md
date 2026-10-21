@@ -162,9 +162,14 @@ set (`ddc`, `apple`, or `none` with the reason), for `omacvm check`:
 (an OmacVM.app output's box from its layout, in points with the layout's
 corner at 0,0) the one among the displays showing an OmacVM.app window whose
 place matches; without, the display of the VM window in front (under the
-pointer when it covers several). Only an external display with a VM window
-on it: `404` when there is none, `409` for the built-in display, a display
-without DDC/CI or `external_brightness: false`, `503` when it does not answer.
+pointer when it covers several). Only a display with a VM window on it:
+`404` when there is none, `409` for an external display without DDC/CI or with
+`external_brightness: false`, `503` when it does not answer. The Mac's
+built-in display is set through macOS's own control, as the brightness keys
+set it (`"method": "builtin"`, also with `external_brightness: false`; Bridges
+before 3.1.30 answer `409`): Omarchy's brightness slider in the VM's Display
+panel. Such a set counts as the Bridge's own for the brightness keys (a key
+pressed at the same moment still steps) and sends no `osd` event.
 The VM only names its output and a level; it never reaches the I2C bus, and
 its writes go out at most every 250 ms (the latest level). A request shows
 no popup from here (Omarchy's command shows its own). Off, `GET
@@ -175,7 +180,7 @@ In the VM, `/usr/local/bin/ddcutil` (`guest/omacvm-ddcutil`) answers the three
 calls Omarchy's `omarchy-brightness-display-ddc` makes (`detect`, `getvcp 10`,
 `setvcp 10 N`; output Virtual-N is "bus" N, maximum 100) through this API, so
 Omarchy's brightness keys, `omarchy brightness display` and its monitor panel
-work on the output's Mac display. Outside OmacVM.app only the focused output
+work on the output's Mac display, the built-in one too. Outside OmacVM.app only the focused output
 asks (the Mac goes by the window in front). Everything else goes to the real
 `/usr/bin/ddcutil`.
 

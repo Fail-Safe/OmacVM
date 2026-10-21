@@ -5,9 +5,11 @@
 # (omarchy-brightness-display-ddc: `detect --brief`, `getvcp 10 --brief`,
 # `setvcp 10 N` on the focused output's I2C bus). A VM's outputs (Virtual-N)
 # have no I2C bus: this answers those three through OmacVM Bridge, which sets
-# the external Mac display the output is on (DDC/CI there, or an Apple
-# display's own control) and refuses the Mac's built-in display, as before.
-# An output's "bus" is its number (Virtual-2: bus 2); its maximum is 100.
+# the Mac display the output is on: an external one over DDC/CI (or an Apple
+# display's own control), the Mac's built-in display through macOS's own
+# control, as the brightness keys (an older Bridge refuses that one: no
+# slider there, as before). An output's "bus" is its number (Virtual-2: bus
+# 2); its maximum is 100.
 # Anything else goes to the real ddcutil (/usr/bin/ddcutil) when installed.
 set -uo pipefail
 REAL=${OMACVM_DDCUTIL_REAL:-/usr/bin/ddcutil}
@@ -33,15 +35,13 @@ while (( $# )); do
   esac
 done
 
-# The VM's connected outputs, without the one on the Mac's built-in display
-# (OmacVM.app names it; the Mac would refuse it anyway).
+# The VM's connected outputs, the one on the Mac's built-in display too.
 outputs() {
-  local s n builtin=""
-  [[ -r $RUNTIME/omacvm/builtin ]] && read -r builtin < "$RUNTIME/omacvm/builtin"
+  local s n
   for s in "$DRM"/card*-Virtual-*/status; do
     [[ -r $s && $(<"$s") == connected ]] || continue
     n=${s%/status}; n=${n##*-Virtual-}
-    [[ $n =~ ^[0-9]+$ && Virtual-$n != "$builtin" ]] && echo "$n"
+    [[ $n =~ ^[0-9]+$ ]] && echo "$n"
   done | sort -un
 }
 

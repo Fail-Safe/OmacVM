@@ -111,7 +111,13 @@ enum Brightness {
   }
 
   static func set(_ v: Float) -> Bool {
-    guard let setFn, let d = display else { return false }
+    guard let d = display else { return false }
+    return set(v, on: d)
+  }
+
+  /// One display by its id (the guest's own brightness path: server.swift).
+  static func set(_ v: Float, on d: CGDirectDisplayID) -> Bool {
+    guard let setFn else { return false }
     return setFn(d, max(0, min(1, v))) == 0
   }
 }
@@ -179,6 +185,16 @@ final class OSDEvents {
       brightness = percent(v)
       brightnessQuietUntil = Date() + 1   // the panel may ramp; that is not an external change
       emit("brightness", value: brightness, muted: false, source: source, device: "Built-in Display")
+    }
+  }
+
+  /// The VM set the built-in display itself (Omarchy's slider or keys, which
+  /// show their own popup): the level is noted and the poll stays quiet while
+  /// the panel ramps, with no event.
+  func brightnessQuiet() {
+    q.async { [self] in
+      if let v = Brightness.get() { brightness = percent(v) }
+      brightnessQuietUntil = Date() + 1
     }
   }
 
@@ -539,6 +555,13 @@ final class MediaKeys {
       ownSteps.stepped(display, at: ProcessInfo.processInfo.systemUptime)
       act()
     }
+  }
+
+  /// The VM set this display's brightness itself (main thread): a key read
+  /// from the keyboard that is checked meanwhile must not take the change
+  /// for macOS's own and skip its step (OwnSteps).
+  func vmSet(_ display: CGDirectDisplayID) {
+    ownSteps.stepped(display, at: ProcessInfo.processInfo.systemUptime)
   }
 
   /// After a key went to the VM (main thread): the first one per VM is

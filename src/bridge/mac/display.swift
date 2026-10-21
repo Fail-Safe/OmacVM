@@ -157,6 +157,22 @@ func displayControl(_ path: String, _ body: [String: Any]) throws -> String {
   }
 }
 
+/// The built-in display for the guest's own brightness path, by its own id
+/// (not Brightness.display's pick). Omarchy shows its own popup (or none, for
+/// its slider), so the Bridge sends none; the poll stays quiet while the panel
+/// ramps (OSDEvents.brightnessQuiet), and a brightness key pressed meanwhile
+/// still steps (MediaKeys.vmSet: OwnSteps).
+func builtinBrightness(_ id: CGDirectDisplayID, percent: Double?, delta: Double?, set: Bool) throws -> [String: Any] {
+  let name = "Built-in Display"
+  guard let now = Brightness.level(id) else { throw APIError(503, "\(name) did not answer") }
+  guard set else { return ["brightness": BrightnessStep.percent(Double(now)), "display": name, "method": "builtin"] }
+  let target = OutputBrightness.target(now: Double(now), percent: percent, delta: delta)
+  guard Brightness.set(Float(target), on: id) else { throw APIError(503, "\(name) did not take it") }
+  osdEvents.brightnessQuiet()
+  DispatchQueue.main.async { mediaKeys.vmSet(id) }
+  return ["brightness": BrightnessStep.percent(target), "display": name, "method": "builtin"]
+}
+
 // ---- Wi-Fi password for QR sharing ----
 let shareableSecurity: Set<String> = ["open", "wep", "wpa-personal", "wpa-wpa2-personal", "wpa2-personal", "personal",
                                       "wpa3-personal", "wpa2-wpa3-personal", "owe", "owe-transition"]
