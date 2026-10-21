@@ -10,7 +10,7 @@ work/tracks/night-brightness.md.
 The user asked for an opt-in extra brightness for the VM's window (bright
 light), with a caution in its (i), that ends by itself when the VM stops.
 XDR panels can show more than the Mac's white (EDR headroom: up to 16x at
-low brightness, about 1.6x at full SDR brightness); a MacBook Air reports a
+low brightness, less at full SDR brightness); a MacBook Air reports a
 potential of 2 and has no XDR, an SDR monitor 1.
 
 Doing it in the guest does not work: it needs the HDR switch, the 10-bit
@@ -50,8 +50,11 @@ A plain 2x of a PQ frame doubles HDR highlights and clips them.
    (`ExtraBrightness.available`, the same number as QEMU's).
 5. **It goes back by itself.** Off: the next frame takes the plain 8-bit
    path and the layer drops EDR. Out of sight (hidden, minimised, covered,
-   another Space) no frame is drawn and the look stops; the window is not
-   shown, so macOS drops the headroom. The VM stopped: the layer is gone.
+   another Space) no frame is drawn. Hidden, macOS drops the headroom about
+   15 s later, as after the switch goes off (M1 Max). Fully covered by
+   another window it does not: the panel keeps 2x headroom until the window
+   shows again or the switch goes off, though nothing on screen is brighter.
+   The VM stopped: the layer is gone.
    On a display without the headroom, g is 1 and the frames are 8-bit.
 6. **The surfaces decide how a frame is drawn**, not the switch: during the
    half-second realloc hold-off a frame of the other kind goes into the
@@ -85,10 +88,12 @@ A plain 2x of a PQ frame doubles HDR highlights and clips them.
 
 - Cost while on: the present surfaces take 8 bytes a pixel instead of 4
   (5 surfaces with vsync: about +154 MB at 3456x2234, more on a 6K
-  display) and the shader one `pow()` a pixel. Off costs nothing (the
+  display; measured on an M1 Max: QEMU +60 to +140 MB) and the shader one
+  `pow()` a pixel. Off costs nothing (the
   look does not run).
-- Power: the panel's backlight follows the headroom; numbers in
-  work/tracks/night-brightness.md.
+- Power: the panel's backlight follows the headroom. M1 Max at brightness
+  0.1, a white page, 3 min windows: 3.28 W on against 3.22 W off for the
+  whole Mac (+2 %, within the noise). Not measured at higher brightness.
 - Next to a 2x VM these stay at 1x: windows on other displays, Omanotch's
   strip in native full screen, the start animation, QEMU's cursor layer
   (if Hyprland ever uses the cursor plane), and screenshots and recordings

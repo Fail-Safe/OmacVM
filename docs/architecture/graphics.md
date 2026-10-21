@@ -945,8 +945,9 @@ bench lock and are indications only):
   `contentsHeadroom` 2 (untagged EDR content took an M1 Max's panel to 16x).
   QEMU reads the app's key live (KVO).
   The surfaces there decide how a frame is drawn (realloc hold-off), the
-  boot logo stays at 1x, PQ frames are never boosted. Off, hidden or on an
-  SDR display: the 8-bit path.
+  boot logo stays at 1x, PQ frames are never boosted. Off or on an SDR
+  display: the 8-bit path. Hidden: no frames, and macOS drops the headroom
+  about 15 s later; fully covered: no frames, but macOS keeps 2x headroom.
 - **HDR clients**: an app must hand Hyprland a PQ image description
   (`wp_color_manager_v1`). GStreamer's `waylandsink` does; mpv 0.41 with
   `--gpu-api=opengl` does not (mpv's master does, with `vo=gpu-next`; app
