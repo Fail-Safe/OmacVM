@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- **Chromium (WebGPU) at the display's scale.** The "Chromium (WebGPU)" menu entry runs Chromium
+  on X11, which does not see Omarchy's display scale: on a Retina display its pages and menus came
+  out at half size. It now opens at the scale of the display it starts on (a scale you set
+  yourself, on its command line or in `chromium-flags.conf`, still wins).
+
 ## 3.1.28
 
 - **A VM from another Mac says what it needs.** When OmacVM Gestures or the Bridge aren't set up
@@ -12,10 +19,6 @@ in more words.
   helper that is not allowed yet, or switched off in Login Items, gets the right System Settings
   button. Nothing is installed without you, and Later starts the VM as it is. `omacvm check` has
   the same answer in its new "Mac setup" line.
-- **Chromium (WebGPU) at the display's scale.** The "Chromium (WebGPU)" menu entry runs Chromium
-  on X11, which does not see Omarchy's display scale: on a Retina display its pages and menus came
-  out at half size. It now opens at the scale of the display it starts on (a scale you set
-  yourself, on its command line or in `chromium-flags.conf`, still wins).
 
 ## 3.1.27
 
