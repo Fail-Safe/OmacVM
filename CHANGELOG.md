@@ -13,6 +13,9 @@ in more words.
 - **Extra brightness works with HDR.** With "HDR and 10-bit colour" on, Extra brightness now wins
   while it is on: the VM's picture gets up to 2x brighter, HDR highlights do not; turned off, HDR
   is back at once, in a running VM. Before, it stayed off over HDR ("not with HDR yet").
+- **Extra brightness keeps your setting.** On or off, it stays as you last set it in the app or
+  the VM's Display panel: through a restart of the VM or the Mac, Update VM and app updates, HDR
+  or GPU safe mode switched, and a start on a display without it. Its (i) says so now.
 - **Chromium (WebGPU) at the display's scale.** The "Chromium (WebGPU)" menu entry runs Chromium
   on X11, which does not see Omarchy's display scale: on a Retina display its pages and menus came
   out at half size. It now opens at the scale of the display it starts on (a scale you set
