@@ -11,9 +11,11 @@ end. The tools are in [`src/bench/`](../../src/bench).
 |---|---|---|---|
 | Geekbench 7 CPU | CPU, single-core and multi-core | ✓ | ✓ (Linux ARM preview) |
 | Speedometer 3.1 | web apps: browser and CPU together | ✓ | ✓ |
+| JetStream 2.2 | JavaScript and WebAssembly | ✓ | ✓ |
 | MotionMark 1.3.1 | 2D graphics drawn through the browser | ✓ | ✓ |
 | WebGL Aquarium, 30,000 fish | 3D in the browser, frames per second | ✓ | ✓ |
 | Basemark Web 3.0 | the GPU in the browser: WebGL, canvas, SVG, plus some JavaScript and page tests | ✓ | ✓ |
+| Scrolling (`browser-bench.py scroll`) | Chrome scrolls a long Wikipedia page with its own gesture at 1500 px/s: frames per second, frame-time percentiles and late frames | ✓ | ✓ |
 | Geekbench 7 GPU | GPU compute | ✓ (Metal, OpenCL) | only OmacVM.app with Venus, see below |
 | WebGPU matmul (`browser-bench.py webgpu`) | GPU compute in the browser, GFLOPS | ✓ | only OmacVM.app with Venus |
 | glmark2 | OpenGL ES in the VM, absolute score | ✗ no macOS build | ✓ |
@@ -94,7 +96,7 @@ OmacVM copies its tools into the VM, so they are in
 ### Options
 
 ```text
-bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,basemark,gpu,glmark2] [OUT.jsonl]
+bench.sh [--runs N] [--only geekbench,speedometer,jetstream,motionmark,aquarium,basemark,webgpu,scroll,gpu,glmark2] [OUT.jsonl]
 ```
 
 Each result is one JSON line: host, OS, test, run, value, and the browser

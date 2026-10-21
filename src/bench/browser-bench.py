@@ -1,12 +1,35 @@
 #!/usr/bin/env python3
 """Run a browser benchmark in Chrome/Chromium and print its score.
 
-  browser-bench.py speedometer|motionmark|aquarium|basemark|webgpu [--port 9222]
+  browser-bench.py speedometer|jetstream|motionmark|aquarium|basemark|webgpu|scroll [--port 9222]
 
 The browser must already run with --remote-debugging-port (see bench.sh).
 Talks to it over the DevTools protocol; Python's standard library only.
 """
 import base64, json, os, socket, struct, sys, time, urllib.request
+
+SCROLL_JS = r"""
+(async () => {
+  const gb = window.chrome && chrome.gpuBenchmarking;
+  if (!gb || !gb.smoothScrollBy) return JSON.stringify({error: "no chrome.gpuBenchmarking (--enable-gpu-benchmarking)"});
+  window.scrollTo(0, 0);
+  await new Promise(r => setTimeout(r, 1000));
+  const dist = Math.min(document.documentElement.scrollHeight - innerHeight - 50, 15000);
+  const t = []; let on = true;
+  const tick = ts => { t.push(ts); if (on) requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  const t0 = performance.now();
+  await new Promise(res => gb.smoothScrollBy(dist, res, innerWidth / 2, innerHeight / 2, gb.MOUSE_INPUT, "down", 1500, true));
+  on = false;
+  const secs = (performance.now() - t0) / 1000;
+  const d = []; for (let i = 1; i < t.length; i++) d.push(t[i] - t[i - 1]);
+  d.sort((a, b) => a - b);
+  const pct = p => d.length ? d[Math.min(d.length - 1, Math.floor(p * d.length))] : 0;
+  const late = d.filter(x => x > 1.5 * pct(0.5)).length;
+  return JSON.stringify({fps: +(t.length / secs).toFixed(1), p50: +pct(0.5).toFixed(2), p95: +pct(0.95).toFixed(2),
+    p99: +pct(0.99).toFixed(2), late_pct: +(100 * late / Math.max(1, d.length)).toFixed(1), scrolled: Math.round(scrollY)});
+})()
+"""
 
 TESTS = {
     # Speedometer 3.1: browser and CPU speed (score: runs per minute).
@@ -16,6 +39,16 @@ TESTS = {
         "done": "(() => { const r = document.querySelector('#result-number');"
                 " return location.hash === '#summary' && r ? r.textContent.trim() : '' })()",
         "timeout": 900,
+    },
+    # JetStream 2.2: JavaScript and WebAssembly (score: geometric mean). It loads
+    # about a hundred files first; the Start link shows when they are all in.
+    "jetstream": {
+        "url": "https://browserbench.org/JetStream2.2/",
+        "ready": "!!document.querySelector('#status a.button')",
+        "start": "JetStream.start()",
+        "done": "(() => { const r = document.querySelector('#result-summary.done .score');"
+                " return r ? r.textContent.trim() : '' })()",
+        "timeout": 1200,
     },
     # MotionMark 1.3.1: graphics (animations drawn by the GPU through the browser).
     # Its score reads "1234.56 @ 120fps"; the number before the @ counts.
@@ -45,6 +78,18 @@ TESTS = {
                 " return /benchmark-result/.test(location.pathname) && r ? r.textContent.trim() : '' })()",
         "detail": "location.href + ' ' + (document.body.innerText.replace(/\\s+/g, ' ').split('RESULT')[1] || '').slice(0, 700)",
         "timeout": 900,
+    },
+    # Scrolling: Chrome's own scroll gesture (the compositor's path, as a
+    # trackpad or a wheel) down a long real page at 1500 px/s, 10 s, with the
+    # time of every animation frame. Score: frames per second; the frame-time
+    # percentiles and the share of late frames (over 1.5 frames) go to stderr.
+    # Needs Chrome started with --enable-gpu-benchmarking (bench.sh does).
+    "scroll": {
+        "url": "https://en.wikipedia.org/wiki/Apple_Inc.",
+        "ready": "document.readyState === 'complete'",
+        "settle": 4,
+        "eval": SCROLL_JS,
+        "key": "fps",
     },
     # WebGPU compute: f32 matrix multiply 2048 x 2048 in GFLOPS (pages/webgpu-matmul.html, about
     # 10 s). Pages without a hardware adapter report "error: no adapter".
@@ -119,8 +164,8 @@ class DevTools:
             if m.get("id") == self.id:
                 return m.get("result", {})
 
-    def js(self, expr):
-        r = self.call("Runtime.evaluate", expression=expr, returnByValue=True)
+    def js(self, expr, wait=False):
+        r = self.call("Runtime.evaluate", expression=expr, returnByValue=True, awaitPromise=wait)
         return r.get("result", {}).get("value")
 
 
@@ -147,14 +192,28 @@ def run(dt, t):
     url = t["url"]
     if not url.startswith("http"):   # a page that ships beside this script
         url = "file://" + os.path.join(os.path.dirname(os.path.abspath(__file__)), url)
-    dt.call("Page.navigate", url=url)
-    for _ in range(120):
-        time.sleep(1)
-        if dt.js("document.readyState") == "complete" and dt.js("typeof " + t["start"].split("(")[0].split(".")[0]) != "undefined":
-            break
-    time.sleep(2)
+    ready = t.get("ready") or "typeof " + t["start"].split("(")[0].split(".")[0] + " !== 'undefined'"
+    for attempt in (1, 2):   # a page that never got ready (a lost download) is loaded once more
+        dt.call("Page.navigate", url=url)
+        for _ in range(120):
+            time.sleep(1)
+            if dt.js("document.readyState") == "complete" and dt.js(ready):
+                break
+        else:
+            if attempt == 2:
+                raise SystemExit(f"{sys.argv[1]}: the page did not get ready")
+            continue
+        break
+    time.sleep(t.get("settle", 2))
     # The page size, for the log: it should be the same everywhere.
     print("viewport " + str(dt.js("innerWidth + 'x' + innerHeight + ' at ' + devicePixelRatio + 'x'")), file=sys.stderr)
+    if "eval" in t:   # one script that measures and returns JSON
+        o = json.loads(dt.js(t["eval"], wait=True) or "{}")
+        print(json.dumps(o), file=sys.stderr)
+        if t["key"] not in o:
+            raise SystemExit(f"{sys.argv[1]}: {o.get('error', 'no result')}")
+        print(o[t["key"]])
+        return
     dt.js(t["start"])
     if "sample" in t:
         time.sleep(t["warmup"])
