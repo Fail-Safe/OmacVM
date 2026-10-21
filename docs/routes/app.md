@@ -548,6 +548,7 @@ the 8-bit path.
 - Which Linux apps send HDR (October 2026): GStreamer does; mpv and
   Chromium show HDR video as SDR for now.
 - Only the main window; windows on other displays stay 8-bit.
+- Extra brightness (below) wins while it is on: no HDR highlights then.
 - GPU safe mode turns it off. `omacvm check` has an "HDR" line.
 - How it works: [ADR 0049](../adr/0049-hdr-guest-tone-maps.md).
 
