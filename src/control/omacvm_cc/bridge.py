@@ -309,6 +309,14 @@ class Bridge:
             body["swipe_out"] = bool(swipe_out)
         return self.call("POST", "/omacvm/settings/gestures", body)
 
+    def extra_brightness(self, on: bool | None = None, timeout: float = 2.0) -> dict:
+        """OmacVM.app's Extra brightness, answered by the app itself (never the
+        Bridge): {"display", "safe_mode", "on", "available"}; on: switch it."""
+        path = "/omacvm/app/extra-brightness"
+        if on is None:
+            return self.call("GET", path, timeout=timeout)
+        return self.call("POST", path, {"on": bool(on)}, timeout=timeout)
+
     def start_job(self, action: str, features: list[str] | tuple[str, ...] = ()) -> dict:
         body: dict = {"action": action}
         if action == "graphics":

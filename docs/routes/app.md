@@ -548,6 +548,7 @@ the 8-bit path.
 - Which Linux apps send HDR (October 2026): GStreamer does; mpv and
   Chromium show HDR video as SDR for now.
 - Only the main window; windows on other displays stay 8-bit.
+- Extra brightness (below) wins while it is on: no HDR highlights then.
 - GPU safe mode turns it off. `omacvm check` has an "HDR" line.
 - How it works: [ADR 0049](../adr/0049-hdr-guest-tone-maps.md).
 
@@ -566,12 +567,30 @@ Use it with care: it uses much more battery and makes the Mac warmer.
   Space, or you turn it off. The switch stays as you set it.
 - Only the VM's main window; the rest of the screen, other displays and
   screenshots stay at normal brightness.
-- Not with HDR yet: while the VM shows HDR, it stays off.
+- With HDR and 10-bit colour on, this wins while it is on: the picture
+  gets brighter, HDR highlights do not. Off, HDR is back at once.
 - A MacBook Air and SDR monitors do not show the switch. GPU safe mode
   turns it off. `omacvm check` has an "Extra brightness" line.
 - From the command line: `defaults write org.omacvm.app extraBrightness
   -bool true` (a running VM follows at once).
 - How it works: [ADR 0050](../adr/0050-extra-brightness.md).
+
+### In the VM's Display panel
+
+The Display panel in Omarchy's bar (the monitor icon) has the same switches
+from the VM:
+
+- **Brightness**: Omarchy's own slider sets the brightness of the Mac
+  display the VM's window is on, the MacBook's own display too (through
+  macOS, as the brightness keys). The keys and the slider stay in step. It
+  needs **External display brightness** (on by default) and the Bridge.
+- **Extra brightness**, right under it, only on a Mac with an XDR display:
+  Omarchy's own switch, with the same use-with-care (i) as the app's row.
+  Click it, or walk to it with j/k and press Return or Space. It is the
+  app's setting, so the VM window's row and the panel always agree, and it
+  switches only while that VM's window is in front. GPU safe mode dims it.
+  It needs the control centre (on by default). In the VM's terminal:
+  `omacvm extra-brightness [on|off]`.
 
 ## Fast network (experimental, off by default)
 

@@ -1036,12 +1036,27 @@ final class Runner {
 
     private func startControl() {
         let path = config.controlSocket.path, name = config.name, gpuMemory = GPUMemory.file(for: config)
+        // The VM's Extra brightness switch (its Display panel): this run's
+        // GPU safe mode, not today's setting (that counts from the next start).
+        let safeMode = !ExtraBrightness.start(on: true, display: true, gpuSafeMode: Settings.gpuSafeMode,
+                                              layerPresent: ProcessInfo.processInfo.environment["OMACVM_GL_PRESENT"] == "layer").on
+        let app = NativeControlBridge.AppSide(
+            extraBrightness: { [weak self] in
+                ExtraBrightnessGuest.Context(display: Mac.hasExtraBrightnessDisplay, safeMode: safeMode,
+                                             front: (self?.qemuIsActive ?? false) || Self.testAnyWindow,
+                                             on: Settings.extraBrightness)
+            },
+            setExtraBrightness: { [weak self] on in
+                guard on != Settings.extraBrightness else { return }
+                Settings.extraBrightness = on
+                self?.appendLog("OmacVM: the VM switched extra brightness \(on ? "on" : "off") (its Display panel)")
+            })
         Thread.detachNewThread { [weak self] in
             while true {
                 let running = DispatchQueue.main.sync { self?.isRunning ?? false }
                 guard running else { return }
                 if FileManager.default.fileExists(atPath: path),
-                   let bridge = try? NativeControlBridge(socketPath: path, vmName: name, gpuMemoryFile: gpuMemory) {
+                   let bridge = try? NativeControlBridge(socketPath: path, vmName: name, gpuMemoryFile: gpuMemory, app: app) {
                     DispatchQueue.main.sync { self?.control = bridge }
                     try? bridge.run()
                     bridge.stop()
@@ -1106,6 +1121,13 @@ final class Runner {
                 Thread.sleep(forTimeInterval: 1)
             }
         }
+    }
+
+    /// Test identity only (headless kit rows, no window in front): the VM's
+    /// Extra brightness switch is taken from any of its VMs.
+    /// defaults write org.omacvm.app.test testExtraBrightnessAnyWindow -bool true
+    static var testAnyWindow: Bool {
+        TestIdentity.isOn && UserDefaults.standard.bool(forKey: "testExtraBrightnessAnyWindow")
     }
 
     /// QEMU's window is the active app (the clipboard polls only then).

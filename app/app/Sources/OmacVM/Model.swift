@@ -712,14 +712,27 @@ extension Mac {
     /// A display that can show HDR (EDR headroom above SDR white: the XDR
     /// panel of a MacBook Pro, a Pro Display XDR, an HDR external). Macs
     /// without one (MacBook Air, SDR monitors) keep the 8-bit SDR path.
+    /// Test builds: OMACVM_TEST_EDR ("potential,headroom", QEMU's stand-in
+    /// for the window's display) decides instead, so a hidden test VM on an
+    /// SDR Mac can start with HDR.
     static var hasHDRDisplay: Bool {
-        NSScreen.screens.contains { $0.maximumPotentialExtendedDynamicRangeColorComponentValue > 1 }
+        if let t = TestHooks.value("OMACVM_TEST_EDR", bundleID: Bundle.main.bundleIdentifier),
+           let p = Double(t.split(separator: ",").first ?? "") {
+            return p > 1
+        }
+        return NSScreen.screens.contains { $0.maximumPotentialExtendedDynamicRangeColorComponentValue > 1 }
     }
 
     /// A display with EDR headroom above 2x (an XDR panel, an HDR monitor):
-    /// extra brightness's row. A MacBook Air reports 2 and has none.
+    /// extra brightness's row. A MacBook Air reports 2 and has none. Test
+    /// builds: QEMU's made-up display (OMACVM_TEST_EDR=potential,headroom)
+    /// counts here too, so the VM's switch can be tested on any Mac.
     static var hasExtraBrightnessDisplay: Bool {
-        ExtraBrightness.available(potentials: NSScreen.screens.map {
+        if let v = TestHooks.value("OMACVM_TEST_EDR", bundleID: Bundle.main.bundleIdentifier),
+           let p = v.split(separator: ",").first.flatMap({ Double($0) }) {
+            return ExtraBrightness.available(potentials: [p])
+        }
+        return ExtraBrightness.available(potentials: NSScreen.screens.map {
             Double($0.maximumPotentialExtendedDynamicRangeColorComponentValue)
         })
     }
