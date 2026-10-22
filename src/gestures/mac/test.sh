@@ -379,5 +379,7 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-trackpads" "$HERE/test-trackpad
 "$T/test-trackpads" > "$T/trackpads" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/trackpads"
 n=$(grep -c "trackpad: built-in again, 124 x 76 mm" "$T/trackpads" || true)
-if [[ $n == 7 ]]; then echo "ok   each new device for the trackpad is logged (trackpad: built-in again)"; else echo "FAIL logged $n times, want 7" >&2; fail=1; fi
+if [[ $n == 6 ]]; then echo "ok   each new device for the trackpad is logged (trackpad: built-in again)"; else echo "FAIL logged $n times, want 6" >&2; fail=1; fi
+n=$(grep -c "MultitouchSupport did not start the built-in trackpad (0xe00002d6)" "$T/trackpads" || true)
+if [[ $n == 1 ]]; then echo "ok   a start that failed is logged"; else echo "FAIL a failed start logged $n times, want 1" >&2; fail=1; fi
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" "$T/identity" >&2; exit 1; }

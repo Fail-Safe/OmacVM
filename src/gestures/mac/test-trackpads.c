@@ -56,7 +56,13 @@ CFArrayRef fakeCreateList(void) {
 }
 void fakeRegister(MTDeviceRef d, MTFrameCallback cb) { (void)cb; D(d)->callbacks++; }
 void fakeUnregister(MTDeviceRef d, MTFrameCallback cb) { (void)cb; D(d)->callbacks--; }
-void fakeStart(MTDeviceRef d, int mode) { (void)mode; D(d)->running = 1; D(d)->starts++; }
+static int failStarts;   // the next starts that fail (an IOReturn, as a busy device's)
+int fakeStart(MTDeviceRef d, int mode) {
+  (void)mode;
+  if (failStarts) { failStarts--; return (int)0xe00002d6; }
+  D(d)->running = 1; D(d)->starts++;
+  return 0;
+}
 void fakeStop(MTDeviceRef d) { D(d)->running = 0; D(d)->stops++; }
 bool fakeIsBuiltIn(MTDeviceRef d) { return D(d)->builtIn; }
 int fakeDimensions(MTDeviceRef d, int *w, int *h) { *w = D(d)->w; *h = D(d)->h; return 0; }
@@ -213,6 +219,14 @@ int main(void) {
   D(stuck)->running = 0;
   startTrackpads();
   check(padDev() != stuck && D(padDev())->entry == 0x1b0b && D(padDev())->running, "same device, not running: taken again (as before)");
+
+  // MultitouchSupport does not start the new device (busy): not running, so the next look takes it again.
+  hw[0].entry = 0x1c00;
+  failStarts = 1;
+  startTrackpads();
+  check(D(padDev())->entry == 0x1c00 && !D(padDev())->running && swipe() == 0, "a new device that did not start: not running");
+  startTrackpads();
+  check(D(padDev())->entry == 0x1c00 && D(padDev())->running && swipe() >= 10, "... taken again at the next look, and its frames come");
 
   // macOS says it added a multi-touch device: looked for 1 s later, once for a burst.
   hw[0].entry = 0x1d5b;
