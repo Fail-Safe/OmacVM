@@ -280,7 +280,9 @@ static volatile int fingers;      // contacts in the touching trackpad's last fr
 // one touching now has its frames sent; scroll momentum takes only scrolling
 // that a trackpad's fingers make (scroll-model.h), never a mouse's.
 #define MAX_PADS 8
-static struct { MTDeviceRef dev; uint64_t id; int w, h, fingers; } pads[MAX_PADS];
+// entry: the IORegistry entry of its device (macOS makes a new one for the same
+// trackpad at a wake from deep sleep: startTrackpads).
+static struct { MTDeviceRef dev; uint64_t id, entry; int w, h, fingers; } pads[MAX_PADS];
 static int nPads, activePad = -1;
 static ScrollState scrollSt;
 static pthread_mutex_t padLock = PTHREAD_MUTEX_INITIALIZER;   // pads' fingers, activePad, scrollSt
@@ -293,7 +295,7 @@ static int pinchSent;             // P sent for the current two-finger touch
 #define MAX_MICE 4
 // take: its swipe as the Mac's (swipe out to macOS); takeAt: the swipe's
 // travel on the guest's touchpad at the last frame (trackpad widths).
-static struct { MTDeviceRef dev; uint64_t id; int w, h, sent, fingers; MouseState st; SwipeTake take; double takeAt; } mice[MAX_MICE];
+static struct { MTDeviceRef dev; uint64_t id, entry; int w, h, sent, fingers; MouseState st; SwipeTake take; double takeAt; } mice[MAX_MICE];
 static int nMice;
 static pthread_mutex_t mouseLock = PTHREAD_MUTEX_INITIALIZER;   // mice
 static volatile double mouseSwipeUntil;
@@ -3687,9 +3689,47 @@ static void *serverThread(void *arg) {
 // MultitouchSupport lists every multi-touch surface, the Magic Mouse's too; a
 // trackpad is told apart by its size (a Magic Trackpad is 160 x 115 mm, a Magic
 // Mouse's surface well under 100 mm wide), a Magic Mouse by its family id or
-// HID product (isMagicMouseKind). Looked for again every 10 s, so a Magic
-// Trackpad or Magic Mouse connected later (or again) is taken too.
+// HID product (isMagicMouseKind). Looked for again every 10 s, and 1 s after
+// macOS adds a multi-touch device (watchMultitouch), so a Magic Trackpad or
+// Magic Mouse connected later (or again) is taken too.
+// At a wake from deep sleep (Power Nap's dark wakes too) macOS makes the
+// built-in trackpad's device anew: the same Multitouch ID, a new IORegistry
+// entry, the old one gone. MultitouchSupport tells only devices run with
+// MTDeviceScheduleOnRunLoop about that, not ours (MTDeviceStart): the old one
+// still says it runs and its frames never come again (the M1 Max, 2026-10-22:
+// no trackpad frames from the first wake on, until the helper started again).
+// So a listed device is the one held only while its IORegistry entry is the
+// same; a newer entry with the same ID takes its place.
 static int trackpadStarted;
+static int isReplayDev(MTDeviceRef d);
+
+// The IORegistry entry of a multi-touch surface's device (0: unknown).
+static uint64_t mtEntry(MTDeviceRef d) {
+  io_service_t svc = MTDeviceGetService(d);
+  uint64_t e = 0;
+  if (!svc || IORegistryEntryGetRegistryEntryID(svc, &e) != KERN_SUCCESS) return 0;
+  return e;
+}
+
+// d (IORegistry entry `entry`) is listed with the Multitouch ID of the device
+// held (heldEntry): does it take its place? A newer entry: macOS made the
+// device anew, or it was connected again. An older one never (the old one may
+// still be listed for a moment next to the new). The same entry, or none
+// known: only once the held one no longer runs, as before.
+static int takesOver(MTDeviceRef held, uint64_t heldEntry, MTDeviceRef d, uint64_t entry) {
+  if (held == d) return 0;
+  if (heldEntry && entry && heldEntry != entry) return entry > heldEntry;
+  return !MTDeviceIsRunning(held);
+}
+
+// Let go of a device taken (startTrackpads, startMouse): no more frames from
+// it, and the hold on it (CFRetain) ends.
+static void stopDevice(MTDeviceRef d, MTFrameCallback cb) {
+  MTUnregisterContactFrameCallback(d, cb);
+  if (MTDeviceIsRunning(d)) MTDeviceStop(d);
+  CFRelease(d);
+}
+static void (*stopDeviceFn)(MTDeviceRef, MTFrameCallback) = stopDevice;
 
 // The HID product id of the device behind a multi-touch surface (0: unknown).
 static int mtProduct(MTDeviceRef d) {
@@ -3703,31 +3743,35 @@ static int mtProduct(MTDeviceRef d) {
   return product;
 }
 
-// A Magic Mouse not taken yet: 1 if it was added (its frames now come).
-static int startMouse(MTDeviceRef d, int w, int h, int family, int product) {
-  uint64_t id = 0;
+// A Magic Mouse not taken yet, or a new device for one (above): its frames come
+// from now on. The device is held (CFRetain) until let go (stopDevice).
+static void startMouse(MTDeviceRef d, int w, int h, int family, int product) {
+  uint64_t id = 0, entry = mtEntry(d);
   MTDeviceGetDeviceID(d, &id);
   int slot = -1, known = 0;
+  MTDeviceRef old = NULL;
   pthread_mutex_lock(&mouseLock);
   for (int k = 0; k < nMice; k++) {
-    if (mice[k].id != id) continue;
-    // The same mouse connected again comes as a new device: take that one.
-    if (mice[k].dev == d || MTDeviceIsRunning(mice[k].dev)) known = 1; else slot = k;
+    if (mice[k].id != id || isReplayDev(mice[k].dev)) continue;
+    if (takesOver(mice[k].dev, mice[k].entry, d, entry)) slot = k; else known = 1;
   }
+  if (!known && slot >= 0) old = mice[slot].dev;
   if (!known && slot < 0 && nMice < MAX_MICE) slot = nMice++;
   if (!known && slot >= 0) {
-    mice[slot].dev = d; mice[slot].id = id; mice[slot].sent = 0;
+    CFRetain(d);
+    mice[slot].dev = d; mice[slot].id = id; mice[slot].entry = entry; mice[slot].sent = 0;
     mice[slot].w = w > 0 ? w : 5150; mice[slot].h = h > 0 ? h : 9050;
     mouseStateInit(&mice[slot].st);
     takeReset(&mice[slot].take);
   }
+  int mw = slot >= 0 ? mice[slot].w : 0, mh = slot >= 0 ? mice[slot].h : 0;
   pthread_mutex_unlock(&mouseLock);
-  if (known || slot < 0) return 0;
+  if (known || slot < 0) return;
+  if (old) stopDeviceFn(old, mouseFrameCb);   // its device is gone: let go of it
   MTRegisterContactFrameCallback(d, mouseFrameCb);
   MTDeviceStart(d, 0);
-  logf_("Magic Mouse: family %d, product 0x%04x, %d x %d mm (in the VM: two-finger swipe = workspaces, "
-        "one-finger flick = back/forward; scrolling as before)", family, product, mice[slot].w / 100, mice[slot].h / 100);
-  return 1;
+  logf_("Magic Mouse%s: family %d, product 0x%04x, %d x %d mm (in the VM: two-finger swipe = workspaces, "
+        "one-finger flick = back/forward; scrolling as before)", old ? " again" : "", family, product, mw / 100, mh / 100);
 }
 
 static int isTrackpad(MTDeviceRef d, int *w, int *h) {
@@ -3737,45 +3781,47 @@ static int isTrackpad(MTDeviceRef d, int *w, int *h) {
 
 static void startTrackpads(void) {
   CFArrayRef list = MTDeviceCreateList();
-  int added = 0;
   for (CFIndex i = 0; list && i < CFArrayGetCount(list); i++) {
     MTDeviceRef d = (MTDeviceRef)CFArrayGetValueAtIndex(list, i);
     int w = 0, h = 0;
-    uint64_t id = 0;
+    uint64_t id = 0, entry = mtEntry(d);
     if (!isTrackpad(d, &w, &h)) {
       int family = 0;
       if (MTDeviceGetFamilyID(d, &family) != 0) family = 0;
       int product = mtProduct(d);
-      if (isMagicMouseKind(MTDeviceIsBuiltIn(d), family, product, w, h)) added += startMouse(d, w, h, family, product);
+      if (isMagicMouseKind(MTDeviceIsBuiltIn(d), family, product, w, h)) startMouse(d, w, h, family, product);
       continue;
     }
     MTDeviceGetDeviceID(d, &id);
     int slot = -1, known = 0;
+    MTDeviceRef old = NULL;
     pthread_mutex_lock(&padLock);
     for (int k = 0; k < nPads; k++) {
-      if (pads[k].id != id) continue;
-      // The same trackpad connected again comes as a new device: take that one.
-      if (pads[k].dev == d || MTDeviceIsRunning(pads[k].dev)) known = 1; else slot = k;
+      if (pads[k].id != id || isReplayDev(pads[k].dev)) continue;
+      if (takesOver(pads[k].dev, pads[k].entry, d, entry)) slot = k; else known = 1;
     }
+    if (!known && slot >= 0) old = pads[slot].dev;
     if (!known && slot < 0 && nPads < MAX_PADS) slot = nPads++;
     if (!known && slot >= 0) {
-      pads[slot].dev = d; pads[slot].id = id; pads[slot].fingers = 0;
+      CFRetain(d);   // held until let go (stopDevice)
+      pads[slot].dev = d; pads[slot].id = id; pads[slot].entry = entry; pads[slot].fingers = 0;
       pads[slot].w = w > 0 ? w : 15600; pads[slot].h = h > 0 ? h : 9600;
       if (activePad < 0 || MTDeviceIsBuiltIn(d)) {
         activePad = slot;
         tpW = pads[slot].w; tpH = pads[slot].h;
       }
     }
+    int pw = slot >= 0 ? pads[slot].w : 0, ph = slot >= 0 ? pads[slot].h : 0;
     pthread_mutex_unlock(&padLock);
     if (known || slot < 0) continue;
+    if (old) stopDeviceFn(old, frameCb);   // its device is gone: let go of it
     MTRegisterContactFrameCallback(d, frameCb);
     MTDeviceStart(d, 0);
-    added++;
-    logf_("trackpad: %s, %d x %d mm (scroll momentum: its scrolling only, never a mouse's)",
-          MTDeviceIsBuiltIn(d) ? "built-in" : "Magic Trackpad", pads[slot].w / 100, pads[slot].h / 100);
+    logf_("trackpad: %s%s, %d x %d mm (%s)", MTDeviceIsBuiltIn(d) ? "built-in" : "Magic Trackpad", old ? " again" : "",
+          pw / 100, ph / 100, old ? "a new device for it from macOS: after sleep, or connected again"
+                                  : "scroll momentum: its scrolling only, never a mouse's");
   }
-  // Devices with a callback must stay: keep a list that gave us one.
-  if (list && !added) CFRelease(list);
+  if (list) CFRelease(list);   // the devices taken are held on their own
   if (nPads) trackpadStarted = 1;
 }
 
@@ -3784,17 +3830,43 @@ static void retryTrackpad(CFRunLoopTimerRef t, void *info) {
   if (!inputPaused) startTrackpads();
 }
 
+// macOS added a multi-touch device (the built-in trackpad's, made anew at a
+// wake; a Magic Trackpad or Magic Mouse connected): looked for 1 s later
+// instead of at the next 10 s look. Not at once: MTDeviceStart waits for a
+// busy device (up to 5 s, on this thread, the event tap's).
+static int lookQueued;   // main thread
+static void lookSoon(void) {
+  if (lookQueued) return;
+  lookQueued = 1;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    lookQueued = 0;
+    if (trackpad && !inputPaused) startTrackpads();
+  });
+}
+static void multitouchAdded(void *refcon, io_iterator_t it) {
+  (void)refcon;
+  io_object_t o;
+  while ((o = IOIteratorNext(it))) IOObjectRelease(o);   // all of them, or no next notice comes
+  lookSoon();
+}
+static void watchMultitouch(void) {
+  IONotificationPortRef port = IONotificationPortCreate(MACH_PORT_NULL);
+  io_iterator_t it = 0;
+  if (!port) return;
+  CFRunLoopAddSource(CFRunLoopGetMain(), IONotificationPortGetRunLoopSource(port), kCFRunLoopCommonModes);
+  if (IOServiceAddMatchingNotification(port, kIOFirstMatchNotification, IOServiceMatching("AppleMultitouchDevice"),
+                                       multitouchAdded, NULL, &it) != KERN_SUCCESS) {
+    logf_("not told about new multi-touch devices: looked for every 10 s only");
+    return;
+  }
+  io_object_t o;
+  while ((o = IOIteratorNext(it))) IOObjectRelease(o);   // the ones there now (taken at start); arms it
+}
+
 // A permission taken away (checkPermissions): every trackpad and Magic Mouse
 // let go, so none of them waits on frames nobody takes; startTrackpads takes
 // them again. The callbacks run on MultitouchSupport's thread: the tables
 // are emptied under their locks first, the devices stopped outside them.
-static void stopDevice(MTDeviceRef d, MTFrameCallback cb) {
-  MTUnregisterContactFrameCallback(d, cb);
-  if (MTDeviceIsRunning(d)) MTDeviceStop(d);
-}
-static void (*stopDeviceFn)(MTDeviceRef, MTFrameCallback) = stopDevice;
-static int isReplayDev(MTDeviceRef d);
-
 static void stopTrackpads(void) {
   MTDeviceRef p[MAX_PADS], m[MAX_MICE];
   pthread_mutex_lock(&padLock);
@@ -3919,6 +3991,8 @@ static void startRunning(void) {
     // Every 10 s: a Magic Trackpad or Magic Mouse connected later, or again.
     CFRunLoopTimerRef t = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 10, 10, 0, 0, retryTrackpad, NULL);
     CFRunLoopAddTimer(CFRunLoopGetCurrent(), t, kCFRunLoopCommonModes);
+    // ... and 1 s after macOS adds one (a wake makes the built-in trackpad's anew).
+    watchMultitouch();
   }
 
 

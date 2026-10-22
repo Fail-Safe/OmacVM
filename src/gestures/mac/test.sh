@@ -63,6 +63,10 @@
 #    while it waits makes the tap and starts the listener without a restart;
 #    when only a new process gets it, the helper starts again, once (#330,
 #    test-wait.c).
+# 11. A trackpad or Magic Mouse whose device macOS made anew (a wake from deep
+#    sleep; connected again) is taken, from the next look or 1 s after macOS
+#    adds it, and the old one let go and not held; the same device listed again
+#    is not (test-trackpads.c, made-up devices).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
@@ -336,4 +340,12 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-wait" "$HERE/test-wait.c" "$HER
   -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-wait" > "$T/wait" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/wait"
+# 11. Devices macOS made anew: a wake from deep sleep makes the built-in trackpad's.
+clang -O1 -Wall -Wno-unused-function -o "$T/test-trackpads" "$HERE/test-trackpads.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit -framework IOKit
+"$T/test-trackpads" > "$T/trackpads" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/trackpads"
+n=$(grep -c "trackpad: built-in again, 124 x 76 mm" "$T/trackpads" || true)
+if [[ $n == 7 ]]; then echo "ok   each new device for the trackpad is logged (trackpad: built-in again)"; else echo "FAIL logged $n times, want 7" >&2; fail=1; fi
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" "$T/identity" >&2; exit 1; }
