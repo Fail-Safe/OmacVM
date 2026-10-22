@@ -6,6 +6,8 @@
 //       checks' answers and the connected guests. LOCAL: the Mac address the
 //       guest came in on as greet sees it (getsockname), PEER: the guest's
 //       address (default: the real ones, 127.0.0.1).
+//       TEST_WAIT_GONE=1: first wait (up to 4 s) until no guest is connected
+//       (their readers drop a connection that ended).
 #include <arpa/inet.h>
 #include <sys/socket.h>
 static const char *fakeLocal;
@@ -28,6 +30,14 @@ static unsigned targetsFor(int net, const char *title) {
   unsigned m = pickTargets();
   pthread_mutex_unlock(&sendLock);
   return m;
+}
+
+static int liveClients(void) {
+  int n = 0;
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++) n += clients[i].fd >= 0;
+  pthread_mutex_unlock(&sendLock);
+  return n;
 }
 
 static void say(const char *what, unsigned mask) {
@@ -72,6 +82,7 @@ int main(int argc, char **argv) {
   }
   // The guests' lines, read on their own threads, are acted on here (the main queue).
   if (getenv("TEST_SWIPE_OUT")) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.5, false);
+  if (getenv("TEST_WAIT_GONE")) for (int t = 0; t < 40 && liveClients(); t++) usleep(100000);
   for (int i = 0; i < MAX_CLIENTS; i++)
     if (clients[i].fd >= 0) printf("live %s %s\n", clients[i].name, clients[i].ip);
   for (int i = 0; i < MAX_CLIENTS; i++)   // what each guest said about its swipes ("E")

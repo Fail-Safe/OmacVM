@@ -7,6 +7,8 @@
 #    so it connects there and both proofs name 192.168.77.1. Then the app moves
 #    it to the user network (the gateway becomes 10.0.2.2): it connects again
 #    within seconds, on keepalive, and the Mac drops its old connection.
+#    A guest's connection that ends (closed by the VM, or reset: keepalive
+#    during the Mac's sleep) is dropped at once and logged (2c).
 # 3. The default gateway: the card with a link, lowest metric, the same in
 #    Gestures, the Bridge client and the guest check.
 # 4. The event tap is created again when another OmacVM VM (a new QEMU, whose
@@ -89,7 +91,7 @@ echo "$TOKEN" > "$T/vm/token"
 # routing table (the file $T/gw), and its addresses (both Mac addresses reach
 # the test's listener on 127.0.0.1). once: one run(); loop: serve(), main()'s loop.
 cat > "$T/guest.py" <<'PY'
-import importlib.machinery, importlib.util, itertools, socket, sys, threading, types
+import importlib.machinery, importlib.util, itertools, socket, sys, threading, time, types
 # Apple's python3 (3.9) on macOS has no name for TCP_KEEPALIVE (netinet/tcp.h: 0x10).
 if sys.platform == "darwin" and not hasattr(socket, "TCP_KEEPALIVE"):
     socket.TCP_KEEPALIVE = 0x10
@@ -100,6 +102,7 @@ class Any(int):
 ev = types.ModuleType("evdev")
 ev.__getattr__ = lambda name: Any(next(n))
 sys.modules["evdev"] = ev
+import os, struct
 src, token, gw, mode, port = sys.argv[1:6]
 loader = importlib.machinery.SourceFileLoader("g", src)
 spec = importlib.util.spec_from_loader("g", loader)
@@ -108,9 +111,11 @@ loader.exec_module(g)
 g.bridge_token = lambda: open(token).read().strip()   # the VM user's token file
 g.default_gateway = lambda: open(gw).read().strip()
 real = socket.create_connection
+conns = []
 def connect(addr, *a, **k):
     print(f"guest: connect {addr[0]}", flush=True)
-    return real(("127.0.0.1", int(port)), *a, **k)
+    conns.append(real(("127.0.0.1", int(port)), *a, **k))
+    return conns[-1]
 g.socket.create_connection = connect
 setka = g.keepalive
 def keepalive(s):
@@ -138,9 +143,16 @@ if mode == "swipe":
             g.SWIPE.send(b"X left\n")
     g.SWIPE.set = set_
     g.hypr_socket = lambda: None   # no Hyprland here: the watcher has nothing to say
-if mode in ("once", "swipe"):
+# once: one run() for 1.5 s, then the process ends (its connection closes);
+# reset: the same, reset (RST) once connected; hold, swipe: until the Mac closes it.
+if mode in ("once", "reset", "hold", "swipe"):
     t = threading.Thread(target=lambda: g.run(Stub(), Stub(), Stub()), daemon=True)
-    t.start(); t.join(1.5)
+    t.start()
+    if mode == "reset":
+        g.CONNECTED.wait(5); time.sleep(0.5)
+        conns[-1].setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        os._exit(0)
+    t.join(1.5 if mode == "once" else 20)
 else:
     g.serve(Stub(), Stub(), Stub())   # main()'s own retry loop
 PY
@@ -165,11 +177,16 @@ fail=0
 expect() { if grep -qxF "$2" "$1"; then echo "ok   $2"; else echo "FAIL $2" >&2; fail=1; fi; }
 reject() { if grep -qxF "$2" "$1"; then echo "FAIL not: $2" >&2; fail=1; else echo "ok   not: $2"; fi; }
 
-# 1. Which VM gets them: an app VM on the fast network's listener, a UTM VM on UTM's.
+# 1. Which VM gets them: an app VM on the fast network's listener, a UTM VM on UTM's
+#    (both stay connected until the Mac side is done).
 mac "$T/out" 4 1   # NET_APP_FAST, NET_UTM
-guest "App VM" app "" once OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest1" 2>&1 || true
-guest "UTM VM" utm "" once OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest2" 2>&1 || true
+guest "App VM" app "" hold OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest1" 2>&1 &
+G1=$!; PIDS="$MAC $G1"
+for _ in $(seq 100); do grep -q "^accepted 1" "$T/out" && break; sleep 0.1; done
+guest "UTM VM" utm "" hold OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest2" 2>&1 &
+G2=$!; PIDS="$MAC $G1 $G2"
 wait "$MAC" || { cat "$T/err" "$T/guest1" "$T/guest2" >&2; exit 1; }
+killtree "$G1" "$G2"; wait "$G1" "$G2" 2>/dev/null || true
 expect "$T/out" "client App VM: app"
 expect "$T/out" "client UTM VM: utm"
 expect "$T/out" "UTM in front, title Windows: UTM VM"   # no name match: every UTM VM, never the app VM
@@ -246,6 +263,21 @@ expect "$T/out2" "accepted 2"
 if (( took <= 4 )); then echo "ok   connected again ${took} s after the switch"; else echo "FAIL connected again only after ${took} s" >&2; fail=1; fi
 expect "$T/out2" "live App VM 127.0.0.1"         # one connection: the old one was dropped
 reject "$T/out2" "live App VM 192.168.77.2"
+# 2c. The guest's connection ends: closed by the VM (it stopped), or reset (keepalive
+#     while the Mac slept): dropped at once and said so, not kept until a send fails.
+TEST_WAIT_GONE=1 mac "$T/out6" 3
+guest "App VM" app "" once OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest6" 2>&1 || true
+wait "$MAC" || true
+expect "$T/out6" "accepted 1"
+grep -q "guest disconnected: 127.0.0.1 (closed by the VM)" "$T/out6" && echo "ok   a connection the VM closed: dropped and logged" ||
+  { echo "FAIL a connection the VM closed: not logged" >&2; fail=1; }
+reject "$T/out6" "live App VM 127.0.0.1"
+TEST_WAIT_GONE=1 mac "$T/out7" 3
+guest "App VM" app "" reset OMACVM_GESTURES_HOST=127.0.0.1 > "$T/guest7" 2>&1 || true
+wait "$MAC" || true
+grep -q "guest disconnected: 127.0.0.1 (connection reset)" "$T/out7" && echo "ok   a connection reset: dropped and logged" ||
+  { echo "FAIL a connection reset: not logged" >&2; cat "$T/out7" >&2; fail=1; }
+reject "$T/out7" "live App VM 127.0.0.1"
 # 2b. Swipe out to macOS (#342): with it on the guest hears "X on 2" with the Mac's
 #     hello; where its swipes go ("E") is kept with its connection, and its "X left"
 #     (daemons 3.1.0-3.1.5) is read and acted on by the Mac (no VM in front here:

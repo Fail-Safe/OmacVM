@@ -3490,6 +3490,7 @@ static unsigned addClient(int c, int net, const char *ip, int gestures, int glid
         ((!strcmp(clients[i].ip, ip) && (!loopback || !strcmp(clients[i].name, name))) ||
          (net == NET_APP && clients[i].net == NET_APP && name[0] && !strcmp(clients[i].name, name)))) {
       if (strcmp(clients[i].ip, ip)) logf_("guest %s now comes from %s: its old connection closed", clients[i].ip, ip);
+      else logf_("guest %s connected again: its old connection closed", ip);
       closeClient(clients[i].fd); slot = i; break;
     }
   for (int i = 0; slot < 0 && i < MAX_CLIENTS; i++) if (clients[i].fd < 0) slot = i;
@@ -3516,6 +3517,25 @@ static unsigned addClient(int c, int net, const char *ip, int gestures, int glid
   return gen;
 }
 
+// The guest's connection ended while it was still the guest's (its reader saw
+// it end; err: recv's errno, 0 = closed by the VM): it is dropped and the
+// front VM's guests picked again, as a failed send does (sendTo). Before, it
+// stayed until the next send to it failed or the VM connected again, and
+// neither said so: a reset while the Mac slept (keepalive gets no answer from
+// a VM that does not run during Power Nap's dark wakes) left no line in the
+// log. One the Mac closed itself (replaced, dropped) is not its slot's any more.
+static void guestGone(int fd, unsigned gen, int err) {
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (clients[i].fd != fd || clients[i].gen != gen) continue;
+    logf_("guest disconnected: %s (%s)", clients[i].ip, !err ? "closed by the VM" : err == ETIMEDOUT ?
+          "no answer to keepalive: the VM did not run, or its network went away" : err == ECONNRESET ? "connection reset" : strerror(err));
+    closeClient(fd); clients[i].fd = -1;
+    retargetLocked(capturing);
+  }
+  pthread_mutex_unlock(&sendLock);
+}
+
 // After the handshake: the guest's lines ("X left|right"), until it goes or
 // its connection is closed here (closeClient shuts the socket down). rd is
 // this thread's own copy of the socket, so a closed fd number taken by a new
@@ -3523,10 +3543,11 @@ static unsigned addClient(int c, int net, const char *ip, int gestures, int glid
 static void readGuest(int rd, int fd, unsigned gen) {
   struct timeval none = { 0 };
   setsockopt(rd, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof none);
-  char buf[256]; size_t n = 0; int skipping = 0;
+  char buf[256]; size_t n = 0; int skipping = 0, err = 0;
   for (;;) {
     ssize_t r = recv(rd, buf + n, sizeof buf - 1 - n, 0);
-    if (r <= 0) break;
+    if (r < 0 && errno == EINTR) continue;
+    if (r <= 0) { err = r < 0 ? errno : 0; break; }
     n += (size_t)r;
     char *start = buf, *nl;
     while ((nl = memchr(start, '\n', n - (size_t)(start - buf)))) {
@@ -3540,6 +3561,7 @@ static void readGuest(int rd, int fd, unsigned gen) {
     if (n == sizeof buf - 1) { n = 0; skipping = 1; }   // too long: the rest of it too
   }
   close(rd);
+  guestGone(fd, gen, err);
 }
 
 struct readerArg { int rd, fd; unsigned gen; };
