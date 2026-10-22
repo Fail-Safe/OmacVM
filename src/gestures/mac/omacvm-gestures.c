@@ -3831,7 +3831,7 @@ static void startTrackpads(void) {
       continue;
     }
     MTDeviceGetDeviceID(d, &id);
-    int slot = -1, known = 0, renewed = 0;
+    int slot = -1, known = 0, renewed = 0, sized = 0;
     MTDeviceRef old = NULL;
     pthread_mutex_lock(&padLock);
     for (int k = 0; k < nPads; k++) {
@@ -3844,13 +3844,18 @@ static void startTrackpads(void) {
       CFRetain(d);   // held until let go (stopDevice)
       pads[slot].dev = d; pads[slot].id = id; pads[slot].entry = entry; pads[slot].fingers = 0;
       pads[slot].w = w > 0 ? w : 15600; pads[slot].h = h > 0 ? h : 9600;
-      if (activePad < 0 || MTDeviceIsBuiltIn(d)) {
+      // A new device for a trackpad held (old) keeps the one touched last: the
+      // built-in one's at a wake must not take over from a Magic Trackpad, or
+      // the guest, told the Magic Trackpad's size, never hears the built-in's.
+      if (activePad < 0 || (!old && MTDeviceIsBuiltIn(d))) {
         activePad = slot;
+        sized = tpW != pads[slot].w || tpH != pads[slot].h;
         tpW = pads[slot].w; tpH = pads[slot].h;
       }
     }
     int pw = slot >= 0 ? pads[slot].w : 0, ph = slot >= 0 ? pads[slot].h : 0;
     pthread_mutex_unlock(&padLock);
+    if (sized) sendSize();   // the guests scale finger movement to this trackpad now
     if (known || slot < 0) continue;
     if (old) stopDeviceFn(old, frameCb);   // its device is gone (or did not start): let go of it
     int builtIn = MTDeviceIsBuiltIn(d);

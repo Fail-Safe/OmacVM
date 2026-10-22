@@ -82,7 +82,9 @@ static void check(int ok, const char *what) {
   if (!ok) fail = 1;
 }
 
-// What the guest got since the last call: counts of F lines with fingers, and A lines.
+// What the guest got since the last call: counts of F lines with fingers, and A
+// lines; lastW: the trackpad width in the last "O" line (its size).
+static int lastW;
 static void drain(int *f, int *a) {
   char buf[16384]; *f = *a = 0;
   for (;;) {
@@ -92,6 +94,7 @@ static void drain(int *f, int *a) {
     for (char *l = buf; *l; ) {
       if (l[0] == 'F' && l[2] != '0') (*f)++;
       if (l[0] == 'A') (*a)++;
+      if (l[0] == 'O') sscanf(l, "O %*d %d", &lastW);
       char *nl = strchr(l, '\n');
       if (!nl) break;
       l = nl + 1;
@@ -128,6 +131,14 @@ static int swipeFrom(MTDeviceRef dev) {
   return f;
 }
 static int swipe(void) { return swipeFrom(NULL); }
+// The same: the trackpad width the guest scales the swipe for if it was told
+// one with it (0: none, -1: the swipe did not reach the guest).
+static int swipeWidth(MTDeviceRef dev) {
+  int f, a;
+  drain(&f, &a);
+  lastW = 0;
+  return swipeFrom(dev) >= 10 ? lastW : -1;
+}
 
 // A two-finger scroll on the trackpad through the event tap (Glide): the A
 // lines the guest got, and the scroll events the VM app got instead.
@@ -258,6 +269,23 @@ int main(void) {
         "permission taken away: every device let go and not held");
   startTrackpads();
   check(nPads == 1 && nMice == 1 && swipe() >= 10, "permission back: taken again");
+
+  // A Magic Trackpad next to the built-in one, touched last before the Mac
+  // slept; the wake makes the built-in one's device anew. The guest still
+  // scales for the Magic Trackpad: the built-in one, touched next, tells it
+  // its size ("O"), as at any change of trackpad.
+  hw[2] = (Dev){ .id = 0x55, .entry = 0x3000, .builtIn = 0, .w = 16000, .h = 11500 };
+  nHw = 3;
+  startTrackpads();
+  MTDeviceRef magic = NULL;
+  for (int i = 0; i < nPads; i++) if (D(pads[i].dev)->id == 0x55) magic = pads[i].dev;
+  check(nPads == 2 && magic && D(magic)->running, "a Magic Trackpad next to the built-in one: taken");
+  check(swipeWidth(magic) == 16000, "the Magic Trackpad touched: the guest scales for it (160 mm)");
+  hw[0].entry = 0x1e00;
+  startTrackpads();
+  check(nPads == 2 && D(padDev())->entry == 0x1e00, "a wake beside a Magic Trackpad: the built-in one's new device taken");
+  check(swipeWidth(NULL) == 12400, "... touched next, the guest scales for the built-in one again (124 mm)");
+  check(swipeWidth(magic) == 16000, "... and for the Magic Trackpad when it is touched again");
 
   printf("%s\n", fail ? "FAIL trackpads" : "ok   trackpads: a device macOS made anew (a wake) is taken, the old one let go");
   return fail;
