@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.30
+## 3.1.31 (unreleased)
 
 - **Trackpad gestures after sleep.** After the Mac woke from a longer sleep (Power Nap's short
   wakes too), three- and four-finger swipes and scroll momentum's two-finger scrolling no longer
@@ -25,6 +25,8 @@ in more words.
   on X11, which does not see Omarchy's display scale: on a Retina display its pages and menus came
   out at half size. It now opens at the scale of the display it starts on (a scale you set
   yourself, on its command line or in `chromium-flags.conf`, still wins).
+
+There is no 3.1.30: it was built but not released, and its changes are the ones above.
 
 ## 3.1.29
 
