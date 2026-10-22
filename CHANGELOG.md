@@ -5,6 +5,11 @@ in more words.
 
 ## 3.1.30
 
+- **Trackpad gestures after sleep.** After the Mac woke from a longer sleep (Power Nap's short
+  wakes too), three- and four-finger swipes and scroll momentum's two-finger scrolling no longer
+  reached the VM until OmacVM Gestures was started again: macOS makes the trackpad's device anew at
+  such a wake, and Gestures kept the old one. It now takes the new one about a second after the
+  wake (a Magic Mouse's too).
 - **Brightness and Extra brightness in the VM's Display panel.** Omarchy's brightness slider now
   also sets the MacBook's own display (through the Bridge, as the brightness keys), and on a Mac
   with an XDR display an Omarchy-style **Extra brightness** switch sits right under it, with the
