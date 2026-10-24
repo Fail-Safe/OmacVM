@@ -144,12 +144,16 @@ enum Graphics {
     /// The Venus host memory window, from the VM's memory plan (one memory
     /// pool on Apple Silicon): what this Mac has beyond the VM's own memory and
     /// macOS's reserve (4 GB up to 16 GB, 6 GB up to 36 GB, 8 GB above), as a
-    /// power of two between 4 and 32 GB. It is address space for mapping Vulkan
-    /// memory into the VM; what Vulkan really allocates counts against the
-    /// GPU memory budget (gpu-robust's budget patch), which follows macOS's
-    /// memory pressure. So the window has a floor (minHostmemGB): with 1 or
-    /// 2 GB (a 4 GB VM on an 8 GB Mac, a 24 GB VM on a 32 GB Mac) a 3B
-    /// language model could not map its weights.
+    /// power of two between 4 and 32 GB. It bounds how much Vulkan memory the
+    /// VM can map; what Vulkan allocates counts against the GPU memory budget
+    /// (virgl-venus-memory-budget.patch, three quarters of the Mac's memory).
+    /// Venus memory is not checked against macOS's memory pressure, so on an
+    /// 8 GB Mac a big model can make macOS swap. QEMU backs the whole window
+    /// with anonymous memory (hostmem-background): a guest that writes there
+    /// outside a blob uses Mac memory up to the window's size, outside the
+    /// budget. The window has a floor (minHostmemGB): with 1 or 2 GB (a 4 GB
+    /// VM on an 8 GB Mac, a 24 GB VM on a 32 GB Mac) a 3B language model
+    /// could not map its weights.
     ///
     /// The window is a 64-bit PCI memory BAR of its own size and alignment.
     /// QEMU's virt machine has a 512 GB PCI window above 512 GB only when the

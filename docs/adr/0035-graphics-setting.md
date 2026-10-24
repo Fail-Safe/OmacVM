@@ -65,12 +65,17 @@ decides whether Vulkan apps get the Mac's GPU, not how the desktop draws.
   design): Mac memory minus the VM's minus macOS's reserve (4/6/8 GB),
   a power of two from 1 to 32 GB. It is address space; allocations count
   against the GPU memory budget (`virgl-venus-memory-budget.patch`).
-  Amended for 3.1.32: at least 4 GB (`Graphics.minHostmemGB`). The budget
-  follows macOS's memory pressure (ADR 0034), so the reserve in the plan
-  only keeps big Macs from getting a needlessly large window; with 1 or 2 GB
-  (a 4 GB VM on an 8 GB Mac, a 24 GB VM on a 32 GB Mac) a 3B language
-  model could not map its weights. M1/M2 keep the cap of half the small
-  high PCI window.
+  Amended for 3.1.32: at least 4 GB (`Graphics.minHostmemGB`). With 1 or
+  2 GB (a 4 GB VM on an 8 GB Mac, a 24 GB VM on a 32 GB Mac) a 3B language
+  model could not map its weights. Venus memory is checked against the
+  budget only, not against macOS's memory pressure (ADR 0034), so the
+  bigger window lets Vulkan apps use more Mac memory, up to the budget: on
+  an 8 GB Mac a big model can make macOS swap, which we take over a model
+  that does not load. QEMU backs the whole window with anonymous memory
+  (`hostmem-background`), so a guest that writes there outside a blob uses
+  Mac memory up to the window's size, outside the budget; at 4 GB that is
+  still less than big Macs already had (up to 32 GB). M1/M2 keep the cap of
+  half the small high PCI window.
 
 ## Consequences
 
