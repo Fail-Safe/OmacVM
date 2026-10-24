@@ -2,8 +2,9 @@
 # OmacVM.app's VM gives freed memory back to the Mac in 256 KiB blocks
 # (src/memory/guest/90-omacvm-mm.tmpfiles), without a VM: the tmpfiles lines
 # applied to a stand-in /sys set page_reporting_order from the kernel's 9 to 6
-# and leave a kernel without free page reporting alone (tmpfiles' "w" writes
-# only to a file that is there); install.sh installs the file and applies it
+# and leave a kernel built without free page reporting alone (tmpfiles' "w"
+# writes only to a file that is there; Arch's kernel has it, so on Parallels,
+# UTM and Fusion 6 is written too and does nothing there: no balloon reports); install.sh installs the file and applies it
 # at once; omacvm check has its line on the app route.
 #   src/tests/memory-report-order.sh
 set -uo pipefail
@@ -31,7 +32,7 @@ expect "order 9 (kernel default) becomes 6" 6 "$(cat "$T/a$P")"
 expect "the other lines still apply" "defer+madvise 1000" "$(cat "$T/a/sys/kernel/mm/transparent_hugepage/defrag") $(cat "$T/a/sys/kernel/mm/lru_gen/min_ttl_ms")"
 mkdir -p "$T/b/sys/kernel/mm"
 apply "$T/b"
-expect "no free page reporting: nothing made" no "$([[ -e $T/b$P || -d $T/b/sys/module ]] && echo yes || echo no)"
+expect "kernel without free page reporting: nothing made" no "$([[ -e $T/b$P || -d $T/b/sys/module ]] && echo yes || echo no)"
 o=$(sed -n "s|^w $P - - - - \([0-9]*\)$|\1|p" "$F")
 expect "the order is 2 (16 KiB, the Mac's page) to 8 (1 MiB)" yes "$([[ -n $o ]] && (( o >= 2 && o < 9 )) && echo yes)"
 expect "install.sh installs the file" 1 "$(grep -c 'install -m644 90-omacvm-mm.tmpfiles /etc/tmpfiles.d/90-omacvm-mm.conf' "$I")"
