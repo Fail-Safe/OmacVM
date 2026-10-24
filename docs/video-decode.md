@@ -144,7 +144,9 @@ off, `OMACVM_VIDEO_DEBUG=1` logs each stream and the time per frame,
 put the shim in: the VM folder's `video-decode` file). In the VM:
 `OMACVM_VA_EXPORT=1` or `0` in an app's environment turns the shim's
 exportable surfaces on or off for it; `OMACVM_VA_MAX=N` sets the largest
-size Chromium decodes in hardware (default 1920, 0: no limit).
+size Chromium decodes in hardware (default 1920, 0: no limit; only in
+Chromium's processes and only for decoding: VA-API encoders and video
+processing keep Mesa's sizes).
 
 ## Chrome's converted frames
 

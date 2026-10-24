@@ -42,9 +42,14 @@ run "OMACVM_HOST_ENV=$T/host-new.env" no
 # An older runtime shows the converted frames black: Chromium decodes on the CPU.
 run "OMACVM_HOST_ENV=$T/host-old.env" no --type=gpu-process
 run "OMACVM_HOST_ENV=$T/none.env" no --type=gpu-process
-# The size limit for Chromium's hardware decoding: off, and another one.
+# The size limit for Chromium's hardware decoding (decoding configs only): off, and another one.
 run "OMACVM_HOST_ENV=$T/host-new.env OMACVM_VA_MAX=0" yes --type=gpu-process
 run "OMACVM_HOST_ENV=$T/host-new.env OMACVM_VA_MAX=3840" yes --type=gpu-process
+# Not a number: the default limit; too large for an int: no limit (not a negative one).
+run "OMACVM_HOST_ENV=$T/host-new.env OMACVM_VA_MAX=abc" yes --type=gpu-process
+run "OMACVM_HOST_ENV=$T/host-new.env OMACVM_VA_MAX=4294967295" yes --type=gpu-process
+# The export hint forced in Chromium: the limit too (forced elsewhere, as above: none).
+run "OMACVM_VA_EXPORT=1" yes --type=gpu-process
 
 # The app says so at every start (Runner.swift), as host.env's reader expects.
 if grep -q '^        a += \["-smbios", "type=11,value=omacvm.vaexport=1"\]$' "$repo/app/app/Sources/OmacVM/Runner.swift"; then

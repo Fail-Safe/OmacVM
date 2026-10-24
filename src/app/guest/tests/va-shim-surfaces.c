@@ -7,9 +7,10 @@
  *   va-shim-surfaces SHIM STUB yes|no
  * yes: every surface Mesa allocates itself gets VASurfaceAttribMemoryType DRM_PRIME_2
  * added (Mesa then makes it exportable, with a dma-buf of its real size); imports and
- * surfaces with a memory type of their own pass unchanged; the largest surface size the
- * driver reports is at most OMACVM_VA_MAX (default 1920, 0: Mesa's). no: everything
- * unchanged.
+ * surfaces with a memory type of their own pass unchanged; in a Chromium process (a
+ * --type= argument) the largest surface size reported for a decoding config is at most
+ * OMACVM_VA_MAX (default 1920, 0: Mesa's), for encoding and video processing Mesa's.
+ * no: everything unchanged.
  */
 #include <dlfcn.h>
 #include <stdio.h>
@@ -57,10 +58,25 @@ static VAStatus query_surface_attributes(VADriverContextP ctx, VAConfigID config
     return VA_STATUS_SUCCESS;
 }
 
+/* Config 0 decodes, 1 encodes, 2 is video processing. */
+static VAStatus query_config_attributes(VADriverContextP ctx, VAConfigID config, VAProfile *profile,
+                                        VAEntrypoint *entrypoint, VAConfigAttrib *a, int *n)
+{
+    static const VAEntrypoint ep[] = { VAEntrypointVLD, VAEntrypointEncSlice, VAEntrypointVideoProc };
+    (void)ctx; (void)a;
+    if (config > 2)
+        return VA_STATUS_ERROR_INVALID_CONFIG;
+    *profile = config == 2 ? VAProfileNone : VAProfileH264Main;
+    *entrypoint = ep[config];
+    *n = 0;
+    return VA_STATUS_SUCCESS;
+}
+
 VAStatus __vaDriverInit_1_20(VADriverContextP ctx)
 {
     ctx->vtable->vaCreateSurfaces2 = create_surfaces2;
     ctx->vtable->vaQuerySurfaceAttributes = query_surface_attributes;
+    ctx->vtable->vaQueryConfigAttributes = query_config_attributes;
     return VA_STATUS_SUCCESS;
 }
 #else
@@ -102,11 +118,13 @@ int main(int argc, char **argv)
     VASurfaceAttrib l[40];
     void *shim, *stub;
     VAStatus (*init)(VADriverContextP);
-    int yes;
+    int yes, chromium = 0;
 
     if (argc < 4)
         return 2;
     yes = !strcmp(argv[3], "yes");
+    for (int i = 4; i < argc; i++)
+        chromium |= !strncmp(argv[i], "--type=", 7);
     stub = dlopen(argv[2], RTLD_NOW | RTLD_GLOBAL);
     shim = dlopen(argv[1], RTLD_NOW);
     if (!stub || !shim) {
@@ -151,25 +169,28 @@ int main(int argc, char **argv)
                               .value = { .type = VAGenericValueTypePointer, .value.p = &ext } };
     check("external buffers with the default memory type", VA_RT_FORMAT_YUV420, l, 2, 0);
 
-    /* The largest size Chromium is told (its decoder uses the CPU above it); I420 is
-     * hidden either way. */
-    {
+    /* The largest size Chromium's decoder is told (it uses the CPU above it); encoding and
+     * video processing keep Mesa's; I420 is hidden either way. */
+    for (VAConfigID config = 0; config < 3; config++) {
+        static const char *const what[] = { "decoding", "encoding", "video processing" };
         VASurfaceAttrib q[8];
         unsigned int nq = 8, maxw = 0, maxh = 0, i420 = 0;
         const char *env = getenv("OMACVM_VA_MAX");
-        unsigned int want = !yes ? 4096 : env && *env ? (unsigned int)atoi(env) : 1920;
+        char *end = NULL;
+        unsigned long v = env && *env ? strtoul(env, &end, 10) : 1920;
+        unsigned int want = end && *end ? 1920 : v > 4096 || !v ? 4096 : (unsigned int)v;
 
-        if (!want)
+        if (!yes || !chromium || config)
             want = 4096;
-        ctx->vtable->vaQuerySurfaceAttributes(ctx, 0, q, &nq);
+        ctx->vtable->vaQuerySurfaceAttributes(ctx, config, q, &nq);
         for (unsigned int k = 0; k < nq; k++) {
             maxw = q[k].type == VASurfaceAttribMaxWidth ? (unsigned)q[k].value.value.i : maxw;
             maxh = q[k].type == VASurfaceAttribMaxHeight ? (unsigned)q[k].value.value.i : maxh;
             i420 |= q[k].type == VASurfaceAttribPixelFormat && q[k].value.value.i == VA_FOURCC_I420;
         }
         int ok = maxw == want && maxh == want && !i420 && nq == 5;
-        printf("%s: largest surface %ux%u (want %u), I420 %s\n", ok ? "ok" : "FAIL", maxw, maxh, want,
-               i420 ? "listed" : "hidden");
+        printf("%s: %s: largest surface %ux%u (want %u), I420 %s\n", ok ? "ok" : "FAIL", what[config],
+               maxw, maxh, want, i420 ? "listed" : "hidden");
         failed |= !ok;
     }
 

@@ -24,10 +24,12 @@
  * Mac's runtime draws those ARGB frames (it says omacvm.vaexport=1 at start:
  * /run/omacvm/host.env); an older one shows them black, and then the CPU is
  * better. Other apps keep Mesa's one page. OMACVM_VA_EXPORT=1 or 0 overrides.
- * Chromium sees a largest size of 1920 x 1920 (OMACVM_VA_MAX, 0: none): above
- * that its hardware path dropped far more frames than its CPU decoders in our
- * test VMs (4K VP9 on an M2: 31 % against 0.1 %), so 1440p and 4K stay on the
- * CPU; calls and 1080p get the media engine.
+ * Chromium's decoders see a largest size of 1920 x 1920 (OMACVM_VA_MAX, 0:
+ * none; encoders and video processing keep Mesa's): above that its hardware
+ * path dropped far more frames than its CPU decoders in our test VMs (4K VP9
+ * on an M2: 31 % against 0.1 %), so 1440p and 4K stay on the CPU; calls and
+ * 1080p get the media engine. Only in Chromium's processes, also when
+ * OMACVM_VA_EXPORT=1 forces the export hint elsewhere.
  *
  * Limits: the Mac says in its video caps how many decoders and encoders a VM
  * should keep open at once. Past a somewhat higher limit of its own it gives
@@ -83,14 +85,40 @@
 static VAStatus (*mesa_query_surface_attributes)(VADriverContextP, VAConfigID,
                                                  VASurfaceAttrib *, unsigned int *);
 static int export_sized(void);
+static int chromium(void);
 
 /* Chromium's hardware decoding up to this many pixels wide and high (see the top);
- * OMACVM_VA_MAX=0: no limit. */
-static unsigned int chromium_max(void)
+ * OMACVM_VA_MAX=0: no limit; not a number: 1920. */
+static int chromium_max(void)
 {
     const char *env = getenv("OMACVM_VA_MAX");
+    char *end;
+    unsigned long v;
 
-    return env && *env ? (unsigned int)strtoul(env, NULL, 10) : 1920;
+    if (!env || !*env)
+        return 1920;
+    v = strtoul(env, &end, 10);
+    if (*end)
+        return 1920;
+    return v > INT_MAX ? INT_MAX : (int)v;
+}
+
+/* A config's entry point (VAEntrypointVLD: decoding), 0 when Mesa does not say. */
+static VAEntrypoint config_entrypoint(VADriverContextP ctx, VAConfigID config)
+{
+    VAProfile profile;
+    VAEntrypoint entrypoint = 0;
+    VAConfigAttrib *attribs;
+    int n = 0;
+
+    if (!ctx->vtable->vaQueryConfigAttributes)
+        return 0;
+    attribs = calloc(ctx->max_attributes > 0 ? ctx->max_attributes : 1, sizeof(*attribs));
+    if (!attribs || ctx->vtable->vaQueryConfigAttributes(ctx, config, &profile, &entrypoint,
+                                                         attribs, &n) != VA_STATUS_SUCCESS)
+        entrypoint = 0;
+    free(attribs);
+    return entrypoint;
 }
 
 static VAStatus query_surface_attributes(VADriverContextP ctx, VAConfigID config,
@@ -98,16 +126,17 @@ static VAStatus query_surface_attributes(VADriverContextP ctx, VAConfigID config
 {
     VAStatus st = mesa_query_surface_attributes(ctx, config, attribs, num);
     unsigned int i, n = 0;
-    int has_nv12 = 0;
+    int has_nv12 = 0, max = chromium_max();
 
     if (st != VA_STATUS_SUCCESS || !attribs)
         return st;
-    for (i = 0; i < *num && export_sized() && chromium_max(); i++)
-        if ((attribs[i].type == VASurfaceAttribMaxWidth ||
-             attribs[i].type == VASurfaceAttribMaxHeight) &&
-            attribs[i].value.type == VAGenericValueTypeInteger &&
-            attribs[i].value.value.i > (int)chromium_max())
-            attribs[i].value.value.i = (int)chromium_max();
+    if (export_sized() && chromium() && max && config_entrypoint(ctx, config) == VAEntrypointVLD)
+        for (i = 0; i < *num; i++)
+            if ((attribs[i].type == VASurfaceAttribMaxWidth ||
+                 attribs[i].type == VASurfaceAttribMaxHeight) &&
+                attribs[i].value.type == VAGenericValueTypeInteger &&
+                attribs[i].value.value.i > max)
+                attribs[i].value.value.i = max;
     for (i = 0; i < *num; i++)
         if (attribs[i].type == VASurfaceAttribPixelFormat &&
             attribs[i].value.value.i == VA_FOURCC_NV12)
@@ -206,14 +235,25 @@ static int host_draws_export(void)
 
 /* Decided once, at the driver's start: Chromium loads it before its sandbox
  * closes, and host.env cannot be read after that. */
+static int chromium_on = -1;
+
+static int chromium(void)
+{
+    if (chromium_on < 0)
+        chromium_on = chromium_process();
+    return chromium_on;
+}
+
 static int export_sized(void)
 {
     static int on = -1;
     const char *env;
 
     if (on < 0) {
+        int c = chromium();
+
         env = getenv("OMACVM_VA_EXPORT");
-        on = env && *env ? *env == '1' : chromium_process() && host_draws_export();
+        on = env && *env ? *env == '1' : c && host_draws_export();
     }
     return on;
 }
@@ -665,21 +705,11 @@ static void give_back(int k, int slot)
 /* Decoder, encoder, or neither (video processing makes no codec on the Mac). */
 static int config_kind(VADriverContextP ctx, VAConfigID config)
 {
-    VAProfile profile;
-    VAEntrypoint entrypoint;
-    VAConfigAttrib *attribs;
-    int n = 0, k = -1;
+    VAEntrypoint entrypoint = config_entrypoint(ctx, config);
 
-    if (!ctx->vtable->vaQueryConfigAttributes)
-        return -1;
-    attribs = calloc(ctx->max_attributes > 0 ? ctx->max_attributes : 1, sizeof(*attribs));
-    if (attribs && ctx->vtable->vaQueryConfigAttributes(ctx, config, &profile, &entrypoint,
-                                                        attribs, &n) == VA_STATUS_SUCCESS)
-        k = entrypoint == VAEntrypointVLD ? DEC :
-            entrypoint == VAEntrypointEncSlice || entrypoint == VAEntrypointEncSliceLP ||
-            entrypoint == VAEntrypointEncPicture ? ENC : -1;
-    free(attribs);
-    return k;
+    return entrypoint == VAEntrypointVLD ? DEC :
+           entrypoint == VAEntrypointEncSlice || entrypoint == VAEntrypointEncSliceLP ||
+           entrypoint == VAEntrypointEncPicture ? ENC : -1;
 }
 
 /* A refusal goes to stderr: the first at once, then at most every 10 s with
