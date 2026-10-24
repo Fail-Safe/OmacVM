@@ -3,6 +3,19 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.32 (unreleased)
+
+- **Vulkan windows show each new frame at once.** With "Vulkan windows without a copy" on (the
+  default since 3.1.26, macOS 26 and newer), a Vulkan app's window showed its previous frame for
+  one screen refresh after each new one: in Zed the caret jumped back a character for a moment on
+  every move, a window that draws all the time was about 50 ms late, and one that draws as fast as
+  it can could tear. The Mac's OpenGL does not send one context's work when another one takes
+  over, so the copy of the window's frame for the desktop went out one frame late; it is now sent
+  first. Thanks to @epicoun for the report and its details (#499). If you added
+  `MESA_VK_WSI_DEBUG=sw,nowlts` to `~/.config/environment.d/50-vulkan-present.conf` to get around
+  it, take that line out after the update and log in again: Vulkan windows then go through the
+  GPU again. The VM needs no update.
+
 ## 3.1.31
 
 - **Trackpad gestures after sleep.** After the Mac woke from a longer sleep (Power Nap's short
