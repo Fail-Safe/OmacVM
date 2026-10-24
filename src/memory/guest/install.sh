@@ -1,8 +1,9 @@
 #!/bin/bash
-# Memory tuning for a Parallels guest. Run as root inside the VM: ./install.sh
-# Parallels keeps every guest page the guest ever touched until the VM stops
-# (its balloon has no free-page reporting), so the guest should not hoard: a
-# small zram, smooth reclaim, THP without allocation stalls, MGLRU protection.
+# Memory tuning for the guest, every route. Run as root inside the VM: ./install.sh
+# Parallels, UTM and Fusion keep every page the guest ever touched until the VM
+# stops, so the guest should not hoard: a small zram, smooth reclaim, THP
+# without allocation stalls, MGLRU protection. OmacVM.app's balloon gives freed
+# memory back (free page reporting); the tmpfiles file sets its block size.
 set -euo pipefail
 cd "$(dirname "$0")"
 install -m644 90-omacvm.sysctl /etc/sysctl.d/90-omacvm.conf

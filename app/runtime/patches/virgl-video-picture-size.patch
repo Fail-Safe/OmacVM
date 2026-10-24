@@ -1,0 +1,145 @@
+virglrenderer: copy only the decoded picture of AV1 and VP9 frames
+
+What: the copy of a decoded frame into the guest's plane textures takes the
+picture's size from the picture description (AV1's and VP9's frame_width and
+frame_height) where it is smaller than the frame VideoToolbox returned; the
+plane-edge fill then repeats the picture's last row and column past it. With
+OMACVM_VIDEO_DEBUG=1 qemu.log says each new "output WxH, picture WxH".
+Why: VideoToolbox's AV1 frame is as large as the format description, which
+av1_set_format makes from max_width + 1 and max_height + 1. Mesa's VA frontend
+sends the surface's size there (picture_av1.c), not the size minus one, and
+Chrome's surfaces are its coded size (rounded up to 16): the frame came back
+larger than the picture, its extra rows (not the picture's, near zero) were
+copied as picture, and the fill was skipped. In Google Chrome's hardware
+decoding AV1 at 1080p, 540p and 360p had the green bar again (8, 4 and 8 rows).
+Applies on top of virgl-videotoolbox-decode.patch and
+virgl-video-plane-edge.patch.
+Upstreamable with the decode backend; not sent.
+Tests: Tests/virgl/test-video-padding.c, the AV1 case with Mesa's max_width and
+max_height (the 320x192 surface): without the patch the 4800 texels past the
+picture are not its last row and column; GPU and CPU copy.
+--- a/src/vrend/virgl_video_vt.c
++++ b/src/vrend/virgl_video_vt.c
+@@ -242,6 +242,7 @@
+     unsigned held_next;
+     OSStatus output_status;
+     uint32_t frames;
++    uint32_t out_w, out_h, pic_w, pic_h;    /* last logged output and picture size */
+     uint32_t errors;
+     uint64_t ns_decode;                 /* debug timing, per 120 frames */
+     uint64_t ns_upload;
+@@ -637,6 +638,34 @@
+         return false;
+     }
+     return true;
++}
++
++/* The decoded picture's size, at most the frame VideoToolbox returned: VP9's and
++ * AV1's frame size from the picture description. VideoToolbox's AV1 frame is as large
++ * as the format description, and that comes from Mesa's max_width/max_height (the
++ * guest surface's size, rounded up to 16 by Chrome's coded size): the rows past the
++ * picture are not the picture's, and vrend fills the guest's planes past this size
++ * with the picture's last row and column instead (virgl-video-plane-edge.patch). */
++static void picture_size(const struct virgl_video_codec *codec, CVPixelBufferRef pix,
++                         uint32_t *w, uint32_t *h)
++{
++    uint32_t fw = 0, fh = 0;
++
++    *w = (uint32_t)CVPixelBufferGetWidth(pix);
++    *h = (uint32_t)CVPixelBufferGetHeight(pix);
++    if (!codec->have_desc)
++        return;
++    if (codec->kind == VT_KIND_AV1) {
++        fw = codec->desc.av1.picture_parameter.frame_width;
++        fh = codec->desc.av1.picture_parameter.frame_height;
++    } else if (codec->kind == VT_KIND_VP9) {
++        fw = codec->desc.vp9.picture_parameter.frame_width;
++        fh = codec->desc.vp9.picture_parameter.frame_height;
++    }
++    if (fw && fw < *w)
++        *w = fw;
++    if (fh && fh < *h)
++        *h = fh;
+ }
+ 
+ /* Hand the decoded picture to vrend, which copies it into the plane textures. */
+@@ -645,6 +674,7 @@
+ {
+     struct virgl_video_dma_buf dmabuf;
+     CVPixelBufferRef pix = codec->output;
++    uint32_t pic_w, pic_h;
+ 
+     codec->output = NULL;
+     if (!pix)
+@@ -654,8 +684,18 @@
+     if (callbacks && callbacks->decode_completed && target) {
+         memset(&dmabuf, 0, sizeof(dmabuf));
+         dmabuf.buf = target;
+-        dmabuf.width = (uint32_t)CVPixelBufferGetWidth(pix);
+-        dmabuf.height = (uint32_t)CVPixelBufferGetHeight(pix);
++        picture_size(codec, pix, &pic_w, &pic_h);
++        if (vt_debug && (codec->out_w != CVPixelBufferGetWidth(pix) ||
++                         codec->out_h != CVPixelBufferGetHeight(pix) ||
++                         codec->pic_w != pic_w || codec->pic_h != pic_h)) {
++            codec->out_w = (uint32_t)CVPixelBufferGetWidth(pix);
++            codec->out_h = (uint32_t)CVPixelBufferGetHeight(pix);
++            codec->pic_w = pic_w;
++            codec->pic_h = pic_h;
++            vt_log("output %ux%u, picture %ux%u\n", codec->out_w, codec->out_h, pic_w, pic_h);
++        }
++        dmabuf.width = pic_w;
++        dmabuf.height = pic_h;
+         dmabuf.flags = VIRGL_VIDEO_DMABUF_READ_ONLY;
+         dmabuf.num_planes = (uint32_t)CVPixelBufferGetPlaneCount(pix);
+         dmabuf.native = pix;
+--- a/src/vrend/vrend_video.c
++++ b/src/vrend/vrend_video.c
+@@ -285,7 +285,8 @@
+  * GL state touched here is put back exactly as it was. */
+ static bool blit_pixbuf_to_video_buffer(struct vrend_video_buffer *buf,
+                                         CVPixelBufferRef pix,
+-                                        bool sixteen, bool interleaved)
++                                        bool sixteen, bool interleaved,
++                                        uint32_t pic_w, uint32_t pic_h)
+ {
+     IOSurfaceRef surface = CVPixelBufferGetIOSurface(pix);
+     CGLContextObj cgl = CGLGetCurrentContext();
+@@ -329,6 +330,13 @@
+         GLsizei sh = (GLsizei)IOSurfaceGetHeightOfPlane(surface, i);
+         GLsizei w = sw, h = sh;
+         GLenum internal = sixteen ? (rg ? GL_RG16 : GL_R16) : (rg ? GL_RG8 : GL_R8);
++        /* the picture's part of the frame (4:2:0: chroma half, rounded up) */
++        uint32_t pw = i ? (pic_w + 1) / 2 : pic_w, ph = i ? (pic_h + 1) / 2 : pic_h;
++
++        if (pw && (uint32_t)w > pw)
++            w = (GLsizei)pw;
++        if (ph && (uint32_t)h > ph)
++            h = (GLsizei)ph;
+ 
+         res = vrend_renderer_ctx_res_lookup(buf->ctx->ctx, buf->planes[i].res_handle);
+         if (!res) {
+@@ -420,7 +428,8 @@
+                         !(version && strstr(version, "OpenGL ES"));
+         }
+         if (zero_copy) {
+-            if (blit_pixbuf_to_video_buffer(buf, pix, sixteen, interleaved))
++            if (blit_pixbuf_to_video_buffer(buf, pix, sixteen, interleaved,
++                                            dmabuf->width, dmabuf->height))
+                 return 0;
+             /* Only this frame goes the CPU way: a guest's odd plane
+              * texture must not slow down every other VM context. */
+@@ -447,6 +456,14 @@
+         uint32_t w = CVPixelBufferGetWidthOfPlane(pix, i);
+         uint32_t h = CVPixelBufferGetHeightOfPlane(pix, i);
+         const void *base = CVPixelBufferGetBaseAddressOfPlane(pix, i);
++        /* the picture's part of the frame, as the GPU copy */
++        uint32_t pw = i ? (dmabuf->width + 1) / 2 : dmabuf->width;
++        uint32_t ph = i ? (dmabuf->height + 1) / 2 : dmabuf->height;
++
++        if (pw && w > pw)
++            w = pw;
++        if (ph && h > ph)
++            h = ph;
+ 
+         res = vrend_renderer_ctx_res_lookup(buf->ctx->ctx, buf->planes[i].res_handle);
+         if (!res || !base) {
