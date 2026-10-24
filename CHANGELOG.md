@@ -25,6 +25,13 @@ in more words.
   full-screen VM also switched Omarchy's workspaces. Three fingers now stay macOS's drag and only
   four-finger swipes go to the VM, as macOS itself does then. The setting is read live; with it
   off (the default) three and four fingers both switch workspaces as before.
+- **The camera comes back.** After the MacBook's lid closed (or a USB or display camera was
+  unplugged) while a Linux app used the camera, the VM's picture stayed black until the app or
+  the VM was started again: the camera's session kept the camera that was gone. Each start now
+  picks the camera again (the built-in one while the lid is open, else macOS's default, else
+  the first there is), and a camera that is gone, suspended or gives no picture for 5 s (20 s for
+  its first) is started again with whichever camera there is then; a camera plugged in meanwhile
+  is taken at once.
 
 ## 3.1.32
 
