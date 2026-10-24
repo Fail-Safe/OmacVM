@@ -163,6 +163,7 @@ final class Audio {
   private func name(_ dev: AudioObjectID) -> String { getString(dev, kAudioObjectPropertyName) ?? "device \(dev)" }
 
   /// Absolute (0..1) or relative volume; unmute = also unmute, like the Mac's volume keys.
+  /// The output mutes at 0 and unmutes above it (OutputMute: 0 is not silence).
   func setVolume(input: Bool, absolute: Double?, delta: Double?, unmute: Bool) throws -> (volume: Double, muted: Bool) {
     let scope = input ? scopeIn : scopeOut, dev = try device(input: input)
     guard let va = volumeAddress(dev, scope) else { throw APIError(409, "\(name(dev)) has no volume control") }
@@ -172,7 +173,8 @@ final class Audio {
     let st = set(dev, va, target)
     guard st == noErr else { throw APIError(500, "setting the volume failed (OSStatus \(st))") }
     let ma = addr(kAudioDevicePropertyMute, scope)
-    if unmute, get(dev, ma, UInt32(0)) == 1 { set(dev, ma, UInt32(0)) }
+    let mute = input ? (unmute ? false : nil) : OutputMute.after(before: now, target: Double(target), unmute: unmute)
+    if let mute, let m = get(dev, ma, UInt32(0)), (m == 1) != mute { set(dev, ma, UInt32(mute ? 1 : 0)) }
     return (rounded(get(dev, va, target) ?? target), get(dev, ma, UInt32(0)) == 1)
   }
 

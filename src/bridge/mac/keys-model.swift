@@ -216,6 +216,26 @@ enum MediaKey: Int {
   }
 }
 
+// ---- the Mac's output at volume 0 ----
+
+/// The mute that goes with a new volume of the Mac's output. 0 on an output's
+/// volume control is only its lowest level, not silence: the speakers of a
+/// MacBook Pro and a Mac mini play at -63.5 dB there, 4 dB under the first
+/// key step. So volume 0 also mutes, and a volume above 0 unmutes again.
+enum OutputMute {
+  /// Below this the volume is 0 (the API and the log show 3 decimals).
+  static let zero = 0.0005
+
+  /// true = mute, false = unmute, nil = leave it. `before`, `target`: the
+  /// volume (0..1) before and after; `unmute`: the change unmutes anyway (a
+  /// volume key, a relative raise).
+  static func after(before: Double, target: Double, unmute: Bool) -> Bool? {
+    if target < zero { return true }
+    if unmute || before < zero { return false }   // up from 0: unmute what 0 muted
+    return nil
+  }
+}
+
 // ---- Shift and Option with a media key ----
 
 /// The modifiers a media key is read with.
