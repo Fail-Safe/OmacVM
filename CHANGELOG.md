@@ -13,6 +13,9 @@ in more words.
   macOS also works on the external now: before, after you left it with a swipe, ⌃⌥ Esc there
   brought the MacBook's display back into the VM instead. Needs the VM's update (Update VM);
   until then the display under the pointer, as before.
+- **⌃⌥ Esc with "All monitors".** With the VM full screen on two displays, ⌃⌥ Esc moved only the
+  display under the pointer with macOS's shortcut; the other one needed a Dock swipe to go out and
+  stayed on macOS on the way back in. Both displays now move, out and back in.
 - **⌃⌥ Esc pressed again quickly.** A second ⌃⌥ Esc right after the first (while Control and
   Option were still down) set the trackpad back to the VM but still moved to macOS. Now it keeps
   you in the VM.
