@@ -32,6 +32,12 @@ in more words.
   the first there is), and a camera that is gone, suspended or gives no picture for 5 s (20 s for
   its first) is started again with whichever camera there is then; a camera plugged in meanwhile
   is taken at once.
+- **The VM's time zone follows the Mac's.** The VM took the Mac's time zone only when it was set
+  up, so after a trip its clock was off by the time difference. The Bridge now sends the Mac's
+  zone, and the VM follows it at every start and within seconds of a change on the Mac. A zone
+  you set in the VM yourself (Omarchy's menu, `timedatectl`) from now on is kept; set it back to
+  the Mac's and it follows again. `omacvm check` shows which (line "time zone"). One set before
+  this update is taken over by the Mac's once: set it again after the update to keep it.
 
 ## 3.1.32
 
