@@ -7,7 +7,9 @@
 # (that full-screen size), omacvm.hdr, omacvm.vkwindows (the app shows Vulkan
 # windows Hyprland imports), omacvm.hwcursor (the Mac's cursor shows the
 # pointer: omacvm_app.lua) and omacvm.notchpointer (QEMU parks the guest's
-# pointer in NOTCH as the Mac's leaves for the strip: notchcast does not hide it).
+# pointer in NOTCH as the Mac's leaves for the strip: notchcast does not hide it)
+# and omacvm.vaexport (the runtime draws VA-API's RGB frames: the VA driver
+# shim sizes Chromium's surfaces, omacvm_drv_video.c).
 set -euo pipefail
 out=/run/omacvm/host.env
 install -d -m755 /run/omacvm

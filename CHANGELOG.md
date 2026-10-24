@@ -3,7 +3,25 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.32 (unreleased)
+## 3.1.33 (unreleased)
+
+- **Google Chrome decodes video on the Mac's media engine again, up to 1080p.** Chrome 155 and
+  newer had gone back to decoding YouTube and video calls on the VM's CPU (Chrome's log: "Plane 0
+  is out of bounds: ... > 4096"; Brave and other Chromium-based apps share that code). Chrome
+  converts each decoded frame to RGB and checks that frame's buffer size first; the VM's buffers
+  looked one page small. Past that check the converted frames would have been black: the Mac
+  refused the converting shader, its colour matrix read as zeros and it could not read the
+  video's planes (FFmpeg's `scale_vaapi` too). The VM's video driver now asks for buffers of the
+  real size in Chromium-based apps, and the Mac draws the frames. Tested in Chrome 156 only.
+  Up to 1080p (calls too): above that Chrome's hardware path dropped many more frames than its
+  own decoders in our tests, so 1440p and 4K stay on the CPU. At 1080p it drops more frames
+  too: YouTube 1080p60 AV1 on a MacBook Pro M4 Max lost 5.9-6.4 % of its frames against 2.1 % on
+  the CPU (about 4 a second instead of 1). The VM's CPU went from 0.77 to 0.47 cores there, but
+  QEMU's on the Mac only from 1.11 to 1.01: the conversion costs the Mac's graphics thread
+  most of what the VM saves. `OMACVM_VA_EXPORT=0` in Chrome's environment in the VM keeps it on
+  the CPU. Needs the app update and Update VM; restart Chrome after it.
+
+## 3.1.32
 
 - **Vulkan windows show each new frame at once.** With "Vulkan windows without a copy" on (the
   default since 3.1.26, macOS 26 and newer), a Vulkan app's window showed its previous frame for
@@ -15,6 +33,30 @@ in more words.
   `MESA_VK_WSI_DEBUG=sw,nowlts` to `~/.config/environment.d/50-vulkan-present.conf` to get around
   it, take that line out after the update and log in again: Vulkan windows then go through the
   GPU again. The VM needs no update.
+- **No green bar under videos.** Some videos played with the Mac's video decoder had a thin
+  green strip at the bottom (VP9 and AV1 at 1080p, 540p and 360p: YouTube, and video in calls)
+  or on the right (480p and 240p). The VM's video surfaces are a few rows and columns bigger
+  than the picture, and those were never written; they now repeat the picture's last row and
+  column. In small call tiles that strip can still show as a stretched edge instead of green.
+  The VM needs no update.
+- **Faster canvas and SVG drawing in Chrome and Chromium.** In OmacVM.app VMs, Chrome no longer
+  draws every canvas stroke and clip path on the CPU: it now sees "OmacVM-GPU" as its GL renderer
+  instead of "virgl", the name for which Chrome's Skia turns instanced drawing off. MotionMark's
+  Paths and Suits ran at 29-48 fps and now hold the display's rate (75 fps in the test VM). Only
+  Chrome and Chromium get the new name (other programs, Brave and Electron apps among them, keep
+  "virgl"), and web pages that read the WebGL renderer now see "OmacVM-GPU" instead of the Mac's
+  GPU model. A VM gets it at its next Update VM; restart Chrome after that.
+- **Local AI models load with Vulkan on smaller Macs.** The VM's Vulkan memory window is now at
+  least 4 GB. It was 1 GB for a 4 GB VM on an 8 GB Mac and 2 GB for a 24 GB VM on a 32 GB Mac,
+  too small for a 3B language model's weights. The window limits how much Vulkan memory the VM
+  can map; what Vulkan allocates counts against the VM's GPU memory guard (three quarters of the
+  Mac's memory), not against macOS's memory pressure. So on an 8 GB Mac a large model can now
+  make macOS swap where it did not load before. The VM needs no update.
+- **More memory back to the Mac.** OmacVM.app's VM now gives memory Linux frees back to the Mac in
+  256 KiB blocks, not only in whole 2 MiB ones. After a build and a dropped file cache, a 4 GB VM
+  held 1.1-1.4 GB less of the Mac's memory, for about 0.5 % more CPU during the build; bigger VMs can get
+  more back. Takes effect with Update VM (no restart needed); `omacvm check` shows it as
+  "memory back to the Mac".
 
 ## 3.1.31
 
