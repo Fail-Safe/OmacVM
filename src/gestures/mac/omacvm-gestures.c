@@ -2473,23 +2473,28 @@ static void noWayOut(const char *why) {
 }
 
 // ---- the moves of the last press: per display, from its Space to the one beside it ----
-typedef struct { CGDirectDisplayID id; CGRect b; uint64_t from, to; int dir, done; } Move;
+typedef struct { CGDirectDisplayID id; CGRect b; uint64_t from, to; int dir, done, swiped; } Move;
 enum { BY_SHORTCUT, BY_DOCK };
 static Move moves[MAX_DISPLAYS];
 static int nMoves, leaving, signRetried, learnedNow, shortcutOff;
 static CGWindowID enterWin;   // back in: the VM's window on the pointer's display (activated when no move lands)
 
 static int addMove(const DisplaySpaces *d, int dir, uint64_t to) {
-  // "Displays have separate Spaces" off: one list for every display, moved once.
-  for (int i = 0; i < nMoves; i++) if (moves[i].from == d->current) return 0;
+  // "Displays have separate Spaces" off: one list for every display, moved
+  // once, on the pointer's display when it is one of them (runMoves).
+  for (int i = 0; i < nMoves; i++)
+    if (moves[i].from == d->current) {
+      if (CGRectContainsPoint(d->bounds, pointerFn())) { moves[i].id = d->id; moves[i].b = d->bounds; }
+      return 0;
+    }
   if (!dir || nMoves >= MAX_DISPLAYS) return 0;
-  moves[nMoves++] = (Move){ d->id, d->bounds, d->current, to, dir, 0 };
+  moves[nMoves++] = (Move){ d->id, d->bounds, d->current, to, dir, 0, 0 };
   return 1;
 }
 
-// One move on its display. macOS moves the display the pointer is on: for
-// another display (the "all" setting) the pointer goes to its centre first,
-// then back. 0: not made (the shortcut is off). *k: the shortcut used.
+// One move on its display. For another display than the pointer's the
+// pointer goes to its centre first, then back. 0: not made (the shortcut is
+// off). *k: the shortcut used.
 static int postMove(const Move *m, int by, Hotkey *k) {
   if (by == BY_SHORTCUT) {
     *k = hotkey(m->dir < 0 ? HOTKEY_SPACE_LEFT : HOTKEY_SPACE_RIGHT);
@@ -2507,20 +2512,28 @@ static int postMove(const Move *m, int by, Hotkey *k) {
 }
 
 // Every move not done yet, one way. Returns how many were made.
+// macOS's shortcut posted from here moves the display the pointer was on
+// before our warp, not the one it was warped to (the mini, OmacVM.app's VM
+// full screen on two displays, 2026-10-24: 40 of 40 presses; the same warp
+// and key from another process moved the right one). So a display the
+// pointer is not on gets its Dock swipe, which carries its own place.
 static int runMoves(int by, const char *what) {
   int made = 0;
   if (movesCancelled) return 0;
+  CGPoint at = pointerFn();
   for (int i = 0; i < nMoves; i++) {
     Move *m = &moves[i];
     if (m->done) continue;
     const char *side = m->dir > 0 ? "right" : "left";
     Hotkey k = { 0 };
-    if (!postMove(m, by, &k)) {
-      if (by == BY_SHORTCUT) logf_("escape combo: macOS's \"Move %s a space\" shortcut is off or has no key", side);
+    int how = by == BY_SHORTCUT && !CGRectContainsPoint(m->b, at) ? BY_DOCK : by;
+    if (!postMove(m, how, &k)) {
+      if (how == BY_SHORTCUT) logf_("escape combo: macOS's \"Move %s a space\" shortcut is off or has no key", side);
       continue;
     }
     made++;
-    if (by == BY_SHORTCUT)
+    m->swiped = how == BY_DOCK;
+    if (how == BY_SHORTCUT)
       logf_("escape combo: display %u: macOS's \"Move %s a space\" (key %d, modifiers 0x%llx; %s)", m->id, side, k.keycode,
             (unsigned long long)k.flags, what);
     else logf_("escape combo: display %u swiped %s (%s)", m->id, side, what);
@@ -2541,7 +2554,7 @@ static int movesLeft(int by, int *moved) {
     if (!d) { m->done = 1; continue; }   // the display is gone
     int from = spaceIndex(d, m->from), now = spaceIndex(d, d->current);
     if (d->current != m->from) *moved = 1;
-    if (by == BY_DOCK && from >= 0 && now == from - m->dir && !learnedNow) {
+    if ((by == BY_DOCK || m->swiped) && from >= 0 && now == from - m->dir && !learnedNow) {
       swipeSign = -swipeSign;
       saveSignFn();
       learnedNow = 1;
