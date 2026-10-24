@@ -97,6 +97,8 @@ check(g.focus_line() == "D -\n", "one output only: not known (the Mac's pointer 
 layout(TWO)
 focused("HDMI-A-1")
 check(g.focus_line() == "D -\n", "a focused output the Mac does not know: not known")
+monitors = [{"name": ["Virtual-2"], "focused": True}]
+check(g.focus_line() == "D -\n", "an output name that is no string: not known")
 focused("Virtual-2")
 os.remove(LAYOUT)
 check(g.focus_line() == "D -\n", "no displays.json (another route, not full screen): not known")

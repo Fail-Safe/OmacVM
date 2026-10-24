@@ -1026,7 +1026,8 @@ def focus_line(sock=None):
     monitors = hypr("j/monitors", sock) if uid is not None else None
     m = next((m for m in monitors if isinstance(m, dict) and m.get("focused")), None) if isinstance(monitors, list) else None
     layout = mac_layout(uid) if m else {}
-    box = layout.get(m.get("name")) if m and len(layout) > 1 else None
+    name = m.get("name") if m else None
+    box = layout.get(name) if isinstance(name, str) and len(layout) > 1 else None
     return "D %.0f %.0f %.0f %.0f\n" % box if box else "D -\n"
 
 
