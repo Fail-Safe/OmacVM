@@ -23,7 +23,8 @@ struct GraphicsPlan: Equatable {
     var choice: GraphicsChoice
     /// The Venus device (Vulkan) at this start.
     var venus: Bool
-    /// Its host memory window in MB (a power of two, 256 MB or more).
+    /// Its host memory window in MB (a power of two, 256 MB or more; 4 GB
+    /// or more where the PCI window allows it).
     var hostmemMB: Int
     /// QEMU's high PCI window in GB on a Mac with a small VM address space
     /// (M1/M2: highmem-mmio-size, right above RAM); nil: QEMU's own.
@@ -143,9 +144,16 @@ enum Graphics {
     /// The Venus host memory window, from the VM's memory plan (one memory
     /// pool on Apple Silicon): what this Mac has beyond the VM's own memory and
     /// macOS's reserve (4 GB up to 16 GB, 6 GB up to 36 GB, 8 GB above), as a
-    /// power of two between 1 and 32 GB. It is address space for mapping Vulkan
-    /// memory into the VM; what Vulkan really allocates counts against the
-    /// GPU memory budget (gpu-robust's budget patch).
+    /// power of two between 4 and 32 GB. It bounds how much Vulkan memory the
+    /// VM can map; what Vulkan allocates counts against the GPU memory budget
+    /// (virgl-venus-memory-budget.patch, three quarters of the Mac's memory).
+    /// Venus memory is not checked against macOS's memory pressure, so on an
+    /// 8 GB Mac a big model can make macOS swap. QEMU backs the whole window
+    /// with anonymous memory (hostmem-background): a guest that writes there
+    /// outside a blob uses Mac memory up to the window's size, outside the
+    /// budget. The window has a floor (minHostmemGB): with 1 or 2 GB (a 4 GB
+    /// VM on an 8 GB Mac, a 24 GB VM on a 32 GB Mac) a 3B language model
+    /// could not map its weights.
     ///
     /// The window is a 64-bit PCI memory BAR of its own size and alignment.
     /// QEMU's virt machine has a 512 GB PCI window above 512 GB only when the
@@ -169,7 +177,7 @@ enum Graphics {
 
     static func usualHostmemMB(macMemoryGB: Int, vmMemoryGB: Int) -> Int {
         let reserve = macMemoryGB <= 16 ? 4 : macMemoryGB <= 36 ? 6 : 8
-        let free = min(max(macMemoryGB - vmMemoryGB - reserve, 1), 32)
+        let free = min(max(macMemoryGB - vmMemoryGB - reserve, minHostmemGB), 32)
         var p = 1
         while p * 2 <= free { p *= 2 }
         return p * 1024
@@ -178,6 +186,7 @@ enum Graphics {
     /// QEMU virt's high PCI window ends at 1 TB (40 bits).
     static let highPCIWindowBits = 40
     static let lowWindowHostmemMB = 256
+    static let minHostmemGB = 4
     static let smallHighWindowMaxGB = 16
 
     /// The high PCI window for a Mac under 40 bits, in GB: the largest power

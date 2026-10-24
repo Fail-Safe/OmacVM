@@ -210,6 +210,14 @@ if [[ $BRIDGE == on ]]; then
   else bad "shared event stream" "$n connections to the Mac (widgets from before it: log out and in)"; fi
   if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
   else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
+  # The VM's time zone follows the Mac's (omacvm-timezone); one set by hand is kept.
+  read -r tzm tzv tzmac < <(/usr/local/bin/omacvm-timezone --status 2>/dev/null || echo "none - -")
+  if [[ ! -x /usr/local/bin/omacvm-timezone ]]; then bad "time zone" "omacvm-timezone missing (omacvm apply)"
+  elif ! systemctl is-active -q omacvm-timezone; then bad "time zone" "omacvm-timezone.service not running (omacvm apply)"
+  elif [[ $tzm == follows ]]; then ok "time zone" "$tzv, the Mac's"
+  elif [[ $tzm == by-hand ]]; then ok "time zone" "$tzv, set in the VM (the Mac's is $tzmac; set the Mac's and it follows again)"
+  elif [[ $tzm == waiting ]]; then bad "time zone" "could not set $tzmac (journalctl -u omacvm-timezone)"
+  else skip "time zone" "no zone from the Mac yet (an older Bridge: omacvm update on the Mac)"; fi
   # Omarchy's brightness commands reach the external Mac display an output is on.
   FEATURE=external-brightness
   if [[ $EXT_BRIGHTNESS != on ]]; then skip "external brightness" "off (omacvm enable external-brightness)"
@@ -718,6 +726,15 @@ if [[ -n $lru && $lru != 0x0000 ]]; then ok "MGLRU" "$lru"
 elif [[ $k == *thp* ]]; then bad "MGLRU" "${lru:-unavailable}"
 else skip "MGLRU" "${lru:-not in this kernel} (part of the memory-optimized kernel)"; fi
 FEATURE=""
+# OmacVM.app: freed memory goes back to the Mac in 256 KiB blocks (memory/guest/90-omacvm-mm.tmpfiles).
+if [[ $TYPE == app ]]; then
+  o=$(cat /sys/module/page_reporting/parameters/page_reporting_order 2>/dev/null)
+  if [[ -z $o ]]; then skip "memory back to the Mac" "this kernel has no free page reporting"
+  elif [[ $o == 6 ]]; then ok "memory back to the Mac" "freed memory in 256 KiB blocks and up"
+  elif [[ $o == 9 ]]; then warn "memory back to the Mac" "freed memory goes back only in 2 MiB blocks (Update VM / omacvm apply sets 256 KiB)"
+  elif [[ $o == -1 ]]; then warn "memory back to the Mac" "the balloon has not started free page reporting yet (Update VM / omacvm apply sets 256 KiB)"
+  else warn "memory back to the Mac" "freed memory goes back in blocks of order $o, not 256 KiB (Update VM / omacvm apply sets it)"; fi
+fi
 z=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/ { print $2; exit }')
 [[ -n $z ]] && ok "zram swap" "$z" || bad "zram swap" "none (reboot after omacvm apply?)"
 if command -v grub-mkconfig >/dev/null; then

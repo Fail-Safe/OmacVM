@@ -3,18 +3,41 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.32 (unreleased)
+## 3.1.33 (unreleased)
 
-- **Vulkan windows show each new frame at once.** With "Vulkan windows without a copy" on (the
-  default since 3.1.26, macOS 26 and newer), a Vulkan app's window showed its previous frame for
-  one screen refresh after each new one: in Zed the caret jumped back a character for a moment on
-  every move, a window that draws all the time was about 50 ms late, and one that draws as fast as
-  it can could tear. The Mac's OpenGL does not send one context's work when another one takes
-  over, so the copy of the window's frame for the desktop went out one frame late; it is now sent
-  first. Thanks to @epicoun for the report and its details (#499). If you added
-  `MESA_VK_WSI_DEBUG=sw,nowlts` to `~/.config/environment.d/50-vulkan-present.conf` to get around
-  it, take that line out after the update and log in again: Vulkan windows then go through the
-  GPU again. The VM needs no update.
+- **Google Chrome decodes video on the Mac's media engine again, up to 1080p.** Chrome 155 and
+  newer had gone back to decoding YouTube and video calls on the VM's CPU (Chrome's log: "Plane 0
+  is out of bounds: ... > 4096"; Brave and other Chromium-based apps share that code). Chrome
+  converts each decoded frame to RGB and checks that frame's buffer size first; the VM's buffers
+  looked one page small. Past that check the converted frames would have been black: the Mac
+  refused the converting shader, its colour matrix read as zeros and it could not read the
+  video's planes (FFmpeg's `scale_vaapi` too). The VM's video driver now asks for buffers of the
+  real size in Chromium-based apps, and the Mac draws the frames. Tested in Chrome 156 only.
+  Up to 1080p (calls too): above that Chrome's hardware path dropped many more frames than its
+  own decoders in our tests, so 1440p and 4K stay on the CPU. At 1080p it drops more frames
+  too: YouTube 1080p60 AV1 on a MacBook Pro M4 Max lost 5.9-6.4 % of its frames against 2.1 % on
+  the CPU (about 4 a second instead of 1). The VM's CPU went from 0.77 to 0.47 cores there, but
+  QEMU's on the Mac only from 1.11 to 1.01: the conversion costs the Mac's graphics thread
+  most of what the VM saves. `OMACVM_VA_EXPORT=0` in Chrome's environment in the VM keeps it on
+  the CPU. Needs the app update and Update VM; restart Chrome after it.
+- **Three Finger Drag.** With macOS's Three Finger Drag on (System Settings > Accessibility >
+  Pointer Control > Trackpad Options > Dragging style), dragging with three fingers in the
+  full-screen VM also switched Omarchy's workspaces. Three fingers now stay macOS's drag and only
+  four-finger swipes go to the VM, as macOS itself does then. The setting is read live; with it
+  off (the default) three and four fingers both switch workspaces as before.
+- **The camera comes back.** After the MacBook's lid closed (or a USB or display camera was
+  unplugged) while a Linux app used the camera, the VM's picture stayed black until the app or
+  the VM was started again: the camera's session kept the camera that was gone. Each start now
+  picks the camera again (the built-in one while the lid is open, else macOS's default, else
+  the first there is), and a camera that is gone, suspended or gives no picture for 5 s (20 s for
+  its first) is started again with whichever camera there is then; a camera plugged in meanwhile
+  is taken at once.
+- **The VM's time zone follows the Mac's.** The VM took the Mac's time zone only when it was set
+  up, so after a trip its clock was off by the time difference. The Bridge now sends the Mac's
+  zone, and the VM follows it at every start and within seconds of a change on the Mac. A zone
+  you set in the VM yourself (Omarchy's menu, `timedatectl`) from now on is kept; set it back to
+  the Mac's and it follows again. `omacvm check` shows which (line "time zone"). One set before
+  this update is taken over by the Mac's once: set it again after the update to keep it.
 - **⌃⌥ Esc on an external display.** With the VM full screen on the MacBook and an external
   display, ⌃⌥ Esc moved the display under the Mac's pointer. Omarchy does not move the pointer when
   you go to the other display with the keyboard, so often the other display went to macOS and the
@@ -29,6 +52,43 @@ in more words.
 - **⌃⌥ Esc pressed again quickly.** A second ⌃⌥ Esc right after the first (while Control and
   Option were still down) set the trackpad back to the VM but still moved to macOS. Now it keeps
   you in the VM.
+
+## 3.1.32
+
+- **Vulkan windows show each new frame at once.** With "Vulkan windows without a copy" on (the
+  default since 3.1.26, macOS 26 and newer), a Vulkan app's window showed its previous frame for
+  one screen refresh after each new one: in Zed the caret jumped back a character for a moment on
+  every move, a window that draws all the time was one swapchain cycle late (about 50 ms at
+  60 Hz), and one that draws as fast as it can could tear. The Mac's OpenGL does not send one context's work when another one takes
+  over, so the copy of the window's frame for the desktop went out one frame late; it is now sent
+  first. Thanks to @epicoun for the report and its details (#499). If you added
+  `MESA_VK_WSI_DEBUG=sw,nowlts` to `~/.config/environment.d/50-vulkan-present.conf` to get around
+  it, take that line out after the update and log in again: Vulkan windows then go through the
+  GPU again. The VM needs no update.
+- **No green bar under videos.** Some videos played with the Mac's video decoder had a thin
+  green strip at the bottom (VP9 and AV1 at 1080p, 540p and 360p: YouTube, and video in calls)
+  or on the right (480p and 240p). The VM's video surfaces are a few rows and columns bigger
+  than the picture, and those were never written; they now repeat the picture's last row and
+  column. In small call tiles that strip can still show as a stretched edge instead of green.
+  The VM needs no update.
+- **Faster canvas and SVG drawing in Chrome and Chromium.** In OmacVM.app VMs, Chrome no longer
+  draws every canvas stroke and clip path on the CPU: it now sees "OmacVM-GPU" as its GL renderer
+  instead of "virgl", the name for which Chrome's Skia turns instanced drawing off. MotionMark's
+  Paths and Suits ran at 29-48 fps and now hold the display's rate (75 fps in the test VM). Only
+  Chrome and Chromium get the new name (other programs, Brave and Electron apps among them, keep
+  "virgl"), and web pages that read the WebGL renderer now see "OmacVM-GPU" instead of the Mac's
+  GPU model. A VM gets it at its next Update VM; restart Chrome after that.
+- **Local AI models load with Vulkan on smaller Macs.** The VM's Vulkan memory window is now at
+  least 4 GB. It was 1 GB for a 4 GB VM on an 8 GB Mac and 2 GB for a 24 GB VM on a 32 GB Mac,
+  too small for a 3B language model's weights. The window limits how much Vulkan memory the VM
+  can map; what Vulkan allocates counts against the VM's GPU memory guard (three quarters of the
+  Mac's memory), not against macOS's memory pressure. So on an 8 GB Mac a large model can now
+  make macOS swap where it did not load before. The VM needs no update.
+- **More memory back to the Mac.** OmacVM.app's VM now gives memory Linux frees back to the Mac in
+  256 KiB blocks, not only in whole 2 MiB ones. After a build and a dropped file cache, a 4 GB VM
+  held 1.1-1.4 GB less of the Mac's memory, for about 0.5 % more CPU during the build; bigger VMs can get
+  more back. Takes effect with Update VM (no restart needed); `omacvm check` shows it as
+  "memory back to the Mac".
 
 ## 3.1.31
 

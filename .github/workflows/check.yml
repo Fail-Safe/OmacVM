@@ -198,6 +198,9 @@ jobs:
       - name: Freeing disk space (2 update snapshots kept, a trim at apply, omacvm check's line)
         run: src/tests/disk-space.sh
 
+      - name: Freed memory back to the Mac in 256 KiB blocks (page_reporting_order 6, omacvm check's line)
+        run: src/tests/memory-report-order.sh
+
       - name: apply's SSH key in the VM (the user's ~/.ssh written as the user)
         run: src/tests/ssh-key.sh
 
@@ -282,11 +285,17 @@ jobs:
       - name: Battery watts and time left (Mac snapshot, VM agent, module on a kernel stand-in)
         run: src/tests/battery.sh
 
+      - name: The VM's time zone follows the Mac's (agent on a stand-in for /, a zone set by hand kept)
+        run: src/tests/timezone.sh
+
       - name: Gestures offline test (which VM gets them)
         run: src/gestures/mac/test.sh
 
       - name: Bridge offline tests (media-key tap, where each media key goes, Wi-Fi state)
         run: src/bridge/mac/test-models.sh
+
+      - name: Camera picked again after the lid closed, an unplug or no picture (a camera stand-in)
+        run: src/bridge/mac/test-camera.sh
 
       - name: Bridge wallpaper store (embedded image URLs, no desktop changes)
         run: src/bridge/mac/test-wallpaper.sh
@@ -516,6 +525,7 @@ jobs:
           python3 src/omanotch/guest/tests/test_display_panel.py
           python3 src/camera/guest/tests/test_frames.py
           python3 src/app/guest/tests/test_audio_latency.py
+          python3 src/app/guest/tests/test_chrome_drirc.py
 
       - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
         run: tests/bench/final-round/test.sh
@@ -712,3 +722,8 @@ jobs:
           sudo apt-get install -yq --no-install-recommends pkg-config gcc libva-dev libgbm-dev libegl-dev \
             libgles-dev libdrm-dev libavcodec-dev libavutil-dev libsystemd-dev
           OMACVM_VDECD_SYSTEMD=1 src/tests/vdecd-down.sh
+
+      - name: The VA driver shim gives Chromium surfaces of their real size (a stand-in for Mesa's driver)
+        run: |
+          sudo apt-get install -yq --no-install-recommends gcc libva-dev
+          src/app/guest/tests/va-shim-surfaces.sh

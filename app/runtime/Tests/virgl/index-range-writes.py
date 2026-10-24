@@ -75,6 +75,14 @@ REVIEWED = {
         ("own", "vrend's buffers for shader constants"),
     ("vrend/vrend_renderer.c", "vrend_const_own_buffer", "glBufferSubData"):
         ("own", "vrend's buffers for shader constants"),
+    ("vrend/vrend_renderer.c", "vrend_const0_from_buffer", "glBufferData"):
+        ("own", "vrend's buffers for shader constants (constant buffer 0 from a guest buffer)"),
+    ("vrend/vrend_renderer.c", "vrend_const0_from_buffer", "glBufferSubData"):
+        ("own", "vrend's buffers for shader constants (constant buffer 0 from a guest buffer)"),
+    ("vrend/vrend_renderer.c", "vrend_const0_from_buffer", "glBindBuffer"):
+        ("own", "vrend's buffers for shader constants: the copy's target"),
+    ("vrend/vrend_renderer.c", "vrend_const0_from_buffer", "glCopyBufferSubData"):
+        ("own", "vrend's buffers for shader constants: the guest buffer is only read"),
     ("vrend/vrend_renderer.c", "vrend_draw_bind_vertex_legacy", "glMapBufferRange"): ("read", None),
     ("vrend/vrend_renderer.c", "vrend_read_gl_buffer", "glMapBufferRange"): ("read", None),
     ("vrend/vrend_renderer.c", "vrend_renderer_transfer_send_iov", "glMapBufferRange"): ("read", None),
