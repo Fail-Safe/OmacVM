@@ -20,7 +20,11 @@
  * With OMACVM_VIDEO_EDGE_FILL=0 it expects the marker there instead (the guest's view
  * before the fix), so the test shows it can see the bar. Both copy paths: run it again
  * with OMACVM_VIDEO_COPY=1. Runs on Apple's software OpenGL (soft-gl.h); the decoder is
- * the Mac's media engine, fed these clips only. Skips a codec the Mac does not decode. */
+ * the Mac's media engine, fed these clips only. Skips a codec the Mac does not decode.
+ * AV1 runs twice: with max_width/max_height one less than the frame, and as Mesa's VA
+ * frontend sends them (picture_av1.c: the surface's size; Chrome's surfaces are its coded
+ * size, rounded up to 16): VideoToolbox's frame is then larger than the picture, and only
+ * the picture may be copied (virgl-video-picture-size.patch). */
 #include <CoreMedia/CoreMedia.h>
 #include <OpenGL/OpenGL.h>
 #include <VideoToolbox/VideoToolbox.h>
@@ -112,6 +116,7 @@ struct source {
    int dw, dh;                 /* what the host decodes (VideoToolbox's picture) */
    uint64_t hash;              /* of the reference picture; 0: compare with ref[] */
    int extra;                  /* planes this much bigger than Mesa's: past the fill's limit */
+   int mesa_max;               /* AV1: max_width/height as Mesa sends them (the surface) */
    struct unit u[FRAMES * 2];
    int count;
    uint8_t *store[FRAMES];
@@ -452,8 +457,8 @@ static void run_case(struct source *s, int expect_marker)
       } else if (s->profile == G_AV1_MAIN) {
          desc.av1.picture_parameter.frame_width = (uint16_t)s->w;
          desc.av1.picture_parameter.frame_height = (uint16_t)s->h;
-         desc.av1.picture_parameter.max_width = (uint16_t)(s->w - 1);
-         desc.av1.picture_parameter.max_height = (uint16_t)(s->h - 1);
+         desc.av1.picture_parameter.max_width = (uint16_t)(s->mesa_max ? aw : (uint32_t)s->w - 1);
+         desc.av1.picture_parameter.max_height = (uint16_t)(s->mesa_max ? ah : (uint32_t)s->h - 1);
          desc.av1.slice_parameter.slice_count = 1;
          desc.av1.slice_parameter.slice_data_offset[0] = (uint32_t)u->tile;
          desc.av1.slice_parameter.slice_data_size[0] = 1;
@@ -585,6 +590,9 @@ int main(void)
       CLIP("vp9p0-321x181.ivf", G_VP9_P0, 321, 181, 0, 0x3398897b7b9f396eull, 0),
       CLIP("vp9p2-330x182.ivf", G_VP9_P2, 330, 182, 1, 0x2174241ece435612ull, 0),
       CLIP("av1-320x180.ivf", G_AV1_MAIN, 320, 180, 0, 0xb72bd625932bd0a5ull, 0),
+      /* the same with Mesa's max_width/height: the surface's 320x192 */
+      { .name = "av1-320x180.ivf", .profile = G_AV1_MAIN, .w = 320, .h = 180, .dw = 320,
+        .dh = 180, .hash = 0xb72bd625932bd0a5ull, .mesa_max = 1 },
       /* a 480x352 surface for a 320x180 picture: more than padding, left alone */
       CLIP("vp9p0-320x180.ivf", G_VP9_P0, 320, 180, 0, 0x43273c816ba2b012ull, 160),
 #undef CLIP

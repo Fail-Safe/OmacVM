@@ -324,6 +324,28 @@ int main(void)
                      "VOTE_ANY TEMP[0].x, TEMP[0].xxxx\nEND\n",
                      &key, "#extension GL_ARB_texture_gather", NULL, false);
 
+   /* Mesa's VA-API video compositor (vl_compositor_gfx.c, create_frag_shader_yuv)
+    * reads the alpha with a swizzle on the sampler: TEX ..., SAMP[0].wwww. Gallium's
+    * own translators ignore a sampler's swizzle; written into GLSL as
+    * "fssamp0.wwww" the Mac refused the shader ("Swizzle of non-vector primitive"),
+    * so every frame Chrome's decoder converts to RGB was black
+    * (virgl-shader-sampler-swizzle.patch). */
+   memset(&key, 0, sizeof(key));
+   failed |= convert("swizzle on a sampler (Mesa's video compositor)",
+                     "FRAG\nDCL IN[0], GENERIC[0], LINEAR\nDCL OUT[0], COLOR\n"
+                     "DCL SAMP[0]\nDCL SAMP[1]\nDCL SAMP[2]\n"
+                     "DCL SVIEW[0], 2D_ARRAY, FLOAT\nDCL SVIEW[1], 2D_ARRAY, FLOAT\n"
+                     "DCL SVIEW[2], 2D_ARRAY, FLOAT\nDCL CONST[0..2]\nDCL TEMP[0..1]\n"
+                     "IMM[0] FLT32 {    1.0000,     0.0000,     0.0000,     0.0000}\n"
+                     "TEX TEMP[0].x, IN[0], SAMP[0], 2D_ARRAY\n"
+                     "TEX TEMP[0].y, IN[0], SAMP[1], 2D_ARRAY\n"
+                     "TEX TEMP[0].z, IN[0], SAMP[2], 2D_ARRAY\n"
+                     "TEX TEMP[0].w, IN[0], SAMP[0].wwww, 2D_ARRAY\n"
+                     "MOV TEMP[1].w, TEMP[0].wwww\nMOV TEMP[0].w, IMM[0].xxxx\n"
+                     "DP4 OUT[0].x, CONST[0], TEMP[0]\nDP4 OUT[0].y, CONST[1], TEMP[0]\n"
+                     "DP4 OUT[0].z, CONST[2], TEMP[0]\nMOV OUT[0].w, TEMP[1].wwww\nEND\n",
+                     &key, "texture(fssamp0, ", "fssamp0.", have_gl);
+
    /* A plain float shader is unchanged apart from the version. */
    memset(&key, 0, sizeof(key));
    failed |= convert("float fragment shader",

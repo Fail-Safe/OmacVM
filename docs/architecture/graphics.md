@@ -393,7 +393,16 @@ the GL has is built again with uniforms (shader key `const_uniforms`) and the
 draw selects again. `OMACVM_VIRGL_CONST_UBO=1` binds a range per draw in vertex
 shaders too, `=0` keeps uniforms (the GL calls of before); qemu.log says which.
 `OMACVM_VIRGL_CACHE_STATS=1` logs uploads, binds, index draws and window binds.
-Test: `test-const-ubo` (all three modes).
+Constant buffer 0 can also be a guest buffer (`SET_UNIFORM_BUFFER` index 0):
+Mesa's own gallium helpers bind one, the VA-API video compositor its colour
+matrix. When that came after the stage's last `SET_CONSTANT_BUFFER`, each draw
+uses the buffer as the stage's constants (`virgl-const-buffer0-resource.patch`;
+before, the shader read zeros and Chrome's decoded frames were black). Where
+the constants are a uniform block bound per draw, the GPU copies the buffer
+into the stage's own one (`glCopyBufferSubData`, no wait for the GPU); with
+uniforms or a vertex shader's window each draw reads it back
+(`glGetBufferSubData`).
+Test: `test-const-ubo` (all three modes; case 22 for the guest buffer).
 
 Context switches: on CGL, every handover between GL contexts flushes the
 context it leaves. A `glWaitSync` in another context waits only for a fence
@@ -441,6 +450,9 @@ one patch each, each with a build-time test that compiles or runs on the Mac's G
 | floatBitsToInt() etc. need GLSL 3.30; `GL_ARB_draw_instanced` refused (one table: extension → GLSL version where it is core) | `virgl-shader-core-glsl-version.patch` | `test-core-glsl-shaders.c` |
 | `GL_EXT_texture_shadow_lod` asked for core lookups (gradients, cube shadow bias, gather) | `virgl-shader-shadow-lod-extension.patch` | `test-core-glsl-shaders.c` |
 | results written to an integer output lost their bits or did not compile (upstream bug) | `virgl-shader-integer-outputs.patch` (integer outputs written like a float temporary, stored once with their bits) | `test-core-glsl-shaders.c` |
+| a swizzle on a sampler written into the GLSL (Mesa's VA-API video compositor: `SAMP[0].wwww`), refused by the Mac, so frames VA-API converts to RGB (Chrome's decoder output) were black | `virgl-shader-sampler-swizzle.patch` (left out, as gallium's own translators do) | `test-core-glsl-shaders.c` |
+| a 2D_ARRAY sampler over a plain 2D texture view (Mesa's VA-API video compositor and progressive video planes) reads nothing on GL | `virgl-shader-array-sampler-2d-view.patch` (declared `sampler2D`, 2D lookups, layer 0; a key bit only where the shader declares 2D_ARRAY) | `test-const-ubo.c` case 23, `test-view-key.c` |
+| two views of one texture with different swizzles in one draw (the compositor's U and V from one UV plane): GL keeps one swizzle per texture, so both read the last one | `virgl-view-swizzle-shared-texture.patch` (their swizzles in the shader, the texture's none while the draw reads them) | `test-const-ubo.c` case 24, `test-view-key.c` |
 | blitter shaders were GLSL 1.30: every shader blit drew nothing | `virgl-blitter-core-glsl-version.patch` | `test-blitter-shaders.c` |
 | integer multisample blit used texture() on a MS sampler (upstream bug) | `virgl-blitter-integer-msaa.patch` | `test-blitter-shaders.c` |
 | framebuffer without attachments (all draw buffers GL_NONE): GL error on draw | `virgl-framebuffer-no-attachments.patch` (depth stand-in as large as the first viewport, at most 8192², kept between switches, freed when unused; depth test off while it is attached) | `test-empty-framebuffer.c` |

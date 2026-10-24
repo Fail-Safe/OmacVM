@@ -99,6 +99,10 @@ final class Runner {
         // output when the Mac's pointer leaves for the strip (omacvm-cocoa-notch-park):
         // notchcast then never hides the guest's cursor (that lagged by Hyprland's tick).
         a += ["-smbios", "type=11,value=omacvm.notchpointer=1"]
+        // This runtime draws the frames VA-API converts to RGB (virgl-shader-sampler-swizzle.patch):
+        // the guest's VA driver shim then gives Chromium surfaces it can hand back to VA-API
+        // (omacvm_drv_video.c), so Chrome decodes on the media engine.
+        a += ["-smbios", "type=11,value=omacvm.vaexport=1"]
         // FullPanel (NotchArea): the camera housing for the guest's bar, which
         // then sits in the strip beside the notch (omacvm-app-host -> host.env;
         // the bar and notchcast read it). Native starts send nothing.
