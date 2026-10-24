@@ -12,10 +12,11 @@
  * video-padding/ (FFmpeg, libvpx and SVT-AV1), and H.264 with SPS/PPS in band made here by VideoToolbox's encoder (the Mac
  * applies the SPS crop). Heights and widths that are not multiples of 16 (180 has
  * 1080's and 360's remainder, 426 and 854 are YouTube's 240p and 480p), an odd size,
- * and one without padding. After the last picture every texel of both planes is read
- * back: the picture itself must be bit for bit what FFmpeg's software decoder makes of
- * the clip (H.264: what VideoToolbox decodes from the stream on its own), and every
- * texel past it must repeat the picture's last row and column.
+ * one without padding, and planes more than 64 bigger than the picture (a surface the
+ * guest crops itself: the fill leaves them). After the last picture every texel of both
+ * planes is read back: the picture itself must be bit for bit what FFmpeg's software
+ * decoder makes of the clip (H.264: what VideoToolbox decodes from the stream on its
+ * own), and every texel past it must repeat the picture's last row and column.
  * With OMACVM_VIDEO_EDGE_FILL=0 it expects the marker there instead (the guest's view
  * before the fix), so the test shows it can see the bar. Both copy paths: run it again
  * with OMACVM_VIDEO_COPY=1. Runs on Apple's software OpenGL (soft-gl.h); the decoder is
@@ -110,6 +111,7 @@ struct source {
    int w, h, ten_bit;
    int dw, dh;                 /* what the host decodes (VideoToolbox's picture) */
    uint64_t hash;              /* of the reference picture; 0: compare with ref[] */
+   int extra;                  /* planes this much bigger than Mesa's: past the fill's limit */
    struct unit u[FRAMES * 2];
    int count;
    uint8_t *store[FRAMES];
@@ -406,7 +408,8 @@ static void run_case(struct source *s, int expect_marker)
    int h264 = s->profile == G_AVC_HIGH;
    /* Mesa's planes and video buffer: rounded up to 16; H.264's codec size too
     * (virgl_video_create_codec), VP9's and AV1's the frame's */
-   uint32_t aw = ((uint32_t)s->w + 15) & ~15u, ah = ((uint32_t)s->h + 15) & ~15u;
+   uint32_t aw = (((uint32_t)s->w + 15) & ~15u) + (uint32_t)s->extra;
+   uint32_t ah = (((uint32_t)s->h + 15) & ~15u) + (uint32_t)s->extra;
    uint32_t bpp = s->ten_bit ? 2 : 1, pw[2] = { aw, aw / 2 }, ph[2] = { ah, ah / 2 };
    uint32_t texel[2] = { bpp, 2 * bpp }, res[2], codec = next_obj++, buf = next_obj++;
    res[0] = next_res++;
@@ -514,6 +517,8 @@ static void run_case(struct source *s, int expect_marker)
             s->h, s->ten_bit ? " 10-bit" : "", pw[0], ph[0], pw[1], ph[1], s->count,
             s->hash ? "FFmpeg decodes it" : "VideoToolbox decodes it on its own",
             exact ? "yes" : "no", (unsigned long long)hash, past,
+            s->extra ? (marker == past ? "never written (a surface, not padding)" :
+                        "written although it is past the fill's limit") :
             expect_marker ? (marker == past ? "never written (as before the fix)" :
                              "written although the fill is off") :
             edge && !marker ? "its last row and column" :
@@ -572,14 +577,16 @@ int main(void)
    /* FFmpeg's software decode of each clip's last picture: FNV-1a of Y, then UV
     * interleaved (10-bit as P010); video-padding/README says how they were made */
    static struct source clips[] = {
-#define CLIP(file, prof, cw, ch, ten, sum) \
+#define CLIP(file, prof, cw, ch, ten, sum, more) \
       { .name = file, .profile = prof, .w = cw, .h = ch, .ten_bit = ten, .dw = cw, .dh = ch, \
-        .hash = sum }
-      CLIP("vp9p0-320x180.ivf", G_VP9_P0, 320, 180, 0, 0x43273c816ba2b012ull),
-      CLIP("vp9p0-426x240.ivf", G_VP9_P0, 426, 240, 0, 0xad2bf90b325d9f65ull),
-      CLIP("vp9p0-321x181.ivf", G_VP9_P0, 321, 181, 0, 0x3398897b7b9f396eull),
-      CLIP("vp9p2-330x182.ivf", G_VP9_P2, 330, 182, 1, 0x2174241ece435612ull),
-      CLIP("av1-320x180.ivf", G_AV1_MAIN, 320, 180, 0, 0xb72bd625932bd0a5ull),
+        .hash = sum, .extra = more }
+      CLIP("vp9p0-320x180.ivf", G_VP9_P0, 320, 180, 0, 0x43273c816ba2b012ull, 0),
+      CLIP("vp9p0-426x240.ivf", G_VP9_P0, 426, 240, 0, 0xad2bf90b325d9f65ull, 0),
+      CLIP("vp9p0-321x181.ivf", G_VP9_P0, 321, 181, 0, 0x3398897b7b9f396eull, 0),
+      CLIP("vp9p2-330x182.ivf", G_VP9_P2, 330, 182, 1, 0x2174241ece435612ull, 0),
+      CLIP("av1-320x180.ivf", G_AV1_MAIN, 320, 180, 0, 0xb72bd625932bd0a5ull, 0),
+      /* a 480x352 surface for a 320x180 picture: more than padding, left alone */
+      CLIP("vp9p0-320x180.ivf", G_VP9_P0, 320, 180, 0, 0x43273c816ba2b012ull, 160),
 #undef CLIP
    };
    for (unsigned i = 0; i < sizeof(clips) / sizeof(clips[0]); i++) {
@@ -592,7 +599,7 @@ int main(void)
          check(0, s->name);
          continue;
       }
-      run_case(s, expect_marker);
+      run_case(s, expect_marker || s->extra);
       ran++;
    }
 
@@ -616,6 +623,10 @@ int main(void)
          CFRelease(enc_fmt);
       enc_fmt = NULL;
    }
+
+   /* a Mac with a media engine must run cases: none means the host offers no decoder */
+   if (!ran && VTIsHardwareDecodeSupported(kCMVideoCodecType_H264))
+      check(0, "no case ran, although this Mac decodes H.264 in hardware");
 
    virgl_renderer_context_destroy(1);
    virgl_renderer_resource_unref(R_DESC);
