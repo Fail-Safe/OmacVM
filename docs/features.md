@@ -177,6 +177,9 @@ If the shortcut is off or did not move the Space (macOS 15 ignores it on a
 MacBook's built-in display), OmacVM swipes the Space like a trackpad. If that
 did not move it either, or macOS gives no Spaces information, nothing else
 happens (no notice); the trackpad is macOS's, so a swipe still works.
+A monitor other than the one under the pointer (the focused monitor elsewhere,
+or *All monitors*) is always swiped: the shortcut from OmacVM moves only the
+monitor the pointer is on.
 Back in, if the shortcut does not land, the VM's window comes to the front
 and macOS shows its Space.
 
