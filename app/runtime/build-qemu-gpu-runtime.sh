@@ -1278,6 +1278,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-vulkan-windows-ios
 # OmacVM: a GL context is flushed before vrend switches away from it (CGL's make-current does not
 # flush, and the next context's wait for its fence did not wait: Vulkan windows a frame late, #499).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-context-switch-flush.patch"
+# OmacVM: no swizzle on a sampler in the GLSL (Mesa's VA-API video compositor reads its alpha that
+# way; the Mac refused the shader, so frames VA-API converts to RGB, Chrome's decoder output, were black).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-shader-sampler-swizzle.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
