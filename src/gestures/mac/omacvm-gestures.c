@@ -2506,24 +2506,32 @@ static int postMove(const Move *m, int by, Hotkey *k) {
   return ok;
 }
 
-// Every move not done yet, one way. Returns how many were made.
+// Every move not done yet, one way. Returns how many were made. The displays
+// the pointer is not on go first, the pointer's last: once a display's Space
+// changes, OmacVM.app's QEMU puts the Mac's cursor back where the guest's
+// pointer is, so a later visit to another display ended on the pointer's
+// display again and that display's key did nothing (the mini, two displays,
+// "all": the second display stayed on the VM, or out of it, 2026-10-24).
 static int runMoves(int by, const char *what) {
   int made = 0;
   if (movesCancelled) return 0;
-  for (int i = 0; i < nMoves; i++) {
-    Move *m = &moves[i];
-    if (m->done) continue;
-    const char *side = m->dir > 0 ? "right" : "left";
-    Hotkey k = { 0 };
-    if (!postMove(m, by, &k)) {
-      if (by == BY_SHORTCUT) logf_("escape combo: macOS's \"Move %s a space\" shortcut is off or has no key", side);
-      continue;
+  CGPoint at = pointerFn();
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < nMoves; i++) {
+      Move *m = &moves[i];
+      if (m->done || CGRectContainsPoint(m->b, at) != (pass == 1)) continue;
+      const char *side = m->dir > 0 ? "right" : "left";
+      Hotkey k = { 0 };
+      if (!postMove(m, by, &k)) {
+        if (by == BY_SHORTCUT) logf_("escape combo: macOS's \"Move %s a space\" shortcut is off or has no key", side);
+        continue;
+      }
+      made++;
+      if (by == BY_SHORTCUT)
+        logf_("escape combo: display %u: macOS's \"Move %s a space\" (key %d, modifiers 0x%llx; %s)", m->id, side, k.keycode,
+              (unsigned long long)k.flags, what);
+      else logf_("escape combo: display %u swiped %s (%s)", m->id, side, what);
     }
-    made++;
-    if (by == BY_SHORTCUT)
-      logf_("escape combo: display %u: macOS's \"Move %s a space\" (key %d, modifiers 0x%llx; %s)", m->id, side, k.keycode,
-            (unsigned long long)k.flags, what);
-    else logf_("escape combo: display %u swiped %s (%s)", m->id, side, what);
   }
   return made;
 }
