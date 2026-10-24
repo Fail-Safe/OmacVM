@@ -622,6 +622,8 @@ step_switches() {
       # Not for this Mac or VM: the row says so and Space changes nothing.
       title=$(feat title "$n")
       cc row "$title"; s=$CCS
+      # The last job's toast can cover the row's line below the table for a few seconds: once more.
+      [[ $s == *"row: "* ]] || { sleep 5; cc row "$title"; s=$CCS; }
       [[ $s == *"row: off, unavailable"* || $s == *"row: off, off"* || $s == *"no row"* ]] \
         && res "switch-$n" skip "not on this Mac ($(feat reason "$n")); ${s:0:120}" \
         || res "switch-$n" FAIL "unavailable here ($(feat reason "$n")) but the row says: $s"
