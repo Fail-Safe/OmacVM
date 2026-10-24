@@ -3441,8 +3441,10 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   }
   // A gesture event type. Also just after a swipe the Mac took (TAKE_QUIET):
   // the trackpad's own end of it must not reach the Dock's swipe.
-  // A three-finger touch with Three Finger Drag is macOS's drag: its events pass.
-  if (threeDrag && fingers == 3) return e;
+  // A three-finger touch with Three Finger Drag is macOS's drag: its events
+  // pass, but not while a swipe out runs or just ended (four fingers, one
+  // lifted: the trackpad's own end of it).
+  if (threeDrag && fingers == 3 && !takeRun.on && monoNow() >= takeQuietUntil) return e;
   return (capturing && gesturesOn()) || monoNow() < takeQuietUntil ? NULL : e;
 }
 

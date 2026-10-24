@@ -103,6 +103,16 @@ int main(void) {
   touch(3, 0);
   check(gestureEvent(), "on: macOS's gesture events for three fingers pass");
   touch(0, 0);
+  // A four-finger swipe out, one finger lifted: three left, but the swipe is
+  // the helper's, and just after it the trackpad's end of it stays away too.
+  touch(3, 0);
+  takeRun.on = 1;
+  check(!gestureEvent(), "on: during a swipe out, macOS's events for the three fingers left are dropped");
+  takeRun.on = 0; takeQuietUntil = monoNow() + 5;
+  check(!gestureEvent(), "on: just after a swipe out, they are dropped too");
+  takeQuietUntil = 0;
+  check(gestureEvent(), "on: after that, they pass again");
+  touch(0, 0);
   swipe(4); drain();
   check(frames[4] == 10 && ends == 1, "on: a four-finger swipe still goes to the VM");
   touch(4, 0);
