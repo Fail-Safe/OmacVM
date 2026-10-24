@@ -53,7 +53,11 @@
  * 23 a fragment shader that declares a 2D_ARRAY sampler (as Mesa's VA-API video compositor
  *    declares its planes) with a plain 2D texture view bound reads the texture, as gallium
  *    reads such a view (layer 0); the same program with the colour from constant buffer 0
- *    is the compositor's whole path (virgl-shader-array-sampler-2d-view.patch).
+ *    is the compositor's whole path (virgl-shader-array-sampler-2d-view.patch);
+ * 24 two views of one texture with different swizzles (RRR1 and GGG1, as the compositor
+ *    reads U and V from one UV plane) in one draw: each reads its own channel, not the
+ *    swizzle bound last (GL keeps one per texture; virgl-view-swizzle-shared-texture.patch);
+ *    a draw with only the second view after it still gets that view's swizzle.
  * Run as is, with OMACVM_VIRGL_CONST_UBO=1 and with OMACVM_VIRGL_CONST_UBO=0.
  * Usage: test-const-ubo [case] */
 #include <OpenGL/OpenGL.h>
@@ -80,7 +84,8 @@ enum { R_RT = 1, R_POS, R_UBO, R_TEX, R_COUNT };
 /* objects */
 enum { VS_CONST = 10, VS_CONST8, VS_INDEX, VS_UBO, VS_PLAIN, VS_IN16, FS_VARYING, FS_CONST, FS_MUL,
        VE = 20, VS_FAR = 30, VS_SEP, FS_SEP, SURFACE = 40, BLEND, RS, GS_CONST = 50,
-       FS_CONST1D = 60, FS_ARRAY_SAMPLER, VIEW_2D, SAMPLER };
+       FS_CONST1D = 60, FS_ARRAY_SAMPLER, VIEW_2D, SAMPLER, FS_TWO_VIEWS, VIEW_R, VIEW_G,
+       FS_ONE_VIEW };
 
 static CGLContextObj main_ctx;
 static int failures;
@@ -422,6 +427,36 @@ static const char *fs_array_sampler =
    "  1: MUL OUT[0], TEMP[0], CONST[1]\n"
    "  2: END\n";
 
+/* red from view 0's x, green from view 1's x: two views of one texture */
+static const char *fs_two_views =
+   "FRAG\n"
+   "DCL OUT[0], COLOR\n"
+   "DCL SAMP[0]\n"
+   "DCL SAMP[1]\n"
+   "DCL SVIEW[0], 2D, FLOAT\n"
+   "DCL SVIEW[1], 2D, FLOAT\n"
+   "DCL TEMP[0..1]\n"
+   "IMM[0] FLT32 {    0.5000,     0.5000,     0.0000,     1.0000}\n"
+   "  0: TEX TEMP[0], IMM[0], SAMP[0], 2D\n"
+   "  1: TEX TEMP[1], IMM[0], SAMP[1], 2D\n"
+   "  2: MOV OUT[0].x, TEMP[0].xxxx\n"
+   "  3: MOV OUT[0].y, TEMP[1].xxxx\n"
+   "  4: MOV OUT[0].zw, IMM[0].zzzw\n"
+   "  5: END\n";
+
+/* red from view 1's x alone */
+static const char *fs_one_view =
+   "FRAG\n"
+   "DCL OUT[0], COLOR\n"
+   "DCL SAMP[1]\n"
+   "DCL SVIEW[1], 2D, FLOAT\n"
+   "DCL TEMP[0]\n"
+   "IMM[0] FLT32 {    0.5000,     0.5000,     0.0000,     1.0000}\n"
+   "  0: TEX TEMP[0], IMM[0], SAMP[1], 2D\n"
+   "  1: MOV OUT[0].x, TEMP[0].xxxx\n"
+   "  2: MOV OUT[0].yzw, IMM[0].zzzw\n"
+   "  3: END\n";
+
 /* colour = the vertex colour * CONST[0][0] */
 static const char *fs_mul =
    "FRAG\n"
@@ -504,6 +539,8 @@ static void emit_state(struct cmds *c, int ctx)
    emit_shader(c, FS_MUL, TEST_SHADER_FRAGMENT, fs_mul);
    emit_shader(c, FS_CONST1D, TEST_SHADER_FRAGMENT, fs_const1d);
    emit_shader(c, FS_ARRAY_SAMPLER, TEST_SHADER_FRAGMENT, fs_array_sampler);
+   emit_shader(c, FS_TWO_VIEWS, TEST_SHADER_FRAGMENT, fs_two_views);
+   emit_shader(c, FS_ONE_VIEW, TEST_SHADER_FRAGMENT, fs_one_view);
    emit_bind_shaders(c, VS_CONST, FS_VARYING);
 
    emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_VERTEX_ELEMENTS,
@@ -886,6 +923,45 @@ static void case_array_sampler(struct cmds *c, int ctx)
    check(submit(ctx, c) == 0, "a 2D_ARRAY sampler with a 2D view");
    const uint32_t want[2] = { GREEN, GREEN };
    check_stripes(ctx, 2, want, "a 2D view read through a 2D_ARRAY sampler");
+}
+
+/* a 2D view of R_TEX with swizzle s (3 bits per channel, PIPE_SWIZZLE_*) */
+static void emit_view(struct cmds *c, int ctx, uint32_t handle, uint32_t s)
+{
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_SAMPLER_VIEW,
+                      VIRGL_OBJ_SAMPLER_VIEW_SIZE));
+   emit(c, handle);
+   emit(c, res_id(ctx, R_TEX));
+   emit(c, VIRGL_FORMAT_R8G8B8A8_UNORM | TEST_PIPE_TEXTURE_2D << 24);
+   emit(c, 0);
+   emit(c, 0);
+   emit(c, s);
+}
+
+static void case_shared_swizzle(struct cmds *c, int ctx)
+{
+   emit_texture(c, ctx, 0xff00c040);          /* R 0x40, G 0xc0, B 0, A 0xff */
+   emit_view(c, ctx, VIEW_R, 0 | 0 << 3 | 0 << 6 | 5 << 9);   /* RRR1 */
+   emit_view(c, ctx, VIEW_G, 1 | 1 << 3 | 1 << 6 | 5 << 9);   /* GGG1 */
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_SET_SAMPLER_VIEWS, 0, VIRGL_SET_SAMPLER_VIEWS_SIZE(2)));
+   emit(c, TEST_SHADER_FRAGMENT);
+   emit(c, 0);
+   emit(c, VIEW_R);
+   emit(c, VIEW_G);
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_BIND_SAMPLER_STATES, 0, 4));
+   emit(c, TEST_SHADER_FRAGMENT);
+   emit(c, 0);
+   emit(c, SAMPLER);
+   emit(c, SAMPLER);
+   emit_bind_shaders(c, VS_PLAIN, FS_TWO_VIEWS);
+   emit_stripe(c, 0);
+   emit_draw(c);
+   emit_bind_shaders(c, VS_PLAIN, FS_ONE_VIEW);
+   emit_stripe(c, 1);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "two views of one texture with different swizzles");
+   const uint32_t want[2] = { 0xff00c040, 0xff0000c0 };
+   check_stripes(ctx, 2, want, "each view of a shared texture with its own swizzle");
 }
 
 static void case_odd(struct cmds *c, int ctx)
@@ -1369,6 +1445,7 @@ static void run_case(int n)
    case 21: case_random(&c, ctx); break;
    case 22: case_buffer0(&c, ctx); break;
    case 23: case_array_sampler(&c, ctx); break;
+   case 24: case_shared_swizzle(&c, ctx); break;
    }
    teardown(ctx);
    if (n == 4)
@@ -1409,7 +1486,7 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   for (int n = 1; n <= 23; n++)
+   for (int n = 1; n <= 24; n++)
       if (!only || only == n)
          run_case(n);
 

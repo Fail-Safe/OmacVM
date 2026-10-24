@@ -1287,6 +1287,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-const-buffer0-reso
 # OmacVM: a plain 2D view behind a sampler the shader declares 2D_ARRAY is sampled as 2D (Mesa's
 # VA-API video compositor declares its planes so; GL read nothing there: converted frames were black).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-shader-array-sampler-2d-view.patch"
+# OmacVM: two views of one texture with different swizzles in one draw each get their own, in the
+# shader (GL keeps one per texture: U read V in Mesa's VA-API video compositor, wrong colours).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-view-swizzle-shared-texture.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
