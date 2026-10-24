@@ -20,6 +20,11 @@ in more words.
   QEMU's on the Mac only from 1.11 to 1.01: the conversion costs the Mac's graphics thread
   most of what the VM saves. `OMACVM_VA_EXPORT=0` in Chrome's environment in the VM keeps it on
   the CPU. Needs the app update and Update VM; restart Chrome after it.
+- **Three Finger Drag.** With macOS's Three Finger Drag on (System Settings > Accessibility >
+  Pointer Control > Trackpad Options > Dragging style), dragging with three fingers in the
+  full-screen VM also switched Omarchy's workspaces. Three fingers now stay macOS's drag and only
+  four-finger swipes go to the VM, as macOS itself does then. The setting is read live; with it
+  off (the default) three and four fingers both switch workspaces as before.
 
 ## 3.1.32
 
