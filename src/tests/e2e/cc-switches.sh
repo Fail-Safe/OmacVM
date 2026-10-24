@@ -115,6 +115,10 @@ if [[ ${OMACVM_E2E_LAPTOP:-} != 1 && $(ioreg -rc AppleSmartBattery 2>/dev/null) 
 fi
 idle=$(( $(ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF; exit}') / 1000000000 ))
 (( idle >= 300 || ${OMACVM_E2E_IGNORE_IDLE:-0} == 1 )) || die "someone used this Mac ${idle}s ago: wait until it is idle 5 min"
+# A Screen Sharing session: someone may be watching this screen (its input also counts as HID input). Only a
+# session left alone for 30 min does not count.
+shares=$(pmset -g assertions 2>/dev/null | grep -c 'screensharingd.*Remote user is connected')
+(( shares == 0 || idle >= 1800 || ${OMACVM_E2E_IGNORE_IDLE:-0} == 1 )) || die "a Screen Sharing session is connected (input ${idle}s ago): wait until it ends or is idle 30 min"
 LOCKS=()
 lock() {   # DIR: ours, or taken now (same owner counts: the caller may hold it)
   local o; o=$(cat "$1/owner" 2>/dev/null)
