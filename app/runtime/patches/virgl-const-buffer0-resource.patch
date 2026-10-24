@@ -7,8 +7,12 @@ the stage's slot 0 was a buffer, each draw reads the buffer's bytes back
 (glGetBufferSubData: the guest writes new ones into the same buffer) and
 uses them as if SET_CONSTANT_BUFFER had sent them, as many as the shader
 declares; past the bound range they read as zero. A later
-SET_CONSTANT_BUFFER wins again. Desktop GL only (GLES has no
-glGetBufferSubData: unchanged there). Applies on top of
+SET_CONSTANT_BUFFER wins again. Where the constants are a uniform block
+bound per draw, the GPU copies them into the stage's own buffer
+(glCopyBufferSubData: a read back makes the render thread wait for the GPU
+on every converted frame); uniforms and a vertex shader's window read them
+back. Desktop GL only (GLES
+has no glGetBufferSubData: unchanged there). Applies on top of
 virgl-const-uniform-buffer.patch (both constant paths).
 Why: Mesa's st/mesa sends plain constants as data, but Mesa's own gallium
 helpers bind a buffer: the VA-API video compositor (vl_compositor) binds its
@@ -54,19 +58,20 @@ Tests: Tests/virgl/test-const-ubo.c case 22, in all three constant modes
     }
     ctx->sub->const_bufs_dirty[shader] |= mask;
  }
-@@ -6822,11 +6830,53 @@
-    sub_ctx->const_bufs_dirty[shader_type] = dirty;
+@@ -6823,10 +6831,83 @@
  
     return next_ubo_id;
-+}
+ }
 +
 +/* OmacVM: gallium's constant buffer 0 bound as a guest buffer (SET_UNIFORM_BUFFER index 0:
 + * Mesa's VA-API video compositor binds its colour matrix that way) holds the stage's plain
 + * constants, CONST[0..n], which vrend took only from SET_CONSTANT_BUFFER: the shader read
-+ * zeros, and every frame VA-API converted to RGB was black. The buffer's bytes are read back
-+ * for each draw (the guest writes new ones into the same buffer) and used as if
-+ * SET_CONSTANT_BUFFER had sent them, as many as the shader declares; past the buffer's
-+ * range they read as zero. GLES has no glGetBufferSubData: unchanged there. */
++ * zeros, and every frame VA-API converted to RGB was black. For each draw (the guest writes
++ * new ones into the same buffer) its bytes become the stage's constants, as many as the
++ * shader declares; past the buffer's range they read as zero. Where the constants are a
++ * uniform block bound per draw, the GPU copies them into the stage's own buffer (no wait for
++ * the GPU); else (uniforms, a vertex window) they are read back. GLES has no
++ * glGetBufferSubData: unchanged there. */
 +static void vrend_const0_from_buffer(struct vrend_sub_context *sub_ctx, int shader_type)
 +{
 +   const struct pipe_constant_buffer *cb = &sub_ctx->cbs[shader_type][0];
@@ -74,13 +79,42 @@ Tests: Tests/virgl/test-const-ubo.c case 22, in all three constant modes
 +   const struct vrend_shader_selector *sel = sub_ctx->shaders[shader_type];
 +   struct vrend_constants *consts = &sub_ctx->consts[shader_type];
 +   uint32_t words, bytes;
-+
+ 
 +   if (!sel || !sel->sinfo.num_consts || vrend_state.use_gles || !vrend_res_is_gl_buffer(res))
 +      return;
 +   words = sel->sinfo.num_consts * 4;
 +   bytes = MIN2(cb->buffer_size, words * 4);
 +   if (!vrend_buffer_range_ok(res, cb->buffer_offset, bytes))
 +      return;
++   if (sub_ctx->prog->const_block_bind[shader_type] &&
++       !(shader_type == PIPE_SHADER_VERTEX && sub_ctx->prog->const_index)) {
++      static const uint8_t zeros[4096];
++      uint32_t size = sub_ctx->prog->const_block_size[shader_type];
++      uint32_t copy = MIN2(bytes, size);
++
++      if (!sub_ctx->const_own[shader_type])
++         glGenBuffers(1, &sub_ctx->const_own[shader_type]);
++      glBindBuffer(GL_UNIFORM_BUFFER, sub_ctx->const_own[shader_type]);
++      glBufferData(GL_UNIFORM_BUFFER, size, NULL, GL_STREAM_DRAW);
++      for (uint32_t at = copy; at < size; at += sizeof(zeros))
++         glBufferSubData(GL_UNIFORM_BUFFER, at, MIN2(sizeof(zeros), size - at), zeros);
++      glBindBuffer(GL_UNIFORM_BUFFER, 0);
++      if (copy) {
++         glBindBuffer(GL_COPY_READ_BUFFER, res->gl_id);
++         glBindBuffer(GL_COPY_WRITE_BUFFER, sub_ctx->const_own[shader_type]);
++         glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, cb->buffer_offset, 0, copy);
++         glBindBuffer(GL_COPY_READ_BUFFER, 0);
++         glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
++      }
++      sub_ctx->const_own_size[shader_type] = size;
++      consts->ubo_ok = true;
++      consts->ubo_id = sub_ctx->const_own[shader_type];
++      consts->ubo_offset = 0;
++      consts->ubo_bytes = size;
++      consts->ubo_slot = VREND_CONST_RING;
++      consts->ubo_gen = 0;
++      return;
++   }
 +   if (consts->num_allocated_consts < words) {
 +      unsigned int *grown = malloc(words * sizeof(*grown));
 +      if (!grown)
@@ -98,8 +132,8 @@ Tests: Tests/virgl/test-const-ubo.c case 22, in all three constant modes
 +   consts->ubo_ok = false;
 +   consts->ubo_slot = VREND_CONST_RING;
 +   sub_ctx->const_dirty[shader_type] = true;
- }
- 
++}
++
  static void vrend_draw_bind_const_shader(struct vrend_sub_context *sub_ctx,
                                           int shader_type, bool new_program)
  {
