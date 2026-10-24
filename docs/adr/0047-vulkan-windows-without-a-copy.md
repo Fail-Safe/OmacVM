@@ -79,6 +79,29 @@ covers the read, and the guest writes the buffer again only after that fence
 the re-stride and that fence. GL sees Metal's writes to the pages without a
 lock or rebind because Apple silicon's memory is one (checked bit-exact).
 
+2026-10-24 (#499): that GPU wait holds only once the context it leaves is
+flushed. A `glWaitSync` waits only for a flushed fence (ARB_sync);
+`eglMakeCurrent` and `glXMakeCurrent` flush the context they leave, but
+`CGLSetCurrentContext` does not, and Apple's `glWaitSync` on an unflushed
+fence does not wait. From 3.1.24 to 3.1.31 Hyprland's draw therefore ran
+before the re-stride was even sent: the first frame Hyprland drew after each
+new one showed the buffer's previous frame (Zed's caret one character back
+for a frame), a FIFO window was one swapchain cycle late, a mailbox window
+tore. `vrend_sync_make_current` now flushes before it switches, into the
+blitter and back (`virgl-darwin-context-switch-flush.patch`). Host harness,
+Mac mini M4: 7-8 us more CPU per re-stride (0.024 -> 0.031 ms at 1816x870,
+0.028 -> 0.036 ms at 4K), and the switch back stays a GPU wait (0.02-0.09
+ms with up to 16 more 4K re-strides queued in the blitter). Test VM on the
+mini (bench lock, median of 3, 3.1.31 -> fixed): vkcube FIFO 57.9 -> 57.7
+fps, QEMU's busiest thread 1.30 -> 1.40 ms a frame; vkmark windowed 2682 ->
+2646. The blit fallback's flushes did not run at all in glmark2, a terminal,
+WebGL Aquarium or vkcube (no GL fallback blits there).
+The window texture is not bound again in Hyprland's context after a
+re-stride. GL 4.6 Appendix D.3.3 rule 4 asks for that when another context
+changed a texture; Apple's GL was measured not to need it on macOS 27
+(the build test runs both ways: bound before every draw and bound once).
+Workaround on 3.1.24-3.1.31: the switch off (VM restart).
+
 ### Lifetime
 
 | Holder | Takes | Drops |
@@ -118,7 +141,10 @@ Vulkan compositor inside the VM): `VK_ERROR_INVALID_EXTERNAL_HANDLE`.
 
 Tests: `Tests/virgl/test-vulkan-window-restride.c` (build time: the real
 shader and draw on the Mac's OpenGL, bit-exact for all three layouts, and
-the layout check's limits); `src/tests/venus-driver.sh` (the generator);
+the layout check's limits); `Tests/virgl/test-vulkan-window-handover.c`
+(build time, GPU: the re-stride seen by the guest context's very next draw,
+and the guest's work seen by the blitter, with shared CGL contexts;
+`OMACVM_TEST_BENCH=1` times the switches); `src/tests/venus-driver.sh` (the generator);
 the Vulkan validation layer on the host harness (no errors); VM rows:
 vkcube FIFO, Xwayland, resizes, two windows, vkmark full screen,
 `gpuOffMainLoop`, MoltenVK forced, a 30-minute soak with no GPU restart.
