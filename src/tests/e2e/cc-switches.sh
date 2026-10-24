@@ -435,7 +435,7 @@ use_vm() {   # NAME [CLONE_FROM]: the VM of this pass (an APFS clone of a kept o
 }
 
 update_vm_window() {   # Update VM in the app's window (VM stopped): 0 when the VM has this app's OmacVM
-  local p t0 i v want
+  local p t0 i v want rc
   want=$(appver); t0=$(date +%s)
   rm -f "$VMD/logs/update.log" "$VMD/update.log"
   if (( HIDDEN )); then   # the script the button runs, without the window
@@ -446,7 +446,13 @@ update_vm_window() {   # Update VM in the app's window (VM stopped): 0 when the 
     [[ $v == "$want" ]]; return
   fi
   p=$(window) || { echo "no window on $VM"; return 1; }
-  if ! "$OUT/ax" "$p" press "Update VM" > "$OUT/ax-update-vm.txt" 2>&1; then
+  "$OUT/ax" "$p" press "Update VM" > "$OUT/ax-update-vm.txt" 2>&1; rc=$?
+  # -25204 (cannot complete): the app's main thread was busy when the press came, e.g. right after
+  # the app updated itself. The press may have gone through: Update VM writes its log at once.
+  if (( rc )) && grep -q 'press failed: -25204' "$OUT/ax-update-vm.txt"; then
+    for ((i = 0; i < 60; i += 2)); do [[ -s $VMD/logs/update.log || -s $VMD/update.log ]] && { rc=0; echo " (update.log written: the press went through)" >> "$OUT/ax-update-vm.txt"; break; }; sleep 2; done
+  fi
+  if (( rc )); then
     close_window
     v=$(cat "$VMD/omacvm-version" 2>/dev/null)
     if [[ -n $v && $(printf '%s\n%s\n' "$v" "$want" | sort -V | tail -1) == "$v" ]]; then
