@@ -396,9 +396,12 @@ shaders too, `=0` keeps uniforms (the GL calls of before); qemu.log says which.
 Constant buffer 0 can also be a guest buffer (`SET_UNIFORM_BUFFER` index 0):
 Mesa's own gallium helpers bind one, the VA-API video compositor its colour
 matrix. When that came after the stage's last `SET_CONSTANT_BUFFER`, each draw
-reads the buffer back (`glGetBufferSubData`) and uses it as the stage's
-constants (`virgl-const-buffer0-resource.patch`; before, the shader read zeros
-and Chrome's decoded frames were black).
+uses the buffer as the stage's constants (`virgl-const-buffer0-resource.patch`;
+before, the shader read zeros and Chrome's decoded frames were black). Where
+the constants are a uniform block bound per draw, the GPU copies the buffer
+into the stage's own one (`glCopyBufferSubData`, no wait for the GPU); with
+uniforms or a vertex shader's window each draw reads it back
+(`glGetBufferSubData`).
 Test: `test-const-ubo` (all three modes; case 22 for the guest buffer).
 
 Context switches: on CGL, every handover between GL contexts flushes the
