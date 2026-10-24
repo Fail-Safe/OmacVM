@@ -224,4 +224,6 @@ Options for later (none started; parked on 2026-10-21):
    the M1 Max per call: fsync 21–36 µs, `F_BARRIERFSYNC` 0.66–0.75 ms,
    `F_FULLFSYNC` 5.7–6.0 ms. With `F_BARRIERFSYNC` a guest fsync would go from
    about 0.45 ms to roughly 1.1–1.9 ms (estimate: btrfs sends 1–2 flushes per
-   fsync). Not decided.
+   fsync). Done in 3.2.1 (ADR 0051): measured on the M4 Max, a guest fsync went
+   from 0.38 to 0.63 ms, far below the estimate; git commits +40 %, installs
+   and checkouts the same.

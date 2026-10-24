@@ -3,6 +3,17 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.1 (unreleased)
+
+- **The VM's disk survives a power cut.** When Omarchy saves a file for good, the Mac's drive now
+  gets a write barrier: nothing written after it reaches the flash before what came before it.
+  Until now a power cut (a Mac mini or Studio losing power, a held power button) could leave
+  the VM's btrfs half written and unmountable, because macOS's fsync stops at the drive's cache.
+  Now at most the last moments before the cut are lost. It costs about 0.25 ms per flush: on a
+  MacBook Pro M4 Max, 200 git commits took 0.97 s instead of 0.70 s; installing 222 packages,
+  git checkouts and big copies took the same time. `omacvm check` shows it as "disk flush".
+  Needs the app update.
+
 ## 3.1.33 (unreleased)
 
 - **Google Chrome decodes video on the Mac's media engine again, up to 1080p.** Chrome 155 and
