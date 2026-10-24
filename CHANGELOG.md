@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.32 (unreleased)
+
+- **The camera comes back.** After the MacBook's lid closed (or a USB or display camera was
+  unplugged) while a Linux app used the camera, the VM's picture stayed black until the app or
+  the VM was started again: the camera's session kept the camera that was gone. Each start now
+  picks the camera again (the built-in one while the lid is open, else macOS's default, else
+  the first there is), and a camera that is gone, suspended or gives no picture for 5 s is
+  started again with whichever camera there is then; a camera plugged in meanwhile is taken at
+  once.
+
 ## 3.1.31
 
 - **Trackpad gestures after sleep.** After the Mac woke from a longer sleep (Power Nap's short
