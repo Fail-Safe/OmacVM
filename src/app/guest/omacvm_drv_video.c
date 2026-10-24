@@ -11,6 +11,20 @@
  * AV1 is listed for Chromium-based browsers only (OMACVM_VA_AV1=1 or 0
  * overrides).
  *
+ * Surfaces with their real size (Chromium): Mesa's virgl gives a surface's
+ * planes a guest buffer of one page when the Mac keeps their pixels (copy
+ * transfers), so a plane's dma-buf says 4096 bytes. Chromium (Chrome, Brave,
+ * Electron) converts each decoded frame into an ARGB surface of its own
+ * (VA-API video processing) and, before it hands that back to VA-API, checks
+ * every plane against its dma-buf's size ("Plane 0 is out of bounds: 8294400
+ * > 4096"), then decodes on the CPU. So in Chromium's processes the shim asks
+ * for surfaces that will be exported (memory type DRM_PRIME_2 without a
+ * descriptor, as libva documents it): Mesa makes them shared, with a guest
+ * buffer of the planes' size (1080p: 3.3 MB NV12, 8.3 MB ARGB). Only when the
+ * Mac's runtime draws those ARGB frames (it says omacvm.vaexport=1 at start:
+ * /run/omacvm/host.env); an older one shows them black, and then the CPU is
+ * better. Other apps keep Mesa's one page. OMACVM_VA_EXPORT=1 or 0 overrides.
+ *
  * Limits: the Mac says in its video caps how many decoders and encoders a VM
  * should keep open at once. Past a somewhat higher limit of its own it gives
  * a new one nothing, and the guest cannot be told, so the video would stay
@@ -122,6 +136,105 @@ static VAStatus query_config_profiles(VADriverContextP ctx, VAProfile *list, int
     }
     *num = n;
     return st;
+}
+
+/* ---- Surfaces with their real size (see the top) ---- */
+
+/* Chromium's browser process by name, its GPU and video decoder processes
+ * (any Chromium or Electron app) by their --type= switch. */
+static int chromium_process(void)
+{
+    char exe[PATH_MAX], args[4096];
+    ssize_t n;
+    int fd;
+
+    n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n > 0) {
+        exe[n] = 0;
+        if (strstr(exe, "chrom") || strstr(exe, "brave") || strstr(exe, "electron"))
+            return 1;
+    }
+    fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    n = read(fd, args, sizeof(args) - 1);
+    close(fd);
+    if (n <= 0)
+        return 0;
+    args[n] = 0;
+    for (char *a = args; a < args + n; a += strlen(a) + 1)
+        if (!strncmp(a, "--type=", 7))
+            return 1;
+    return 0;
+}
+
+/* The Mac's runtime draws VA-API's converted frames (see the top). */
+static int host_draws_export(void)
+{
+    char line[256];
+    const char *path = getenv("OMACVM_HOST_ENV");   /* tests */
+    FILE *f = fopen(path && *path ? path : "/run/omacvm/host.env", "re");
+    int yes = 0;
+
+    if (!f)
+        return 0;
+    while (!yes && fgets(line, sizeof(line), f))
+        yes = !strcmp(line, "OMACVM_VAEXPORT=1\n");
+    fclose(f);
+    return yes;
+}
+
+/* Decided once, at the driver's start: Chromium loads it before its sandbox
+ * closes, and host.env cannot be read after that. */
+static int export_sized(void)
+{
+    static int on = -1;
+    const char *env;
+
+    if (on < 0) {
+        env = getenv("OMACVM_VA_EXPORT");
+        on = env && *env ? *env == '1' : chromium_process() && host_draws_export();
+    }
+    return on;
+}
+
+static VAStatus (*mesa_create_surfaces2)(VADriverContextP, unsigned int, unsigned int,
+                                         unsigned int, VASurfaceID *, unsigned int,
+                                         VASurfaceAttrib *, unsigned int);
+
+/* A new surface that Mesa allocates (no buffer of the app's, no memory type
+ * of its own) gets the export hint added. */
+static VAStatus create_surfaces2(VADriverContextP ctx, unsigned int format, unsigned int width,
+                                 unsigned int height, VASurfaceID *surfaces,
+                                 unsigned int num_surfaces, VASurfaceAttrib *attribs,
+                                 unsigned int num_attribs)
+{
+    VASurfaceAttrib list[32];
+    unsigned int i;
+    int plain = export_sized() && num_attribs < sizeof(list) / sizeof(list[0]) &&
+                (attribs || !num_attribs);
+
+    for (i = 0; plain && i < num_attribs; i++) {
+        if (!(attribs[i].flags & VA_SURFACE_ATTRIB_SETTABLE))
+            continue;
+        if ((attribs[i].type == VASurfaceAttribMemoryType &&
+             attribs[i].value.value.i != VA_SURFACE_ATTRIB_MEM_TYPE_VA) ||
+            attribs[i].type == VASurfaceAttribExternalBufferDescriptor)
+            plain = 0;
+    }
+    if (!plain)
+        return mesa_create_surfaces2(ctx, format, width, height, surfaces, num_surfaces,
+                                     attribs, num_attribs);
+    if (num_attribs)
+        memcpy(list, attribs, num_attribs * sizeof(*attribs));
+    list[num_attribs] = (VASurfaceAttrib){
+        .type = VASurfaceAttribMemoryType,
+        .flags = VA_SURFACE_ATTRIB_SETTABLE,
+        .value = { .type = VAGenericValueTypeInteger,
+                   .value.i = VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2 },
+    };
+    return mesa_create_surfaces2(ctx, format, width, height, surfaces, num_surfaces, list,
+                                 num_attribs + 1);
 }
 
 /* ---- Images in another YUV layout (see the top) ---- */
@@ -691,6 +804,11 @@ static VAStatus shim_init(VADriverContextP ctx)
     if (st == VA_STATUS_SUCCESS && ctx->vtable && ctx->vtable->vaQueryConfigProfiles) {
         mesa_query_config_profiles = ctx->vtable->vaQueryConfigProfiles;
         ctx->vtable->vaQueryConfigProfiles = query_config_profiles;
+    }
+    if (st == VA_STATUS_SUCCESS && ctx->vtable && ctx->vtable->vaCreateSurfaces2) {
+        export_sized();
+        mesa_create_surfaces2 = ctx->vtable->vaCreateSurfaces2;
+        ctx->vtable->vaCreateSurfaces2 = create_surfaces2;
     }
     if (st == VA_STATUS_SUCCESS && ctx->vtable && ctx->vtable->vaCreateContext &&
         ctx->vtable->vaDestroyContext && ctx->vtable->vaTerminate) {
