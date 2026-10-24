@@ -723,7 +723,9 @@ if [[ $TYPE == app ]]; then
   o=$(cat /sys/module/page_reporting/parameters/page_reporting_order 2>/dev/null)
   if [[ -z $o ]]; then skip "memory back to the Mac" "this kernel has no free page reporting"
   elif [[ $o == 6 ]]; then ok "memory back to the Mac" "freed memory in 256 KiB blocks and up"
-  else warn "memory back to the Mac" "only in blocks of order $o (Update VM / omacvm apply sets 256 KiB)"; fi
+  elif [[ $o == 9 ]]; then warn "memory back to the Mac" "freed memory goes back only in 2 MiB blocks (Update VM / omacvm apply sets 256 KiB)"
+  elif [[ $o == -1 ]]; then warn "memory back to the Mac" "the balloon has not started free page reporting yet (Update VM / omacvm apply sets 256 KiB)"
+  else warn "memory back to the Mac" "freed memory goes back in blocks of order $o, not 256 KiB (Update VM / omacvm apply sets it)"; fi
 fi
 z=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/ { print $2; exit }')
 [[ -n $z ]] && ok "zram swap" "$z" || bad "zram swap" "none (reboot after omacvm apply?)"
