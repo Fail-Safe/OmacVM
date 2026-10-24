@@ -160,6 +160,14 @@ commit 82927e9. Changes here:
   guest's new screen, uploaded there on every mode change, stayed in GPU
   memory too (ADR 0018). Checked in a test VM by
   `tests/graphics/scanout-churn.sh`
+- `patches/virgl-darwin-context-switch-flush.patch`: vrend flushes a GL
+  context before it switches to another one (`vrend_sync_make_current`).
+  `CGLSetCurrentContext` does not flush (EGL's and GLX's make-current do), and
+  Apple's `glWaitSync` does not wait for a fence that was never flushed, so a
+  Vulkan window's re-stride in the blitter's context reached Hyprland's draw
+  one frame late (#499). Checked by `Tests/virgl/test-vulkan-window-handover.c`
+  (GPU, both ways between the contexts; `OMACVM_TEST_BENCH=1` times the
+  switches, not run by the build)
 - `patches/virgl-resource-memory-budget.patch`: guest resources are charged
   their estimated size against a budget (`OMACVM_GPU_MEMORY_MB`, default
   three quarters of the Mac's memory, 0 = off: only a guard against a runaway

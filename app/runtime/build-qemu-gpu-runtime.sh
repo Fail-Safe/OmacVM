@@ -1275,6 +1275,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-const-uniform-buff
 # OmacVM: Vulkan windows without a copy (ADR 0047, vkWindowsNoCopy): a Vulkan window's buffer is
 # an IOSurface that OpenGL binds; the GPU re-strides it into the window's texture (no CPU copy).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-vulkan-windows-iosurface.patch"
+# OmacVM: a GL context is flushed before vrend switches away from it (CGL's make-current does not
+# flush, and the next context's wait for its fence did not wait: Vulkan windows a frame late, #499).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-context-switch-flush.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.

@@ -249,6 +249,9 @@ run_test("test-core-glsl-shaders", "vrend_shader.c")
 run_test("test-blitter-shaders", "vrend_blitter.c")
 # Vulkan windows without a copy (virgl-vulkan-windows-iosurface.patch): the re-stride and its layout check.
 run_test("test-vulkan-window-restride", "vrend_blitter.c")
+# GL work that crosses vrend's contexts is seen by the other one (virgl-darwin-context-switch-flush.patch,
+# #499): the re-stride's window texture in the guest's next draw, bound each draw or once.
+run_test("test-vulkan-window-handover", "vrend_blitter.c", envs=(None, {"OMACVM_TEST_BIND": "once"}))
 run_api_test("test-empty-framebuffer")
 run_api_test("test-sampler-limit")
 run_api_test("test-set-type-no-egl")
