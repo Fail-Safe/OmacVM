@@ -251,7 +251,13 @@ static int vmOffSpace;
 // swipe); edgeKnown: it said so since it connected. ways: which finger counts
 // switch workspaces going left [0] / right [1] there (bit n: n fingers; "G",
 // Hyprland's gestures); waysKnown: it said so (else any 3 or more).
-static struct { int fd, net, gestures, glide, target, edge[2], edgeKnown, waysKnown; unsigned ways[2], gen; char ip[32], name[256]; } clients[MAX_CLIENTS];
+// focus: where Hyprland's focused output sits on the Mac ("D", the answer to
+// the escape combo's "Q"; OmacVM.app's arrangement of the VM's outputs, points
+// from its top-left), focusOk: known; focusAt: when it answered (monoNow, 0:
+// never); focusSilent: it did not answer in time once (a guest from before
+// 3.1.32): not waited for again.
+static struct { int fd, net, gestures, glide, target, edge[2], edgeKnown, waysKnown, focusOk, focusSilent; unsigned ways[2], gen;
+                double focusAt; CGRect focus; char ip[32], name[256]; } clients[MAX_CLIENTS];
 static volatile int frontNet = -1;
 static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
@@ -2155,6 +2161,26 @@ static int windowsOf(pid_t pid, CGRect *out, int cap) {
   return k;
 }
 
+// Every normal window of pid on any Space (layer 0, bigger than 100 x 100):
+// OmacVM.app's VM has one per display in full screen.
+static int allWindowsOf(pid_t pid, CGWindowID *out, int cap) {
+  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionAll | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+  if (!wins) return 0;
+  int k = 0;
+  for (CFIndex i = 0; i < CFArrayGetCount(wins) && k < cap; i++) {
+    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, i);
+    int owner = 0, layer = -1; CGRect r; CGWindowID id = 0;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowNumber), kCFNumberIntType, &id);
+    if (owner == pid && layer == 0 && id && CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r) &&
+        r.size.width > 100 && r.size.height > 100)
+      out[k++] = id;
+  }
+  CFRelease(wins);
+  return k;
+}
+
 // Mission Control is showing: the Dock then has a window over a whole display
 // below its own level (layer 18 on macOS 26; its normal window sits at the
 // Dock level, 20, and its backdrops below 0). macOS gives no call for it. In
@@ -2325,6 +2351,7 @@ static void warpPointer(CGPoint p) { CGWarpMouseCursorPosition(p); CGAssociateMo
 static void (*warpFn)(CGPoint) = warpPointer;
 static double warpSettle = 0.08;   // s: macOS takes the move before the pointer goes back
 static int (*vmWindowsFn)(pid_t, CGRect *, int) = windowsOf;
+static int (*vmAllWindowsFn)(pid_t, CGWindowID *, int) = allWindowsOf;
 static pid_t (*topAppFn)(CGRect, pid_t, CGWindowID *) = topAppOn;
 static int (*hideFn)(pid_t) = ns_hide;   // a VM in a window only
 static int (*escapeAllFn)(void) = escapeAll;
@@ -2415,13 +2442,18 @@ static int fullOn(const DisplaySpaces *d, const CGRect *wins, int nw) {
   return 0;
 }
 
-// Still in the VM: it has the keyboard, or the pointer's display still shows
-// its full-screen window.
+// The last move out was for this point (the VM's focused display), not for
+// the pointer's: the keyboard follows that display.
+static CGPoint leavePoint;
+static int leaveByFocus;
+
+// Still in the VM: it has the keyboard, or the display the combo moved (the
+// pointer's) still shows its full-screen window.
 static const char *stillIn(void) {
   if (frontFn() == vmPid) return "it has the keyboard";
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
-  CGPoint p = pointerFn();
+  CGPoint p = leaveByFocus ? leavePoint : pointerFn();
   for (int i = 0; i < nd; i++)
     if (CGRectContainsPoint(ds[i].bounds, p) && fullOn(&ds[i], wins, nw)) return "its full screen still shows";
   return NULL;
@@ -2438,7 +2470,7 @@ static void checkOut(void) {
 // there): then the app on top of the pointer's display, else Finder.
 static void focusPointerDisplay(void) {
   if (frontFn() != vmPid) { checkOut(); return; }
-  CGPoint p = pointerFn();
+  CGPoint p = leaveByFocus ? leavePoint : pointerFn();   // the display the combo moved
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
   CGRect b = CGRectNull;
   for (int i = 0; i < nd; i++) if (CGRectContainsPoint(ds[i].bounds, p)) b = ds[i].bounds;
@@ -2460,6 +2492,7 @@ static double doublePress = 0.4;     // s between the two presses (the offline t
 int ns_open_mission_control(void);
 static int (*missionAppFn)(void) = ns_open_mission_control;
 static int movesCancelled;           // the first press's steps not posted yet are dropped
+static int leaveWaiting;             // a move out waits for the combo's keys to come up (nothing posted yet)
 static double mcClosedAt = -1;       // when we last closed Mission Control (its shortcut toggles it)
 static double mcClosing = 1.0;       // s it may still be listed while it closes (the offline test sets its own)
 static double lastComboAt = -1;
@@ -2486,22 +2519,28 @@ static void noWayOut(const char *why) {
 }
 
 // ---- the moves of the last press: per display, from its Space to the one beside it ----
-typedef struct { CGDirectDisplayID id; CGRect b; uint64_t from, to; int dir, done; } Move;
+typedef struct { CGDirectDisplayID id; CGRect b; uint64_t from, to; int dir, done, swiped; } Move;
 enum { BY_SHORTCUT, BY_DOCK };
 static Move moves[MAX_DISPLAYS];
 static int nMoves, leaving, signRetried, learnedNow, shortcutOff;
+static CGWindowID enterWin;   // back in: the VM's window on the pointer's display (activated when no move lands)
 
 static int addMove(const DisplaySpaces *d, int dir, uint64_t to) {
-  // "Displays have separate Spaces" off: one list for every display, moved once.
-  for (int i = 0; i < nMoves; i++) if (moves[i].from == d->current) return 0;
+  // "Displays have separate Spaces" off: one list for every display, moved
+  // once, on the pointer's display when it is one of them (runMoves).
+  for (int i = 0; i < nMoves; i++)
+    if (moves[i].from == d->current) {
+      if (CGRectContainsPoint(d->bounds, pointerFn())) { moves[i].id = d->id; moves[i].b = d->bounds; }
+      return 0;
+    }
   if (!dir || nMoves >= MAX_DISPLAYS) return 0;
-  moves[nMoves++] = (Move){ d->id, d->bounds, d->current, to, dir, 0 };
+  moves[nMoves++] = (Move){ d->id, d->bounds, d->current, to, dir, 0, 0 };
   return 1;
 }
 
-// One move on its display. macOS moves the display the pointer is on: for
-// another display (the "all" setting) the pointer goes to its centre first,
-// then back. 0: not made (the shortcut is off). *k: the shortcut used.
+// One move on its display. For another display than the pointer's the
+// pointer goes to its centre first, then back. 0: not made (the shortcut is
+// off). *k: the shortcut used.
 static int postMove(const Move *m, int by, Hotkey *k) {
   if (by == BY_SHORTCUT) {
     *k = hotkey(m->dir < 0 ? HOTKEY_SPACE_LEFT : HOTKEY_SPACE_RIGHT);
@@ -2519,20 +2558,28 @@ static int postMove(const Move *m, int by, Hotkey *k) {
 }
 
 // Every move not done yet, one way. Returns how many were made.
+// macOS's shortcut posted from here moves the display the pointer was on
+// before our warp, not the one it was warped to (the mini, OmacVM.app's VM
+// full screen on two displays, 2026-10-24: 40 of 40 presses; the same warp
+// and key from another process moved the right one). So a display the
+// pointer is not on gets its Dock swipe, which carries its own place.
 static int runMoves(int by, const char *what) {
   int made = 0;
   if (movesCancelled) return 0;
+  CGPoint at = pointerFn();
   for (int i = 0; i < nMoves; i++) {
     Move *m = &moves[i];
     if (m->done) continue;
     const char *side = m->dir > 0 ? "right" : "left";
     Hotkey k = { 0 };
-    if (!postMove(m, by, &k)) {
-      if (by == BY_SHORTCUT) logf_("escape combo: macOS's \"Move %s a space\" shortcut is off or has no key", side);
+    int how = by == BY_SHORTCUT && !CGRectContainsPoint(m->b, at) ? BY_DOCK : by;
+    if (!postMove(m, how, &k)) {
+      if (how == BY_SHORTCUT) logf_("escape combo: macOS's \"Move %s a space\" shortcut is off or has no key", side);
       continue;
     }
     made++;
-    if (by == BY_SHORTCUT)
+    m->swiped = how == BY_DOCK;
+    if (how == BY_SHORTCUT)
       logf_("escape combo: display %u: macOS's \"Move %s a space\" (key %d, modifiers 0x%llx; %s)", m->id, side, k.keycode,
             (unsigned long long)k.flags, what);
     else logf_("escape combo: display %u swiped %s (%s)", m->id, side, what);
@@ -2553,7 +2600,7 @@ static int movesLeft(int by, int *moved) {
     if (!d) { m->done = 1; continue; }   // the display is gone
     int from = spaceIndex(d, m->from), now = spaceIndex(d, d->current);
     if (d->current != m->from) *moved = 1;
-    if (by == BY_DOCK && from >= 0 && now == from - m->dir && !learnedNow) {
+    if ((by == BY_DOCK || m->swiped) && from >= 0 && now == from - m->dir && !learnedNow) {
       swipeSign = -swipeSign;
       saveSignFn();
       learnedNow = 1;
@@ -2613,7 +2660,10 @@ static void checkLeave(int by) {
     else { saveSignFn(); logf_("escape combo: the other direction worked: direction learned"); }
   }
   if (!rest) {
-    logf_("escape combo: out of the VM's Space (%s)", by == BY_SHORTCUT ? "macOS's shortcut" : "a Dock swipe");
+    int keyed = 0, swiped = 0;
+    for (int i = 0; i < nMoves; i++) { if (moves[i].swiped) swiped = 1; else keyed = 1; }
+    logf_("escape combo: out of the VM's Space (%s)",
+          keyed && swiped ? "macOS's shortcut and a Dock swipe" : swiped ? "a Dock swipe" : "macOS's shortcut");
     focusPointerDisplay();
     return;
   }
@@ -2639,12 +2689,13 @@ static void checkEnter(void) {
   lateLooks = 0;
   if (rest) {
     logf_("escape combo: not in the VM's Space: its window to the front instead");
-    goTo(vmPid, vmWin, "back into the VM:", NULL);
+    goTo(vmPid, enterWin ? enterWin : vmWin, "back into the VM:", NULL);
     return;
   }
   // The keyboard to the VM now on the pointer's display (a full-screen Space
-  // usually brings its app).
-  if (frontFn() != vmPid) goTo(vmPid, vmWin, "keyboard to the VM:", NULL);
+  // usually brings its app), through its window there: the main window on
+  // another display would bring that display back into the VM too.
+  if (frontFn() != vmPid) goTo(vmPid, enterWin ? enterWin : vmWin, "keyboard to the VM:", NULL);
 }
 
 // The combo's Ctrl, Option and Cmd are most likely still down when its steps
@@ -2666,12 +2717,113 @@ static int showsVM(const DisplaySpaces *d, const CGRect *wins, int nw) {
   return 0;
 }
 
-// Out of the VM: the pointer's display (or, with "all", each display that
-// shows the VM) moves one Space toward the one it showed before.
+// ---- which display is "focused": the VM's own focus, else the pointer ----
+// OmacVM.app's VM in full screen on two or more displays is one Hyprland with
+// an output per display. Omarchy turns Hyprland's pointer warps off, so a
+// workspace or focus change from the keyboard leaves the Mac's pointer on the
+// other display, and the combo moved that display: the one being worked on
+// stayed on the VM and had to be swiped out by hand. So the combo ("Focused
+// monitor") asks the guest which output has Hyprland's focus ("Q"); it answers
+// at once with where that output sits on the Mac ("D x y w h", OmacVM.app's
+// arrangement of the VM's outputs, points from its top-left) or "D -". No
+// answer within focusWait (a guest from before 3.1.32), two VMs answering, or
+// a place on no display of the VM: the pointer's display, as before.
+static double focusWait = 0.15;   // s: the guest answers in a few ms (the offline test sets its own)
+static void askFocus(void) { sendTo(0, "Q\n", 2); }
+static void (*askFocusFn)(void) = askFocus;   // a seam for the offline test
+
+// A front VM's guest still to answer "Q" since askedAt (one that never
+// answered before is not waited for).
+static int focusPending(double askedAt) {
+  int pending = 0;
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i].fd >= 0 && clients[i].target && !clients[i].focusSilent && clients[i].focusAt < askedAt) pending = 1;
+  pthread_mutex_unlock(&sendLock);
+  return pending;
+}
+
+static void focusNoAnswer(double askedAt) {
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i].fd >= 0 && clients[i].target && clients[i].focusAt < askedAt) clients[i].focusSilent = 1;
+  pthread_mutex_unlock(&sendLock);
+}
+
+// The centre of Hyprland's focused output on the Mac, as the front VM's one
+// guest said it since askedAt. The arrangement starts at the top-left of the
+// displays that show the VM. 0: not known, or not on a display of the VM.
+static int guestFocus(double askedAt, const DisplaySpaces *ds, int nd, const CGRect *wins, int nw, CGPoint *at) {
+  CGRect r = CGRectNull; int n = 0;
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i].fd >= 0 && clients[i].target && clients[i].focusAt >= askedAt) { n++; if (clients[i].focusOk) r = clients[i].focus; }
+  pthread_mutex_unlock(&sendLock);
+  if (n != 1 || CGRectIsNull(r)) return 0;
+  double ox = INFINITY, oy = INFINITY;
+  for (int i = 0; i < nd; i++)
+    if (showsVM(&ds[i], wins, nw)) { ox = fmin(ox, ds[i].bounds.origin.x); oy = fmin(oy, ds[i].bounds.origin.y); }
+  if (!isfinite(ox)) return 0;
+  CGPoint c = CGPointMake(ox + CGRectGetMidX(r), oy + CGRectGetMidY(r));
+  for (int i = 0; i < nd; i++)
+    if (showsVM(&ds[i], wins, nw) && CGRectContainsPoint(ds[i].bounds, c)) { *at = c; return 1; }
+  return 0;
+}
+
+static void leavePlan(double askedAt);
+
+// Waits (at most focusWait, in 10 ms looks) for the guest's answer.
+static void leaveWait(double askedAt, int looks) {
+  if (movesCancelled) { leaveWaiting = 0; return; }   // pressed again meanwhile
+  if (focusPending(askedAt) && looks > 0) {
+    pendingSteps++;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * (int64_t)NSEC_PER_MSEC), dispatch_get_main_queue(),
+                   ^{ pendingSteps--; leaveWait(askedAt, looks - 1); });
+    return;
+  }
+  if (focusPending(askedAt)) {
+    focusNoAnswer(askedAt);
+    logf_("escape combo: the VM did not say which display it has its focus on (a guest from before 3.1.32): the pointer's display");
+  }
+  leavePlan(askedAt);
+}
+
+// Out of the VM: the focused display (the VM's focus, else the pointer's; or,
+// with "all", each display that shows the VM) moves one Space toward the one
+// it showed before.
 static void leaveVM(void) {
+  leaveByFocus = 0;
+  if (!escapeAllFn() && frontNet == NET_APP) {
+    DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), shown = 0;
+    CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
+    for (int i = 0; i < nd; i++) shown += showsVM(&ds[i], wins, nw);
+    if (shown >= 2) {   // only then can the focus be on another display than the pointer
+      double at = monoNow();
+      askFocusFn();
+      leaveWaiting = 1;
+      leaveWait(at, (int)(focusWait / 0.01 + 0.5));
+      return;
+    }
+  }
+  leavePlan(-1);
+}
+
+static void leavePlan(double askedAt) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
-  CGPoint p = pointerFn();
+  CGPoint p = pointerFn(), f;
+  leaveWaiting = 0;
+  if (!all && askedAt >= 0 && guestFocus(askedAt, ds, nd, wins, nw, &f)) {
+    const DisplaySpaces *fd = NULL, *pd = NULL;
+    for (int i = 0; i < nd; i++) {
+      if (CGRectContainsPoint(ds[i].bounds, f)) fd = &ds[i];
+      if (CGRectContainsPoint(ds[i].bounds, p)) pd = &ds[i];
+    }
+    if (fd != pd) {
+      logf_("escape combo: display %u has the VM's focus (the pointer is on display %u)", fd ? fd->id : 0, pd ? pd->id : 0);
+      p = f; leavePoint = f; leaveByFocus = 1;
+    }
+  }
   nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0;
   int pointerOnVM = 0;
   for (int i = 0; i < nd; i++) {
@@ -2683,7 +2835,9 @@ static void leaveVM(void) {
     if (dir && addMove(d, dir, d->spaces[spaceIndex(d, d->current) + dir])) rememberOn(left, d->id, d->current);
   }
   if (nMoves) {
+    leaveWaiting = 1;
     whenKeysUp(^{
+      leaveWaiting = 0;
       if (runMoves(BY_SHORTCUT, "out of the VM")) after(^{ checkLeave(BY_SHORTCUT); });
       else { shortcutOff = 1; checkLeave(BY_SHORTCUT); }   // the shortcut is off: on to the Dock swipe
     }, 50);
@@ -2746,6 +2900,7 @@ static int leaveToward(int dir, CGDirectDisplayID done) {
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
   CGPoint p = pointerFn();
   const char *side = dir < 0 ? "left" : "right";
+  leaveByFocus = 0;   // a swipe goes by the pointer, also when it moves nothing more
   if (done && !all) return 0;
   nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0; movesCancelled = 0;
   for (int i = 0; i < nd; i++) {
@@ -2766,7 +2921,9 @@ static int leaveToward(int dir, CGDirectDisplayID done) {
     logf_("swipe out to the %s: capture off", side);
     sendState("esc");
   }
+  leaveWaiting = 1;
   whenKeysUp(^{
+    leaveWaiting = 0;
     if (runMoves(BY_SHORTCUT, done ? "swipe out, the other displays" : "swipe out")) after(^{ checkLeave(BY_SHORTCUT); });
     else { shortcutOff = 1; checkLeave(BY_SHORTCUT); }
   }, 50);
@@ -2845,6 +3002,20 @@ static void guestLine(int fd, unsigned gen, const char *line) {
       if (clients[i].fd == fd && clients[i].gen == gen) { clients[i].edge[0] = l; clients[i].edge[1] = r; clients[i].edgeKnown = 1; }
     pthread_mutex_unlock(&sendLock);
     if (verbose) logf_("swipe out: fingers to the left %s, to the right %s", a, b);
+    return;
+  }
+  if (!strncmp(line, "D ", 2)) {
+    double x, y, w, h; char extra;
+    int ok = sscanf(line + 2, "%lf %lf %lf %lf %c", &x, &y, &w, &h, &extra) == 4 && isfinite(x) && isfinite(y) &&
+             isfinite(w) && isfinite(h) && fabs(x) < 1e6 && fabs(y) < 1e6 && w > 0 && h > 0 && w < 1e6 && h < 1e6;
+    if (!ok && strcmp(line + 2, "-")) return;   // neither a place nor "not known"
+    pthread_mutex_lock(&sendLock);
+    for (int i = 0; i < MAX_CLIENTS; i++)
+      if (clients[i].fd == fd && clients[i].gen == gen) {
+        clients[i].focusOk = ok; clients[i].focusAt = monoNow(); clients[i].focusSilent = 0;
+        if (ok) clients[i].focus = CGRectMake(x, y, w, h);
+      }
+    pthread_mutex_unlock(&sendLock);
     return;
   }
   int dir = !strcmp(line, "X left") ? -1 : !strcmp(line, "X right") ? 1 : 0;
@@ -3235,20 +3406,48 @@ static void closeMissionControl(void) {
   whenKeysUp(^{ closeMissionControlOnce("Esc in Mission Control (the VM would have taken it)"); }, 50);
 }
 
+// The VM's own Space on this display and its window there: its main window's,
+// else another of its windows' (OmacVM.app has one per display in full
+// screen), the one nearest the display's current Space. 0: none there.
+static uint64_t vmSpaceOn(const DisplaySpaces *d, CGWindowID *win) {
+  uint64_t s = windowSpaceFn(vmWin);
+  *win = vmWin;
+  if (s && spaceIndex(d, s) >= 0) return s;
+  CGWindowID ws[MAX_DISPLAYS * 2]; int n = vmAllWindowsFn(vmPid, ws, MAX_DISPLAYS * 2);
+  int at = spaceIndex(d, d->current), best = -1;
+  uint64_t found = 0;
+  *win = 0;
+  for (int i = 0; i < n; i++) {
+    uint64_t t = windowSpaceFn(ws[i]);
+    int j = t ? spaceIndex(d, t) : -1;
+    if (j < 0) continue;
+    int dist = at < 0 ? 0 : abs(j - at);
+    if (best < 0 || dist < best) { best = dist; found = t; *win = ws[i]; }
+  }
+  return found;
+}
+
 static void enterVMNow(int mayCloseMC) {
   if (mayCloseMC && missionControlOpenFn()) { closeMissionControlThenEnter(); return; }
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGPoint p = pointerFn();
-  uint64_t vmSpace = windowSpaceFn(vmWin);
-  nMoves = 0; leaving = 0; lateLooks = 0;
+  nMoves = 0; leaving = 0; lateLooks = 0; enterWin = vmWin;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
-    if (!all && !CGRectContainsPoint(d->bounds, p)) continue;
+    int under = CGRectContainsPoint(d->bounds, p);
+    if (!all && !under) continue;
     uint64_t want = spaceOn(left, d->id);
-    if (!want || spaceIndex(d, want) < 0) want = all ? 0 : vmSpace;
+    CGWindowID w = 0;
+    // Not left by the combo (a swipe, Mission Control, or the VM's Spaces
+    // are new): the VM's Space on this display, also a second display's
+    // window's (before, only the main window's: on the external the combo
+    // brought the main window instead).
+    if (!want || spaceIndex(d, want) < 0) want = all ? 0 : vmSpaceOn(d, &w);
+    else if (under) vmSpaceOn(d, &w);
+    if (under && w) enterWin = w;
     if (want && d->current != want) addMove(d, stepToward(d, want), want);
   }
-  if (!nMoves) { goTo(vmPid, vmWin, "back into the VM:", NULL); return; }
+  if (!nMoves) { goTo(vmPid, enterWin, "back into the VM:", NULL); return; }
   whenKeysUp(^{
     if (runMoves(BY_SHORTCUT, "back into the VM")) after(^{ checkEnter(); });
     else checkEnter();
@@ -3394,6 +3593,9 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
       logf_("escape combo: capture %s", capturing ? "ON" : "off");
       sendState(capturing ? "on" : "esc");
       if (act == COMBO_LEAVE) later(leaveVM);
+      // Back in before the last move out was posted (it waits for Ctrl and
+      // Option to come up): that move is dropped, the VM stays.
+      else if (leaveWaiting) { movesCancelled = 1; logf_("escape combo: pressed again before the move out: it is dropped"); }
     }
     swallowEscUp = 1;
     return NULL;
@@ -3553,6 +3755,7 @@ static unsigned addClient(int c, int net, const char *ip, int gestures, int glid
   clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
   clients[slot].edge[0] = clients[slot].edge[1] = 0; clients[slot].edgeKnown = 0;
   clients[slot].ways[0] = clients[slot].ways[1] = 0; clients[slot].waysKnown = 0;
+  clients[slot].focusOk = clients[slot].focusSilent = 0; clients[slot].focusAt = 0;
   snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
   snprintf(clients[slot].name, sizeof clients[slot].name, "%s", name);
   logf_("guest connected: %s (gestures %s, scroll momentum %s%s%s%s%s)", ip, gestures ? "on" : "off",
