@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.0 (unreleased)
+## 3.2.0
 
 Chrome decodes video on the Mac's media engine again, ⌃⌥ Esc takes the right display out of the VM, the
 VM's time zone follows the Mac, macOS's Three Finger Drag stays macOS's, and the camera comes back.
