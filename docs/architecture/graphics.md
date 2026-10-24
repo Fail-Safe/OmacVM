@@ -395,6 +395,23 @@ shaders too, `=0` keeps uniforms (the GL calls of before); qemu.log says which.
 `OMACVM_VIRGL_CACHE_STATS=1` logs uploads, binds, index draws and window binds.
 Test: `test-const-ubo` (all three modes).
 
+Context switches: on CGL, every handover between GL contexts flushes the
+context it leaves. A `glWaitSync` in another context waits only for a fence
+that was flushed (ARB_sync); `eglMakeCurrent` and `glXMakeCurrent` flush the
+context they leave, and upstream relies on that, but `CGLSetCurrentContext`
+(QEMU's Cocoa make-current) does not, and Apple's `glWaitSync` on an
+unflushed fence does not wait. vrend moves work between its contexts with
+`vrend_sync_make_current` (fence, switch, `glWaitSync`): the re-stride of a
+Vulkan window without a copy (guest -> blitter -> guest, ADR 0047) and the GL
+fallback of `vrend_renderer_blit_int`. It flushes before the switch
+(`virgl-darwin-context-switch-flush.patch`, #499: before, the next context's
+draw ran before the other's commands were sent, and a Vulkan window showed
+its buffer's previous frame once after every new frame). Apple's GL also
+keeps a context's work, and the memory it frees, until that context is
+flushed: `qemu-cocoa-gl-view-flush.patch` (QEMU's view context) and
+`virgl-control-queue-flush.patch` (vrend's ctx0) flush contexts that nothing
+else flushed. Test: `test-vulkan-window-handover` (both ways, on the GPU).
+
 ### Where the time goes
 
 - Light frames (glmark2, the desktop): the fence round trip. Fixed above.
@@ -566,7 +583,10 @@ Patches (all in `app/runtime/patches`, one per concern):
   BGRA/RGBA or 8-byte half-float pixels, bit-exact): no CPU copy, no CPU wait,
   0.3-0.4 ms of QEMU's time a frame instead of 1.8-2.5 ms. Anything else falls
   back to the copy above, logged once ("Vulkan windows are copied (no
-  IOSurfaces: ...)"); `omacvm check` names the path.
+  IOSurfaces: ...)"); `omacvm check` names the path. The re-stride's two
+  context switches flush first (`virgl-darwin-context-switch-flush.patch`,
+  section 4): before 3.1.32 Hyprland drew each new frame's buffer with its
+  previous frame once (#499).
 
 Switch: the VM's Graphics setting (ADR 0035; up to 2.9 the hidden `venus`
 default, moved into it at the first 3.0.0 launch) adds
