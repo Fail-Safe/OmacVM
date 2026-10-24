@@ -8,9 +8,9 @@ in more words.
 - **Volume 0 is silent.** With a VM in front, the volume-down key to 0 % (or Omarchy's volume
   slider at 0) set the Mac's volume to 0 but did not mute it, and 0 is not silence on a Mac's
   speakers: MacBook Pro and Mac mini speakers still play at -63.5 dB there, only 4 dB under the
-  first step. A mute pressed before was even cleared by the next volume-down. The Bridge now mutes
-  the Mac's output at 0, as macOS does, and volume up from 0 unmutes it again. Needs `omacvm
-  update` (or the app's update) on the Mac; nothing changes in the VM.
+  first step. A mute pressed before was cleared by the next volume-down, and 0 stayed unmuted. The
+  Bridge now mutes the Mac's output at 0, as macOS does, and volume up from 0 unmutes it again.
+  Needs `omacvm update` (or the app's update) on the Mac; nothing changes in the VM.
 
 ## 3.1.33 (unreleased)
 

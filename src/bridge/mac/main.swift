@@ -13,6 +13,7 @@
 //                          system's scan cache (instant, no radio scan)
 //   GET  /audio            default output/input (volume, mute) + all devices
 //   POST /audio/volume     {"volume": 0..1} or {"delta": -1..1}  [+ "scope": "input"]
+//                          (output: 0 mutes, up from 0 or a raise unmutes)
 //   POST /audio/mute       {"muted": true|false|"toggle"}        [+ "scope": "input"]
 //   POST /audio/output     {"uid": "<device UID>"}
 //   POST /audio/input      {"uid": "<device UID>"}
