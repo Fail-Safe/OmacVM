@@ -656,6 +656,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-playback-th
 # OmacVM: the main loop (sound card timers, virgl) at user-interactive QoS, so a
 # busy guest on a busy Mac no longer delays it and the sound stays clean.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-main-loop-qos.patch"
+# OmacVM: a guest disk flush is a write barrier on the Mac's drive
+# (F_BARRIERFSYNC; OMACVM_DISK_FLUSH=full|fsync), so a power cut cannot leave
+# the guest's file system half written.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-disk-flush-barrier.patch"
+"$native_dir/Tests/disk/test-flush.sh" "$source_dir" "$work_dir/disk-tests"
 # OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
 # OmacVM tests: OMACVM_COCOA_HIDDEN=1 (no window), OMACVM_BACKGROUND=1 (window
