@@ -158,6 +158,10 @@ os.rename(f"{T}/token.away", f"{home}/.config/omacvm-bridge/token")
 import subprocess
 out = subprocess.run([sys.executable, "-I", AGENT, "--status"], capture_output=True, text=True, env=dict(os.environ)).stdout.split()
 check(out == ["follows", "Asia/Tokyo", "Asia/Tokyo"], "--status: the state line")
+# A zone set by hand after the Mac's last word: --status says so at once (no event needed).
+localtime("America/New_York")
+out = subprocess.run([sys.executable, "-I", AGENT, "--status"], capture_output=True, text=True, env=dict(os.environ)).stdout.split()
+check(out == ["by-hand", "America/New_York", "Asia/Tokyo"], "--status: set by hand since the last zone from the Mac")
 
 print("FAIL timezone" if fail else "ok   timezone: the VM follows the Mac's zone, one set by hand is kept")
 sys.exit(fail)

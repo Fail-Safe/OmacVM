@@ -11,8 +11,9 @@ remembers the zone it set last (/var/lib/omacvm/timezone); when the VM's zone
 is another one, someone else chose it, and the agent leaves it until the VM
 is on the Mac's zone again (set it back to the Mac's, and it follows again).
 Without a record (the first run) it follows: the setup took the zone from the
-Mac. The state for `omacvm check`: /run/omacvm/timezone, one line
-"<mode> <the VM's zone> <the Mac's zone>", mode follows, by-hand or waiting.
+Mac. For `omacvm check`: /run/omacvm/timezone keeps the Mac's last zone;
+`omacvm-timezone --status` says "<mode> <the VM's zone> <the Mac's zone>",
+mode follows, by-hand or waiting (not on the Mac's zone yet, or refused).
 
 Only a name of the zone database is taken (letters, digits, "_+-", up to
 three parts, a file under /usr/share/zoneinfo); anything else is ignored.
@@ -194,11 +195,18 @@ def from_bridge(follower: Follower) -> bool:
 
 
 def status() -> int:
-    """For omacvm check: one line, the state file's."""
+    """For omacvm check: "<mode> <the VM's zone> <the Mac's zone>", the mode
+    worked out now (a zone set by hand since the Mac's last word counts)."""
     try:
-        print(open(STATE).read().strip())
-    except OSError:
+        mode, _, mac = open(STATE).read().split()[:3]
+    except (OSError, ValueError):
         print("none - -")
+        return 0
+    current = current_zone()
+    if valid(mac):
+        action, _ = decide(mac, current, read_record())
+        mode = {"keep": "follows", "by-hand": "by-hand"}.get(action, "waiting")
+    print(f"{mode} {current or '-'} {mac}")
     return 0
 
 
