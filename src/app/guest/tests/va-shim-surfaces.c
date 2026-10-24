@@ -7,7 +7,9 @@
  *   va-shim-surfaces SHIM STUB yes|no
  * yes: every surface Mesa allocates itself gets VASurfaceAttribMemoryType DRM_PRIME_2
  * added (Mesa then makes it exportable, with a dma-buf of its real size); imports and
- * surfaces with a memory type of their own pass unchanged. no: everything unchanged.
+ * surfaces with a memory type of their own pass unchanged; the largest surface size the
+ * driver reports is at most OMACVM_VA_MAX (default 1920, 0: Mesa's). no: everything
+ * unchanged.
  */
 #include <dlfcn.h>
 #include <stdio.h>
@@ -34,9 +36,31 @@ static VAStatus create_surfaces2(VADriverContextP ctx, unsigned int format, unsi
     return VA_STATUS_SUCCESS;
 }
 
+/* Mesa's list for a decoding config: NV12 and I420, up to 4096 x 4096 */
+static VAStatus query_surface_attributes(VADriverContextP ctx, VAConfigID config,
+                                         VASurfaceAttrib *a, unsigned int *n)
+{
+    static const struct { VASurfaceAttribType type; int value; } list[] = {
+        { VASurfaceAttribPixelFormat, VA_FOURCC_NV12 }, { VASurfaceAttribPixelFormat, VA_FOURCC_I420 },
+        { VASurfaceAttribMinWidth, 1 }, { VASurfaceAttribMinHeight, 1 },
+        { VASurfaceAttribMaxWidth, 4096 }, { VASurfaceAttribMaxHeight, 4096 },
+    };
+    (void)ctx; (void)config;
+    if (!a) {
+        *n = 6;
+        return VA_STATUS_SUCCESS;
+    }
+    for (unsigned int i = 0; i < 6 && i < *n; i++)
+        a[i] = (VASurfaceAttrib){ .type = list[i].type, .flags = VA_SURFACE_ATTRIB_GETTABLE,
+                                  .value = { .type = VAGenericValueTypeInteger, .value.i = list[i].value } };
+    *n = 6;
+    return VA_STATUS_SUCCESS;
+}
+
 VAStatus __vaDriverInit_1_20(VADriverContextP ctx)
 {
     ctx->vtable->vaCreateSurfaces2 = create_surfaces2;
+    ctx->vtable->vaQuerySurfaceAttributes = query_surface_attributes;
     return VA_STATUS_SUCCESS;
 }
 #else
@@ -126,6 +150,28 @@ int main(int argc, char **argv)
                               .flags = VA_SURFACE_ATTRIB_SETTABLE,
                               .value = { .type = VAGenericValueTypePointer, .value.p = &ext } };
     check("external buffers with the default memory type", VA_RT_FORMAT_YUV420, l, 2, 0);
+
+    /* The largest size Chromium is told (its decoder uses the CPU above it); I420 is
+     * hidden either way. */
+    {
+        VASurfaceAttrib q[8];
+        unsigned int nq = 8, maxw = 0, maxh = 0, i420 = 0;
+        const char *env = getenv("OMACVM_VA_MAX");
+        unsigned int want = !yes ? 4096 : env && *env ? (unsigned int)atoi(env) : 1920;
+
+        if (!want)
+            want = 4096;
+        ctx->vtable->vaQuerySurfaceAttributes(ctx, 0, q, &nq);
+        for (unsigned int k = 0; k < nq; k++) {
+            maxw = q[k].type == VASurfaceAttribMaxWidth ? (unsigned)q[k].value.value.i : maxw;
+            maxh = q[k].type == VASurfaceAttribMaxHeight ? (unsigned)q[k].value.value.i : maxh;
+            i420 |= q[k].type == VASurfaceAttribPixelFormat && q[k].value.value.i == VA_FOURCC_I420;
+        }
+        int ok = maxw == want && maxh == want && !i420 && nq == 5;
+        printf("%s: largest surface %ux%u (want %u), I420 %s\n", ok ? "ok" : "FAIL", maxw, maxh, want,
+               i420 ? "listed" : "hidden");
+        failed |= !ok;
+    }
 
     /* A list too long to copy: unchanged. */
     for (int i = 0; i < 40; i++)
