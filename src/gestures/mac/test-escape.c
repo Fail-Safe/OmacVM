@@ -173,6 +173,10 @@ static int fakeAllVMWindows(pid_t pid, CGWindowID *out, int cap) {
   for (int sp = 0; sp < MAX_SPACE_ID && k < cap; sp++) if (owner[sp] == pid && winOn[sp]) out[k++] = winOn[sp];
   return k;
 }
+// The guest's answer to "Q" (the escape combo asks which display has the
+// VM's focus): this line at once, NULL for none (a guest from before 3.1.32).
+static const char *focusReply; static int asks;
+static void fakeAskFocus(void) { asks++; if (focusReply) guestLine(clients[0].fd, clients[0].gen, focusReply); }
 static int fakeHide(pid_t pid) { hidden++; hiddenPid = pid; if (front == pid) front = finder; return 1; }
 static pid_t fakeFront(void) { return front; }
 static pid_t fakeFinder(void) { return finder; }
@@ -353,7 +357,7 @@ static void layout(int displays, const uint64_t *a, int na, const uint64_t *b, i
 int main(void) {
   activateFn = fakeActivate; finderFn = fakeFinder; frontFn = fakeFront; vmWindowFn = fakeVMWindow;
   spacesFn = fakeSpaces; windowSpaceFn = fakeWindowSpace; pointerFn = fakePointer;
-  vmWindowsFn = fakeVMWindows; vmAllWindowsFn = fakeAllVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll;
+  vmWindowsFn = fakeVMWindows; vmAllWindowsFn = fakeAllVMWindows; askFocusFn = fakeAskFocus; focusWait = 0.05; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll;
   warpFn = fakeWarp; warpSettle = 0; isQemuFn = fakeIsQemu;
   hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld;
   swipeFn = fakeSwipe; saveSignFn = fakeSaveSign; swipeOutFn = fakeSwipeOut; swipeOutEvery = 0; swipeOutGap = 0;
@@ -669,6 +673,90 @@ int main(void) {
     check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[1].cur == 312 && world[0].cur == 212 && front == vm, "... and back in there");
     settle(vm, NET_APP); sent();
     owner[313] = 0;
+  }
+
+  // ---- "Focused monitor" with the VM on both displays: the display with the
+  // VM's own focus (Hyprland's focused output, which the guest says on "Q"),
+  // not the one the Mac's pointer was left on (Omarchy does not warp the
+  // pointer when the focus moves by keyboard) ----
+  {
+    const uint64_t mbp[] = { 221, 222 }, ext[] = { 321, 322 };
+    layout(2, mbp, 2, ext, 2);
+    owner[221] = terminal; winOn[221] = 11; owner[222] = vm; winOn[222] = 29;
+    owner[321] = safari; winOn[321] = 44; owner[322] = vm; winOn[322] = 30;
+    world[0].cur = 221; world[1].cur = 321; front = terminal; pointer = CGPointMake(1000, 700);
+    frontChanged(terminal, -1, 0, "", 11, 1); sent();
+    world[0].cur = 222; world[1].cur = 322; front = vm;
+    frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    // The real question goes over the connection as "Q".
+    askFocus();
+    check(!strcmp(sent(), "Q|"), "focus: the question to the guest is \"Q\"");
+    focusReply = "D 2560 0 1920 1200"; asks = 0; warps = 0;   // Hyprland's focus on the external
+    check(press(K, HID, 0) == 1 && asks == 1 && spaceKeys == 1 && movedOn[0] == 2,
+          "focus on the external, pointer on the MacBook: the external moves out");
+    check(world[1].cur == 321 && world[0].cur == 222 && warps == 2, "... the MacBook stays on the VM (the pointer went there and back)");
+    settle(vm, NET_APP); sent();
+    // Back in from macOS: where the pointer is (macOS's focus), as before: the
+    // pointer is on the MacBook, which shows the VM, so the external comes back.
+    front = safari; frontChanged(safari, -1, 0, "", 44, 1); sent();
+    world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    focusReply = "D -"; asks = 0;
+    check(press(K, HID, 0) == 1 && asks == 1 && spaceKeys == 1 && movedOn[0] == 1 && world[0].cur == 221 && world[1].cur == 322,
+          "the guest does not know (\"D -\"): the pointer's display, as before");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    focusReply = "D 0 0 2560 1440";
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && movedOn[0] == 1 && world[0].cur == 221 && !warps,
+          "focus where the pointer is: that display, no detour");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    focusReply = "D 9000 9000 100 100";
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && movedOn[0] == 1 && world[1].cur == 322,
+          "a place on no display of the VM: the pointer's display");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    focusReply = "D 1 2 x"; 
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && movedOn[0] == 1, "junk for an answer: not taken, the pointer's display after the wait");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    // No answer (a guest from before 3.1.32): the pointer's display after the
+    // wait, and that guest is not waited for again.
+    check(clients[0].focusSilent, "... junk counts as no answer");
+    focusReply = NULL; asks = 0; clients[0].focusSilent = 0;
+    double t0 = monoNow();
+    check(press(K, HID, 0) == 1 && asks == 1 && spaceKeys == 1 && movedOn[0] == 1 && monoNow() - t0 >= focusWait,
+          "no answer: the pointer's display, after waiting focusWait");
+    check(clients[0].focusSilent, "... that guest is not waited for again");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    focusReply = "D 2560 0 1920 1200";
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && movedOn[0] == 2 && !clients[0].focusSilent,
+          "... until it answers again: then its focus counts");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    // Pressed again while the question is open: back in the VM, nothing moves.
+    focusReply = NULL; clients[0].focusSilent = 0; focusWait = 0.3; spaceKeys = 0;
+    CGEventRef fd1 = key(1, K, HID, 0), fu1 = key(0, K, HID, 0);
+    tapCb(NULL, kCGEventKeyDown, fd1, NULL); tapCb(NULL, kCGEventKeyUp, fu1, NULL);
+    CFRelease(fd1); CFRelease(fu1);
+    for (int i = 0; i < 4; i++) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);
+    fd1 = key(1, K, HID, 0); fu1 = key(0, K, HID, 0);
+    tapCb(NULL, kCGEventKeyDown, fd1, NULL); tapCb(NULL, kCGEventKeyUp, fu1, NULL);
+    CFRelease(fd1); CFRelease(fu1);
+    settleSteps();
+    check(capturing && !spaceKeys && world[0].cur == 222 && world[1].cur == 322, "pressed again while asking: back in the VM, nothing moves");
+    focusWait = 0.05; clients[0].focusSilent = 0; sent();
+    // "All monitors": no question, both move.
+    all = 1; asks = 0; focusReply = "D 2560 0 1920 1200";
+    check(press(K, HID, 0) == 1 && !asks && spaceKeys == 2 && world[0].cur == 221 && world[1].cur == 321,
+          "all monitors: no question, both displays move");
+    sent(); settle(vm, NET_APP); press(K, HID, 0); sent(); all = 0;
+    // The VM on one display only: no question (the pointer says it).
+    world[0].cur = 221; world[1].cur = 322; front = vm; pointer = CGPointMake(3000, 600);
+    frontChanged(vm, NET_APP, 1, "Omarchy", 30, 0); sent(); asks = 0;
+    check(press(K, HID, 0) == 1 && !asks && spaceKeys == 1 && world[1].cur == 321, "the VM on one display: no question");
+    sent(); settle(vm, NET_APP); sent();
+    focusReply = NULL;
   }
 
   // ---- Not the real keyboard, a held key, other combos: as before ----

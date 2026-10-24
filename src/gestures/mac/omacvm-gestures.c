@@ -251,7 +251,13 @@ static int vmOffSpace;
 // swipe); edgeKnown: it said so since it connected. ways: which finger counts
 // switch workspaces going left [0] / right [1] there (bit n: n fingers; "G",
 // Hyprland's gestures); waysKnown: it said so (else any 3 or more).
-static struct { int fd, net, gestures, glide, target, edge[2], edgeKnown, waysKnown; unsigned ways[2], gen; char ip[32], name[256]; } clients[MAX_CLIENTS];
+// focus: where Hyprland's focused output sits on the Mac ("D", the answer to
+// the escape combo's "Q"; OmacVM.app's arrangement of the VM's outputs, points
+// from its top-left), focusOk: known; focusAt: when it answered (monoNow, 0:
+// never); focusSilent: it did not answer in time once (a guest from before
+// 3.1.32): not waited for again.
+static struct { int fd, net, gestures, glide, target, edge[2], edgeKnown, waysKnown, focusOk, focusSilent; unsigned ways[2], gen;
+                double focusAt; CGRect focus; char ip[32], name[256]; } clients[MAX_CLIENTS];
 static volatile int frontNet = -1;
 static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
@@ -2392,11 +2398,15 @@ static int fullOn(const DisplaySpaces *d, const CGRect *wins, int nw) {
 
 // Still in the VM: it has the keyboard, or the pointer's display still shows
 // its full-screen window.
+// The last move out was for this point (the VM's focused display), not for
+// the pointer's: the keyboard follows that display.
+static CGPoint leavePoint;
+static int leaveByFocus;
 static const char *stillIn(void) {
   if (frontFn() == vmPid) return "it has the keyboard";
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
-  CGPoint p = pointerFn();
+  CGPoint p = leaveByFocus ? leavePoint : pointerFn();
   for (int i = 0; i < nd; i++)
     if (CGRectContainsPoint(ds[i].bounds, p) && fullOn(&ds[i], wins, nw)) return "its full screen still shows";
   return NULL;
@@ -2413,7 +2423,7 @@ static void checkOut(void) {
 // there): then the app on top of the pointer's display, else Finder.
 static void focusPointerDisplay(void) {
   if (frontFn() != vmPid) { checkOut(); return; }
-  CGPoint p = pointerFn();
+  CGPoint p = leaveByFocus ? leavePoint : pointerFn();   // the display the combo moved
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
   CGRect b = CGRectNull;
   for (int i = 0; i < nd; i++) if (CGRectContainsPoint(ds[i].bounds, p)) b = ds[i].bounds;
@@ -2644,12 +2654,113 @@ static int showsVM(const DisplaySpaces *d, const CGRect *wins, int nw) {
   return 0;
 }
 
-// Out of the VM: the pointer's display (or, with "all", each display that
-// shows the VM) moves one Space toward the one it showed before.
+// ---- which display is "focused": the VM's own focus, else the pointer ----
+// OmacVM.app's VM in full screen on two or more displays is one Hyprland with
+// an output per display. Omarchy turns Hyprland's pointer warps off, so a
+// workspace or focus change from the keyboard leaves the Mac's pointer on the
+// other display, and the combo moved that display: the one being worked on
+// stayed on the VM and had to be swiped out by hand. So the combo ("Focused
+// monitor") asks the guest which output has Hyprland's focus ("Q"); it answers
+// at once with where that output sits on the Mac ("D x y w h", OmacVM.app's
+// arrangement of the VM's outputs, points from its top-left) or "D -". No
+// answer within focusWait (a guest from before 3.1.32), two VMs answering, or
+// a place on no display of the VM: the pointer's display, as before.
+static double focusWait = 0.15;   // s: the guest answers in a few ms (the offline test sets its own)
+static void askFocus(void) { sendTo(0, "Q\n", 2); }
+static void (*askFocusFn)(void) = askFocus;   // a seam for the offline test
+
+// A front VM's guest still to answer "Q" since askedAt (one that never
+// answered before is not waited for).
+static int focusPending(double askedAt) {
+  int pending = 0;
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i].fd >= 0 && clients[i].target && !clients[i].focusSilent && clients[i].focusAt < askedAt) pending = 1;
+  pthread_mutex_unlock(&sendLock);
+  return pending;
+}
+
+static void focusNoAnswer(double askedAt) {
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i].fd >= 0 && clients[i].target && clients[i].focusAt < askedAt) clients[i].focusSilent = 1;
+  pthread_mutex_unlock(&sendLock);
+}
+
+// The centre of Hyprland's focused output on the Mac, as the front VM's one
+// guest said it since askedAt. The arrangement starts at the top-left of the
+// displays that show the VM. 0: not known, or not on a display of the VM.
+static int guestFocus(double askedAt, const DisplaySpaces *ds, int nd, const CGRect *wins, int nw, CGPoint *at) {
+  CGRect r = CGRectNull; int n = 0;
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i].fd >= 0 && clients[i].target && clients[i].focusAt >= askedAt) { n++; if (clients[i].focusOk) r = clients[i].focus; }
+  pthread_mutex_unlock(&sendLock);
+  if (n != 1 || CGRectIsNull(r)) return 0;
+  double ox = INFINITY, oy = INFINITY;
+  for (int i = 0; i < nd; i++)
+    if (showsVM(&ds[i], wins, nw)) { ox = fmin(ox, ds[i].bounds.origin.x); oy = fmin(oy, ds[i].bounds.origin.y); }
+  if (!isfinite(ox)) return 0;
+  CGPoint c = CGPointMake(ox + CGRectGetMidX(r), oy + CGRectGetMidY(r));
+  for (int i = 0; i < nd; i++)
+    if (showsVM(&ds[i], wins, nw) && CGRectContainsPoint(ds[i].bounds, c)) { *at = c; return 1; }
+  return 0;
+}
+
+static void leavePlan(double askedAt);
+
+// Waits (at most focusWait, in 10 ms looks) for the guest's answer.
+static void leaveWait(double askedAt, int looks) {
+  if (movesCancelled) { leaveWaiting = 0; return; }   // pressed again meanwhile
+  if (focusPending(askedAt) && looks > 0) {
+    pendingSteps++;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * (int64_t)NSEC_PER_MSEC), dispatch_get_main_queue(),
+                   ^{ pendingSteps--; leaveWait(askedAt, looks - 1); });
+    return;
+  }
+  if (focusPending(askedAt)) {
+    focusNoAnswer(askedAt);
+    logf_("escape combo: the VM did not say which display it has its focus on (a guest from before 3.1.32): the pointer's display");
+  }
+  leavePlan(askedAt);
+}
+
+// Out of the VM: the focused display (the VM's focus, else the pointer's; or,
+// with "all", each display that shows the VM) moves one Space toward the one
+// it showed before.
 static void leaveVM(void) {
+  leaveByFocus = 0;
+  if (!escapeAllFn() && frontNet == NET_APP) {
+    DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), shown = 0;
+    CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
+    for (int i = 0; i < nd; i++) shown += showsVM(&ds[i], wins, nw);
+    if (shown >= 2) {   // only then can the focus be on another display than the pointer
+      double at = monoNow();
+      askFocusFn();
+      leaveWaiting = 1;
+      leaveWait(at, (int)(focusWait / 0.01 + 0.5));
+      return;
+    }
+  }
+  leavePlan(-1);
+}
+
+static void leavePlan(double askedAt) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
-  CGPoint p = pointerFn();
+  CGPoint p = pointerFn(), f;
+  leaveWaiting = 0;
+  if (!all && askedAt >= 0 && guestFocus(askedAt, ds, nd, wins, nw, &f)) {
+    const DisplaySpaces *fd = NULL, *pd = NULL;
+    for (int i = 0; i < nd; i++) {
+      if (CGRectContainsPoint(ds[i].bounds, f)) fd = &ds[i];
+      if (CGRectContainsPoint(ds[i].bounds, p)) pd = &ds[i];
+    }
+    if (fd != pd) {
+      logf_("escape combo: display %u has the VM's focus (the pointer is on display %u)", fd ? fd->id : 0, pd ? pd->id : 0);
+      p = f; leavePoint = f; leaveByFocus = 1;
+    }
+  }
   nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0;
   int pointerOnVM = 0;
   for (int i = 0; i < nd; i++) {
@@ -2727,7 +2838,7 @@ static int leaveToward(int dir, CGDirectDisplayID done) {
   CGPoint p = pointerFn();
   const char *side = dir < 0 ? "left" : "right";
   if (done && !all) return 0;
-  nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0; movesCancelled = 0;
+  nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0; movesCancelled = 0; leaveByFocus = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
     int at = spaceIndex(d, d->current);
@@ -2827,6 +2938,20 @@ static void guestLine(int fd, unsigned gen, const char *line) {
       if (clients[i].fd == fd && clients[i].gen == gen) { clients[i].edge[0] = l; clients[i].edge[1] = r; clients[i].edgeKnown = 1; }
     pthread_mutex_unlock(&sendLock);
     if (verbose) logf_("swipe out: fingers to the left %s, to the right %s", a, b);
+    return;
+  }
+  if (!strncmp(line, "D ", 2)) {
+    double x, y, w, h; char extra;
+    int ok = sscanf(line + 2, "%lf %lf %lf %lf %c", &x, &y, &w, &h, &extra) == 4 && isfinite(x) && isfinite(y) &&
+             isfinite(w) && isfinite(h) && fabs(x) < 1e6 && fabs(y) < 1e6 && w > 0 && h > 0 && w < 1e6 && h < 1e6;
+    if (!ok && strcmp(line + 2, "-")) return;   // neither a place nor "not known"
+    pthread_mutex_lock(&sendLock);
+    for (int i = 0; i < MAX_CLIENTS; i++)
+      if (clients[i].fd == fd && clients[i].gen == gen) {
+        clients[i].focusOk = ok; clients[i].focusAt = monoNow(); clients[i].focusSilent = 0;
+        if (ok) clients[i].focus = CGRectMake(x, y, w, h);
+      }
+    pthread_mutex_unlock(&sendLock);
     return;
   }
   int dir = !strcmp(line, "X left") ? -1 : !strcmp(line, "X right") ? 1 : 0;
@@ -3558,6 +3683,7 @@ static unsigned addClient(int c, int net, const char *ip, int gestures, int glid
   clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
   clients[slot].edge[0] = clients[slot].edge[1] = 0; clients[slot].edgeKnown = 0;
   clients[slot].ways[0] = clients[slot].ways[1] = 0; clients[slot].waysKnown = 0;
+  clients[slot].focusOk = clients[slot].focusSilent = 0; clients[slot].focusAt = 0;
   snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
   snprintf(clients[slot].name, sizeof clients[slot].name, "%s", name);
   logf_("guest connected: %s (gestures %s, scroll momentum %s%s%s%s%s)", ip, gestures ? "on" : "off",
