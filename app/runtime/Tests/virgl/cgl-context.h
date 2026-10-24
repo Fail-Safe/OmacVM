@@ -61,8 +61,9 @@ static bool cgl_make_current(void *ctx)
    return cgl_load() && !cgl.current(ctx);
 }
 
-/* A current core profile context for tests that compile shaders. */
-static bool cgl_init_current(void)
+/* A current core profile context for tests that compile shaders (inline: tests that
+ * make their own contexts do not use it). */
+static inline bool cgl_init_current(void)
 {
    void *ctx = cgl_core_context(NULL);
    return ctx && cgl_make_current(ctx);
