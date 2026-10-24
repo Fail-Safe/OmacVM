@@ -110,8 +110,12 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   of it. The copy fills the rows and columns past the picture with its last
   row and column (`virgl-video-plane-edge.patch`); before 3.1.32 they stayed
   zero and showed as a green bar at the bottom or right of VP9 and AV1
-  videos at 1080p, 540p, 360p, 480p and 240p. `OMACVM_VIDEO_EDGE_FILL=0`
-  turns the fill off. Test: `Tests/virgl/test-video-padding.c`.
+  videos at 1080p, 540p, 360p, 480p and 240p. The app still shows the
+  rounded size, so the picture is squeezed by those rows (1080p: 8 of 1088,
+  invisible; a 320x180 call tile: 12 of 192) and the strip is its stretched
+  edge. Planes more than 64 bigger than the picture are surfaces the guest
+  crops itself and are left alone. `OMACVM_VIDEO_EDGE_FILL=0` turns the fill
+  off. Test: `Tests/virgl/test-video-padding.c`.
 - In the VM, `src/app/guest/install.sh` adds `vainfo` and a small VA-API driver
   shim (`omacvm_drv_video.c`, used through `LIBVA_DRIVER_NAME=omacvm`): Mesa's
   driver unchanged, but it offers only NV12 surfaces (Firefox cannot show the
