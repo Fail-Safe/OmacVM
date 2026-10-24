@@ -21,6 +21,12 @@ in more words.
   than the picture, and those were never written; they now repeat the picture's last row and
   column. In small call tiles that strip can still show as a stretched edge instead of green.
   The VM needs no update.
+- **Local AI models load with Vulkan on smaller Macs.** The VM's Vulkan memory window is now at
+  least 4 GB. It was 1 GB for a 4 GB VM on an 8 GB Mac and 2 GB for a 24 GB VM on a 32 GB Mac,
+  too small for a 3B language model's weights. The window limits how much Vulkan memory the VM
+  can map; what Vulkan allocates counts against the VM's GPU memory guard (three quarters of the
+  Mac's memory), not against macOS's memory pressure. So on an 8 GB Mac a large model can now
+  make macOS swap where it did not load before. The VM needs no update.
 
 ## 3.1.31
 
