@@ -3,10 +3,11 @@
 In OmacVM.app, videos in the VM are decoded by the Mac's own video decoder
 (the media engine) instead of the VM's CPU. YouTube in 4K at 60 frames per
 second keeps the VM's CPU far less busy: about 0.3 cores in Google Chrome
-and 0.4 to 0.6 in Omarchy's own Chromium, instead of 1.0 to 1.6 (see
+154 and 0.4 to 0.6 in Omarchy's own Chromium, instead of 1.0 to 1.6 (see
 [Numbers](#numbers) and [Chromium](#chromium-from-arch-linux-arm)). Google
-Chrome 155 and newer use it up to 1080p since 3.1.32 (1440p and 4K stay on
-the CPU for now: [Chrome's converted frames](#chromes-converted-frames)).
+Chrome 155 and newer use it up to 1080p since 3.1.32, with more dropped
+frames than its CPU decoders; 1440p and 4K stay on the CPU for now (4K: about
+1 core; [Chrome's converted frames](#chromes-converted-frames)).
 Firefox decodes in hardware too, but its VM stays at about 0.9 cores.
 
 ## What works
@@ -15,7 +16,7 @@ Firefox decodes in hardware too, but its VM stays at about 0.9 cores.
 |---|---|---|---|---|
 | H.264 | yes | patch tested, see below | no | no |
 | VP9 (YouTube) | yes | patch tested, see below | no | no |
-| AV1 (YouTube) | yes: Google Chrome, Brave | – | no | no |
+| AV1 (YouTube) | yes: Google Chrome (Brave not tested since 1.96) | – | no | no |
 | HEVC | yes: mpv, FFmpeg, GStreamer, Chrome | – | no | no |
 | 10-bit (VP9 profile 2, HEVC Main 10, AV1) | yes | – | no | no |
 
@@ -28,14 +29,19 @@ Browsers in an OmacVM.app VM:
   and newer decode in hardware from OmacVM 3.1.32 with Update VM (before:
   on the CPU, *Plane 0 is out of bounds: ... > 4096* in Chrome's log; see
   [Chrome's converted frames](#chromes-converted-frames)), for now up to
-  1080p: 1440p and 4K stay on the CPU, where they drop fewer frames.
+  1080p: 1440p and 4K stay on the CPU, where they drop fewer frames. At
+  1080p, too, the media engine drops more frames than the CPU (5.9-6.4 %
+  against 2.1 % on the M4 Max); `OMACVM_VA_EXPORT=0` in Chrome's
+  environment keeps it on the CPU.
 - **Firefox**: yes for H.264 and VP9 (AV1 stays on the CPU, see below; HEVC
   Firefox does not hand to VA-API at all here). The decoding is on the media
   engine, but YouTube 4K at 60 fps in VP9 still kept the VM at 0.9 to 1.0
   cores (two 4-minute runs, Mac busy), near what CPU decoding costs. Where
   Firefox spends it is not measured yet.
 - **Brave** (Linux ARM, from Brave's `.deb`): like Chrome. YouTube 4K at
-  60 fps in VP9 and AV1 (Brave 1.96).
+  60 fps in VP9 and AV1 (Brave 1.96, early October). Later it showed
+  Chrome's "Plane 0 is out of bounds" too; the 3.1.32 fix shares Chrome's
+  code but was tested in Chrome 156 only.
 - **Chromium from Arch Linux ARM** (Omarchy's default browser): H.264 and
   VP9, YouTube included, through a V4L2 decoder that `omacvm apply` adds to
   the VM ([below](#chromium-from-arch-linux-arm)); on YouTube a small
@@ -150,7 +156,8 @@ processing keep Mesa's sizes).
 
 ## Chrome's converted frames
 
-Google Chrome (and Brave, Electron apps) with Skia on OpenGL shows a
+Google Chrome (and, by the same code, Brave and Electron apps: tested in
+Chrome 156 only) with Skia on OpenGL shows a
 hardware-decoded frame only as ARGB: NV12 counts as renderable only with
 Vulkan or when GBM can make NV12 buffers, which virgl cannot. So Chrome
 converts each frame on the GPU (VA-API video processing, Mesa's video
@@ -197,26 +204,34 @@ all fixed in 3.1.32:
   `OMACVM_VIDEO_DEBUG=1` logs "output WxH, picture WxH").
 
 How well it plays: YouTube *Big Buck Bunny* 60 fps, Chrome 156, test VMs
-with 4 CPUs and 4 GB without a window, `src/bench/video-bench.py`, the VM's
-busy cores and dropped frames, CPU decoding (before) against the media
-engine:
+with 4 CPUs and 4 GB without a window, `src/bench/video-bench.py`, busy
+cores of the VM and of QEMU on the Mac (the VM's CPUs and the graphics
+thread together) and dropped frames, CPU decoding (before) against the
+media engine (-: not measured):
 
-| Mac, video | CPU: cores, dropped | Media engine: cores, dropped |
+| Mac, video | CPU: VM, QEMU, dropped | Media engine: VM, QEMU, dropped |
 |---|---|---|
-| MacBook Pro M4 Max, 4K AV1 | 1.24-1.29, 3.1-3.4 % | 0.43-0.45, 11-14 % |
-| MacBook Pro M4 Max, 1080p AV1 | 0.77, 2.1 % | 0.47, 5-6 % |
-| Mac mini M4, 4K AV1 | - | 0.30, 3.1 % |
-| MacBook Air M2, 4K VP9 (no AV1 decoder) | 1.77, 0.1 % | 0.49, 31 % |
-| MacBook Air M2, 1440p VP9 | 1.09, 5.1 % | 0.60, 15 % |
+| MacBook Pro M4 Max, 4K AV1 | 1.24-1.29, 1.49-1.52, 3.1-3.4 % | 0.43-0.45, 0.95-0.96, 11-14 % |
+| MacBook Pro M4 Max, 1080p AV1 | 0.77, 1.11, 2.1 % | 0.47, 1.01, 5.9-6.4 % |
+| Mac mini M4, 4K AV1 | - | 0.30, -, 3.1 % |
+| MacBook Air M2, 4K VP9 (no AV1 decoder) | 1.77, -, 0.1 % | 0.49, -, 31 % |
+| MacBook Air M2, 1440p VP9 | 1.09, -, 5.1 % | 0.60, -, 15 % |
 
-The media engine takes about a third of the CPU, but above 1080p Chrome's
-hardware path drops many more frames (the decoding itself keeps up: FFmpeg
+The media engine takes about a third of the VM's CPU, but less of the
+Mac's: the frame copies and conversions run on QEMU's graphics thread, so
+at 1080p the VM saves 0.3 cores and the Mac only 0.1 (QEMU minus the VM
+went from about 0.34 to 0.54 cores). And Chrome's hardware path drops more frames, at 1080p about
+three times as many (about 4 frames a second at 60 fps instead of 1), above
+1080p many more (the decoding itself keeps up: FFmpeg
 decodes and converts 4K VP9 at 128 fps on the Air; with the VM's graphics on
 QEMU's main loop, `gpuMainLoop`, 4K AV1 on the M4 Max dropped 2.7 %). Where
 those frames go is not found yet. So the shim tells Chrome a largest size of
 1920 x 1920 (`OMACVM_VA_MAX`, 0: no limit): calls and up to 1080p (also
 portrait) on the media engine, 1440p and 4K on the CPU. With the limit,
 YouTube 4K on the M4 Max played VP9 on the CPU (0.98 cores, 3.7 % dropped).
+`OMACVM_VA_EXPORT=0` in Chrome's environment keeps every size on the CPU.
+Not measured yet: video calls, 1080p VP9 on M1 and M2 Macs (no AV1 decoder:
+at 1080p YouTube played AV1 on the CPU on the Air), and the M1 Max.
 Chrome's canvas readback of a hardware frame (not the screen) takes the
 ARGB surface's coded size: 8 black rows under 1080p, 10 black columns at 854
 wide.
