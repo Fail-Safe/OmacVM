@@ -45,7 +45,11 @@
  *    of the buffer it reads (gl-oracle: a 64 KB window over a 64-byte own buffer);
  * 20 vertex (window), geometry (an index) and fragment constants per draw;
  * 21 random runs (programs, constants, submits, sub contexts; SEED, SEEDS): every draw is
- *    checked by gl-oracle, and the printed hashes are the same in all three modes.
+ *    checked by gl-oracle, and the printed hashes are the same in all three modes;
+ * 22 constant buffer 0 as a guest buffer (SET_UNIFORM_BUFFER index 0, as Mesa's VA-API video
+ *    compositor binds its colour matrix; virgl-const-buffer0-resource.patch): the shader's
+ *    CONST[0..n] read it, new data in the same buffer is seen by the next draw, a later
+ *    SET_CONSTANT_BUFFER wins again and binding the buffer again wins over that.
  * Run as is, with OMACVM_VIRGL_CONST_UBO=1 and with OMACVM_VIRGL_CONST_UBO=0.
  * Usage: test-const-ubo [case] */
 #include <OpenGL/OpenGL.h>
@@ -71,7 +75,8 @@ enum { RED = 0xff0000ff, GREEN = 0xff00ff00, BLUE = 0xffff0000, YELLOW = 0xff00f
 enum { R_RT = 1, R_POS, R_UBO, R_COUNT };
 /* objects */
 enum { VS_CONST = 10, VS_CONST8, VS_INDEX, VS_UBO, VS_PLAIN, VS_IN16, FS_VARYING, FS_CONST, FS_MUL,
-       VE = 20, VS_FAR = 30, VS_SEP, FS_SEP, SURFACE = 40, BLEND, RS, GS_CONST = 50 };
+       VE = 20, VS_FAR = 30, VS_SEP, FS_SEP, SURFACE = 40, BLEND, RS, GS_CONST = 50,
+       FS_CONST1D = 60 };
 
 static CGLContextObj main_ctx;
 static int failures;
@@ -390,6 +395,15 @@ static const char *fs_const =
    "  0: MOV OUT[0], CONST[0][1]\n"
    "  1: END\n";
 
+/* colour from vec4 1 of 2, constants declared one-dimensional as gallium's own shaders do
+ * (Mesa's vl_compositor) */
+static const char *fs_const1d =
+   "FRAG\n"
+   "DCL OUT[0], COLOR\n"
+   "DCL CONST[0..1]\n"
+   "  0: MOV OUT[0], CONST[1]\n"
+   "  1: END\n";
+
 /* colour = the vertex colour * CONST[0][0] */
 static const char *fs_mul =
    "FRAG\n"
@@ -470,6 +484,7 @@ static void emit_state(struct cmds *c, int ctx)
    emit_shader(c, FS_VARYING, TEST_SHADER_FRAGMENT, fs_varying);
    emit_shader(c, FS_CONST, TEST_SHADER_FRAGMENT, fs_const);
    emit_shader(c, FS_MUL, TEST_SHADER_FRAGMENT, fs_mul);
+   emit_shader(c, FS_CONST1D, TEST_SHADER_FRAGMENT, fs_const1d);
    emit_bind_shaders(c, VS_CONST, FS_VARYING);
 
    emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_VERTEX_ELEMENTS,
@@ -737,6 +752,49 @@ static void case_ubo(struct cmds *c, int ctx)
    }
    check(submit(ctx, c) == 0, "constants and a uniform buffer in one shader");
    check_stripes(ctx, 4, colours, "constants times a white uniform buffer");
+}
+
+/* the fragment stage's constant buffer 0 bound as the guest's buffer R_UBO */
+static void emit_const_buffer0(struct cmds *c, int ctx)
+{
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_SET_UNIFORM_BUFFER, 0, VIRGL_SET_UNIFORM_BUFFER_SIZE));
+   emit(c, TEST_SHADER_FRAGMENT);
+   emit(c, 0);                      /* index 0: the constants */
+   emit(c, 0);
+   emit(c, 32);
+   emit(c, res_id(ctx, R_UBO));
+}
+
+/* vec4 0 zero, vec4 1 = colour */
+static void emit_buffer_colour(struct cmds *c, int ctx, uint32_t colour)
+{
+   float val[2][4];
+   memset(val, 0, sizeof(val));
+   for (int i = 0; i < 4; i++)
+      val[1][i] = ((colour >> (8 * i)) & 0xff) / 255.0f;
+   emit_write(c, res_id(ctx, R_UBO), val, sizeof(val));
+}
+
+static void case_buffer0(struct cmds *c, int ctx)
+{
+   emit_bind_shaders(c, VS_PLAIN, FS_CONST1D);
+   emit_buffer_colour(c, ctx, RED);
+   emit_const_buffer0(c, ctx);
+   emit_stripe(c, 0);
+   emit_draw(c);
+   emit_buffer_colour(c, ctx, GREEN);
+   emit_stripe(c, 1);
+   emit_draw(c);
+   emit_colour_consts(c, TEST_SHADER_FRAGMENT, 2, 1, BLUE);
+   emit_stripe(c, 2);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "constant buffer 0 as a guest buffer, then plain constants");
+   emit_const_buffer0(c, ctx);
+   emit_stripe(c, 3);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "constant buffer 0 as a guest buffer again, next submit");
+   const uint32_t want[4] = { RED, GREEN, BLUE, GREEN };
+   check_stripes(ctx, 4, want, "constant buffer 0 from a guest buffer");
 }
 
 static void case_odd(struct cmds *c, int ctx)
@@ -1218,6 +1276,7 @@ static void run_case(int n)
    case 19: case_own_mixed(&c, ctx); break;
    case 20: case_gs(&c, ctx); break;
    case 21: case_random(&c, ctx); break;
+   case 22: case_buffer0(&c, ctx); break;
    }
    teardown(ctx);
    if (n == 4)
@@ -1258,7 +1317,7 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   for (int n = 1; n <= 21; n++)
+   for (int n = 1; n <= 22; n++)
       if (!only || only == n)
          run_case(n);
 

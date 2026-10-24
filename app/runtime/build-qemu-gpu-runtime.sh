@@ -1281,6 +1281,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-context-swi
 # OmacVM: no swizzle on a sampler in the GLSL (Mesa's VA-API video compositor reads its alpha that
 # way; the Mac refused the shader, so frames VA-API converts to RGB, Chrome's decoder output, were black).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-shader-sampler-swizzle.patch"
+# OmacVM: a stage's constant buffer 0 bound as a guest buffer is its constants (Mesa's VA-API video
+# compositor binds its colour matrix that way; the shader read zeros, so converted frames were black).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-const-buffer0-resource.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
