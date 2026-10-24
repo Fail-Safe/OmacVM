@@ -21,7 +21,7 @@ mode, the fallbacks, errors kept); the runtime build checks the call is in.
 
 --- a/block/file-posix.c
 +++ b/block/file-posix.c
-@@ -1702,7 +1702,72 @@
+@@ -1702,7 +1702,76 @@
      return 0;
  }
  #endif /* linux */
@@ -65,7 +65,7 @@ mode, the fallbacks, errors kept); the runtime build checks the call is in.
 +
 +static int omacvm_darwin_flush(int fd)
 +{
-+    static bool said;
++    static bool said, said_full;
 +    int ret;
 +
 +    pthread_once(&omacvm_flush_once, omacvm_flush_init);
@@ -73,6 +73,10 @@ mode, the fallbacks, errors kept); the runtime build checks the call is in.
 +        ret = RETRY_ON_EINTR(fcntl(fd, F_FULLFSYNC));
 +        if (ret != -1 || !omacvm_flush_unsupported(errno)) {
 +            return ret;
++        }
++        if (!qatomic_xchg(&said_full, true)) {
++            fprintf(stderr, "OmacVM: disk flush: the drive refused F_FULLFSYNC "
++                    "(%s): barrier\n", strerror(errno));
 +        }
 +    }
 +    if (omacvm_flush_mode != OMACVM_FLUSH_FSYNC) {
@@ -94,7 +98,7 @@ mode, the fallbacks, errors kept); the runtime build checks the call is in.
  static int handle_aiocb_flush(void *opaque)
  {
      RawPosixAIOData *aiocb = opaque;
-@@ -1713,7 +1778,11 @@
+@@ -1713,7 +1782,11 @@
          return -s->page_cache_inconsistent;
      }
  

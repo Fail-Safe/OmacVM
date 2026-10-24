@@ -26,6 +26,7 @@ run full full "OmacVM: disk flush: full (F_FULLFSYNC)"
 run fsync fsync "OmacVM: disk flush: fsync (no barrier)"
 run refused "" "OmacVM: disk flush: barrier (F_BARRIERFSYNC)
 OmacVM: disk flush: the drive refused F_BARRIERFSYNC (Operation not supported): fsync only"
-run full-refused full "OmacVM: disk flush: full (F_FULLFSYNC)"
+run full-refused full "OmacVM: disk flush: full (F_FULLFSYNC)
+OmacVM: disk flush: the drive refused F_FULLFSYNC (Operation not supported): barrier"
 run eio "" "OmacVM: disk flush: barrier (F_BARRIERFSYNC)"
 (( fail == 0 )) && echo "test-flush: all ok" || { echo "test-flush: FAILED"; exit 1; }

@@ -38,6 +38,8 @@ check "check.sh: full is ok" grep -q "^ok:each flush waits for the Mac's drive" 
 check "check.sh: fsync warns" grep -q "^warn:no write barrier" <<<"$(verdict 'fsync (no barrier)')"
 check "check.sh: a refused barrier warns" grep -q "^warn:the drive the VM is on refused" \
   <<<"$(verdict 'the drive refused F_BARRIERFSYNC (Operation not supported): fsync only')"
+check "check.sh: F_FULLFSYNC refused, barrier is ok" grep -q "^ok:each flush is a write barrier.*refused F_FULLFSYNC" \
+  <<<"$(verdict 'the drive refused F_FULLFSYNC (Operation not supported): barrier')"
 check "check.sh: an old runtime prints nothing" test -z "$(verdict '')"
 echo "disk-flush: $((N - FAIL)) of $N ok"
 (( FAIL == 0 ))

@@ -609,6 +609,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   df=$(sed -n 's/^OmacVM: disk flush: //p' "$miclog" | tail -1)
   case $df in
     "") ;;   # an app from before 3.2.1, or no flush yet
+    *"refused F_FULLFSYNC ("*"): barrier") ok "disk flush" "each flush is a write barrier on the Mac's drive (the drive refused F_FULLFSYNC)" ;;
     *"refused"*) warn "disk flush" "the drive the VM is on refused the write barrier: after a power cut the VM can lose recent writes (${df})" ;;
     "barrier"*) ok "disk flush" "each flush is a write barrier on the Mac's drive (F_BARRIERFSYNC)" ;;
     "full"*) ok "disk flush" "each flush waits for the Mac's drive (F_FULLFSYNC, OMACVM_DISK_FLUSH=full)" ;;
