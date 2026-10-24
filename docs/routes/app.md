@@ -79,6 +79,13 @@ VM runs, and goes back by itself when a new version does not start
   (120 Hz on a MacBook Pro).
 - GPU in browsers: WebGL 1 and 2 on the hardware in Chromium, Google Chrome,
   Brave and Firefox (`virgl (Apple M4 Max)`), no flags.
+- For faster pages, use Google Chrome instead of Omarchy's Chromium: Omarchy
+  menu > Install > Browser > Chrome (`omarchy-install-browser chrome`, from
+  the AUR). At the same version in the same VM, Speedometer 3.1 was 17 %
+  higher in Chrome; JetStream, MotionMark, WebGL, WebGPU and scrolling were
+  within 4 % ([numbers](../benchmarks/README.md#google-chrome-vs-omarchys-chromium-macbook-pro-m4-max-2026-10-25)).
+  Arch Linux ARM builds Chromium without Google's profile-guided
+  optimization. Both decode video on the Mac's media engine.
 - Video decoding on the Mac's media engine (since 2.7.0): H.264, VP9 and AV1
   in Google Chrome (YouTube 4K at 60 fps, the VM's CPU nearly idle), VP9 in
   Brave, H.264 and VP9 in Firefox (AV1 not yet), H.264, VP9 and HEVC in mpv,

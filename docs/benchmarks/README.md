@@ -250,6 +250,29 @@ does not work. Your results are public on Geekbench's site.
 
 ## Results
 
+### Google Chrome vs Omarchy's Chromium, MacBook Pro M4 Max (2026-10-25)
+
+Both browsers at the same version, 153.0.8010.36: Arch Linux ARM's `chromium` (what Omarchy installs) and
+Google's own .deb of that version. Google Chrome 156.0.8078.47 (what the AUR gives now) as a third row, one run.
+One test VM, 4 CPUs / 4 GB, hidden (1920x1080 at 75 Hz), OmacVM 3.1.32's VM side, Graphics Automatic
+(Vulkan on KosmicKrisp; the browsers draw with GL over virgl), Omarchy's Chromium flags for all three, a fresh
+profile per run. The runs alternate between the two 153 builds, 3 each, median; nothing else ran on the Mac but
+an idle language model server.
+
+| Test | Chromium 153 | Chrome 153 | Chrome 156 | Chrome vs Chromium (153) |
+|---|---|---|---|---|
+| Speedometer 3.1 | 37.5 (37.3-37.6) | 43.7 (41.1-44.0) | 44.1 | +17 % |
+| JetStream 2.2 | 532 (516-553) | 548 (535-552) | 519 | +3 % (within the spread) |
+| MotionMark 1.3.1 | 4814 | 4982 | 4866 | +3 % |
+| WebGL Aquarium, 30,000 fish (fps) | 37.6 | 37.8 | 37.5 | same |
+| Scrolling (fps at 75 Hz, p95 ms) | 74.0, 13.4 | 74.0, 13.4 | 73.5, 13.4 | same |
+| WebGPU matmul in the "(WebGPU)" launcher (GFLOPS) | 4804 | no adapter | 4801 | - |
+
+Speedometer is where the build shows: every Chrome run was above every Chromium run. Arch Linux ARM builds
+Chromium without the profile Google's builds are optimized with (`chrome_pgo_phase=0`), and Chromium runs
+without Google's field trials. The graphics tests are bound by the VM's GPU path, the same for both. Chrome 153
+gave pages no WebGPU adapter in the launcher's route; Chrome 156 does.
+
 ### Browser, Mac mini M4, OmacVM.app 3.1.27 (2026-10-21)
 
 Mac mini M4 (4 performance + 6 efficiency cores, 16 GB), macOS 27.0, LG UltraFine at 3200x1800 (60 Hz).
