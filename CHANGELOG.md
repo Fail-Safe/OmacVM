@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.32 (unreleased)
+
+- **Three Finger Drag.** With macOS's Three Finger Drag on (System Settings > Accessibility >
+  Pointer Control > Trackpad Options > Dragging style), dragging with three fingers in the
+  full-screen VM also switched Omarchy's workspaces. Three fingers now stay macOS's drag and only
+  four-finger swipes go to the VM, as macOS itself does then. The setting is read live; with it
+  off (the default) three and four fingers both switch workspaces as before.
+
 ## 3.1.31
 
 - **Trackpad gestures after sleep.** After the Mac woke from a longer sleep (Power Nap's short
