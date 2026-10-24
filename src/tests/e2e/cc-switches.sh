@@ -770,7 +770,9 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
   [[ -z $e && $(cat "$OUT/${PFX}ax-check.txt") == pressed* ]] && res window-check-now ok "$(grep -iE 'up to date|is ready|checked|newest' "$OUT/${PFX}window-check.txt" | head -1)" \
     || res window-check-now FAIL "$(cat "$OUT/${PFX}ax-check.txt"); $e"
   # The switch of the compact window (3.0.5), or the Turn On…/Turn Off… button before it.
+  # The settings window (3.1.0) names the switch "Fast network", (experimental) beside it.
   sw=""; "$OUT/ax" "$p" has "Fast network (experimental)" > "$OUT/${PFX}ax-fastnet-has.txt" 2>&1 && sw="Fast network (experimental)"
+  [[ -z $sw ]] && "$OUT/ax" "$p" has "Fast network" >> "$OUT/${PFX}ax-fastnet-has.txt" 2>&1 && sw="Fast network"
   if [[ -n $sw ]] || "$OUT/ax" "$p" has "Turn On…" >/dev/null 2>&1 || "$OUT/ax" "$p" has "Turn Off…" >/dev/null 2>&1; then
     blk=$(netd_blocked)
     if [[ -n $blk ]]; then
