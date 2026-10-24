@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.32 (unreleased)
+
+- **The VM's time zone follows the Mac's.** The VM took the Mac's time zone only when it was set
+  up, so after a trip its clock was off by the time difference. The Bridge now sends the Mac's
+  zone, and the VM follows it at every start and within seconds of a change on the Mac. A zone
+  you set in the VM yourself (Omarchy's menu, `timedatectl`) is kept; set it back to the Mac's
+  and it follows again. `omacvm check` shows which (line "time zone").
+
 ## 3.1.31
 
 - **Trackpad gestures after sleep.** After the Mac woke from a longer sleep (Power Nap's short
