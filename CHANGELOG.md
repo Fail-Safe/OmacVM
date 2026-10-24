@@ -15,6 +15,12 @@ in more words.
   `MESA_VK_WSI_DEBUG=sw,nowlts` to `~/.config/environment.d/50-vulkan-present.conf` to get around
   it, take that line out after the update and log in again: Vulkan windows then go through the
   GPU again. The VM needs no update.
+- **No green bar under videos.** Some videos played with the Mac's video decoder had a thin
+  green strip at the bottom (VP9 and AV1 at 1080p, 540p and 360p: YouTube, and video in calls)
+  or on the right (480p and 240p). The VM's video surfaces are a few rows and columns bigger
+  than the picture, and those were never written; they now repeat the picture's last row and
+  column. In small call tiles that strip can still show as a stretched edge instead of green.
+  The VM needs no update.
 - **Local AI models load with Vulkan on smaller Macs.** The VM's Vulkan memory window is now at
   least 4 GB. It was 1 GB for a 4 GB VM on an 8 GB Mac and 2 GB for a 24 GB VM on a 32 GB Mac,
   too small for a 3B language model's weights. The window limits how much Vulkan memory the VM
