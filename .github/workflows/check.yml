@@ -527,6 +527,9 @@ jobs:
       - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
         run: src/tests/audio-timing.sh
 
+      - name: Disk flushes as write barriers (patch pinned and tested, log lines, check)
+        run: src/tests/disk-flush.sh
+
       - name: The VM's GPU work without QEMU's big lock (patches pinned and ordered, switch, log lines, check, what runs unlocked)
         run: src/tests/gpu-unlocked.sh
 
