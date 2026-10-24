@@ -2614,7 +2614,10 @@ static void checkLeave(int by) {
     else { saveSignFn(); logf_("escape combo: the other direction worked: direction learned"); }
   }
   if (!rest) {
-    logf_("escape combo: out of the VM's Space (%s)", by == BY_SHORTCUT ? "macOS's shortcut" : "a Dock swipe");
+    int keyed = 0, swiped = 0;
+    for (int i = 0; i < nMoves; i++) { if (moves[i].swiped) swiped = 1; else keyed = 1; }
+    logf_("escape combo: out of the VM's Space (%s)",
+          keyed && swiped ? "macOS's shortcut and a Dock swipe" : swiped ? "a Dock swipe" : "macOS's shortcut");
     focusPointerDisplay();
     return;
   }
