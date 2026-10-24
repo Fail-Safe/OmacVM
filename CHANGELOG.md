@@ -34,6 +34,11 @@ in more words.
   can map; what Vulkan allocates counts against the VM's GPU memory guard (three quarters of the
   Mac's memory), not against macOS's memory pressure. So on an 8 GB Mac a large model can now
   make macOS swap where it did not load before. The VM needs no update.
+- **More memory back to the Mac.** OmacVM.app's VM now gives memory Linux frees back to the Mac in
+  256 KiB blocks, not only in whole 2 MiB ones. After a build and a dropped file cache, a 4 GB VM
+  held 1.1-1.4 GB less of the Mac's memory, for about 0.5 % more CPU during the build; bigger VMs can get
+  more back. Takes effect with Update VM (no restart needed); `omacvm check` shows it as
+  "memory back to the Mac".
 
 ## 3.1.31
 
