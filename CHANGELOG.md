@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.32 (unreleased)
+
+- **No green bar under videos.** Some videos played with the Mac's video decoder had a thin
+  green strip at the bottom (VP9 and AV1 at 1080p, 540p and 360p: YouTube, and video in calls)
+  or on the right (480p and 240p). The VM's video surfaces are a few rows and columns bigger
+  than the picture, and those were never written; they now repeat the picture's edge. The
+  picture itself is unchanged, and the VM needs no update.
+
 ## 3.1.31
 
 - **Trackpad gestures after sleep.** After the Mac woke from a longer sleep (Power Nap's short
