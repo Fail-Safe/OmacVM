@@ -6,6 +6,12 @@
  *    without (RGBA8), by no view, by a 2D view, or dropped by set_num_sampler_views;
  *  - a compute slot also sets cs_shader_dirty;
  *  - views without key bits swapped (2D for 2D, RGBA8 buffer for none) do not.
+ *  - with a fragment shader bound that declares slot 0 a 2D_ARRAY sampler, a plain 2D view
+ *    coming or going there does (virgl-shader-array-sampler-2d-view.patch), and its key
+ *    bit is set exactly then;
+ *  - a second view of slot 0's texture with another swizzle coming to slot 1 does (each
+ *    then takes its swizzle in the shader: virgl-view-swizzle-shared-texture.patch), and
+ *    both slots' views get the key's swizzle lowering.
  * And vrend_view_key_bits() agrees with vrend_fill_shader_key(): two views give the same
  * key exactly when they give the same bits (so a new key input from views cannot be
  * missed silently).
@@ -26,6 +32,13 @@ static void GLAPIENTRY nop_bind_texture(GLenum target, GLuint id)
 {
    (void)target;
    (void)id;
+}
+
+static void GLAPIENTRY nop_tex_parameteri(GLenum target, GLenum name, GLint value)
+{
+   (void)target;
+   (void)name;
+   (void)value;
 }
 
 static void GLAPIENTRY nop_tex_buffer(GLenum target, GLenum format, GLuint id)
@@ -59,8 +72,14 @@ static void make_views(struct vrend_sub_context *sub)
       view->format = v[i].format;
       view->texture = v[i].buffer ? &buffer : &texture.base;
       view->target = view->texture->target;
-      view->gl_id = 100 + v[i].id;                  /* not the texture's: no GL state */
+      /* buffers: not the texture's id (no GL state); 2D views are the texture itself, as
+       * without GL texture views (their swizzle is the texture's: stubbed) */
+      view->gl_id = v[i].buffer || v[i].rect ? 100 + v[i].id : texture.base.gl_id;
       view->emulated_rect = v[i].rect;
+      /* 2D views: RGBA as they come, the L8 one RRR1 */
+      const GLint rgba[4] = { GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA };
+      const GLint rrr1[4] = { GL_RED, GL_RED, GL_RED, GL_ONE };
+      memcpy(view->gl_swizzle, v[i].id == V_2D_B ? rrr1 : rgba, sizeof(rgba));
       vrend_object_insert(sub->object_hash, view, v[i].id, VIRGL_OBJECT_SAMPLER_VIEW);
    }
 }
@@ -97,6 +116,7 @@ int main(void)
    char text[160];
 
    epoxy_glBindTexture = nop_bind_texture;
+   epoxy_glTexParameteri = nop_tex_parameteri;
    epoxy_glTexBuffer = nop_tex_buffer;
    ctx.sub = &sub;
    ctx.shader_cfg.glsl_version = 410;
@@ -133,6 +153,67 @@ int main(void)
    sub.shader_dirty = false;
    vrend_set_num_sampler_views(&ctx, PIPE_SHADER_FRAGMENT, 0, 1);
    check(sub.shader_dirty, "set_num_sampler_views drops an L8 buffer slot: shaders marked dirty");
+   vrend_set_num_sampler_views(&ctx, PIPE_SHADER_FRAGMENT, 0, 0);
+
+   /* a fragment shader that declares slot 0 a 2D_ARRAY sampler: a 2D view there is a key
+    * bit (sampled as 2D), so it coming or going selects the shaders again */
+   struct vrend_shader_selector arrays = { .type = PIPE_SHADER_FRAGMENT };
+   arrays.sinfo.samplers_2d_array_mask = 1;
+   sub.shaders[PIPE_SHADER_FRAGMENT] = &arrays;
+   static const struct { int from, to; bool dirty; const char *what; } a[] = {
+      { 0, V_2D, true, "2D_ARRAY sampler: no view -> 2D texture" },
+      { V_2D, V_2D_B, false, "2D_ARRAY sampler: 2D texture -> another 2D texture" },
+      { V_2D, 0, true, "2D_ARRAY sampler: 2D texture -> no view" },
+      { V_2D, V_RECT, true, "2D_ARRAY sampler: 2D texture -> emulated rectangle" },
+   };
+   for (unsigned i = 0; i < ARRAY_SIZE(a); i++) {
+      bool dirty = dirty_after(&ctx, PIPE_SHADER_FRAGMENT, a[i].from, a[i].to, NULL);
+      snprintf(text, sizeof(text), "%s: %s", a[i].what,
+               a[i].dirty ? "shaders marked dirty" : "nothing to select again");
+      check(dirty == a[i].dirty, text);
+   }
+   vrend_set_single_sampler_view(&ctx, PIPE_SHADER_FRAGMENT, 0, 0);
+   {
+      struct vrend_shader_key k2d, knone, kbuf;
+      struct vrend_sampler_view *old = sub.views[PIPE_SHADER_FRAGMENT].views[0];
+      sub.views[PIPE_SHADER_FRAGMENT].max_num_views = 1;
+      sub.views[PIPE_SHADER_FRAGMENT].views[0] = &views[V_2D];
+      memset(&k2d, 0, sizeof(k2d));
+      vrend_fill_shader_key(&sub, &arrays, &k2d);
+      sub.views[PIPE_SHADER_FRAGMENT].views[0] = NULL;
+      memset(&knone, 0, sizeof(knone));
+      vrend_fill_shader_key(&sub, &arrays, &knone);
+      sub.views[PIPE_SHADER_FRAGMENT].views[0] = &views[V_RGBA8];
+      memset(&kbuf, 0, sizeof(kbuf));
+      vrend_fill_shader_key(&sub, &arrays, &kbuf);
+      sub.views[PIPE_SHADER_FRAGMENT].views[0] = old;
+      check(k2d.sampler_views_2d_for_array_mask == 1 && !knone.sampler_views_2d_for_array_mask &&
+            !kbuf.sampler_views_2d_for_array_mask,
+            "2D_ARRAY sampler: the key bit is set for a 2D view only");
+   }
+   sub.shaders[PIPE_SHADER_FRAGMENT] = NULL;
+
+   /* two views of one texture with different swizzles: GL keeps one swizzle per texture,
+    * so both are applied in the shader, and the second coming or going selects again */
+   vrend_set_num_sampler_views(&ctx, PIPE_SHADER_FRAGMENT, 0, 2);
+   vrend_set_single_sampler_view(&ctx, PIPE_SHADER_FRAGMENT, 0, V_2D);
+   sub.shader_dirty = false;
+   vrend_set_single_sampler_view(&ctx, PIPE_SHADER_FRAGMENT, 1, V_2D_B);
+   check(sub.shader_dirty, "a second view of slot 0's texture with another swizzle: shaders marked dirty");
+   {
+      struct vrend_shader_selector plain = { .type = PIPE_SHADER_FRAGMENT };
+      struct vrend_shader_key k;
+      memset(&k, 0, sizeof(k));
+      vrend_fill_shader_key(&sub, &plain, &k);
+      check(vrend_shader_sampler_views_mask_get(k.sampler_views_lower_swizzle_mask, 0) &&
+            vrend_shader_sampler_views_mask_get(k.sampler_views_lower_swizzle_mask, 1) &&
+            k.tex_swizzle[1] == (0 | 0 << 3 | 0 << 6 | PIPE_SWIZZLE_1 << 9) &&
+            k.tex_swizzle[0] == (0 | 1 << 3 | 2 << 6 | 3 << 9),
+            "two views of one texture: both swizzles in the shader");
+   }
+   sub.shader_dirty = false;
+   vrend_set_single_sampler_view(&ctx, PIPE_SHADER_FRAGMENT, 1, 0);
+   check(sub.shader_dirty, "the second view goes: shaders marked dirty");
    vrend_set_num_sampler_views(&ctx, PIPE_SHADER_FRAGMENT, 0, 0);
 
    /* vrend_view_key_bits() and vrend_fill_shader_key() agree on every pair */

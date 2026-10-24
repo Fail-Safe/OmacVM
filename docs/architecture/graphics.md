@@ -112,6 +112,23 @@ on CGL, not on ANGLE.
 | Frames on the display's refresh (jitter buffer, display link thread) | built: `pacing-hdr` | `qemu-cocoa-gl-present-vsync.patch`, ADR 0020 |
 | Colour-tagged frames, 10-bit scanout, HDR (PQ, EDR) | built: `pacing-hdr`, `hdr` (the app's switch, off by default; the guest tone-maps into the display's headroom) | `qemu-cocoa-gl-present-color.patch`, `omacvm-cocoa-hdr-headroom*.patch`, `src/app/guest/virtio-gpu/`, ADR 0021, 0049 |
 | Guest paced by the host's vsync | planned | ADR 0020 option 1 |
+| Chrome's GL renderer without "virgl" (Skia keeps instanced drawing) | built: `gpu-browser` (3.1.32) | `src/app/guest/50-omacvm-chrome.drirc` |
+
+Chrome's renderer string: Skia turns instanced drawing off when the GL
+renderer names virgl (`GrGLCaps.cpp`, 2021, no public reason). Without it
+Chrome's GL path has no path atlas, and every canvas stroke and clip path
+becomes a CPU mask, an upload and a draw of its own in every frame. App VMs
+get a Mesa drirc (`/usr/share/drirc.d/50-omacvm-chrome.conf`) that gives the
+programs `chrome` and `chromium` the renderer "OmacVM-GPU" (`force_gl_renderer`);
+every other program keeps the real string. MotionMark at a fixed complexity
+in a VM on the M4 Max (3 alternating rounds): Paths 29-35 -> 75 fps, Suits
+40-48 -> 75 fps (75 = the hidden VM display's rate), Canvas Arcs 75 both.
+chrome://gpu lists the same features and driver workarounds. A static page
+of strokes, arcs, clips, rounded rects and SVG paths matches Chrome's
+Graphite render; it differs from Chrome's CPU raster only inside one thick
+self-overlapping stroke, which GPU tessellation fills. dEQP-GLES3
+`functional.instanced` 45/45 and `functional.draw` 324/324 pass on virgl.
+The WebGL renderer string that pages can read changes the same way.
 
 ## 2. Processes and threads
 
@@ -376,10 +393,22 @@ the GL has is built again with uniforms (shader key `const_uniforms`) and the
 draw selects again. `OMACVM_VIRGL_CONST_UBO=1` binds a range per draw in vertex
 shaders too, `=0` keeps uniforms (the GL calls of before); qemu.log says which.
 `OMACVM_VIRGL_CACHE_STATS=1` logs uploads, binds, index draws and window binds.
-Test: `test-const-ubo` (all three modes).
+Constant buffer 0 can also be a guest buffer (`SET_UNIFORM_BUFFER` index 0):
+Mesa's own gallium helpers bind one, the VA-API video compositor its colour
+matrix. When that came after the stage's last `SET_CONSTANT_BUFFER`, each draw
+uses the buffer as the stage's constants (`virgl-const-buffer0-resource.patch`;
+before, the shader read zeros and Chrome's decoded frames were black). Where
+the constants are a uniform block bound per draw, the GPU copies the buffer
+into the stage's own one (`glCopyBufferSubData`, no wait for the GPU); with
+uniforms or a vertex shader's window each draw reads it back
+(`glGetBufferSubData`).
+Test: `test-const-ubo` (all three modes; case 22 for the guest buffer).
 
-Context switches: on CGL, every handover between GL contexts flushes the
-context it leaves. A `glWaitSync` in another context waits only for a fence
+Context switches: on CGL, every handover through `vrend_sync_make_current`
+flushes the context it leaves. Plain `make_current` calls (switching,
+creating and destroying guest contexts) do not; work across guest contexts
+is ordered by the guest's fences, which are flushed when they are made.
+A `glWaitSync` in another context waits only for a fence
 that was flushed (ARB_sync); `eglMakeCurrent` and `glXMakeCurrent` flush the
 context they leave, and upstream relies on that, but `CGLSetCurrentContext`
 (QEMU's Cocoa make-current) does not, and Apple's `glWaitSync` on an
@@ -424,6 +453,9 @@ one patch each, each with a build-time test that compiles or runs on the Mac's G
 | floatBitsToInt() etc. need GLSL 3.30; `GL_ARB_draw_instanced` refused (one table: extension → GLSL version where it is core) | `virgl-shader-core-glsl-version.patch` | `test-core-glsl-shaders.c` |
 | `GL_EXT_texture_shadow_lod` asked for core lookups (gradients, cube shadow bias, gather) | `virgl-shader-shadow-lod-extension.patch` | `test-core-glsl-shaders.c` |
 | results written to an integer output lost their bits or did not compile (upstream bug) | `virgl-shader-integer-outputs.patch` (integer outputs written like a float temporary, stored once with their bits) | `test-core-glsl-shaders.c` |
+| a swizzle on a sampler written into the GLSL (Mesa's VA-API video compositor: `SAMP[0].wwww`), refused by the Mac, so frames VA-API converts to RGB (Chrome's decoder output) were black | `virgl-shader-sampler-swizzle.patch` (left out, as gallium's own translators do) | `test-core-glsl-shaders.c` |
+| a 2D_ARRAY sampler over a plain 2D texture view (Mesa's VA-API video compositor and progressive video planes) reads nothing on GL | `virgl-shader-array-sampler-2d-view.patch` (declared `sampler2D`, 2D lookups, layer 0; a key bit only where the shader declares 2D_ARRAY) | `test-const-ubo.c` case 23, `test-view-key.c` |
+| two views of one texture with different swizzles in one draw (the compositor's U and V from one UV plane): GL keeps one swizzle per texture, so both read the last one | `virgl-view-swizzle-shared-texture.patch` (their swizzles in the shader, the texture's none while the draw reads them) | `test-const-ubo.c` case 24, `test-view-key.c` |
 | blitter shaders were GLSL 1.30: every shader blit drew nothing | `virgl-blitter-core-glsl-version.patch` | `test-blitter-shaders.c` |
 | integer multisample blit used texture() on a MS sampler (upstream bug) | `virgl-blitter-integer-msaa.patch` | `test-blitter-shaders.c` |
 | framebuffer without attachments (all draw buffers GL_NONE): GL error on draw | `virgl-framebuffer-no-attachments.patch` (depth stand-in as large as the first viewport, at most 8192², kept between switches, freed when unused; depth test off while it is attached) | `test-empty-framebuffer.c` |
@@ -589,7 +621,7 @@ firmware maps no device at all (3.0.0: a Vulkan start there never boots).
 From 3.0.1 the app adds `highmem-mmio-size=<n>G` to the machine there
 (`Graphics.highWindowGB`, 16 GB at most) and
 `qemu-virt-small-high-window.patch` puts that window right above RAM; the
-host memory window takes at most half of it (M2 Air, 4 GB VM: 1 GB in
+host memory window takes at most half of it (M2 Air, 4 GB VM: 4 GB in
 16-32 GB). If no window fits (a VM near 64 GB), or the app's QEMU lacks the
 patch (the app looks for the patch's error text in the binary), it is
 256 MB, which fits below 1 GB.
@@ -756,6 +788,7 @@ falls back and logs once.
 | `OMACVM_VIDEO_AV1=1` | set by the app when the VM has the shim | offer AV1 | built |
 | `OMACVM_VIDEO_NO_VP9`, `OMACVM_VIDEO_NO_HEVC` | off | hide one codec | built |
 | `OMACVM_VIDEO_COPY` | off | CPU copy instead of IOSurface blit | built |
+| `OMACVM_VIDEO_EDGE_FILL=0` | on | rows and columns of the guest's video planes past the picture stay unwritten (the green bar before 3.1.32) | built (`green-bar`) |
 | `OMACVM_VIDEO_NO_REALTIME` | off | no real-time VT session | built |
 | `OMACVM_VIRGL_VIDEO_ABI=legacy` | Mesa 26 numbers | profile numbers of older guests | built |
 | `OMACVM_VIDEO_DEBUG=1` | off | log decode details | built |

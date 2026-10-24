@@ -1263,6 +1263,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-index-range-cache.
 # the media engine on every frame: screen recording took the VM's sound and display with it);
 # a guest fence waits for the frames closed before it.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-encode-async.patch"
+# OmacVM: decoded video fills the guest's whole plane textures (Mesa rounds them up to 16): the
+# rows past the picture repeat its last row instead of staying zero, a green bar at the bottom.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-video-plane-edge.patch"
 # OmacVM: big texture uploads go through a pixel unpack buffer (one CPU copy instead of three
 # steps: a frozen screen in screenshot mode uploads a whole display per frame).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-transfer-upload-pbo.patch"
@@ -1275,6 +1278,21 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-vulkan-windows-ios
 # OmacVM: a GL context is flushed before vrend switches away from it (CGL's make-current does not
 # flush, and the next context's wait for its fence did not wait: Vulkan windows a frame late, #499).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-context-switch-flush.patch"
+# OmacVM: no swizzle on a sampler in the GLSL (Mesa's VA-API video compositor reads its alpha that
+# way; the Mac refused the shader, so frames VA-API converts to RGB, Chrome's decoder output, were black).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-shader-sampler-swizzle.patch"
+# OmacVM: a stage's constant buffer 0 bound as a guest buffer is its constants (Mesa's VA-API video
+# compositor binds its colour matrix that way; the shader read zeros, so converted frames were black).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-const-buffer0-resource.patch"
+# OmacVM: a plain 2D view behind a sampler the shader declares 2D_ARRAY is sampled as 2D (Mesa's
+# VA-API video compositor declares its planes so; GL read nothing there: converted frames were black).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-shader-array-sampler-2d-view.patch"
+# OmacVM: two views of one texture with different swizzles in one draw each get their own, in the
+# shader (GL keeps one per texture: U read V in Mesa's VA-API video compositor, wrong colours).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-view-swizzle-shared-texture.patch"
+# OmacVM: only the decoded picture of an AV1 or VP9 frame is copied (VideoToolbox's AV1 frame is as
+# large as Mesa's surface: its extra rows showed as a green bar in Chrome's hardware decoding).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-video-picture-size.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
