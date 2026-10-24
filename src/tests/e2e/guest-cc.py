@@ -280,8 +280,17 @@ def cmd_toggle(a: list[str]) -> None:
     if not started:
         out(False, error="nothing happened after Space (no job, no change in 30 s)", before=before, asked=question,
             trouble=seen1, screen=screen())
-    # The control centre off closes it: nothing more to read once it quit.
-    done, text, seen2 = watch(lambda s: not alive() or state_of(title, s)["on"] == want and state_of(title, s)["status"] not in ("working", None), secs)
+    # The control centre off closes it: nothing more to read once it quit. A question after the
+    # job (e.g. "Update the VM's system first" when a job could not install packages) ends the
+    # wait too: it is answered "n", so the next row finds the table, and the toggle fails with it.
+    done, text, seen2 = watch(lambda s: not alive() or asked(s) or state_of(title, s)["on"] == want and state_of(title, s)["status"] not in ("working", None), secs)
+    if alive() and asked(text):
+        later = re.sub(r"\s+", " ", text)[:600]
+        keys("n")
+        time.sleep(1)
+        out(False, error="the control centre asked after the job (answered n)", question=later, before=before,
+            asked=question, seconds=round(time.monotonic() - t0, 1), trouble=seen1 + [x for x in seen2 if x not in seen1],
+            screen=screen())
     if not alive():
         out(want == "off" and "control centre" in title, before=before, gone="the control centre quit", asked=question,
             seconds=round(time.monotonic() - t0, 1), trouble=seen1 + [x for x in seen2 if x not in seen1], screen=text)

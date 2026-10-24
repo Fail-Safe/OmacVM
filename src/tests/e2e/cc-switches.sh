@@ -278,7 +278,7 @@ try:
 except Exception:
     print("no answer from the VM"); sys.exit(0)
 bits = []
-for k in ("error", "already", "seconds", "asked", "answer"):
+for k in ("error", "already", "seconds", "asked", "answer", "question"):
     if o.get(k): bits.append(f"{k}: {str(o[k])[:160]}")
 for k in ("before", "after"):
     v = o.get(k)
