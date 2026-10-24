@@ -2396,12 +2396,13 @@ static int fullOn(const DisplaySpaces *d, const CGRect *wins, int nw) {
   return 0;
 }
 
-// Still in the VM: it has the keyboard, or the pointer's display still shows
-// its full-screen window.
 // The last move out was for this point (the VM's focused display), not for
 // the pointer's: the keyboard follows that display.
 static CGPoint leavePoint;
 static int leaveByFocus;
+
+// Still in the VM: it has the keyboard, or the display the combo moved (the
+// pointer's) still shows its full-screen window.
 static const char *stillIn(void) {
   if (frontFn() == vmPid) return "it has the keyboard";
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
