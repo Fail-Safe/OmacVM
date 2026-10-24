@@ -103,6 +103,9 @@ final class Runner {
         // the guest's VA driver shim then gives Chromium surfaces it can hand back to VA-API
         // (omacvm_drv_video.c), so Chrome decodes on the media engine.
         a += ["-smbios", "type=11,value=omacvm.vaexport=1"]
+        // This runtime decodes video beside its GPU thread (virgl-videotoolbox-decode-async.patch):
+        // the shim then lets Chromium's decoder wait for each picture, not the Mac's GPU thread.
+        a += ["-smbios", "type=11,value=omacvm.vadecasync=1"]
         // FullPanel (NotchArea): the camera housing for the guest's bar, which
         // then sits in the strip beside the notch (omacvm-app-host -> host.env;
         // the bar and notchcast read it). Native starts send nothing.
