@@ -154,8 +154,79 @@ os.rename(f"{home}/.config/omacvm-bridge/token", f"{T}/token.away")
 f = tz.Follower()
 check(tz.from_bridge(f) is False and any("no Bridge token" in m for m in f.said), "no token: waits, says so")
 os.rename(f"{T}/token.away", f"{home}/.config/omacvm-bridge/token")
-# --status for omacvm check.
+# 10. The real client is a script whose socat or curl streams as its child: when the agent
+# breaks off (the session's shared stream comes up, or the Bridge goes quiet), that child
+# must go too, or the agent waits for it and follows no zone any more.
 import subprocess
+import threading
+import time
+SHARED = f"{T}/run/user/{pwd.getpwnam(user).pw_uid}/omacvm-bridge-events.sock"
+os.makedirs(os.path.dirname(SHARED), exist_ok=True)
+open(CLIENT, "w").write(f"""#!/bin/bash
+[[ $1 == events ]] || exit 2
+( cat {T}/stream; exec sh -c 'echo $$ > {T}/streamer; exec sleep 60' ) &
+wait
+""")
+
+
+def gone(pid, seconds=3):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def held(what, shared_after=None, silence=None):
+    """from_bridge against a streamer that keeps the pipe open; True when it came back in time."""
+    if os.path.exists(f"{T}/streamer"):
+        os.remove(f"{T}/streamer")
+    old_silence = tz.SILENCE_SECONDS
+    if silence is not None:
+        tz.SILENCE_SECONDS = silence
+    if shared_after is not None:
+        threading.Timer(shared_after, lambda: open(SHARED, "w").close()).start()
+    t = threading.Thread(target=tz.from_bridge, args=(tz.Follower(),), daemon=True)
+    started = time.monotonic()
+    t.start()
+    t.join(15)
+    took = time.monotonic() - started
+    tz.SILENCE_SECONDS = old_silence
+    pid = int(open(f"{T}/streamer").read()) if os.path.exists(f"{T}/streamer") else 0
+    back = not t.is_alive()
+    check(back, f"{what}: the agent breaks off ({took:.1f} s)")
+    check(pid > 0 and gone(pid), f"{what}: the client's stream ended with it")
+    if pid:   # the old way: end the leftover so the test goes on
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass
+        t.join(5)
+    return back
+
+
+if os.path.exists(SHARED):
+    os.remove(SHARED)
+stream('{"zone": "Europe/Zurich"}')
+held("before the login, the shared stream comes up", shared_after=1)
+check(calls() == ["Europe/Zurich"], "before the login: the Mac's zone set")
+stream('{"zone": "America/New_York"}')
+held("the Bridge goes quiet", silence=1)   # SHARED exists now: on the shared stream
+check(calls() == ["America/New_York"], "on the shared stream: the Mac's next zone set")
+os.remove(SHARED)
+open(CLIENT, "w").write(f"""#!/bin/bash
+[[ $1 == events ]] || exit 2
+cat {T}/stream
+""")
+localtime("Asia/Tokyo")
+stream('{"zone": "Asia/Tokyo"}')
+run('{"zone": "Asia/Tokyo"}')
+calls()
+
+# --status for omacvm check.
 out = subprocess.run([sys.executable, "-I", AGENT, "--status"], capture_output=True, text=True, env=dict(os.environ)).stdout.split()
 check(out == ["follows", "Asia/Tokyo", "Asia/Tokyo"], "--status: the state line")
 # A zone set by hand after the Mac's last word: --status says so at once (no event needed).

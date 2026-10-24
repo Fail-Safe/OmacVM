@@ -26,6 +26,7 @@ import os
 import pwd
 import re
 import select
+import signal
 import subprocess
 import sys
 import time
@@ -154,7 +155,10 @@ def from_bridge(follower: Follower) -> bool:
     # stream is there.
     shared = f"{ROOT}/run/user/{pw.pw_uid}/omacvm-bridge-events.sock"
     direct = not os.path.exists(shared)
-    proc = subprocess.Popen([CLIENT, "events"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **as_user)
+    # Its own process group: the client is a script whose socat or curl holds
+    # the pipes; killing only the script would leave the stream running.
+    proc = subprocess.Popen([CLIENT, "events"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                            start_new_session=True, **as_user)
     event, buffer, seen, got = "", b"", time.monotonic(), False
     try:
         while True:
@@ -187,8 +191,17 @@ def from_bridge(follower: Follower) -> bool:
             if direct and os.path.exists(shared):
                 break   # the session's stream is up: over to it
     finally:
-        proc.kill()
-        _, err = proc.communicate()
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)   # not yet waited for: the pid is still ours
+        except OSError:
+            pass
+        try:
+            _, err = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:   # something outside the group holds the pipes
+            proc.stdout.close()
+            proc.stderr.close()
+            proc.wait()
+            err = b""
         if err.strip():
             follower.say(err.decode(errors="replace").strip().splitlines()[-1])
     return got
