@@ -1290,6 +1290,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-shader-array-sampl
 # OmacVM: two views of one texture with different swizzles in one draw each get their own, in the
 # shader (GL keeps one per texture: U read V in Mesa's VA-API video compositor, wrong colours).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-view-swizzle-shared-texture.patch"
+# OmacVM: only the decoded picture of an AV1 or VP9 frame is copied (VideoToolbox's AV1 frame is as
+# large as Mesa's surface: its extra rows showed as a green bar in Chrome's hardware decoding).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-video-picture-size.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
