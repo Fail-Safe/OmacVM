@@ -167,6 +167,12 @@ static int fakeActivate(pid_t pid, CGWindowID win) {
   for (int i = 0; s && i < nWorld; i++) if (idx(&world[i], s) >= 0) world[i].cur = s;
   return 1;
 }
+// All the VM's windows on any Space (one per display in full screen).
+static int fakeAllVMWindows(pid_t pid, CGWindowID *out, int cap) {
+  int k = 0;
+  for (int sp = 0; sp < MAX_SPACE_ID && k < cap; sp++) if (owner[sp] == pid && winOn[sp]) out[k++] = winOn[sp];
+  return k;
+}
 static int fakeHide(pid_t pid) { hidden++; hiddenPid = pid; if (front == pid) front = finder; return 1; }
 static pid_t fakeFront(void) { return front; }
 static pid_t fakeFinder(void) { return finder; }
@@ -347,7 +353,7 @@ static void layout(int displays, const uint64_t *a, int na, const uint64_t *b, i
 int main(void) {
   activateFn = fakeActivate; finderFn = fakeFinder; frontFn = fakeFront; vmWindowFn = fakeVMWindow;
   spacesFn = fakeSpaces; windowSpaceFn = fakeWindowSpace; pointerFn = fakePointer;
-  vmWindowsFn = fakeVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll;
+  vmWindowsFn = fakeVMWindows; vmAllWindowsFn = fakeAllVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll;
   warpFn = fakeWarp; warpSettle = 0; isQemuFn = fakeIsQemu;
   hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld;
   swipeFn = fakeSwipe; saveSignFn = fakeSaveSign; swipeOutFn = fakeSwipeOut; swipeOutEvery = 0; swipeOutGap = 0;
@@ -625,6 +631,45 @@ int main(void) {
   check(press(K, HID, 0) == 1 && spaceKeys == 1, "Spaces shared by the displays, all: one shortcut, not two");
   sent(); settle(vm, NET_APP);
   all = 0;
+
+  // ---- The VM full screen on both displays (OmacVM.app: its main window on
+  // the MacBook, a second window on the external, each its own Space); the
+  // external left by hand (a swipe), so the combo did not note where from.
+  // In macOS with the pointer on the external, the combo goes back into the
+  // VM's Space there, not the main window's (that display stays as it is) ----
+  {
+    const uint64_t mbp[] = { 211, 212 }, ext[] = { 311, 312 };
+    layout(2, mbp, 2, ext, 2);
+    owner[211] = terminal; winOn[211] = 11; owner[212] = vm; winOn[212] = 27;
+    owner[311] = safari; winOn[311] = 44; owner[312] = vm; winOn[312] = 28;
+    world[0].cur = 212; world[1].cur = 312; front = vm; pointer = CGPointMake(3000, 600);
+    frontChanged(vm, NET_APP, 1, "Omarchy", 27, 0); sent();
+    world[1].cur = 311; front = safari;   // swiped out on the external
+    frontChanged(safari, -1, 0, "", 44, 1); sent();
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && lastKey.keycode == 124 && movedOn[0] == 2,
+          "external left by hand: the combo there moves the external back (Move right a space)");
+    check(world[1].cur == 312 && world[0].cur == 212 && front == vm, "... into the VM's Space on the external; the MacBook as it was");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 27, 0); sent();
+    // The VM's Space on the external not beside the one shown: its window
+    // there to the front (macOS shows its Space), not the main window.
+    const uint64_t ext3[] = { 311, 313, 312 };
+    layout(2, mbp, 2, ext3, 3);
+    owner[313] = finder;
+    world[0].cur = 211; world[1].cur = 311; front = safari; pointer = CGPointMake(3000, 600);
+    frontChanged(safari, -1, 0, "", 44, 1); sent(); wentTo = 0; wentWin = 0;
+    check(press(K, HID, 0) == 1 && !spaceKeys && wentTo == vm && wentWin == 28 && world[1].cur == 312,
+          "... two Spaces away: the VM's window on the external to the front, not the main window");
+    check(world[0].cur == 211, "... the MacBook stays on its desktop");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 27, 0); sent();
+    // Left by the combo: as before, back to the Space it left.
+    world[0].cur = 212; world[1].cur = 312; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 27, 0); sent();
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[1].cur == 313 && world[0].cur == 212,
+          "the combo on the external: out there only (one Space toward where it came from)");
+    settle(vm, NET_APP); sent();
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[1].cur == 312 && world[0].cur == 212 && front == vm, "... and back in there");
+    settle(vm, NET_APP); sent();
+    owner[313] = 0;
+  }
 
   // ---- Not the real keyboard, a held key, other combos: as before ----
   front = finder; world[0].cur = 401; world[1].cur = 401;

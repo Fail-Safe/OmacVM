@@ -2148,6 +2148,26 @@ static int windowsOf(pid_t pid, CGRect *out, int cap) {
   return k;
 }
 
+// Every normal window of pid on any Space (layer 0, bigger than 100 x 100):
+// OmacVM.app's VM has one per display in full screen.
+static int allWindowsOf(pid_t pid, CGWindowID *out, int cap) {
+  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionAll | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+  if (!wins) return 0;
+  int k = 0;
+  for (CFIndex i = 0; i < CFArrayGetCount(wins) && k < cap; i++) {
+    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, i);
+    int owner = 0, layer = -1; CGRect r; CGWindowID id = 0;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowNumber), kCFNumberIntType, &id);
+    if (owner == pid && layer == 0 && id && CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r) &&
+        r.size.width > 100 && r.size.height > 100)
+      out[k++] = id;
+  }
+  CFRelease(wins);
+  return k;
+}
+
 // Mission Control is showing: the Dock then has a window over a whole display
 // below its own level (layer 18 on macOS 26; its normal window sits at the
 // Dock level, 20, and its backdrops below 0). macOS gives no call for it. In
@@ -2279,6 +2299,7 @@ static void warpPointer(CGPoint p) { CGWarpMouseCursorPosition(p); CGAssociateMo
 static void (*warpFn)(CGPoint) = warpPointer;
 static double warpSettle = 0.08;   // s: macOS takes the move before the pointer goes back
 static int (*vmWindowsFn)(pid_t, CGRect *, int) = windowsOf;
+static int (*vmAllWindowsFn)(pid_t, CGWindowID *, int) = allWindowsOf;
 static pid_t (*topAppFn)(CGRect, pid_t, CGWindowID *) = topAppOn;
 static int (*hideFn)(pid_t) = ns_hide;   // a VM in a window only
 static int (*escapeAllFn)(void) = escapeAll;
@@ -2445,6 +2466,7 @@ typedef struct { CGDirectDisplayID id; CGRect b; uint64_t from, to; int dir, don
 enum { BY_SHORTCUT, BY_DOCK };
 static Move moves[MAX_DISPLAYS];
 static int nMoves, leaving, signRetried, learnedNow, shortcutOff;
+static CGWindowID enterWin;   // back in: the VM's window on the pointer's display (activated when no move lands)
 
 static int addMove(const DisplaySpaces *d, int dir, uint64_t to) {
   // "Displays have separate Spaces" off: one list for every display, moved once.
@@ -2594,12 +2616,13 @@ static void checkEnter(void) {
   lateLooks = 0;
   if (rest) {
     logf_("escape combo: not in the VM's Space: its window to the front instead");
-    goTo(vmPid, vmWin, "back into the VM:", NULL);
+    goTo(vmPid, enterWin ? enterWin : vmWin, "back into the VM:", NULL);
     return;
   }
   // The keyboard to the VM now on the pointer's display (a full-screen Space
-  // usually brings its app).
-  if (frontFn() != vmPid) goTo(vmPid, vmWin, "keyboard to the VM:", NULL);
+  // usually brings its app), through its window there: the main window on
+  // another display would bring that display back into the VM too.
+  if (frontFn() != vmPid) goTo(vmPid, enterWin ? enterWin : vmWin, "keyboard to the VM:", NULL);
 }
 
 // The combo's Ctrl, Option and Cmd are most likely still down when its steps
@@ -3190,20 +3213,48 @@ static void closeMissionControl(void) {
   whenKeysUp(^{ closeMissionControlOnce("Esc in Mission Control (the VM would have taken it)"); }, 50);
 }
 
+// The VM's own Space on this display and its window there: its main window's,
+// else another of its windows' (OmacVM.app has one per display in full
+// screen), the one nearest the display's current Space. 0: none there.
+static uint64_t vmSpaceOn(const DisplaySpaces *d, CGWindowID *win) {
+  uint64_t s = windowSpaceFn(vmWin);
+  *win = vmWin;
+  if (s && spaceIndex(d, s) >= 0) return s;
+  CGWindowID ws[MAX_DISPLAYS * 2]; int n = vmAllWindowsFn(vmPid, ws, MAX_DISPLAYS * 2);
+  int at = spaceIndex(d, d->current), best = -1;
+  uint64_t found = 0;
+  *win = 0;
+  for (int i = 0; i < n; i++) {
+    uint64_t t = windowSpaceFn(ws[i]);
+    int j = t ? spaceIndex(d, t) : -1;
+    if (j < 0) continue;
+    int dist = at < 0 ? 0 : abs(j - at);
+    if (best < 0 || dist < best) { best = dist; found = t; *win = ws[i]; }
+  }
+  return found;
+}
+
 static void enterVMNow(int mayCloseMC) {
   if (mayCloseMC && missionControlOpenFn()) { closeMissionControlThenEnter(); return; }
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGPoint p = pointerFn();
-  uint64_t vmSpace = windowSpaceFn(vmWin);
-  nMoves = 0; leaving = 0; lateLooks = 0;
+  nMoves = 0; leaving = 0; lateLooks = 0; enterWin = vmWin;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
-    if (!all && !CGRectContainsPoint(d->bounds, p)) continue;
+    int under = CGRectContainsPoint(d->bounds, p);
+    if (!all && !under) continue;
     uint64_t want = spaceOn(left, d->id);
-    if (!want || spaceIndex(d, want) < 0) want = all ? 0 : vmSpace;
+    CGWindowID w = 0;
+    // Not left by the combo (a swipe, Mission Control, or the VM's Spaces
+    // are new): the VM's Space on this display, also a second display's
+    // window's (before, only the main window's: on the external the combo
+    // brought the main window instead).
+    if (!want || spaceIndex(d, want) < 0) want = all ? 0 : vmSpaceOn(d, &w);
+    else if (under) vmSpaceOn(d, &w);
+    if (under && w) enterWin = w;
     if (want && d->current != want) addMove(d, stepToward(d, want), want);
   }
-  if (!nMoves) { goTo(vmPid, vmWin, "back into the VM:", NULL); return; }
+  if (!nMoves) { goTo(vmPid, enterWin, "back into the VM:", NULL); return; }
   whenKeysUp(^{
     if (runMoves(BY_SHORTCUT, "back into the VM")) after(^{ checkEnter(); });
     else checkEnter();
