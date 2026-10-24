@@ -235,7 +235,10 @@ commit 82927e9. Changes here:
   are core), `virgl-shader-shadow-lod-extension.patch`,
   `virgl-shader-integer-outputs.patch`, `virgl-shader-sampler-swizzle.patch`
   (no swizzle on a sampler: Mesa's VA-API video compositor, Chrome's decoded
-  frames), `virgl-blitter-core-glsl-version.patch`,
+  frames; with it `virgl-const-buffer0-resource.patch`,
+  `virgl-shader-array-sampler-2d-view.patch`,
+  `virgl-view-swizzle-shared-texture.patch` and, for VideoToolbox's AV1 frames,
+  `virgl-video-picture-size.patch`: docs/video-decode.md), `virgl-blitter-core-glsl-version.patch`,
   `virgl-blitter-integer-msaa.patch`, `virgl-framebuffer-no-attachments.patch`,
   `virgl-caps-sampler-limit.patch`. Checked at build time by
   `Tests/virgl/test-core-glsl-shaders.c`, `test-blitter-shaders.c`,

@@ -21,6 +21,18 @@ in more words.
   than the picture, and those were never written; they now repeat the picture's last row and
   column. In small call tiles that strip can still show as a stretched edge instead of green.
   The VM needs no update.
+- **Google Chrome decodes video on the Mac's media engine again.** Chrome 155 and newer, Brave and
+  other Chromium-based apps had gone back to decoding YouTube and video calls on the VM's CPU
+  (Chrome's log: "Plane 0 is out of bounds: ... > 4096"). Chrome converts each decoded frame to
+  RGB and checks that frame's buffer size first; the VM's buffers looked one page small. Past
+  that check the converted frames would have been black: the Mac refused the converting shader,
+  its colour matrix read as zeros and it could not read the video's planes (FFmpeg's
+  `scale_vaapi` too). The VM's video driver now
+  asks for buffers of the real size in Chromium-based apps, and the Mac draws the frames. For now
+  up to 1080p (calls too): above that Chrome's hardware path dropped many more frames than its
+  own decoders in our tests, so 1440p and 4K stay on the CPU. At 1080p the VM's CPU went from
+  0.77 to 0.47 cores (MacBook Pro M4 Max). Needs the app update and Update VM; restart Chrome
+  after it.
 
 ## 3.1.31
 

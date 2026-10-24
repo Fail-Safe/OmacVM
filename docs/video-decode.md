@@ -4,8 +4,10 @@ In OmacVM.app, videos in the VM are decoded by the Mac's own video decoder
 (the media engine) instead of the VM's CPU. YouTube in 4K at 60 frames per
 second keeps the VM's CPU far less busy: about 0.3 cores in Google Chrome
 and 0.4 to 0.6 in Omarchy's own Chromium, instead of 1.0 to 1.6 (see
-[Numbers](#numbers) and [Chromium](#chromium-from-arch-linux-arm)). Firefox
-decodes in hardware too, but its VM stays at about 0.9 cores.
+[Numbers](#numbers) and [Chromium](#chromium-from-arch-linux-arm)). Google
+Chrome 155 and newer use it up to 1080p since 3.1.32 (1440p and 4K stay on
+the CPU for now: [Chrome's converted frames](#chromes-converted-frames)).
+Firefox decodes in hardware too, but its VM stays at about 0.9 cores.
 
 ## What works
 
@@ -22,7 +24,11 @@ Browsers in an OmacVM.app VM:
 - **Google Chrome** (Linux ARM): yes, no flags needed. YouTube chooses AV1 or
   VP9; `chrome://gpu` shows *Video Decode: Hardware accelerated* and
   `chrome://media-internals` *VaapiVideoDecoder*. Install it with
-  `src/bench/install-chrome.sh` (Arch Linux ARM has no package).
+  `src/bench/install-chrome.sh` (Arch Linux ARM has no package). Chrome 155
+  and newer decode in hardware from OmacVM 3.1.32 with Update VM (before:
+  on the CPU, *Plane 0 is out of bounds: ... > 4096* in Chrome's log; see
+  [Chrome's converted frames](#chromes-converted-frames)), for now up to
+  1080p: 1440p and 4K stay on the CPU, where they drop fewer frames.
 - **Firefox**: yes for H.264 and VP9 (AV1 stays on the CPU, see below; HEVC
   Firefox does not hand to VA-API at all here). The decoding is on the media
   engine, but YouTube 4K at 60 fps in VP9 still kept the VM at 0.9 to 1.0
@@ -126,6 +132,8 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   FFmpeg's `hwdownload,format=yuv420p`), a plain reshuffle on the CPU, so
   they stay bit for bit the decoded ones; Mesa would convert on the GPU
   through RGB.
+  In Chromium's processes it also asks Mesa for exportable surfaces
+  ([below](#chromes-converted-frames)).
   Its folder `/usr/local/lib/dri` goes into `/etc/ld.so.conf.d`: Firefox
   decodes in a sandboxed process that may load libraries only from the paths
   ld.so knows, so without it YouTube in Firefox falls back to the CPU.
@@ -133,7 +141,94 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
 Switches on the Mac (QEMU's environment): `OMACVM_VIDEO_DECODE=0` turns it
 off, `OMACVM_VIDEO_DEBUG=1` logs each stream and the time per frame,
 `OMACVM_VIDEO_AV1=1` offers AV1 (the app sets it for VMs whose `omacvm apply`
-put the shim in: the VM folder's `video-decode` file).
+put the shim in: the VM folder's `video-decode` file). In the VM:
+`OMACVM_VA_EXPORT=1` or `0` in an app's environment turns the shim's
+exportable surfaces on or off for it; `OMACVM_VA_MAX=N` sets the largest
+size Chromium decodes in hardware (default 1920, 0: no limit).
+
+## Chrome's converted frames
+
+Google Chrome (and Brave, Electron apps) with Skia on OpenGL shows a
+hardware-decoded frame only as ARGB: NV12 counts as renderable only with
+Vulkan or when GBM can make NV12 buffers, which virgl cannot. So Chrome
+converts each frame on the GPU (VA-API video processing, Mesa's video
+compositor: one shader pass on the Mac's GPU) into an ARGB surface of its
+own, and hands that surface back to VA-API. Six things stood in the way,
+all fixed in 3.1.32:
+
+- Chrome first checks each plane against its dma-buf's size
+  (`vaapi_wrapper.cc`, `ValidateAndGetPlaneInfo`). Mesa's virgl gives a
+  surface whose pixels the Mac keeps a guest buffer of one page, so the
+  dma-buf said 4096 bytes and Chrome decoded on the CPU. The shim now adds
+  libva's export hint (memory type `DRM_PRIME_2` without a descriptor) to
+  every surface Mesa allocates in Chromium's processes (the browser by
+  name, its GPU and decoder processes by their `--type=` switch): Mesa then
+  gives them a guest buffer of their real size. That costs guest memory:
+  at 1080p 3.3 MB per NV12 surface and 8.3 MB per ARGB one, at 4K 12.5 and
+  33 MB; Chrome keeps up to 16 ARGB frames and the decoder's NV12 ones.
+  Other apps (Firefox, mpv, FFmpeg) keep Mesa's one page.
+- Mesa's compositor shader samples with a swizzle on the sampler, which
+  virglrenderer wrote into the GLSL; the Mac refused it, and the converted
+  frames stayed black (`virgl-shader-sampler-swizzle.patch`).
+- The compositor binds its colour matrix as a buffer in constant slot 0;
+  virglrenderer took a shader's constants only from the data the guest
+  sends, so the matrix read as zeros and the frames were black again
+  (`virgl-const-buffer0-resource.patch`). FFmpeg's `scale_vaapi` (the same
+  conversion) showed it too.
+- The compositor reads U and V from the one UV plane through two views with
+  different swizzles; OpenGL keeps one swizzle per texture, so both read V
+  (red came out magenta). Such views now get their swizzle in the shader
+  (`virgl-view-swizzle-shared-texture.patch`).
+- The compositor declares its plane samplers as 2D arrays, while the
+  planes of a progressive video buffer are plain 2D textures. Gallium reads
+  such a texture as layer 0; on OpenGL a 2D-array sampler reads nothing
+  from it. Where a shader declares a 2D-array sampler and a plain 2D texture
+  is bound there, virglrenderer now declares a 2D sampler
+  (`virgl-shader-array-sampler-2d-view.patch`).
+
+- VideoToolbox's AV1 frame is as large as the format description, which
+  the backend made from Mesa's `max_width` and `max_height` plus one; Mesa
+  sends the surface's size there (not minus one), so the frame came back
+  larger than the picture and its extra rows (near zero: green) were copied
+  as picture. The copy now takes AV1's and VP9's frame size from the
+  picture description (`virgl-video-picture-size.patch`;
+  `OMACVM_VIDEO_DEBUG=1` logs "output WxH, picture WxH").
+
+How well it plays: YouTube *Big Buck Bunny* 60 fps, Chrome 156, test VMs
+with 4 CPUs and 4 GB without a window, `src/bench/video-bench.py`, the VM's
+busy cores and dropped frames, CPU decoding (before) against the media
+engine:
+
+| Mac, video | CPU: cores, dropped | Media engine: cores, dropped |
+|---|---|---|
+| MacBook Pro M4 Max, 4K AV1 | 1.24-1.29, 3.1-3.4 % | 0.43-0.45, 11-14 % |
+| MacBook Pro M4 Max, 1080p AV1 | 0.77, 2.1 % | 0.47, 5-6 % |
+| Mac mini M4, 4K AV1 | - | 0.30, 3.1 % |
+| MacBook Air M2, 4K VP9 (no AV1 decoder) | 1.77, 0.1 % | 0.49, 31 % |
+| MacBook Air M2, 1440p VP9 | 1.09, 5.1 % | 0.60, 15 % |
+
+The media engine takes about a third of the CPU, but above 1080p Chrome's
+hardware path drops many more frames (the decoding itself keeps up: FFmpeg
+decodes and converts 4K VP9 at 128 fps on the Air; with the VM's graphics on
+QEMU's main loop, `gpuMainLoop`, 4K AV1 on the M4 Max dropped 2.7 %). Where
+those frames go is not found yet. So the shim tells Chrome a largest size of
+1920 x 1920 (`OMACVM_VA_MAX`, 0: no limit): calls and up to 1080p (also
+portrait) on the media engine, 1440p and 4K on the CPU. With the limit,
+YouTube 4K on the M4 Max played VP9 on the CPU (0.98 cores, 3.7 % dropped).
+Chrome's canvas readback of a hardware frame (not the screen) takes the
+ARGB surface's coded size: 8 black rows under 1080p, 10 black columns at 854
+wide.
+
+The shim adds the hint only when the Mac's runtime has the shader fix: the
+app says `omacvm.vaexport=1` at every start (`/run/omacvm/host.env`, read
+once when the driver loads, before Chrome's sandbox closes). A VM updated
+by a newer `omacvm` than its app keeps decoding on the CPU instead of
+showing black video. Tests: `src/app/guest/tests/va-shim-surfaces.sh` (CI),
+`tests/video/guest/va-export-size.c` (in a VM: every plane fits its
+dma-buf), `Tests/virgl/test-core-glsl-shaders.c` (the compositor's shader),
+`Tests/virgl/test-const-ubo.c` cases 22 to 24 (constant slot 0 as a
+buffer, a 2D texture through a 2D-array sampler, two views of one texture),
+`test-view-key.c`, `test-video-padding.c` (AV1 with Mesa's sizes).
 
 ## Chromium from Arch Linux ARM
 
