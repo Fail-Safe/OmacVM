@@ -2414,6 +2414,7 @@ static double doublePress = 0.4;     // s between the two presses (the offline t
 int ns_open_mission_control(void);
 static int (*missionAppFn)(void) = ns_open_mission_control;
 static int movesCancelled;           // the first press's steps not posted yet are dropped
+static int leaveWaiting;             // a move out waits for the combo's keys to come up (nothing posted yet)
 static double mcClosedAt = -1;       // when we last closed Mission Control (its shortcut toggles it)
 static double mcClosing = 1.0;       // s it may still be listed while it closes (the offline test sets its own)
 static double lastComboAt = -1;
@@ -2637,7 +2638,9 @@ static void leaveVM(void) {
     if (dir && addMove(d, dir, d->spaces[spaceIndex(d, d->current) + dir])) rememberOn(left, d->id, d->current);
   }
   if (nMoves) {
+    leaveWaiting = 1;
     whenKeysUp(^{
+      leaveWaiting = 0;
       if (runMoves(BY_SHORTCUT, "out of the VM")) after(^{ checkLeave(BY_SHORTCUT); });
       else { shortcutOff = 1; checkLeave(BY_SHORTCUT); }   // the shortcut is off: on to the Dock swipe
     }, 50);
@@ -2720,7 +2723,9 @@ static int leaveToward(int dir, CGDirectDisplayID done) {
     logf_("swipe out to the %s: capture off", side);
     sendState("esc");
   }
+  leaveWaiting = 1;
   whenKeysUp(^{
+    leaveWaiting = 0;
     if (runMoves(BY_SHORTCUT, done ? "swipe out, the other displays" : "swipe out")) after(^{ checkLeave(BY_SHORTCUT); });
     else { shortcutOff = 1; checkLeave(BY_SHORTCUT); }
   }, 50);
@@ -3344,6 +3349,9 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
       logf_("escape combo: capture %s", capturing ? "ON" : "off");
       sendState(capturing ? "on" : "esc");
       if (act == COMBO_LEAVE) later(leaveVM);
+      // Back in before the last move out was posted (it waits for Ctrl and
+      // Option to come up): that move is dropped, the VM stays.
+      else if (leaveWaiting) { movesCancelled = 1; logf_("escape combo: pressed again before the move out: it is dropped"); }
     }
     swallowEscUp = 1;
     return NULL;

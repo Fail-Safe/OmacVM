@@ -895,6 +895,28 @@ int main(void) {
     r3 = press(K, HID, 0);
     check(r3 == 1 && !mcKeys && world[0].cur == 473, "two presses 0.45 s apart: out, then back in, no Mission Control");
     doublePress = 0; sent(); settle(vm, NET_APP); sent();
+    // Ctrl+Option still held, Esc pressed again after doublePress but before
+    // the first press's move went out (it waits for the keys to come up):
+    // back to the VM (capture on), and that move is dropped. Before: capture
+    // on, then the move out ran anyway (the user's log, 2026-10-22 16:05).
+    escaped = 0; front = vm; world[0].cur = 473; frontChanged(vm, NET_APP, 1, "Omarchy", 26, 0); sent(); lastComboAt = -1;
+    heldPolls = 30; keys = spaceKeys = mcKeys = swipes = 0;
+    CGEventRef d1 = key(1, K, HID, 0), u1 = key(0, K, HID, 0);
+    tapCb(NULL, kCGEventKeyDown, d1, NULL); tapCb(NULL, kCGEventKeyUp, u1, NULL);
+    CFRelease(d1); CFRelease(u1);
+    for (int i = 0; i < 5; i++) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);   // the move waits for the keys
+    check(!capturing && escaped && !spaceKeys && heldPolls > 0, "pressed again, keys held: the first press's move still waits");
+    d1 = key(1, K, HID, 0); u1 = key(0, K, HID, 0);
+    tapCb(NULL, kCGEventKeyDown, d1, NULL); tapCb(NULL, kCGEventKeyUp, u1, NULL);
+    CFRelease(d1); CFRelease(u1);
+    heldPolls = 0; settleSteps();
+    check(capturing && !escaped && !spaceKeys && !swipes && !mcKeys && world[0].cur == 473,
+          "... the second press: back in the VM (capture on), the first press's move dropped");
+    check(!strcmp(sent(), "S esc ctrl-opt|S on|"), "... the guest lets go, then takes the keys again");
+    // The next press works as before.
+    r3 = press(K, HID, 0);
+    check(r3 == 1 && spaceKeys == 1 && world[0].cur == 472, "... and the next press moves out as before");
+    sent(); settle(vm, NET_APP); sent();
   }
 
   // ---- After Mission Control + Esc on Desktop 1, the VM's app still in
