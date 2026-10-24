@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.1.32 (unreleased)
+
+- **Local AI models load with Vulkan on smaller Macs.** The VM's Vulkan memory window is now at
+  least 4 GB. It was 1 GB for a 4 GB VM on an 8 GB Mac and 2 GB for a 24 GB VM on a 32 GB Mac,
+  too small for a 3B language model's weights. The window is only address space: what Vulkan
+  really uses still counts against the GPU memory budget, which follows macOS's memory pressure.
+
 ## 3.1.31
 
 - **Trackpad gestures after sleep.** After the Mac woke from a longer sleep (Power Nap's short
