@@ -106,7 +106,7 @@ func until(_ seconds: Double, _ ok: () -> Bool) -> Bool {
 var logs: [String] = []
 let logLock = NSLock()
 let source = FakeSource()
-let hub = CameraHub(log: { m in logLock.lock(); logs.append(m); logLock.unlock() }, source: source, firstRetry: 0.2, frameTimeout: 0.5)
+let hub = CameraHub(log: { m in logLock.lock(); logs.append(m); logLock.unlock() }, source: source, firstRetry: 0.2, frameTimeout: 0.5, firstFrameTimeout: 1.5)
 var sv: [Int32] = [0, 0]
 guard socketpair(AF_UNIX, SOCK_STREAM, 0, &sv) == 0 else { print("FAIL socketpair"); exit(1) }
 hub.attach(fd: sv[0], label: "test VM")
@@ -138,6 +138,11 @@ source.answer("LG UltraFine Display Camera")
 let quiet = source.counts.0
 check(until(3) { saw("unavailable") && source.counts.0 > quiet }, "no picture for the timeout: the camera is started again")
 check(until(2) { saw("streaming:LG UltraFine Display Camera") }, "no picture: streaming again")
+// A camera slow with its first frame (Continuity Camera): longer than the
+// timeout between frames is fine.
+let slow = source.counts.0
+_ = until(1.0) { false }
+check(source.counts.0 == slow, "the first frame may take longer than the timeout between frames")
 source.onFrame?(Data(count: 16))
 
 // 4. No camera at all (lid closed, the display's camera unplugged): it keeps

@@ -352,18 +352,24 @@ final class CameraHub: @unchecked Sendable {
   private let capture: CameraSource
   private let log: (String) -> Void
   // Streaming with no frame for this long (a camera that stopped without a
-  // word): picked and started again.
+  // word): picked and started again. The first frame of a start may take
+  // longer (Continuity Camera over the air). Seconds of uptime: a sleep or a
+  // clock change does not count.
   private let frameTimeout: Double
-  private var lastFrame = Date.distantPast
+  private let firstFrameTimeout: Double
+  private var lastFrame = 0.0
+  private var framed = false   // a frame since this start
   private var watchdog: DispatchSourceTimer?
   let maxConnections = 8
 
-  init(log: @escaping (String) -> Void, source: CameraSource = CameraCapture(), firstRetry: Double = 2, frameTimeout: Double = 5) {
+  init(log: @escaping (String) -> Void, source: CameraSource = CameraCapture(), firstRetry: Double = 2, frameTimeout: Double = 5,
+       firstFrameTimeout: Double = 20) {
     self.log = log
     self.capture = source
     self.firstRetry = firstRetry
     self.retryDelay = firstRetry
     self.frameTimeout = frameTimeout
+    self.firstFrameTimeout = firstFrameTimeout
     capture.onFrame = { [weak self] in self?.frame($0) }
     capture.onFailure = { [weak self] in self?.failed($0) }
     capture.onCameraAdded = { [weak self] in self?.retryNow() }
@@ -460,7 +466,7 @@ final class CameraHub: @unchecked Sendable {
       switch result {
       case .success(let name):
         state = "streaming"; cameraName = name
-        lastFrame = Date()
+        lastFrame = ProcessInfo.processInfo.systemUptime; framed = false
         let retrying = !problem.isEmpty   // "back" comes with the first frame
         lock.unlock()
         watch()
@@ -506,10 +512,11 @@ final class CameraHub: @unchecked Sendable {
     t.setEventHandler { [weak self, weak t] in
       guard let self else { t?.cancel(); return }
       self.lock.lock()
-      let streaming = self.state == "streaming", quiet = -self.lastFrame.timeIntervalSinceNow, name = self.cameraName
+      let streaming = self.state == "streaming", quiet = ProcessInfo.processInfo.systemUptime - self.lastFrame
+      let limit = self.framed ? self.frameTimeout : self.firstFrameTimeout, name = self.cameraName
       self.lock.unlock()
       if !streaming { t?.cancel(); return }
-      if quiet > self.frameTimeout { self.failed("no picture from \(name) for \(Int(self.frameTimeout.rounded())) s") }
+      if quiet > limit { self.failed("no picture from \(name) for \(Int(limit.rounded())) s") }
     }
     lock.lock(); watchdog?.cancel(); watchdog = t; lock.unlock()
     t.resume()
@@ -544,7 +551,7 @@ final class CameraHub: @unchecked Sendable {
   private func frame(_ payload: Data) {
     lock.lock()
     guard state == "streaming" else { lock.unlock(); return }
-    lastFrame = Date()
+    lastFrame = ProcessInfo.processInfo.systemUptime; framed = true
     if retryDelay != firstRetry || !problem.isEmpty {   // it works again
       if !problem.isEmpty { log("back: \(cameraName)") }
       retryDelay = firstRetry; problem = ""
