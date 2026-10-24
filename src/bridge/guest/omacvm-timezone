@@ -148,6 +148,11 @@ def from_bridge(follower: Follower) -> bool:
         return False
     env = dict(os.environ, HOME=home, OMACVM_BRIDGE_TOKEN_FILE=token)
     as_user = dict(user=pw.pw_uid, group=pw.pw_gid, extra_groups=[], cwd="/") if os.geteuid() == 0 else {}
+    # Through the session's shared stream when it runs (one connection to the
+    # Mac per VM); before the login straight to the Mac, until the session's
+    # stream is there.
+    shared = f"{ROOT}/run/user/{pw.pw_uid}/omacvm-bridge-events.sock"
+    direct = not os.path.exists(shared)
     proc = subprocess.Popen([CLIENT, "events"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **as_user)
     event, buffer, seen, got = "", b"", time.monotonic(), False
     try:
@@ -178,6 +183,8 @@ def from_bridge(follower: Follower) -> bool:
             elif time.monotonic() - seen > SILENCE_SECONDS:
                 follower.say("no word from the Bridge: reconnecting")
                 break
+            if direct and os.path.exists(shared):
+                break   # the session's stream is up: over to it
     finally:
         proc.kill()
         _, err = proc.communicate()
