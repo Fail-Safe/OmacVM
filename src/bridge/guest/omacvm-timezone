@@ -162,7 +162,9 @@ def from_bridge(follower: Follower) -> bool:
     event, buffer, seen, got = "", b"", time.monotonic(), False
     try:
         while True:
-            ready, _, _ = select.select([proc.stdout], [], [], 5)
+            # Before the login it looks for the session's stream every 5 s;
+            # after that only the silence clock needs a wake-up.
+            ready, _, _ = select.select([proc.stdout], [], [], 5 if direct else SILENCE_SECONDS)
             if ready:
                 chunk = os.read(proc.stdout.fileno(), 65536)
                 if not chunk:
