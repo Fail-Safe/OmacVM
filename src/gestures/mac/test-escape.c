@@ -714,8 +714,8 @@ int main(void) {
           "focus on the external, pointer on the MacBook: the external moves out (its Dock swipe)");
     check(world[0].cur == 222 && warps == 2, "... the MacBook stays on the VM (the pointer went there and back)");
     settle(vm, NET_APP); sent();
-    // Back in from macOS: where the pointer is (macOS's focus), as before: the
-    // pointer is on the MacBook, which shows the VM, so the external comes back.
+    // Back in from macOS goes by the pointer (macOS's focus), as before; the
+    // external is put back by hand here for the next rows.
     front = safari; frontChanged(safari, -1, 0, "", 44, 1); sent();
     world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
     focusReply = "D -"; asks = 0;
@@ -733,7 +733,7 @@ int main(void) {
           "a place on no display of the VM: the pointer's display");
     sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
     world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
-    focusReply = "D 1 2 x"; 
+    focusReply = "D 1 2 x";
     check(press(K, HID, 0) == 1 && spaceKeys == 1 && movedOn[0] == 1, "junk for an answer: not taken, the pointer's display after the wait");
     sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
     world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;

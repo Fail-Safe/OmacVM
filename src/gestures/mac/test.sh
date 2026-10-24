@@ -26,7 +26,7 @@
 #    with "all"), toward the Space it came from; in macOS back in; not moved
 #    or the shortcut off -> a Dock swipe; still not moved, or no Spaces
 #    information -> a notice in Omarchy, nothing else (never Mission
-#    Control); never out of full screen, never hidden; the keyboard follows the pointer's display; pressed in
+#    Control); never out of full screen, never hidden; the keyboard follows the display that moved; pressed in
 #    Mission Control (after the double press) it closes it and goes back into the VM; with the VM on
 #    two displays "Focused monitor" is the display with the VM's own focus (the guest answers "Q"
 #    with "D", test-focus.py), else the pointer's, and back in also on a display that shows a
