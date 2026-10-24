@@ -5,6 +5,13 @@ in more words.
 
 ## 3.1.32 (unreleased)
 
+- **Faster canvas and SVG drawing in Chrome and Chromium.** In OmacVM.app VMs, Chrome no longer
+  draws every canvas stroke and clip path on the CPU: it now sees "OmacVM-GPU" as its GL renderer
+  instead of "virgl", the name for which Chrome's Skia turns instanced drawing off. MotionMark's
+  Paths and Suits ran at 29-48 fps and now hold the display's rate (75 fps in the test VM). Only
+  Chrome and Chromium get the new name (other programs, Brave and Electron apps among them, keep
+  "virgl"), and web pages that read the WebGL renderer now see "OmacVM-GPU" instead of the Mac's
+  GPU model. A VM gets it at its next Update VM; restart Chrome after that.
 - **Vulkan windows show each new frame at once.** With "Vulkan windows without a copy" on (the
   default since 3.1.26, macOS 26 and newer), a Vulkan app's window showed its previous frame for
   one screen refresh after each new one: in Zed the caret jumped back a character for a moment on
@@ -21,6 +28,12 @@ in more words.
   than the picture, and those were never written; they now repeat the picture's last row and
   column. In small call tiles that strip can still show as a stretched edge instead of green.
   The VM needs no update.
+- **Local AI models load with Vulkan on smaller Macs.** The VM's Vulkan memory window is now at
+  least 4 GB. It was 1 GB for a 4 GB VM on an 8 GB Mac and 2 GB for a 24 GB VM on a 32 GB Mac,
+  too small for a 3B language model's weights. The window limits how much Vulkan memory the VM
+  can map; what Vulkan allocates counts against the VM's GPU memory guard (three quarters of the
+  Mac's memory), not against macOS's memory pressure. So on an 8 GB Mac a large model can now
+  make macOS swap where it did not load before. The VM needs no update.
 - **Google Chrome decodes video on the Mac's media engine again.** Chrome 155 and newer, Brave and
   other Chromium-based apps had gone back to decoding YouTube and video calls on the VM's CPU
   (Chrome's log: "Plane 0 is out of bounds: ... > 4096"). Chrome converts each decoded frame to
