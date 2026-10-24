@@ -227,11 +227,12 @@ enum OutputMute {
   static let zero = 0.0005
 
   /// true = mute, false = unmute, nil = leave it. `before`, `target`: the
-  /// volume (0..1) before and after; `unmute`: the change unmutes anyway (a
-  /// volume key, a relative raise).
-  static func after(before: Double, target: Double, unmute: Bool) -> Bool? {
+  /// volume (0..1) before and after (`before` nil: it could not be read);
+  /// `unmute`: the change unmutes anyway (a volume key, a relative raise).
+  static func after(before: Double?, target: Double, unmute: Bool) -> Bool? {
     if target < zero { return true }
-    if unmute || before < zero { return false }   // up from 0: unmute what 0 muted
+    if unmute { return false }
+    if let before, before < zero { return false }   // up from 0: unmute what 0 muted
     return nil
   }
 }

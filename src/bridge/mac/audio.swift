@@ -168,8 +168,8 @@ final class Audio {
     let scope = input ? scopeIn : scopeOut, dev = try device(input: input)
     guard let va = volumeAddress(dev, scope) else { throw APIError(409, "\(name(dev)) has no volume control") }
     guard settable(dev, va) else { throw APIError(409, "the volume of \(name(dev)) cannot be changed") }
-    let now = Double(get(dev, va, Float32(0)) ?? 0)
-    let target = Float32(max(0, min(1, absolute ?? (now + (delta ?? 0)))))
+    let now = get(dev, va, Float32(0)).map(Double.init)
+    let target = Float32(max(0, min(1, absolute ?? ((now ?? 0) + (delta ?? 0)))))
     let st = set(dev, va, target)
     guard st == noErr else { throw APIError(500, "setting the volume failed (OSStatus \(st))") }
     let ma = addr(kAudioDevicePropertyMute, scope)

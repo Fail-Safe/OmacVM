@@ -525,6 +525,9 @@ o = FakeOutput(volume: 0.04, muted: false)
 o.set(0.04 - 0.05); check(o.volume == 0 && o.muted, "volume 0: omacvm-bridge volume -5 to 0 mutes")
 o.set(0.05, unmute: true); check(o.volume == 0.05 && !o.muted, "volume 0: omacvm-bridge volume +5 from 0 unmutes")
 check(OutputMute.after(before: 0.5, target: 0.0004, unmute: false) == true, "volume 0: below 0.0005 (shown as 0.000) counts as 0")
+check(OutputMute.after(before: nil, target: 0.4, unmute: false) == nil, "volume 0: the slider leaves the mute alone when the volume could not be read")
+check(OutputMute.after(before: nil, target: 0, unmute: false) == true, "volume 0: ... but 0 still mutes")
+check(OutputMute.after(before: nil, target: 0.4, unmute: true) == false, "volume 0: ... and a key still unmutes")
 
 if failed > 0 { print("\(failed) failed"); exit(1) }
 print("models: all ok")
