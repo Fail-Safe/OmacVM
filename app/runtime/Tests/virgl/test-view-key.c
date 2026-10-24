@@ -6,6 +6,9 @@
  *    without (RGBA8), by no view, by a 2D view, or dropped by set_num_sampler_views;
  *  - a compute slot also sets cs_shader_dirty;
  *  - views without key bits swapped (2D for 2D, RGBA8 buffer for none) do not.
+ *  - with a fragment shader bound that declares slot 0 a 2D_ARRAY sampler, a plain 2D view
+ *    coming or going there does (virgl-shader-array-sampler-2d-view.patch), and its key
+ *    bit is set exactly then.
  * And vrend_view_key_bits() agrees with vrend_fill_shader_key(): two views give the same
  * key exactly when they give the same bits (so a new key input from views cannot be
  * missed silently).
@@ -134,6 +137,44 @@ int main(void)
    vrend_set_num_sampler_views(&ctx, PIPE_SHADER_FRAGMENT, 0, 1);
    check(sub.shader_dirty, "set_num_sampler_views drops an L8 buffer slot: shaders marked dirty");
    vrend_set_num_sampler_views(&ctx, PIPE_SHADER_FRAGMENT, 0, 0);
+
+   /* a fragment shader that declares slot 0 a 2D_ARRAY sampler: a 2D view there is a key
+    * bit (sampled as 2D), so it coming or going selects the shaders again */
+   struct vrend_shader_selector arrays = { .type = PIPE_SHADER_FRAGMENT };
+   arrays.sinfo.samplers_2d_array_mask = 1;
+   sub.shaders[PIPE_SHADER_FRAGMENT] = &arrays;
+   static const struct { int from, to; bool dirty; const char *what; } a[] = {
+      { 0, V_2D, true, "2D_ARRAY sampler: no view -> 2D texture" },
+      { V_2D, V_2D_B, false, "2D_ARRAY sampler: 2D texture -> another 2D texture" },
+      { V_2D, 0, true, "2D_ARRAY sampler: 2D texture -> no view" },
+      { V_2D, V_RECT, true, "2D_ARRAY sampler: 2D texture -> emulated rectangle" },
+   };
+   for (unsigned i = 0; i < ARRAY_SIZE(a); i++) {
+      bool dirty = dirty_after(&ctx, PIPE_SHADER_FRAGMENT, a[i].from, a[i].to, NULL);
+      snprintf(text, sizeof(text), "%s: %s", a[i].what,
+               a[i].dirty ? "shaders marked dirty" : "nothing to select again");
+      check(dirty == a[i].dirty, text);
+   }
+   vrend_set_single_sampler_view(&ctx, PIPE_SHADER_FRAGMENT, 0, 0);
+   {
+      struct vrend_shader_key k2d, knone, kbuf;
+      struct vrend_sampler_view *old = sub.views[PIPE_SHADER_FRAGMENT].views[0];
+      sub.views[PIPE_SHADER_FRAGMENT].max_num_views = 1;
+      sub.views[PIPE_SHADER_FRAGMENT].views[0] = &views[V_2D];
+      memset(&k2d, 0, sizeof(k2d));
+      vrend_fill_shader_key(&sub, &arrays, &k2d);
+      sub.views[PIPE_SHADER_FRAGMENT].views[0] = NULL;
+      memset(&knone, 0, sizeof(knone));
+      vrend_fill_shader_key(&sub, &arrays, &knone);
+      sub.views[PIPE_SHADER_FRAGMENT].views[0] = &views[V_RGBA8];
+      memset(&kbuf, 0, sizeof(kbuf));
+      vrend_fill_shader_key(&sub, &arrays, &kbuf);
+      sub.views[PIPE_SHADER_FRAGMENT].views[0] = old;
+      check(k2d.sampler_views_2d_for_array_mask == 1 && !knone.sampler_views_2d_for_array_mask &&
+            !kbuf.sampler_views_2d_for_array_mask,
+            "2D_ARRAY sampler: the key bit is set for a 2D view only");
+   }
+   sub.shaders[PIPE_SHADER_FRAGMENT] = NULL;
 
    /* vrend_view_key_bits() and vrend_fill_shader_key() agree on every pair */
    struct vrend_sampler_view *all[V_COUNT] = { NULL };

@@ -49,7 +49,11 @@
  * 22 constant buffer 0 as a guest buffer (SET_UNIFORM_BUFFER index 0, as Mesa's VA-API video
  *    compositor binds its colour matrix; virgl-const-buffer0-resource.patch): the shader's
  *    CONST[0..n] read it, new data in the same buffer is seen by the next draw, a later
- *    SET_CONSTANT_BUFFER wins again and binding the buffer again wins over that.
+ *    SET_CONSTANT_BUFFER wins again and binding the buffer again wins over that;
+ * 23 a fragment shader that declares a 2D_ARRAY sampler (as Mesa's VA-API video compositor
+ *    declares its planes) with a plain 2D texture view bound reads the texture, as gallium
+ *    reads such a view (layer 0); the same program with the colour from constant buffer 0
+ *    is the compositor's whole path (virgl-shader-array-sampler-2d-view.patch).
  * Run as is, with OMACVM_VIRGL_CONST_UBO=1 and with OMACVM_VIRGL_CONST_UBO=0.
  * Usage: test-const-ubo [case] */
 #include <OpenGL/OpenGL.h>
@@ -72,11 +76,11 @@ enum { RED = 0xff0000ff, GREEN = 0xff00ff00, BLUE = 0xffff0000, YELLOW = 0xff00f
        WHITE = 0xffffffff, ZERO = 0x00000000 };
 
 /* resources of a context: handle = 1000 * ctx + R_* */
-enum { R_RT = 1, R_POS, R_UBO, R_COUNT };
+enum { R_RT = 1, R_POS, R_UBO, R_TEX, R_COUNT };
 /* objects */
 enum { VS_CONST = 10, VS_CONST8, VS_INDEX, VS_UBO, VS_PLAIN, VS_IN16, FS_VARYING, FS_CONST, FS_MUL,
        VE = 20, VS_FAR = 30, VS_SEP, FS_SEP, SURFACE = 40, BLEND, RS, GS_CONST = 50,
-       FS_CONST1D = 60 };
+       FS_CONST1D = 60, FS_ARRAY_SAMPLER, VIEW_2D, SAMPLER };
 
 static CGLContextObj main_ctx;
 static int failures;
@@ -404,6 +408,20 @@ static const char *fs_const1d =
    "  0: MOV OUT[0], CONST[1]\n"
    "  1: END\n";
 
+/* the texel at (0.5, 0.5), layer 0, of a sampler declared 2D_ARRAY, times CONST[1] (white
+ * from constant buffer 0 in case 23), as Mesa's video compositor samples a plane */
+static const char *fs_array_sampler =
+   "FRAG\n"
+   "DCL OUT[0], COLOR\n"
+   "DCL SAMP[0]\n"
+   "DCL SVIEW[0], 2D_ARRAY, FLOAT\n"
+   "DCL CONST[0..1]\n"
+   "DCL TEMP[0]\n"
+   "IMM[0] FLT32 {    0.5000,     0.5000,     0.0000,     0.0000}\n"
+   "  0: TEX TEMP[0], IMM[0], SAMP[0], 2D_ARRAY\n"
+   "  1: MUL OUT[0], TEMP[0], CONST[1]\n"
+   "  2: END\n";
+
 /* colour = the vertex colour * CONST[0][0] */
 static const char *fs_mul =
    "FRAG\n"
@@ -485,6 +503,7 @@ static void emit_state(struct cmds *c, int ctx)
    emit_shader(c, FS_CONST, TEST_SHADER_FRAGMENT, fs_const);
    emit_shader(c, FS_MUL, TEST_SHADER_FRAGMENT, fs_mul);
    emit_shader(c, FS_CONST1D, TEST_SHADER_FRAGMENT, fs_const1d);
+   emit_shader(c, FS_ARRAY_SAMPLER, TEST_SHADER_FRAGMENT, fs_array_sampler);
    emit_bind_shaders(c, VS_CONST, FS_VARYING);
 
    emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_VERTEX_ELEMENTS,
@@ -520,6 +539,13 @@ static void setup(struct cmds *c, int ctx)
    virgl_renderer_ctx_attach_resource(ctx, res_id(ctx, R_RT));
    make_buffer(ctx, R_POS, VIRGL_BIND_VERTEX_BUFFER, 3 * 16);
    make_buffer(ctx, R_UBO, VIRGL_BIND_CONSTANT_BUFFER, 256);
+   struct virgl_renderer_resource_create_args tex = {
+      .handle = res_id(ctx, R_TEX), .target = TEST_PIPE_TEXTURE_2D,
+      .format = VIRGL_FORMAT_R8G8B8A8_UNORM, .bind = VIRGL_BIND_SAMPLER_VIEW, .width = 4,
+      .height = 4, .depth = 1, .array_size = 1,
+   };
+   virgl_renderer_resource_create(&tex, NULL, 0);
+   virgl_renderer_ctx_attach_resource(ctx, res_id(ctx, R_TEX));
 
    emit_state(c, ctx);
    const float pos[3][4] = { { -1, -1, 0, 1 }, { 3, -1, 0, 1 }, { -1, 3, 0, 1 } };
@@ -795,6 +821,71 @@ static void case_buffer0(struct cmds *c, int ctx)
    check(submit(ctx, c) == 0, "constant buffer 0 as a guest buffer again, next submit");
    const uint32_t want[4] = { RED, GREEN, BLUE, GREEN };
    check_stripes(ctx, 4, want, "constant buffer 0 from a guest buffer");
+}
+
+/* the 4x4 texture R_TEX in one colour, a 2D view of it and a nearest sampler for the
+ * fragment stage */
+static void emit_texture(struct cmds *c, int ctx, uint32_t colour)
+{
+   uint32_t texels[16];
+   for (int i = 0; i < 16; i++)
+      texels[i] = colour;
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_RESOURCE_INLINE_WRITE, 0, 11 + 16));
+   emit(c, res_id(ctx, R_TEX));
+   emit(c, 0);                      /* level */
+   emit(c, 0);                      /* usage */
+   emit(c, 16);                     /* stride */
+   emit(c, 0);                      /* layer stride */
+   emit(c, 0);                      /* x, y, z */
+   emit(c, 0);
+   emit(c, 0);
+   emit(c, 4);                      /* w, h, d */
+   emit(c, 4);
+   emit(c, 1);
+   memcpy(&c->dw[c->n], texels, sizeof(texels));
+   c->n += 16;
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_SAMPLER_VIEW,
+                      VIRGL_OBJ_SAMPLER_VIEW_SIZE));
+   emit(c, VIEW_2D);
+   emit(c, res_id(ctx, R_TEX));
+   emit(c, VIRGL_FORMAT_R8G8B8A8_UNORM | TEST_PIPE_TEXTURE_2D << 24);
+   emit(c, 0);                      /* layers 0..0 */
+   emit(c, 0);                      /* levels 0..0 */
+   emit(c, 0 | 1 << 3 | 2 << 6 | 3 << 9);   /* identity swizzle */
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_SET_SAMPLER_VIEWS, 0, VIRGL_SET_SAMPLER_VIEWS_SIZE(1)));
+   emit(c, TEST_SHADER_FRAGMENT);
+   emit(c, 0);
+   emit(c, VIEW_2D);
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_SAMPLER_STATE,
+                      VIRGL_OBJ_SAMPLER_STATE_SIZE));
+   emit(c, SAMPLER);
+   emit(c, VIRGL_OBJ_SAMPLE_STATE_S0_WRAP_S(2) | VIRGL_OBJ_SAMPLE_STATE_S0_WRAP_T(2) |
+           VIRGL_OBJ_SAMPLE_STATE_S0_WRAP_R(2) | VIRGL_OBJ_SAMPLE_STATE_S0_MIN_MIP_FILTER(2));
+   emit_float(c, 0);                /* lod bias, min and max lod */
+   emit_float(c, 0);
+   emit_float(c, 0);
+   for (int i = 0; i < 4; i++)
+      emit(c, 0);                   /* border colour */
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_BIND_SAMPLER_STATES, 0, 3));
+   emit(c, TEST_SHADER_FRAGMENT);
+   emit(c, 0);
+   emit(c, SAMPLER);
+}
+
+static void case_array_sampler(struct cmds *c, int ctx)
+{
+   emit_texture(c, ctx, GREEN);
+   emit_bind_shaders(c, VS_PLAIN, FS_ARRAY_SAMPLER);
+   emit_colour_consts(c, TEST_SHADER_FRAGMENT, 2, 1, WHITE);
+   emit_stripe(c, 0);
+   emit_draw(c);
+   emit_buffer_colour(c, ctx, WHITE);
+   emit_const_buffer0(c, ctx);
+   emit_stripe(c, 1);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "a 2D_ARRAY sampler with a 2D view");
+   const uint32_t want[2] = { GREEN, GREEN };
+   check_stripes(ctx, 2, want, "a 2D view read through a 2D_ARRAY sampler");
 }
 
 static void case_odd(struct cmds *c, int ctx)
@@ -1277,6 +1368,7 @@ static void run_case(int n)
    case 20: case_gs(&c, ctx); break;
    case 21: case_random(&c, ctx); break;
    case 22: case_buffer0(&c, ctx); break;
+   case 23: case_array_sampler(&c, ctx); break;
    }
    teardown(ctx);
    if (n == 4)
@@ -1317,7 +1409,7 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   for (int n = 1; n <= 22; n++)
+   for (int n = 1; n <= 23; n++)
       if (!only || only == n)
          run_case(n);
 

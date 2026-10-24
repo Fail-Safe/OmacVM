@@ -1284,6 +1284,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-shader-sampler-swi
 # OmacVM: a stage's constant buffer 0 bound as a guest buffer is its constants (Mesa's VA-API video
 # compositor binds its colour matrix that way; the shader read zeros, so converted frames were black).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-const-buffer0-resource.patch"
+# OmacVM: a plain 2D view behind a sampler the shader declares 2D_ARRAY is sampled as 2D (Mesa's
+# VA-API video compositor declares its planes so; GL read nothing there: converted frames were black).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-shader-array-sampler-2d-view.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
