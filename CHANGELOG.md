@@ -5,13 +5,6 @@ in more words.
 
 ## 3.1.32 (unreleased)
 
-- **The camera comes back.** After the MacBook's lid closed (or a USB or display camera was
-  unplugged) while a Linux app used the camera, the VM's picture stayed black until the app or
-  the VM was started again: the camera's session kept the camera that was gone. Each start now
-  picks the camera again (the built-in one while the lid is open, else macOS's default, else
-  the first there is), and a camera that is gone, suspended or gives no picture for 5 s is
-  started again with whichever camera there is then; a camera plugged in meanwhile is taken at
-  once.
 - **Vulkan windows show each new frame at once.** With "Vulkan windows without a copy" on (the
   default since 3.1.26, macOS 26 and newer), a Vulkan app's window showed its previous frame for
   one screen refresh after each new one: in Zed the caret jumped back a character for a moment on
@@ -22,6 +15,13 @@ in more words.
   `MESA_VK_WSI_DEBUG=sw,nowlts` to `~/.config/environment.d/50-vulkan-present.conf` to get around
   it, take that line out after the update and log in again: Vulkan windows then go through the
   GPU again. The VM needs no update.
+- **The camera comes back.** After the MacBook's lid closed (or a USB or display camera was
+  unplugged) while a Linux app used the camera, the VM's picture stayed black until the app or
+  the VM was started again: the camera's session kept the camera that was gone. Each start now
+  picks the camera again (the built-in one while the lid is open, else macOS's default, else
+  the first there is), and a camera that is gone, suspended or gives no picture for 5 s (20 s for
+  its first) is started again with whichever camera there is then; a camera plugged in meanwhile
+  is taken at once.
 
 ## 3.1.31
 
