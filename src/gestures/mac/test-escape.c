@@ -774,6 +774,21 @@ int main(void) {
     frontChanged(vm, NET_APP, 1, "Omarchy", 30, 0); sent(); asks = 0;
     check(press(K, HID, 0) == 1 && !asks && spaceKeys == 1 && world[1].cur == 321, "the VM on one display: no question");
     sent(); settle(vm, NET_APP); sent();
+    // Out by the VM's focus (the external), back in, then the fingers take the
+    // MacBook out: the keyboard goes to what the MacBook shows now, not to
+    // what the external showed at the last combo.
+    world[0].cur = 222; world[1].cur = 322; front = vm; pointer = CGPointMake(1000, 700);
+    frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    focusReply = "D 2560 0 1920 1200"; swipeMoves = 1;
+    check(press(K, HID, 0) == 1 && world[1].cur == 321 && world[0].cur == 222, "focus on the external: out there (again)");
+    settle(vm, NET_APP); sent();
+    world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    world[0].cur = 221;   // macOS's swipe followed the fingers on the MacBook; the VM still shows on the external
+    TakeRun fr = { .follows = 1, .toward = -1, .d = { .ok = 1, .n = 2, .id = 1, .b = CGRectMake(0, 0, 2560, 1440), .vmSpace = 222 } };
+    went = 0; wentTo = 0; wentWin = 0;
+    takeLanded(fr, 0); settleSteps();
+    check(wentTo == terminal && wentWin == 11, "... then a swipe out with the fingers on the MacBook: the keyboard to the MacBook's app, not Finder");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1); sent(); swipeMoves = 0;
     focusReply = NULL;
   }
 

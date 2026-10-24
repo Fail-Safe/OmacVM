@@ -2851,8 +2851,9 @@ static int leaveToward(int dir, CGDirectDisplayID done) {
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
   CGPoint p = pointerFn();
   const char *side = dir < 0 ? "left" : "right";
+  leaveByFocus = 0;   // a swipe goes by the pointer, also when it moves nothing more
   if (done && !all) return 0;
-  nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0; movesCancelled = 0; leaveByFocus = 0;
+  nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0; movesCancelled = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
     int at = spaceIndex(d, d->current);
