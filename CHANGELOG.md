@@ -5,6 +5,13 @@ in more words.
 
 ## 3.1.32 (unreleased)
 
+- **Faster canvas and SVG drawing in Chrome and Chromium.** In OmacVM.app VMs, Chrome no longer
+  draws every canvas stroke and clip path on the CPU: it now sees "OmacVM-GPU" as its GL renderer
+  instead of "virgl", the name for which Chrome's Skia turns instanced drawing off. MotionMark's
+  Paths and Suits ran at 29-48 fps and now hold the display's rate (75 fps in the test VM). Only
+  Chrome and Chromium get the new name (other programs, Brave and Electron apps among them, keep
+  "virgl"), and web pages that read the WebGL renderer now see "OmacVM-GPU" instead of the Mac's
+  GPU model. A VM gets it at its next Update VM; restart Chrome after that.
 - **Vulkan windows show each new frame at once.** With "Vulkan windows without a copy" on (the
   default since 3.1.26, macOS 26 and newer), a Vulkan app's window showed its previous frame for
   one screen refresh after each new one: in Zed the caret jumped back a character for a moment on
@@ -15,13 +22,12 @@ in more words.
   `MESA_VK_WSI_DEBUG=sw,nowlts` to `~/.config/environment.d/50-vulkan-present.conf` to get around
   it, take that line out after the update and log in again: Vulkan windows then go through the
   GPU again. The VM needs no update.
-- **Faster canvas and SVG drawing in Chrome and Chromium.** In OmacVM.app VMs, Chrome no longer
-  draws every canvas stroke and clip path on the CPU: it now sees "OmacVM-GPU" as its GL renderer
-  instead of "virgl", the name for which Chrome's Skia turns instanced drawing off. MotionMark's
-  Paths and Suits ran at 29-48 fps and now hold the display's rate (75 fps in the test VM). Only
-  Chrome and Chromium get the new name (other programs, Brave and Electron apps among them, keep "virgl"), and
-  web pages that read the WebGL renderer now see "OmacVM-GPU" instead of the Mac's GPU model. A VM
-  gets it at its next Update VM; restart Chrome after that.
+- **No green bar under videos.** Some videos played with the Mac's video decoder had a thin
+  green strip at the bottom (VP9 and AV1 at 1080p, 540p and 360p: YouTube, and video in calls)
+  or on the right (480p and 240p). The VM's video surfaces are a few rows and columns bigger
+  than the picture, and those were never written; they now repeat the picture's last row and
+  column. In small call tiles that strip can still show as a stretched edge instead of green.
+  The VM needs no update.
 
 ## 3.1.31
 
