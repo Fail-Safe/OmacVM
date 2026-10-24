@@ -2943,13 +2943,14 @@ static void takeLook(void) {
 // same; 0 = the guest's), only toward a macOS Space, with k fingers: only a
 // count the guest switches workspaces with that way ("G"; a guest that did
 // not say: any 3 or more). k = 0: with any count (worth holding back?).
-static void takeSides(int *sl, int *sr, int k) {
+// pad: the trackpad's fingers (a Magic Mouse's virtual ones are never macOS's drag).
+static void takeSides(int *sl, int *sr, int k, int pad) {
   *sl = *sr = 0;
   if (swipeOut != 1) return;
   int e[2] = { 0, 0 }, n = 0, all = 1;
   // Fingers allowed per way: 3 and more, 4 and more with Three Finger Drag
   // (three are macOS's drag).
-  int least = threeDrag ? 4 : 3;
+  int least = pad && threeDrag ? 4 : 3;
   unsigned ok[2] = { ~0u << least, ~0u << least };
   pthread_mutex_lock(&sendLock);
   for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -3138,8 +3139,8 @@ static int takePadFrame(MTTouch **c, int k) {
   if (k) spread /= k;
   static int spreadK;
   int wl = 0, wr = 0, sl = 0, sr = 0;
-  if (padTake.state == TAKE_IDLE && k >= 3) takeSides(&wl, &wr, 0);
-  if ((padTake.state == TAKE_IDLE || padTake.state == TAKE_WATCH) && k >= 3) takeSides(&sl, &sr, k);
+  if (padTake.state == TAKE_IDLE && k >= 3) takeSides(&wl, &wr, 0, 1);
+  if ((padTake.state == TAKE_IDLE || padTake.state == TAKE_WATCH) && k >= 3) takeSides(&sl, &sr, k, 1);
   int was = padTake.state;
   int tk = takeFrame(&padTake, k, wl, wr, sl, sr, ddx, ddy, takeTravel, takeClock());
   // Still not clear which way: fingers spreading or closing (a pinch) are no
@@ -3165,7 +3166,7 @@ static int takePadFrame(MTTouch **c, int k) {
 static int takeMouseFrame(SwipeTake *t, int k, double step) {
   if (!(capturing && gesturesOn())) return takeAbort(t, k);
   int sl = 0, sr = 0;   // its virtual fingers (MouseSwipeFingers): as many as the guest gets
-  if ((t->state == TAKE_IDLE || t->state == TAKE_WATCH) && k >= 3) takeSides(&sl, &sr, k);
+  if ((t->state == TAKE_IDLE || t->state == TAKE_WATCH) && k >= 3) takeSides(&sl, &sr, k, 0);
   int tk = takeFrame(t, k, sl, sr, sl, sr, step, 0, takeTravel * TAKE_MOUSE_TRAVEL, takeClock());
   takeAct(t, tk, "Magic Mouse");
   return tk;

@@ -120,12 +120,14 @@ int main(void) {
   clients[0].waysKnown = 1; clients[0].ways[0] = clients[0].ways[1] = 1u << 3 | 1u << 4;
   takeDisp.ok = 1; takeDisp.left = takeDisp.right = 1;
   int sl, sr;
-  takeSides(&sl, &sr, 3);
+  takeSides(&sl, &sr, 3, 1);
   check(!sl && !sr, "on: no swipe out with three fingers");
-  takeSides(&sl, &sr, 4);
+  takeSides(&sl, &sr, 4, 1);
   check(sl && sr, "on: swipe out with four fingers");
+  takeSides(&sl, &sr, 3, 0);
+  check(sl && sr, "on: a Magic Mouse's swipe as three fingers still goes out (no drag there)");
   setDrag(0);
-  takeSides(&sl, &sr, 3);
+  takeSides(&sl, &sr, 3, 1);
   check(sl && sr, "off: swipe out with three fingers");
   swipeOut = 0; takeDisp.ok = 0;
 
