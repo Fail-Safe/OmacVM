@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.32 (unreleased)
+## 3.1.32
 
 - **Vulkan windows show each new frame at once.** With "Vulkan windows without a copy" on (the
   default since 3.1.26, macOS 26 and newer), a Vulkan app's window showed its previous frame for
