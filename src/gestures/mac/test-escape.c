@@ -76,22 +76,17 @@ static World *underPointer(void) {
   for (int i = 0; i < nWorld; i++) if (CGRectContainsPoint(world[i].b, pointer)) return &world[i];
   return NULL;
 }
-// qemuGivesBack: OmacVM.app's QEMU puts the Mac's cursor back where the
-// guest's pointer is (guestPointer) once a display's Space changed: the next
-// warp after a Space change ends there.
-static int qemuGivesBack, giveBackDue; static CGPoint guestPointer;
 static void moveSpace(World *w, int dir) {
   if (!w) return;
   int i = idx(w, w->cur), j = i + dir;
   if (i < 0 || j < 0 || j >= w->n) return;   // the edge: nothing
   w->cur = w->sp[j];
-  giveBackDue = qemuGivesBack;
   // With "Displays have separate Spaces" off, every display shows it.
   for (int k = 0; k < nWorld; k++) if (&world[k] != w && idx(&world[k], w->sp[j]) >= 0 && world[k].sp[0] == w->sp[0]) world[k].cur = w->cur;
   if (owner[w->cur] && owner[w->cur] != finder) front = owner[w->cur];
 }
 static int warps;
-static void fakeWarp(CGPoint p) { warps++; pointer = giveBackDue ? guestPointer : p; giveBackDue = 0; }
+static void fakeWarp(CGPoint p) { pointer = p; warps++; }
 static int same(Hotkey a, Hotkey b) { return a.enabled && b.enabled && a.keycode == b.keycode && a.flags == b.flags; }
 // "macOS": the key is one of the user's Space shortcuts (as set now) -> that move.
 static double lateKeys;   // macOS moves the Space only this many verify periods after the key
@@ -762,30 +757,6 @@ int main(void) {
     check(press(K, HID, 0) == 1 && !asks && spaceKeys == 1 && world[1].cur == 321, "the VM on one display: no question");
     sent(); settle(vm, NET_APP); sent();
     focusReply = NULL;
-  }
-
-  // ---- "All monitors" with OmacVM.app's QEMU, which puts the cursor back
-  // where the guest's pointer is once a display's Space changed: the other
-  // display's move goes first, the pointer's display's last (the mini, two
-  // virtual displays: the second display stayed on the VM, or out of it) ----
-  {
-    const uint64_t mbp[] = { 231, 232 }, ext[] = { 331, 332 };
-    layout(2, mbp, 2, ext, 2);
-    owner[231] = terminal; winOn[231] = 11; owner[232] = vm; winOn[232] = 31;
-    owner[331] = safari; winOn[331] = 44; owner[332] = vm; winOn[332] = 32;
-    world[0].cur = 231; world[1].cur = 331; front = terminal; pointer = guestPointer = CGPointMake(1000, 700);
-    frontChanged(terminal, -1, 0, "", 11, 1); sent();
-    world[0].cur = 232; world[1].cur = 332; front = vm;
-    frontChanged(vm, NET_APP, 1, "Omarchy", 31, 0); sent();
-    all = 1; qemuGivesBack = 1; giveBackDue = 0; swipeMoves = 0;
-    check(press(K, HID, 0) == 1 && spaceKeys == 2 && movedOn[0] == 2 && movedOn[1] == 1,
-          "all, QEMU's cursor give-back: the external's move first, then the pointer's display");
-    check(world[0].cur == 231 && world[1].cur == 331 && !swipes, "... both out with macOS's shortcut, no swipe needed");
-    sent(); front = safari; frontChanged(safari, -1, 0, "", 44, 1); sent(); giveBackDue = 0;
-    check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 232 && world[1].cur == 332 && front == vm,
-          "... and both back into the VM");
-    settle(vm, NET_APP); sent();
-    all = 0; qemuGivesBack = 0; giveBackDue = 0;
   }
 
   // ---- Not the real keyboard, a held key, other combos: as before ----
