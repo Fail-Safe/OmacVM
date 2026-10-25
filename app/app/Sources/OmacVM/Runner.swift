@@ -566,8 +566,10 @@ final class Runner {
             log.write(Data("OmacVM: HDR: \(hdr.on ? "on" : "off") (\(hdr.why))\n".utf8))
         }
         // The pointer on its own layer for omacvm check, while the switch is on.
+        // "asked": the guest's driver loader decides (an old guest or a driver
+        // not built yet keeps the stock one); omacvm check says what runs.
         if Settings.pointerPlane {
-            log.write(Data("OmacVM: pointer layer: \(Settings.macPointer ? "off (macPointer is on)" : "on")\n".utf8))
+            log.write(Data("OmacVM: pointer layer: \(Settings.macPointer ? "off (macPointer is on)" : "asked (omacvm check says if it runs)")\n".utf8))
         }
         // Extra brightness for omacvm check, while the switch is on (QEMU's own lines follow it).
         if Settings.extraBrightness {
