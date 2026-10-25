@@ -25,8 +25,9 @@ if mac then pcall(hl.config, { cursor = { use_cpu_buffer = 1 } }) end
 -- that copy only while something captures the output (a screenshot, a screen
 -- share; Hyprland redraws the whole output for the first captured frame). The
 -- screen shows the same pixels and screenshots are the same; each HDR frame
--- costs the Mac's GPU 10-20 % less. No effect in SDR (no copy there either
--- way). pcall: an older Hyprland lacks the option.
+-- costs the Mac's GPU 10-19 % less. No effect in SDR (no copy there either
+-- way). This file loads after the user's own config, so it also wins over a
+-- keep_unmodified_copy set there. pcall: an older Hyprland lacks the option.
 pcall(hl.config, { render = { keep_unmodified_copy = 0 } })
 -- A config reload drops the rules omacvm-display-sync gave the outputs, and
 -- each output would take monitors.lua's rule ("auto" place, cached mode) until

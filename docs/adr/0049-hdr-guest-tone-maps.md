@@ -109,4 +109,4 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
   screen sharing by default (`render:keep_unmodified_copy` auto): each
   window is drawn twice. `omacvm_app.lua` sets it to 0, so the copy is made
   only while something captures the output. The screen and screenshots
-  are the same; an HDR frame costs the GPU 10-20 % less.
+  are the same; an HDR frame costs the GPU 10-19 % less (mini, QEMU GPU ms/s).
