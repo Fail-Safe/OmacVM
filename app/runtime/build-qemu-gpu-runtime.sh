@@ -1012,6 +1012,17 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damag
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-lossless.patch"
 "$native_dir/Tests/display/test-present-lossless.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the lossless surfaces are not wired as tested (test-present-lossless.sh)"
+# OmacVM: the pointer's layer as bright as the frames with extra brightness
+# (ADR 0054: the switch "Pointer on its own layer"; ADR 0050). Its rules'
+# test, then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-bright-logic.patch"
+"$native_dir/Tests/display/test-pointer-bright.sh" --self-test "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a pointer-brightness wiring check passes without the patch (test-pointer-bright.sh)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-bright.patch"
+"$native_dir/Tests/display/test-pointer-bright.sh" || \
+  die "the pointer's brightness rules fail their test (test-pointer-bright.sh)"
+"$native_dir/Tests/display/test-pointer-bright.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the pointer's brightness is not wired as tested (test-pointer-bright.sh)"
 # OmacVM: "Pause drawing while hidden" (experimental, off by default): the
 # guest's display agent is told when the main window has been out of sight
 # for 2 s and turns that display off, so the guest stops drawing; seen again,

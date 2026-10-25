@@ -77,4 +77,17 @@ check "cc: ssh's line is UTF-8" yes "$(iconv -f UTF-8 -t UTF-8 < "$T/cc-line" >/
 check "cc: the same arguments in the VM's shell" "[toggle][Mac input: Chinese, Japanese…][it's \"x\" \$HOME \\][on][900]" \
   "$(/bin/bash -c "printf '[%s]' $(sed 's/^python3 [^ ]*//' "$T/cc-line")")"
 
+# 5. The e2e harnesses' own pgrep -f / pkill -f (#545 follow-up): in a UTF-8
+# locale they fail outright on that line, so qemu_pid came back empty and
+# stop_vm, cleanup and the "a VM runs" guards let a running VM through.
+QPAT='(runtime/bin/OmacVM|MacOS/OmacVM-VM) -name' VM="OmacVM e2e-$$"
+eval "$(sed -n '/^qemu_pid() {/p' "$R/src/tests/e2e/cc-switches.sh")"
+bash -c 'exec -a "$1" sleep 120' _ "$T/OmacVM Test.app/Contents/MacOS/OmacVM-VM -name $VM" & E=$!; PIDS+=" $E"
+sleep 0.2
+check "e2e qemu_pid finds the VM's QEMU" "$E" "$(qemu_pid 2>&1)"
+kill "$E"
+bare=$(cd "$R/src/tests/e2e" && grep -nE '(^|[^=_[:alnum:]])p(grep|kill) -f' *.sh */*.sh 2>/dev/null \
+  | grep -v 'LC_ALL=C p\(grep\|kill\) -f' | grep -v ' g "' | cut -d: -f1,2 | tr '\n' ' ')
+check "e2e scripts: every pgrep -f / pkill -f on the Mac reads bytes (LC_ALL=C)" "" "$bare"
+
 exit $fail

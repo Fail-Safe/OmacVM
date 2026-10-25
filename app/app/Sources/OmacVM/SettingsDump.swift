@@ -26,6 +26,7 @@ enum SettingsDump {
             "hdr": Settings.hdr,
             "extraBrightness": Settings.extraBrightness,
             "pauseWhileHidden": Settings.pauseWhileHidden,
+            "pointerPlane": Settings.pointerPlane,
             "closeAction": Settings.closeAction.rawValue,
             "appIconTheme": IconTheme.choice(stored: UserDefaults.standard.object(forKey: IconTheme.key)).id,
             "escapeSwipe": EscapeSetting.current().rawValue,

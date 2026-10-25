@@ -50,7 +50,7 @@ ret_line=$(grep -nF 'if (!path || !*path) {' <<<"$init" | cut -d: -f1)
 n=$(grep -c 'omacvm_ime_on = ' "$src" || true)
 [[ $n -eq 1 ]] && echo "ok   ... and nowhere else" || { echo "FAIL omacvm_ime_on is set in $n places"; fail=1; }
 has "the globe key: mac-ime only when on" "$(cat "$src")" '!(omacvm_ime_on && omacvm_ime_globe())) {'
-has "the view's input context: none while off" "$(body "$src" '- (NSTextInputContext *)inputContext')" 'return omacvm_ime_on && omacvm_ime_active(&omacvm_ime) ? omacvm_ime_ctx : nil;'
+has "the view's input context: none while off (there while a later off waits)" "$(body "$src" '- (NSTextInputContext *)inputContext')" 'return omacvm_ime_on && (omacvm_ime_active(&omacvm_ime) || omacvm_ime_off.waiting) ? omacvm_ime_ctx : nil;'
 [[ $(grep -A1 -xF '    omacvm_globe_init();' "$src" | tail -1) == '    omacvm_ime_init();' ]] &&
   echo "ok   started with the display (after the globe key)" || { echo "FAIL omacvm_ime_init() is not called after omacvm_globe_init()"; fail=1; }
 as=$(body "$src" '- (NSAttributedString *)attributedSubstringForProposedRange:')
@@ -60,4 +60,10 @@ has "the guest's caret is checked before use" "$(cat "$src")" 'omacvm_ime_rect_o
 # A caret as tall as its field (a GTK entry taller than its line): the candidate
 # window goes to the field's middle, where GTK draws the line, not its top.
 has "a caret taller than a line: its middle" "$(body "$src" 'static NSRect omacvm_ime_caret(void)')" 'r.origin.y = NSMidY(r) - 20;'
+# Only the guest's field gone: the context goes off 0.2 s later, unless it comes back (#357).
+up=$(body "$src" 'static void omacvm_ime_update(void)')
+has "the input method's context goes off as omacvm_ime_off_step says" "$up" 'switch (omacvm_ime_off_step(&omacvm_ime_off, &omacvm_ime)) {'
+has "... at once" "$up" 'case OMACVM_IME_OFF_NOW:'
+has "... or later, only that off" "$up" 'if (omacvm_ime_off_due(&omacvm_ime_off, gen)) {'
+has "a modifier goes to the context while a later off waits" "$fl" 'bool active = omacvm_ime_active(&omacvm_ime) || omacvm_ime_off.waiting;'
 exit $fail

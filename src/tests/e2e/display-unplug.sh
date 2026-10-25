@@ -75,12 +75,12 @@ log() { echo "== $(date +%H:%M:%S) $*"; }
 
 VMD=$( (source "$HERE/test-vms.sh" && e2e_vm_guard "$APPID" "$VM") 2>&1) || { echo "display-unplug: $VMD" >&2; exit 2; }
 QPAT='(runtime/bin/OmacVM|MacOS/OmacVM-VM) -name'
-qemu_pid() { pgrep -f "$QPAT $VM( |$)" | head -1; }
+qemu_pid() { LC_ALL=C pgrep -f "$QPAT $VM( |$)" | head -1; }
 port() { sed -n "s/^SSH_PORT=//p" "$VMD/vm.env" | tr -d "'"; }
 gssh() { ssh -i "$KEY" -p "$(port)" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@127.0.0.1 "$@" < /dev/null; }
 # Every QEMU on this Mac but this VM's (the person's VM above all): none may run.
-others() { pgrep -fl "qemu-system-aarch64|runtime/bin/OmacVM -name|MacOS/OmacVM-VM -name" | grep -v -E "$QPAT $VM( |$)"; }
+others() { LC_ALL=C pgrep -fl "qemu-system-aarch64|runtime/bin/OmacVM -name|MacOS/OmacVM-VM -name" | LC_ALL=C grep -v -E "$QPAT $VM( |$)"; }
 [[ -z $(others) ]] || { echo "display-unplug: another VM runs (a display going moves its windows too): $(others | head -1)" >&2; exit 3; }
 [[ -z $(qemu_pid) ]] || { echo "display-unplug: $VM runs: stop it first" >&2; exit 3; }
 crashes() { ls "$HOME/Library/Logs/DiagnosticReports" 2>/dev/null | grep -c '^OmacVM-.*\.ips$'; }
@@ -153,7 +153,7 @@ start() {   # window|full|fullpanel, on the virtual display; head: full on the o
   for ((i = 0; i < 90; i++)); do gssh "test -d /run/user/\$(id -u \$(sed -n 's/^OMACVM_USER=//p' /etc/omacvm/env))/hypr" 2>/dev/null && { sleep 25; return 0; }; sleep 2; done
   return 1
 }
-launcher_stop() { local p; for p in $(pgrep -f "$APP/Contents/MacOS/OmacVM --start --vm $VM\$"); do kill "$p" 2>/dev/null; done; }
+launcher_stop() { local p; for p in $(LC_ALL=C pgrep -f "$APP/Contents/MacOS/OmacVM --start --vm $VM\$"); do kill "$p" 2>/dev/null; done; }
 stop() {
   local p i; p=$(qemu_pid); [[ -n $p ]] || { launcher_stop; return 0; }
   gssh "systemctl poweroff" >/dev/null 2>&1

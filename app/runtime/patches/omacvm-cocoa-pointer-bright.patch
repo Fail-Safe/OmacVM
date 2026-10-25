@@ -1,0 +1,187 @@
+From: OmacVM
+Subject: [PATCH] cocoa: the pointer's layer as bright as the boosted frames, soft edges right
+
+What: QEMU's cursor layer (the guest's pointer over the window: the
+app's switch "Pointer on its own layer", ADR 0054) gets the frames' gain
+while extra brightness boosts them (ADR 0050). Its image is then made in
+half floats, extended linear sRGB, premultiplied, the colour decoded and
+times the gain (ui/omacvm-pointer-bright.h), and the layer shows it with
+EDR as the frames' layer does: toneMapMode never, and on macOS 26+
+contentsHeadroom 2 (it asks for 2x only). Out of the boost (switch off,
+1x, a display without the headroom, a path without it) the plain 8-bit
+image as before. The image is made again when the guest sends a new one
+or the frames' gain moves (omacvm_bright_look, every 250 ms while on;
+the same values the frames take, so it moves when they move).
+
+Why: with Extra brightness the frames' SDR white shows at up to 2x, but
+the cursor layer was a plain 8-bit image at 1x: on an XDR display the
+white pointer showed at about half the brightness of the page under it.
+Before the switch Hyprland drew the pointer into the frames, so it was
+boosted with them. HDR without Extra brightness needs nothing: SDR white
+is the Mac's 1.0 there, as the 8-bit image.
+
+Soft edges: virtio-gpu's cursor image is premultiplied (Xcursor themes
+are; the Mac pointer path, omacvm-cocoa-hw-cursor.patch, takes it so),
+but the layer took it as straight alpha: the white outline's soft edge
+came out darker than the guest draws it (MacBook Air, the switch on
+against the stock driver: 107 pixels around the pointer, up to 55 levels).
+Both images now take it premultiplied. The frames blend the pointer in
+the guest (sRGB values), macOS blends this layer itself: while boosted
+the few soft-edge pixels may still differ by a little.
+
+Threads: main thread only (the image comes from cocoa_cursor_define's
+main-queue block, the gain from omacvm_bright_look).
+
+Upstream: OmacVM only (the app's switches).
+Test: app/runtime/Tests/display/test-pointer-bright.sh (the rules; with
+ui/cocoa.m the wiring; --self-test: every wiring check fails on code
+without it).
+
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -56,6 +56,7 @@
+ #include "ui/omacvm-display-settle.h"
+ #include "ui/omacvm-edr.h"
+ #include "ui/omacvm-bright.h"
++#include "ui/omacvm-pointer-bright.h"
+ #include "ui/omacvm-present-damage.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+@@ -186,6 +187,12 @@
+ static QemuEvent cbevent;
+ static QemuCocoaPasteboardTypeOwner *cbowner;
+ 
++/*
++ * OmacVM: the gain of the pointer's image (ADR 0054): the frames' gain
++ * while extra brightness boosts them, else 1x. Main thread.
++ */
++static int omacvm_pointer_gain_c = OMACVM_BRIGHT_ONE;
++
+ #ifdef CONFIG_OPENGL
+ 
+ @interface QemuCGLLayer : CAOpenGLLayer
+@@ -1504,9 +1511,6 @@
+ 
+ - (void)setCursor:(QEMUCursor *)given_cursor
+ {
+-    CGDataProviderRef provider;
+-    CGImageRef image;
+-
+     cursor_unref(cursor);
+     cursor = given_cursor;
+ 
+@@ -1515,31 +1519,80 @@
+     }
+ 
+     cursor_ref(cursor);
++    [self updateCursorImage];
++}
+ 
+-    provider = CGDataProviderCreateWithData(
+-        NULL,
+-        cursor->data,
+-        cursor->width * cursor->height * 4,
+-        NULL
+-    );
++/*
++ * OmacVM (ADR 0054): the cursor layer's image. While extra brightness boosts
++ * the frames under it (omacvm_pointer_gain_c above 1x), the image goes in
++ * half floats, extended linear sRGB, times the same gain, and the layer
++ * shows it with EDR as the frames' layer does (toneMapMode never; on macOS
++ * 26+ it asks for 2x only). Else the plain 8-bit image, as before.
++ * Main thread: a new image from the guest, or the gain moved.
++ */
++- (void)updateCursorImage
++{
++    int gain = omacvm_pointer_gain_c;
++    BOOL boost = gain > OMACVM_BRIGHT_ONE;
++    CGDataProviderRef provider;
++    CGImageRef image;
+ 
+-    image = CGImageCreate(
+-        cursor->width, //width
+-        cursor->height, //height
+-        8, //bitsPerComponent
+-        32, //bitsPerPixel
+-        cursor->width * 4, //bytesPerRow
+-        colorspace, //colorspace
+-        kCGBitmapByteOrder32Little | kCGImageAlphaFirst, //bitmapInfo
+-        provider, //provider
+-        NULL, //decode
+-        0, //interpolate
+-        kCGRenderingIntentDefault //intent
+-    );
++    if (!cursor) {
++        return;
++    }
++    if (!boost) {
++        provider = CGDataProviderCreateWithData(
++            NULL,
++            cursor->data,
++            cursor->width * cursor->height * 4,
++            NULL
++        );
+ 
++        image = CGImageCreate(
++            cursor->width, //width
++            cursor->height, //height
++            8, //bitsPerComponent
++            32, //bitsPerPixel
++            cursor->width * 4, //bytesPerRow
++            colorspace, //colorspace
++            /* premultiplied, as virtio-gpu sends it (soft edges came out dark) */
++            kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst, //bitmapInfo
++            provider, //provider
++            NULL, //decode
++            0, //interpolate
++            kCGRenderingIntentDefault //intent
++        );
++    } else {
++        size_t n = (size_t)cursor->width * cursor->height;
++        CFMutableDataRef px = CFDataCreateMutable(NULL, n * 8);
++        CGColorSpaceRef linear = CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearSRGB);
++
++        CFDataSetLength(px, n * 8);
++        omacvm_pointer_bright_pixels(cursor->data, n, gain,
++                                     (_Float16 *)CFDataGetMutableBytePtr(px));
++        provider = CGDataProviderCreateWithCFData(px);
++        CFRelease(px);
++        image = CGImageCreate(cursor->width, cursor->height, 16, 64, cursor->width * 8,
++                              linear,
++                              kCGBitmapByteOrder16Little | kCGBitmapFloatComponents |
++                              kCGImageAlphaPremultipliedLast,
++                              provider, NULL, 0, kCGRenderingIntentDefault);
++        CGColorSpaceRelease(linear);
++    }
++
+     CGDataProviderRelease(provider);
+     [CATransaction begin];
+     [CATransaction setDisableActions:YES];
++    if ([cursorLayer wantsExtendedDynamicRangeContent] != boost) {
++        [cursorLayer setWantsExtendedDynamicRangeContent:boost];
++        [cursorLayer setToneMapMode:boost ? CAToneMapModeNever : CAToneMapModeAutomatic];
++    }
++    if (@available(macOS 26.0, *)) {
++        CGFloat need = boost ? OMACVM_BRIGHT_TARGET : 0;
++        if ([cursorLayer contentsHeadroom] != need) {
++            [cursorLayer setContentsHeadroom:need];
++        }
++    }
+     [cursorLayer setContents:(id)image];
+     [self updateCursorLayout];
+     [CATransaction commit];
+@@ -11143,6 +11196,13 @@
+         if (want != was && omacvm_guest_ready) {
+             omacvm_edr_look();      /* HDR: the guest's headroom is 1 while boosted */
+         }
++    }
++    /* The pointer on its own layer: its image gets the frames' gain (ADR 0054). */
++    int pointer = omacvm_pointer_gain(qatomic_read(&omacvm_bright_wanted),
++                                      qatomic_read(&omacvm_bright_gain_c));
++    if (pointer != omacvm_pointer_gain_c) {
++        omacvm_pointer_gain_c = pointer;
++        [cocoaView updateCursorImage];
+     }
+ 
+     /* qemu.log: once per change; "held back" only once it lasted 2 s. */
