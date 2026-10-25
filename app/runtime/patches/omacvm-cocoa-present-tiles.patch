@@ -33,7 +33,7 @@ the runtime build runs it on the real cocoa.m before this patch).
 Applies after omacvm-cocoa-present-damage.patch (it uses its rects, rules
 and checks), before omacvm-cocoa-no-app-nap.patch.
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index ddc7a29..f152ad5 100644
+index ddc7a29..7d2d8dd 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -57,6 +57,7 @@
@@ -505,7 +505,7 @@ index ddc7a29..f152ad5 100644
      if (gl_dirty) {
          cocoa_gl_present_request();
      }
-@@ -8495,6 +8867,189 @@ static void surface_put(IOSurfaceRef surf)
+@@ -8495,6 +8867,191 @@ static void surface_put(IOSurfaceRef surf)
      CFRelease(surf);
  }
  
@@ -661,7 +661,9 @@ index ddc7a29..f152ad5 100644
 +                [l setContentsGravity:kCAGravityResize];
 +                [l setMagnificationFilter:kCAFilterNearest];
 +                [l setMinificationFilter:kCAFilterNearest];
-+                [l setZPosition:0.5];         /* over the frame, under the cursor */
++                /* over the frame (the view's own contents), under every other
++                 * sublayer: the boot logo (-1), QEMU's labels, the cursor */
++                [l setZPosition:-2];
 +                [l setHidden:YES];
 +                [layer addSublayer:l];
 +                present_tile_layer[t] = l;
@@ -695,7 +697,7 @@ index ddc7a29..f152ad5 100644
  /* Any thread: put a finished frame on the layer. */
  static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushed,
                                    bool linear)
-@@ -8509,6 +9064,12 @@ static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushe
+@@ -8509,6 +9066,12 @@ static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushe
      cocoa_gl_layer_follow(layer, surf, linear);
      omacvm_present_gravity(layer, surf);
      [layer setContents:(id)surf];
@@ -708,7 +710,7 @@ index ddc7a29..f152ad5 100644
      [CATransaction commit];
      if (qatomic_read(&omacvm_park_hold_on)) {
          dispatch_async(dispatch_get_main_queue(), ^{
-@@ -8517,6 +9078,16 @@ static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushe
+@@ -8517,6 +9080,16 @@ static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushe
      }
  }
  
@@ -725,7 +727,7 @@ index ddc7a29..f152ad5 100644
  /* Main thread: give the link the rate present_sync.hz names. */
  static void cocoa_gl_present_link_rate(void)
  {
-@@ -8621,15 +9192,15 @@ static void present_window_reset(double now)
+@@ -8621,15 +9194,15 @@ static void present_window_reset(double now)
   * replaces it while the guest draws faster than the link, or while the
   * link runs slower than the screen.
   */
@@ -744,7 +746,7 @@ index ddc7a29..f152ad5 100644
      double gap = present_sync.last_ready > 0 ?
                   now - present_sync.last_ready : INFINITY;
      present_sync.last_ready = now;
-@@ -8673,7 +9244,7 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+@@ -8673,7 +9246,7 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
          bool slowed = present_sync.hz < present_sync.max_hz;
          if ((present_sync.merge || slowed) && last &&
              gap < present_sync.period / 2) {
@@ -753,7 +755,7 @@ index ddc7a29..f152ad5 100644
              present_sync.queued--;
              present_sync.merged++;
              present_sync.extra++;
-@@ -8681,17 +9252,14 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+@@ -8681,17 +9254,14 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
          } else {
              present_sync.extra = 0;
              if (present_sync.queued == PRESENT_QUEUE) {
@@ -773,7 +775,7 @@ index ddc7a29..f152ad5 100644
          /*
           * The guest draws faster than a slowed link (two extra frames in a
           * row, or a full queue): the full rate at once.
-@@ -8708,12 +9276,9 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+@@ -8708,12 +9278,9 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
                                present_sync.queued, present_sync.linked);
      os_unfair_lock_unlock(&present_lock);
  
@@ -788,7 +790,7 @@ index ddc7a29..f152ad5 100644
      }
      if (wake) {
          dispatch_async(dispatch_get_main_queue(), ^{
-@@ -8771,9 +9336,8 @@ static double present_wanted_hz(void)
+@@ -8771,9 +9338,8 @@ static double present_wanted_hz(void)
   */
  static bool cocoa_gl_present_vsync(double T)
  {
@@ -800,7 +802,7 @@ index ddc7a29..f152ad5 100644
      bool input = present_input_first &&
                   qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - qemu_input_last_event_ns() <
                   PRESENT_INPUT_NS;
-@@ -8793,7 +9357,10 @@ static bool cocoa_gl_present_vsync(double T)
+@@ -8793,7 +9359,10 @@ static bool cocoa_gl_present_vsync(double T)
           */
          if (input && present_sync.queued > 1) {
              nstale = present_sync.queued - 1;
@@ -812,7 +814,7 @@ index ddc7a29..f152ad5 100644
              memmove(&present_sync.queue[0], &present_sync.queue[nstale],
                      sizeof(PresentFrame));
              present_sync.queued = 1;
-@@ -8823,7 +9390,8 @@ static bool cocoa_gl_present_vsync(double T)
+@@ -8823,7 +9392,8 @@ static bool cocoa_gl_present_vsync(double T)
              int quarter = present_sync.period > 0 ?
                            MAX(4, (int)lround(0.25 / present_sync.period)) : 15;
              if (++present_sync.left_run >= quarter) {
@@ -822,7 +824,7 @@ index ddc7a29..f152ad5 100644
                  present_sync.queued--;
                  memmove(&present_sync.queue[0], &present_sync.queue[1],
                          sizeof(PresentFrame) * present_sync.queued);
-@@ -8859,7 +9427,8 @@ static bool cocoa_gl_present_vsync(double T)
+@@ -8859,7 +9429,8 @@ static bool cocoa_gl_present_vsync(double T)
           */
          if (present_sync.win_min >= 1 && present_sync.win_min < INT_MAX &&
              !present_sync.win_late && present_sync.queued) {
@@ -832,7 +834,7 @@ index ddc7a29..f152ad5 100644
              present_sync.queued--;
              memmove(&present_sync.queue[0], &present_sync.queue[1],
                      sizeof(PresentFrame) * present_sync.queued);
-@@ -8911,18 +9480,9 @@ static bool cocoa_gl_present_vsync(double T)
+@@ -8911,18 +9482,9 @@ static bool cocoa_gl_present_vsync(double T)
      }
      os_unfair_lock_unlock(&present_lock);
  
@@ -854,7 +856,7 @@ index ddc7a29..f152ad5 100644
          /* The guest may have drawn while the queue was full. */
          qemu_bh_schedule(present_bh);
      }
-@@ -9083,6 +9643,11 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -9083,6 +9645,11 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
      /* What changed, for the surfaces' next draws (partial present). */
      omacvm_pd_add(&present_pd, x, y, w, h);
      present_pd_unflushed = false;
