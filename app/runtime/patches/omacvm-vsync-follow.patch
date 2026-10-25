@@ -11,8 +11,11 @@ the present's display link puts the guest's vblank the lead before that
 refresh's commit (the commit is 3 ms before the vsync,
 qemu-cocoa-gl-present-vsync.patch), at the full rate's period measured
 over the link's run of ticks. The lead follows when the guest's frames
-are ready after their vblank (ui/omacvm-vsync.h: the 95th percentile + 1
-ms, once a second; OMACVM_GL_FOLLOW_LEAD_MS fixes it for tests). While a
+are ready after their vblank (ui/omacvm-vsync.h: the latest of the last
+64 + 1 ms, once a second; OMACVM_GL_FOLLOW_LEAD_MS fixes it for tests).
+A frame later than the lead misses its refresh, so the lead covers the
+slowest one, not a percentile: the first build (95th percentile + 1 ms)
+had 1-3 late frames a second at 60 Hz, each a repeat. While a
 guest follows, a tick that finds more than one frame shows the newest:
 the older one came late for its own refresh (as OMACVM_GL_INPUT_FIRST
 does while input comes), so a late frame costs one repeat, not a
@@ -36,7 +39,8 @@ Threads: the commit queue (present_lock held) publishes the grid and
 reads when the guest asked; QEMU's present thread adds the arrivals under
 present_lock; virtio-gpu (main loop, BQL) answers under the store's spin
 lock; hvf writes the offset under it. Trace cocoa_present_follow once a
-second: the lead, the frames and how many came after it.
+second: the lead, the frames' median and latest after their vblank, how
+many came late.
 
 Upstream: OmacVM only (its present and its own virtio-gpu command).
 Test: app/runtime/Tests/display/test-vsync-follow.sh (rules, wiring);
@@ -272,7 +276,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
              nstale = present_sync.queued - 1;
              memcpy(stale, present_sync.queue, sizeof(PresentFrame) * nstale);
              memmove(&present_sync.queue[0], &present_sync.queue[nstale],
-@@ -8903,6 +8964,17 @@ static bool cocoa_gl_present_vsync(double T)
+@@ -8903,6 +8964,18 @@ static bool cocoa_gl_present_vsync(double T)
              (int)(present_sync.wait_sum * 1e6 / present_sync.shown) : 0);
          trace_cocoa_present_skips(present_sync.repeats, present_sync.merged,
                                    present_sync.dropped, present_sync.busy);
@@ -283,14 +287,15 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
 +                    present_sync.grid_period, present_sync.follow_lead);
 +            }
 +            trace_cocoa_present_follow((int)lround(present_sync.follow_lead * 1e6),
-+                present_sync.lead.n, present_sync.follow_frames,
-+                present_sync.follow_late);
++                (int)lround(omacvm_lead_quantile(&present_sync.lead, 0.5) * 1e6),
++                (int)lround(omacvm_lead_quantile(&present_sync.lead, 1.0) * 1e6),
++                present_sync.follow_frames, present_sync.follow_late);
 +        }
 +        present_sync.follow_frames = present_sync.follow_late = 0;
          present_sync.ticks = present_sync.shown = present_sync.direct = 0;
          present_sync.repeats = 0;
          present_sync.merged = present_sync.dropped = present_sync.busy = 0;
-@@ -8974,10 +9046,11 @@ - (void)tick:(CADisplayLink *)link
+@@ -8974,10 +9047,11 @@ - (void)tick:(CADisplayLink *)link
          const char *e = getenv("OMACVM_GL_LEAD_MS");
          lead = (e ? atof(e) : 3.0) / 1000;
      }
@@ -431,7 +436,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  cocoa_present_frame(int gap_us, int queued, bool linked) "frame ready %d us after the last, %d queued, linked %d"
  cocoa_present_direct(int gap_ms) "frame shown when ready, %d ms after the last"
  cocoa_present_skips(unsigned repeats, unsigned merged, unsigned dropped, unsigned busy) "%u repeats, %u merged, %u dropped, %u no free surface"
-+cocoa_present_follow(int lead_us, int samples, unsigned frames, unsigned late) "guest follows the refresh: vblank %d us before the commit (%d samples), %u frames, %u after it"
++cocoa_present_follow(int lead_us, int median_us, int latest_us, unsigned frames, unsigned late) "guest follows the refresh: vblank %d us before the commit; its frames ready %d us after it (median), %d (latest of the last 64); %u frames, %u late"
  
  # egl-helpers.c
  egl_init_d3d11_device(void *p) "d3d device: %p"

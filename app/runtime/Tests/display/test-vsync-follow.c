@@ -33,7 +33,7 @@ int main(void)
     CHECK(omacvm_vsync_period_ps(1.0, 0) == 0);
     CHECK(omacvm_vsync_period_ps(1.0, 75) == 13333333333ull);
 
-    /* The lead: too few frames keep it; else the 95th percentile + 1 ms, clamped. */
+    /* The lead: too few frames keep it; else the latest + 1 ms, down slowly, clamped. */
     OmacVMLead l = { 0 };
     for (int i = 0; i < 10; i++) {
         omacvm_lead_add(&l, 0.003);
@@ -42,13 +42,23 @@ int main(void)
     for (int i = 0; i < 60; i++) {
         omacvm_lead_add(&l, 0.003 + (i % 20) * 0.0001);   /* 3.0 .. 4.9 ms */
     }
+    CHECK(fabs(omacvm_lead_quantile(&l, 1.0) - 0.0049) < 1e-9);
+    CHECK(fabs(omacvm_lead_quantile(&l, 0.0) - 0.003) < 1e-9);
     double v = omacvm_lead_value(&l, 1 / 60.0, 0.005);
-    CHECK(v > 0.0057 && v < 0.0060);                     /* p95 ~4.8-4.9 ms + 1 ms */
+    CHECK(fabs(v - 0.0059) < 1e-9);                      /* up at once: 4.9 + 1 ms */
+    CHECK(fabs(omacvm_lead_value(&l, 1 / 60.0, 0.009) - 0.0085) < 1e-9);   /* down 0.5 ms at most */
+    CHECK(fabs(omacvm_lead_value(&l, 1 / 60.0, 0.0062) - 0.0059) < 1e-9);  /* down to it when close */
+    OmacVMLead one = { 0 };
+    for (int i = 0; i < 63; i++) {
+        omacvm_lead_add(&one, 0.002);
+    }
+    omacvm_lead_add(&one, 0.007);                          /* one slow frame sets it */
+    CHECK(fabs(omacvm_lead_value(&one, 1 / 60.0, 0.004) - 0.008) < 1e-9);
     OmacVMLead fast = { 0 };
     for (int i = 0; i < 64; i++) {
         omacvm_lead_add(&fast, 0.0002);
     }
-    CHECK(omacvm_lead_value(&fast, 1 / 120.0, 0.005) == OMACVM_LEAD_MIN_S);
+    CHECK(omacvm_lead_value(&fast, 1 / 120.0, 0.0021) == OMACVM_LEAD_MIN_S);
     OmacVMLead slow = { 0 };
     for (int i = 0; i < 64; i++) {
         omacvm_lead_add(&slow, 0.0079);
@@ -59,6 +69,7 @@ int main(void)
     CHECK(slow.n == OMACVM_LEAD_N);
     omacvm_lead_reset(&slow);
     CHECK(slow.n == 0 && omacvm_lead_value(&slow, 1 / 120.0, 0.004) == 0.004);
+    CHECK(omacvm_lead_quantile(&slow, 0.5) < 0);
 
     /* Since the grid's last vblank: wraps by the period, never negative. */
     CHECK(fabs(omacvm_vsync_since(10.004, 10.0, 0.01) - 0.004) < 1e-9);

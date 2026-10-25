@@ -6,8 +6,9 @@ next point of a refresh grid (host ns, period in ps, so an hour of
 60 Hz adds up no rounded ns), the period of the display's full rate from
 a run of the display link's ticks (a link slowed to 60 or 24 Hz on a
 120 Hz panel still ticks on that grid), and the lead: when the guest's
-frames are ready after their vblank, the 95th percentile of the last 64
-plus 1 ms, at least 2 ms, at most a period less 1 ms. Also OmacVM's
+frames are ready after their vblank, the latest of the last 64 plus 1
+ms, up at once, down by at most 0.5 ms a second, at least 2 ms, at most
+a period less 1 ms. Also OmacVM's
 virtio-gpu command and answer numbers, and the shared state's calls.
 
 Why its own file: so the rules are tested without QEMU or a window
@@ -19,7 +20,7 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 
 --- /dev/null
 +++ b/ui/omacvm-vsync.h
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,174 @@
 +/*
 + * OmacVM: the guest's vblanks in step with the Mac display's refresh.
 + *
@@ -91,15 +92,18 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +}
 +
 +/*
-+ * The lead: how long before the commit the guest's vblank comes. Frames that
-+ * arrive later than the lead miss their refresh; the lead follows when the
-+ * guest's frames arrive after their vblank: the 95th percentile of the last
-+ * OMACVM_LEAD_N plus a margin, at least OMACVM_LEAD_MIN_S, at most a period
-+ * less OMACVM_LEAD_SPARE_S.
++ * The lead: how long before the commit the guest's vblank comes. A frame
++ * ready later than the lead misses its refresh (one repeat, and the frame
++ * is dropped for the next), so the lead covers the latest of the last
++ * OMACVM_LEAD_N frames (ready how long after their vblank) plus a margin.
++ * It goes up at once and down by at most OMACVM_LEAD_DOWN_S per update (one
++ * slow frame does not make the next second tight), at least
++ * OMACVM_LEAD_MIN_S, at most a period less OMACVM_LEAD_SPARE_S.
 + */
 +#define OMACVM_LEAD_N 64
 +#define OMACVM_LEAD_MIN_S 0.002
 +#define OMACVM_LEAD_MARGIN_S 0.001
++#define OMACVM_LEAD_DOWN_S 0.0005
 +#define OMACVM_LEAD_SPARE_S 0.001
 +#define OMACVM_LEAD_START_S 0.005
 +
@@ -126,27 +130,39 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +    }
 +}
 +
++/* The q-quantile (0..1) of the frames kept; -1 without any. */
++static inline double omacvm_lead_quantile(const OmacVMLead *l, double q)
++{
++    double s[OMACVM_LEAD_N];
++    int n = l->n;
++
++    if (n <= 0) {
++        return -1;
++    }
++    for (int i = 0; i < n; i++) {
++        double v = l->after[i];
++        int j = i;
++        while (j > 0 && s[j - 1] > v) {
++            s[j] = s[j - 1];
++            j--;
++        }
++        s[j] = v;
++    }
++    int k = (int)(q * (n - 1) + 0.5);
++    return s[k < 0 ? 0 : k >= n ? n - 1 : k];
++}
++
 +/* The lead for a period (seconds); `now` is the current one, kept with too few frames. */
 +static inline double omacvm_lead_value(const OmacVMLead *l, double period, double now)
 +{
-+    double s[OMACVM_LEAD_N];
 +    double hi = period - OMACVM_LEAD_SPARE_S;
-+    int n = l->n;
 +
 +    if (!(period > 0)) {
 +        return now;
 +    }
-+    if (n >= 16) {
-+        for (int i = 0; i < n; i++) {
-+            double v = l->after[i];
-+            int j = i;
-+            while (j > 0 && s[j - 1] > v) {
-+                s[j] = s[j - 1];
-+                j--;
-+            }
-+            s[j] = v;
-+        }
-+        now = s[(n * 95) / 100] + OMACVM_LEAD_MARGIN_S;
++    if (l->n >= 16) {
++        double want = omacvm_lead_quantile(l, 1.0) + OMACVM_LEAD_MARGIN_S;
++        now = want >= now ? want : (want > now - OMACVM_LEAD_DOWN_S ? want : now - OMACVM_LEAD_DOWN_S);
 +    }
 +    if (now < OMACVM_LEAD_MIN_S) {
 +        now = OMACVM_LEAD_MIN_S;
