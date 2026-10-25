@@ -27,16 +27,21 @@ guest destroys drops the pictures still on their way into it; a decoder that
 goes away first puts its last pictures in. A picture the media engine has had
 for 1 s is given up (logged), when it is waited for and in the poll. A decoder's
 queue holds at most 8 pictures not handed to VideoToolbox yet; more are refused
-(a media engine that stopped answering). The sync thread reads the fence's context again after its waits: the context may have
-gone away meanwhile. OMACVM_VIDEO_DECODE_SYNC=1: END_FRAME waits for each picture, as before. With OMACVM_VIDEO_DEBUG=1 the per-120-frames line
-says how many pictures were in flight at most.
+(a media engine that stopped answering). The sync thread reads the fence's
+context again after its waits: the context may have gone away meanwhile.
+Known: a fence waits for the last picture sent by any decoder, so while a video
+plays every context's fences (Hyprland's too) may wait up to one picture's
+decode time (3-5 ms at 4K); before, QEMU's GPU thread itself was held that long.
+OMACVM_VIDEO_DECODE_SYNC=1: END_FRAME waits for each picture, as before. With
+OMACVM_VIDEO_DEBUG=1 the per-120-frames line says how many pictures were in
+flight at most.
 Why: in Google Chrome's hardware decoding of YouTube 4K60 (AV1, MacBook Pro M4
 Max) QEMU's GPU thread was busy 94 % of the time: 55 % of it waiting in
 DecodeFrame + WaitForAsynchronousFrames (about 8 ms a picture), 20 % copying.
 Chrome's compositor and Hyprland waited behind every picture, and Chrome
-dropped 11-14 % of the frames against 3 % decoding on the CPU (31 % against
-0.1 % for 4K VP9 on a MacBook Air M2), so Chromium was held to 1080p
-(OMACVM_VA_MAX).
+dropped 13-20 % of the frames against 8 % decoding on the CPU (YouTube 4K60
+AV1, M4 Max; 38 % against 7 % for 4K VP9 on a MacBook Air M2, same session),
+so Chromium was held to 1080p (OMACVM_VA_MAX).
 Applies on top of virgl-videotoolbox-decode.patch,
 virgl-videotoolbox-encode-async.patch (the fence hook), virgl-video-plane-edge.patch
 and virgl-video-picture-size.patch.
