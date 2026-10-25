@@ -24,8 +24,12 @@ Browsers in an OmacVM.app VM:
 
 - **Google Chrome** (Linux ARM): yes, no flags needed. YouTube chooses AV1 or
   VP9; `chrome://gpu` shows *Video Decode: Hardware accelerated* and
-  `chrome://media-internals` *VaapiVideoDecoder*. Install it with
-  `src/bench/install-chrome.sh` (Arch Linux ARM has no package). Chrome 155
+  `chrome://media-internals` *VaapiVideoDecoder*. Install it from the
+  Omarchy menu (Install > Browser > Chrome, the AUR's `google-chrome`, which
+  builds for ARM), then `omacvm apply` once
+  ([why](routes/app.md)); `src/bench/install-chrome.sh` unpacks Google's
+  .deb instead (the benchmarks use it; the AUR package then stops on its
+  files until `/opt/google/chrome` is removed). Chrome 155
   and newer decode in hardware from OmacVM 3.2.0 with Update VM (before:
   on the CPU, *Plane 0 is out of bounds: ... > 4096* in Chrome's log; see
   [Chrome's converted frames](#chromes-converted-frames)), for now up to
