@@ -3,17 +3,28 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.1 (unreleased)
+## 3.2.2 (unreleased)
 
 - **Pointer on its own layer (experimental, off).** A new switch in the VM window's Display section.
   With it, moving the pointer no longer redraws the VM's screen: the VM puts its pointer on the
   graphics card's cursor layer, and the app shows that layer over the window, the same pointer in
-  the same place (checked pixel for pixel). Only the drawing of the VM's picture for each move
-  goes; the VM still sends a frame per move. MacBook Air M2, pointer moving: 3.47-3.50 W instead
-  of 3.74-3.75 W for the whole Mac (-7 %); scrolling and video the same as before. Only in the
-  VM's main window: on other displays the VM draws the pointer as before. Not together with the
-  hidden `macPointer` setting. Needs Update VM (it builds the VM's graphics driver, internet
-  once); counts from the next start of the VM.
+  the same place (with Extra brightness as bright as the picture). Only the drawing of the VM's
+  picture for each move goes; the VM still sends a frame per move. MacBook Air M2 (60 Hz), pointer
+  moving, whole Mac: 3.47-3.50 W against 3.74-3.75 W with the VM drawing the pointer itself (-7 %);
+  scrolling and video the same. Same pixels in the whole window on the Air; on a MacBook Pro M1 Max
+  with HDR at 120 Hz the same pixels around the pointer (an 8-bit capture). The pointer moves on its
+  own, like the Mac's: while you drag something it can be a frame ahead of it. Only in the VM's main
+  window: on other displays the VM draws the pointer as before. Not together with the hidden
+  `macPointer` setting. Needs Update VM (it builds the VM's graphics driver, internet once); counts
+  from the next start of the VM. With HDR on, Update VM builds that driver again too; until it has,
+  an HDR start uses the stock driver and `omacvm check` says so.
+
+## 3.2.1
+
+Google Chrome plays 1440p and 4K video on the Mac's media engine, call tiles show the whole picture,
+the VM's window takes less power on macOS 27, the VM's disk is safer at a power cut, and volume 0 is
+silent.
+
 - **Google Chrome plays 1440p and 4K video on the Mac's media engine.** The Mac's graphics
   thread for the VM, which runs every app's drawing in it, waited for the media engine on each
   picture (about 5 ms for a 4K one on a MacBook Air M2, 3 ms on an M4 Max). Above 1080p Chrome's
@@ -39,6 +50,13 @@ in more words.
   VP9, AV1 and H.264). Only in Chromium-based apps and with Mesa up to 26.2 (a newer Mesa
   turns it off until it is checked); needs Update VM, then restart Chrome. `OMACVM_VA_FILL=0`
   in Chrome's environment turns it off.
+- **Less power to show the VM's window (macOS 27).** OmacVM.app now keeps the VM's picture in the
+  Mac's lossless-compressed format, so the Mac's graphics move fewer bytes for every frame: on a MacBook
+  Air M2 scrolling in the VM takes 0.20 W less at 60 Hz (4.45 W instead of 4.65 W, 4 %) and 0.37 W
+  less at 120 Hz (6.18 W instead of 6.55 W, 6 %, on a 120 Hz virtual display); the picture is the same
+  pixel for pixel. A video changes little (its frames compress less). To turn it off:
+  `launchctl setenv OMACVM_GL_LOSSLESS 0`, then quit and reopen the app (`launchctl unsetenv
+  OMACVM_GL_LOSSLESS` turns it on again).
 - **The VM's disk is safer at a power cut.** When Omarchy saves a file for good, the Mac's drive now
   gets a write barrier: nothing written after it reaches the flash before what came before it.
   Until now a power cut (a Mac mini or Studio losing power, a held power button) could leave
@@ -48,21 +66,21 @@ in more words.
   where 200 git commits took 0.97 s instead of 0.70 s; the barrier itself costs 0.2-0.75 ms on the
   Macs we measured, the most on an M1 Max. Installing 222 packages, git checkouts and big copies
   took the same time. `omacvm check` shows it as "disk flush". Needs the app update.
+- **Volume 0 is silent.** With a VM in front, the volume-down key to 0 % (or Omarchy's volume
+  slider at 0) set the Mac's volume to 0 but did not mute it, and 0 is not silence on a Mac's
+  speakers: MacBook Pro and Mac mini speakers still play at -63.5 dB there, only 4 dB under the
+  first step. A mute pressed before was cleared by the next volume-down, and 0 stayed unmuted. The
+  Bridge now mutes the Mac's output at 0, as macOS does, and volume up from 0 unmutes it again.
+  Needs `omacvm update` on the Mac (OmacVM.app: the app's update, then Update VM, which installs
+  the new Bridge); nothing changes in the VM.
+- **USB devices** (experimental): the list now says that a USB network adapter, or another Mac on a
+  USB-C cable, is a network adapter that macOS keeps. It said serial port.
 - **Partial present, built, off for now.** OmacVM.app's QEMU draws the whole frame into the window's
   picture for every frame, also when only the pointer moved. It can now draw only the part the VM says
   changed. In a bench on a MacBook Air M2 (no VM) the full draw cost 0.19 W at 60 frames a second and
   0.47 W at 120, a small box a few hundredths. It stays off until a VM run shows it draws right, and it
   needs a VM that says what changed in its desktop's frames (Linux 7.4, or OmacVM's own driver with
   that fix). `OMACVM_GL_PRESENT_DAMAGE=1` in the app's environment turns it on for tests.
-- **USB devices** (experimental): the list now says that a USB network adapter, or another Mac on a
-  USB-C cable, is a network adapter that macOS keeps. It said serial port.
-
-- **Volume 0 is silent.** With a VM in front, the volume-down key to 0 % (or Omarchy's volume
-  slider at 0) set the Mac's volume to 0 but did not mute it, and 0 is not silence on a Mac's
-  speakers: MacBook Pro and Mac mini speakers still play at -63.5 dB there, only 4 dB under the
-  first step. A mute pressed before was cleared by the next volume-down, and 0 stayed unmuted. The
-  Bridge now mutes the Mac's output at 0, as macOS does, and volume up from 0 unmutes it again.
-  Needs `omacvm update` (or the app's update) on the Mac; nothing changes in the VM.
 
 ## 3.2.0
 
