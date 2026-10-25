@@ -12,7 +12,8 @@ org.omacvm.display, one JSON object per line:
                 where each output sits in the Mac's arrangement (points);
                 "builtin" names the output on the Mac's own display (the
                 notch), when one is;
-  to the Mac    {"hello": 1, "external": true}  when it starts,
+  to the Mac    {"hello": 1, "external": true, "pause": 1}  when it starts
+                ("pause": it can turn displays off for "unseen"),
                 {"external": false}             when the switch changes,
                 {"monitors": [{"name": "Virtual-1", "x": 0, "y": 0,
                  "width": 1728, "height": 1085}, ...]}
@@ -34,6 +35,10 @@ org.omacvm.display, one JSON object per line:
                 of them on). The list of them is in
                 $XDG_RUNTIME_DIR/omacvm/paused-displays, so a restarted agent
                 turns them on first (the Mac tells it again at its hello).
+                The Mac says "unseen" again every 5 s while it holds (a
+                line can get lost): with no word for 15 s the agent turns its
+                displays on. After a start or a lost event socket it waits
+                3 s for Hyprland's share events before it turns one off.
 
 Hyprland's event socket has no event when an output only moves (display-sync
 and Omanotch move them with hyprctl eval, a config reload puts them back to
@@ -57,6 +62,7 @@ The switch "Use external displays" is ~/.config/omacvm/displays.conf
   omacvm-displays status            the switch and the outputs, as JSON
   omacvm-displays desktop           displays that show no desktop, as JSON
   omacvm-displays poke              tell the agent the layout moved (Hyprland's hook)
+  omacvm-displays pause             whether it can pause drawing, and the displays it turned off, as JSON
   omacvm-displays fullpanel         the output in "Full screen including notch" (nothing otherwise)
   omacvm-displays scale SCALE       Omarchy's scale for the focused output (the display
                                     panel's buttons): in "Full screen including notch" the Mac
@@ -603,6 +609,8 @@ def write_state(message: dict) -> None:
 
 
 PAUSED = RUNTIME / "omacvm/paused-displays"
+LEASE = 15.0          # no "unseen" from the Mac for this long: the displays on again
+CAST_SETTLE = 3.0     # after a start or a lost event socket: shares unknown for this long
 
 
 def screencasts(data: bytes) -> list[tuple[bool, str, str]]:
@@ -635,16 +643,37 @@ class Pause:
     An output the guest turned off itself (Omarchy's idle) is left as it is.
     """
 
-    def __init__(self, set_dpms=dpms, monitors=lambda: hypr_json("j/monitors"), path: Path = PAUSED) -> None:
+    def __init__(self, set_dpms=dpms, monitors=lambda: hypr_json("j/monitors"), path: Path = PAUSED,
+                 clock=time.monotonic) -> None:
         self.set_dpms = set_dpms
         self.monitors = monitors
         self.path = path
+        self.clock = clock
         self.unseen: set[str] = set()
         self.paused: set[str] = set()
         self.casts: dict[tuple[str, str], int] = {}
+        self.casts_since = clock()     # share events seen from then on
+        self.renewed = 0.0             # the Mac's last "unseen" with a display in it
 
     def mac(self, names) -> None:
         self.unseen = {n for n in names if isinstance(n, str) and re.fullmatch(r"Virtual-[0-9]+", n)}
+        if self.unseen:
+            self.renewed = self.clock()
+
+    def due_at(self) -> float | None:
+        """When the pause has something to do by itself: the lease's end, the end of the share settle."""
+        if not self.unseen:
+            return None
+        at = self.renewed + LEASE
+        settle = self.casts_since + CAST_SETTLE
+        return min(at, settle) if self.clock() < settle else at
+
+    def tick(self) -> None:
+        """The lease ran out (the Mac's word got lost, or QEMU is gone): draw again."""
+        if self.unseen and self.clock() - self.renewed > LEASE:
+            log(f"no word from the Mac for {LEASE:.0f} s: drawing again")
+            self.unseen = set()
+        self.apply()
 
     def cast(self, on: bool, kind: str, name: str) -> None:
         key = (kind, name)
@@ -657,8 +686,11 @@ class Pause:
     def casts_lost(self) -> None:
         """The event socket went away: its ends of shares are not known."""
         self.casts = {}
+        self.casts_since = self.clock()
 
     def wanted_off(self) -> set[str]:
+        if self.clock() - self.casts_since < CAST_SETTLE:
+            return set()   # a share that started before may not be known yet
         if any(kind != "monitor" for kind, _ in self.casts):
             return set()   # a window shared: it may be on any output
         return {n for n in self.unseen if ("monitor", n) not in self.casts}
@@ -1017,11 +1049,15 @@ class Agent:
             due.append(min(self.looks))
         if self.repair or not self.config_watch.ok:
             due.append(now + 1.0)   # a shell restart under way; displays.conf without inotify
+        pause = getattr(self, "pause", None)
+        at = pause.due_at() if pause else None
+        if at is not None:
+            due.append(at + 0.05)
         return max(0.0, min(due) - now)
 
     def run(self) -> None:
         self.pause.restore()
-        self.send({"hello": 1, "external": self.external})
+        self.send({"hello": 1, "external": self.external, "pause": 1})
         self.lua_changed()
         # Started in the middle of a change (a config reload restarts it):
         # the first report may be a passing layout.
@@ -1059,7 +1095,7 @@ class Agent:
                     # The Mac side is not connected (yet): say hello again
                     # once it is, so it sends the layout.
                     if b'"hello"' not in self.outbox:
-                        self.send({"hello": 1, "external": self.external})
+                        self.send({"hello": 1, "external": self.external, "pause": 1})
                     time.sleep(1)
             if self.events and self.events in ready:
                 try:
@@ -1106,6 +1142,10 @@ class Agent:
             self.report()
         self.repair_done()
         self.check_desktop()
+        pause = getattr(self, "pause", None)
+        at = pause.due_at() if pause else None
+        if at is not None and now >= at:
+            pause.tick()
 
 
 def notify(text: str) -> None:
@@ -1152,6 +1192,14 @@ def main(argv: list[str]) -> int:
         return 0
     if len(argv) >= 2 and argv[1] == "poke":
         poke()
+        return 0
+    if len(argv) >= 2 and argv[1] == "pause":
+        paused = []
+        try:
+            paused = json.loads(PAUSED.read_text())
+        except (OSError, ValueError):
+            pass
+        print(json.dumps({"able": True, "paused": paused if isinstance(paused, list) else []}))
         return 0
     if len(argv) >= 2 and argv[1] == "fullpanel":
         out = fullpanel_output()

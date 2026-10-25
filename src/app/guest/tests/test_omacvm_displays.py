@@ -358,10 +358,12 @@ class PauseTest(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp)
         self.path = self.tmp / "omacvm/paused-displays"
-        p = od.Pause(set_dpms=self.h.set, monitors=self.h.monitors, path=self.path)
+        self.t = [1000.0]
+        p = od.Pause(set_dpms=self.h.set, monitors=self.h.monitors, path=self.path, clock=lambda: self.t[0])
         patcher = mock.patch.object(od, "log", lambda m: None)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.t[0] += od.CAST_SETTLE   # past the start's share settle
         return p
 
     def test_unseen_off_seen_on(self):
@@ -446,12 +448,56 @@ class PauseTest(unittest.TestCase):
         self.assertEqual(self.h.dpms, {"Virtual-1": False, "Virtual-2": False})
 
     def test_shares_lost_with_the_event_socket(self):
+        # The share's end may be lost with the socket: forgotten, but nothing goes off for CAST_SETTLE
+        # (a share that runs on announces nothing new).
         p = self.make("Virtual-1")
         p.cast(True, "monitor", "Virtual-1")
         p.casts_lost()
         p.mac(["Virtual-1"])
         p.apply()
+        self.assertTrue(self.h.dpms["Virtual-1"])
+        self.t[0] += od.CAST_SETTLE
+        p.apply()
         self.assertFalse(self.h.dpms["Virtual-1"])
+
+    def test_nothing_off_right_after_a_start(self):
+        h = FakeHypr("Virtual-1")
+        t = [50.0]
+        p = od.Pause(set_dpms=h.set, monitors=h.monitors, path=pathlib.Path("/nonexistent/omacvm-test/p"),
+                     clock=lambda: t[0])
+        with mock.patch.object(od, "log", lambda m: None):
+            p.mac(["Virtual-1"])
+            p.apply()
+            self.assertTrue(h.dpms["Virtual-1"])
+            self.assertEqual(p.due_at(), 50.0 + od.CAST_SETTLE)
+            t[0] += od.CAST_SETTLE
+            p.tick()
+        self.assertFalse(h.dpms["Virtual-1"])
+
+    def test_the_lease_runs_out(self):
+        # The Mac says "unseen" again every 5 s; a lost "seen" (or a QEMU gone) must not leave it dark.
+        p = self.make("Virtual-1")
+        p.mac(["Virtual-1"])
+        p.apply()
+        self.assertEqual(p.due_at(), self.t[0] + od.LEASE)
+        self.t[0] += od.LEASE - 1
+        p.mac(["Virtual-1"])           # renewed
+        self.t[0] += od.LEASE - 1
+        p.tick()
+        self.assertFalse(self.h.dpms["Virtual-1"])
+        self.t[0] += 2
+        p.tick()
+        self.assertTrue(self.h.dpms["Virtual-1"])
+        self.assertEqual(p.unseen, set())
+        self.assertIsNone(p.due_at())
+
+    def test_the_agent_says_it_can_pause(self):
+        with mock.patch("sys.stdout", new_callable=__import__("io").StringIO) as out, \
+             mock.patch.object(od, "PAUSED", pathlib.Path("/nonexistent/omacvm-test/paused")):
+            self.assertEqual(od.main(["omacvm-displays", "pause"]), 0)
+        self.assertEqual(json.loads(out.getvalue()), {"able": True, "paused": []})
+        src = (HERE.parent / "omacvm-displays").read_text()
+        self.assertEqual(src.count('self.send({"hello": 1, "external": self.external, "pause": 1})'), 2)
 
     def test_screenshots_count_up_and_down(self):
         p = self.make("Virtual-1")
