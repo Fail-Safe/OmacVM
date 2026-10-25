@@ -10,7 +10,11 @@ on a Space not shown, closed with Keep running), or the screen is locked,
 the displays sleep or another user is on the console. The agent turns that
 output's display off (DPMS). Seen again: {"unseen": []} at once; until the
 guest's first frame the window keeps its last picture, not QEMU's "display
-not active" one. A restarted agent is told again at its hello. qemu.log:
+not active" one. Only an agent that says "pause": 1 in its hello is told
+(a restarted agent again at its hello). The channel drops a line it cannot
+write at once, so "unseen" is a lease said again every 5 s (the agent turns
+its displays on after 15 s without it) and "seen" is said again every
+0.25 s until the guest's first frame (at most 5 s). qemu.log:
 the switch at start and on a change, and after each pause how long it was
 and when the guest's first two frames came after the window was seen.
 OMACVM_PRESENT_HIDDEN=1 keeps the guest drawing too.
@@ -52,7 +56,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +static OmacVMGuestPause omacvm_gp = { .seen = true };
 +static bool omacvm_gp_dark;     /* the guest's display went off while told (BQL) */
 +static void omacvm_gp_update(void);
-+static void omacvm_gp_hello(void);
++static void omacvm_gp_hello(NSDictionary *hello);
 +
  static NSInteger cbchangecount = -1;
  static QemuClipboardInfo *cbinfo;
@@ -65,12 +69,10 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
      if (!seen) {
          since = CACurrentMediaTime();
  #ifdef CONFIG_OPENGL
-@@ -8132,6 +8145,15 @@
-     if (!qatomic_read(&omacvm_window_seen) && !always) {
-         gl_dirty = true;
+@@ -8207,6 +8220,15 @@
          omacvm_frames_unseen++;
-+        return true;
-+    }
+         return true;
+     }
 +    /*
 +     * OmacVM: the guest's display is off since its window was out of sight
 +     * (omacvm-cocoa-guest-pause.patch): the window keeps its last picture
@@ -78,10 +80,12 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +     */
 +    if (omacvm_gp_keep(&omacvm_gp, gl_scanout_borrow != NULL, CACurrentMediaTime())) {
 +        gl_dirty = false;
-         return true;
-     }
++        return true;
++    }
  
-@@ -9019,6 +9041,9 @@
+     if (gl_scanout_borrow) {
+         DisplayGLTexture texture = gl_scanout_borrow(gl_scanout_id);
+@@ -9092,6 +9114,9 @@
  
  static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
  {
@@ -91,7 +95,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
      gl_scanout_borrow = NULL;
      gl_dirty = true;
      cocoa_refresh_activity();
-@@ -9053,6 +9078,18 @@
+@@ -9126,6 +9151,18 @@
                                     uint32_t x, uint32_t y,
                                     uint32_t w, uint32_t h)
  {
@@ -110,16 +114,16 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
      gl_dirty = true;
      omacvm_hold_dirty = true;
      /* What changed, for the surfaces' next draws (partial present). */
-@@ -10690,6 +10727,8 @@
+@@ -10762,6 +10799,8 @@
+     bool locked = omacvm_ds_screen_locked || omacvm_ds_asleep || omacvm_ds_away ||
                    omacvm_ds_test_locked;
      double at;
- 
-+    omacvm_gp_update();     /* locked or asleep: nobody sees the window */
 +
++    omacvm_gp_update();     /* locked or asleep: nobody sees the window */
+ 
      if (locked != omacvm_ds_timer.locked) {
          omacvm_ds_locked_at = omacvm_ds_clock();
-         fprintf(stderr, "omacvm: displays: %s (%s)\n", locked ?
-@@ -11188,8 +11227,136 @@
+@@ -11261,8 +11300,187 @@
          omacvm_bright_look();
      }];
      omacvm_bright_look();
@@ -142,10 +146,13 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 + * the app), watched with KVO so it works at once in a running VM;
 + * OMACVM_GUEST_PAUSE=1 or 0 decides instead (a QEMU not started as the app,
 + * tests). OMACVM_PRESENT_HIDDEN=1 (frames drawn for an unseen window) keeps
-+ * the guest drawing too. Main thread.
++ * the guest drawing too. Only an agent that says "pause": 1 in its hello is
++ * told (older agents would not know the word). Main thread.
 + */
 +static int omacvm_gp_switch = -1;       /* -1: not read yet */
++static bool omacvm_gp_able;             /* the display agent can pause (its hello) */
 +static unsigned omacvm_gp_gen;          /* the pending "unseen" timer's */
++static unsigned omacvm_gp_again_gen;    /* the next lease or "seen" again */
 +
 +static void omacvm_gp_read_switch(void)
 +{
@@ -161,12 +168,52 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +    }
  }
  
-+static void omacvm_gp_tell(OmacVMGpTell tell)
++static void omacvm_gp_send(OmacVMGpTell tell)
 +{
-+    if (tell == OMACVM_GP_NONE || omacvm_chan_fd < 0 || !omacvm_guest_ready) {
++    if (tell == OMACVM_GP_NONE || omacvm_chan_fd < 0 || !omacvm_guest_ready || !omacvm_gp_able) {
 +        return;
 +    }
 +    omacvm_chan_write(tell == OMACVM_GP_UNSEEN ? @"{\"unseen\":[\"Virtual-1\"]}" : @"{\"unseen\":[]}");
++}
++
++/*
++ * The channel drops a line it cannot write at once (a full socket): the
++ * lease ("unseen" again every 5 s while it holds) and "seen" again until the
++ * guest's first frame, from omacvm_gp_again.
++ */
++static void omacvm_gp_again_arm(void)
++{
++    __block double at = 0;
++    unsigned gen = ++omacvm_gp_again_gen;
++
++    with_bql(^{
++        at = omacvm_gp_again_at(&omacvm_gp);
++    });
++    if (at <= 0) {
++        return;
++    }
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
++                                 (int64_t)(MAX(0.0, at - CACurrentMediaTime()) * NSEC_PER_SEC)),
++                   dispatch_get_main_queue(), ^{
++        __block OmacVMGpTell again = OMACVM_GP_NONE;
++        if (gen != omacvm_gp_again_gen) {
++            return;
++        }
++        with_bql(^{
++            again = omacvm_gp_again(&omacvm_gp, CACurrentMediaTime());
++        });
++        omacvm_gp_send(again);
++        omacvm_gp_again_arm();
++    });
++}
++
++static void omacvm_gp_tell(OmacVMGpTell tell)
++{
++    if (tell == OMACVM_GP_NONE) {
++        return;
++    }
++    omacvm_gp_send(tell);
++    omacvm_gp_again_arm();
 +}
 +
 +static void omacvm_gp_fire(unsigned gen)
@@ -229,7 +276,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +    bool seen = always || (qatomic_read(&omacvm_window_seen) && !omacvm_ds_screen_locked &&
 +                           !omacvm_ds_asleep && !omacvm_ds_away && !omacvm_ds_test_locked);
 +    with_bql(^{
-+        tell = omacvm_gp_feed(&omacvm_gp, omacvm_gp_switch == 1, seen, now);
++        tell = omacvm_gp_feed(&omacvm_gp, omacvm_gp_switch == 1 && omacvm_gp_able, seen, now);
 +        due = omacvm_gp_due_at(&omacvm_gp);
 +    });
 +    omacvm_gp_tell(tell);
@@ -240,11 +287,19 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +    }
 +}
 +
-+/* The guest's display agent said hello (again): it knows nothing yet. */
-+static void omacvm_gp_hello(void)
++/* The guest's display agent said hello (again): whether it can pause; it knows nothing yet. */
++static void omacvm_gp_hello(NSDictionary *hello)
 +{
 +    __block bool told = false;
++    id p = hello[@"pause"];
++    bool able = [p isKindOfClass:[NSNumber class]] && [p intValue] == 1;
 +
++    if (able != omacvm_gp_able && omacvm_gp_switch == 1) {
++        info_report("OmacVM: pause drawing while hidden: %s", able ? "the VM's display agent can pause"
++                    : "the VM's display agent cannot pause yet (Update VM)");
++    }
++    omacvm_gp_able = able;
++    omacvm_gp_update();
 +    with_bql(^{
 +        told = omacvm_gp.told;
 +    });
@@ -256,15 +311,23 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
  static void omacvm_send_layout(void)
  {
      NSMutableArray *outputs = [NSMutableArray array];
-@@ -11409,6 +11576,7 @@
+@@ -11482,6 +11700,7 @@
              omacvm_last_layout = nil;
              omacvm_edr_set(omacvm_edr_now());
              omacvm_edr_watch();
-+            omacvm_gp_hello();
++            omacvm_gp_hello(d);
              update = true;
          }
          if ([d[@"external"] isKindOfClass:[NSNumber class]] &&
-@@ -12499,6 +12667,7 @@
+@@ -11511,6 +11730,7 @@
+     }
+     omacvm_chan_fd = -1;
+     omacvm_guest_ready = false;
++    omacvm_gp_able = false;
+     omacvm_chan_tries = 0;
+     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC),
+                    dispatch_get_main_queue(), ^{ omacvm_chan_connect(); });
+@@ -12572,6 +12792,7 @@
  #endif
      omacvm_head_delegate = [[OmacVMHeadDelegate alloc] init];
      omacvm_ds_watch_lock();

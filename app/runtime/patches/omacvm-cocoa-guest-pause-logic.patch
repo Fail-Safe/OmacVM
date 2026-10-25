@@ -4,7 +4,8 @@ Subject: [PATCH] ui: when the guest stops drawing for a window out of sight, tes
 What: a header with no AppKit in it: when to tell the guest that the VM's
 main window is out of sight (after 2 s) and seen again (at once), and when
 the window keeps its last picture (from "unseen" until the guest's first
-frame after "seen", at most 1 s). Used by omacvm-cocoa-guest-pause.patch
+frame after "seen", at most 1 s), and when to say it again (the lease every
+5 s, "seen" every 0.25 s until the first frame). Used by omacvm-cocoa-guest-pause.patch
 (which explains the why).
 
 Why its own file: so the rules are tested without QEMU or a window
@@ -18,7 +19,7 @@ diff --git a/ui/omacvm-guest-pause.h b/ui/omacvm-guest-pause.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-guest-pause.h
-@@ -0,0 +1,127 @@
+@@ -0,0 +1,173 @@
 +/*
 + * OmacVM: the guest stops drawing while the VM's main window cannot be seen
 + * (omacvm-cocoa-guest-pause.patch, OmacVM.app's "Pause drawing while
@@ -42,6 +43,11 @@ new file mode 100644
 + *   guest's display is off meanwhile, and QEMU would draw its "display not
 + *   active" picture instead.
 + * - The switch off while told: "seen" at once.
++ * - The display channel may drop a line (a full socket): "unseen" is a lease
++ *   the guest renews every OMACVM_GP_LEASE_S (the agent turns its displays
++ *   on when no word came for three of them), and "seen" is said again every
++ *   OMACVM_GP_RESEND_S until the guest's first frame, for at most
++ *   OMACVM_GP_RESEND_FOR_S.
 + */
 +#ifndef OMACVM_GUEST_PAUSE_H
 +#define OMACVM_GUEST_PAUSE_H
@@ -50,6 +56,9 @@ new file mode 100644
 +
 +#define OMACVM_GP_AFTER_S 2.0
 +#define OMACVM_GP_HOLD_S 1.0
++#define OMACVM_GP_LEASE_S 5.0
++#define OMACVM_GP_RESEND_S 0.25
++#define OMACVM_GP_RESEND_FOR_S 5.0
 +
 +typedef struct OmacVMGuestPause {
 +    bool on;            /* the switch */
@@ -62,6 +71,7 @@ new file mode 100644
 +    double seen_at;     /* "seen" told at (the hold's limit; 0: never) */
 +    double paused_s;    /* how long the guest was told unseen, for the log */
 +    unsigned frames;    /* guest frames since "seen" (up to 3) */
++    double sent_at;     /* the last "unseen" or "seen" told */
 +} OmacVMGuestPause;
 +
 +typedef enum OmacVMGpTell {
@@ -97,6 +107,7 @@ new file mode 100644
 +        p->told = false;
 +        p->paused_s = now - p->told_at;
 +        p->seen_at = now;
++        p->sent_at = now;
 +        p->frames = 0;
 +        return OMACVM_GP_SEEN;  /* the hold stays until the guest's first frame */
 +    }
@@ -112,8 +123,44 @@ new file mode 100644
 +    p->away = false;
 +    p->told = true;
 +    p->told_at = now;
++    p->sent_at = now;
 +    p->hold = true;
 +    return OMACVM_GP_UNSEEN;
++}
++
++/*
++ * The same word again, in case the guest did not get it: "unseen" every
++ * OMACVM_GP_LEASE_S while told (the lease), "seen" every OMACVM_GP_RESEND_S
++ * until the guest's first frame (at most OMACVM_GP_RESEND_FOR_S).
++ */
++static inline OmacVMGpTell omacvm_gp_again(OmacVMGuestPause *p, double now)
++{
++    if (p->told) {
++        if (now - p->sent_at < OMACVM_GP_LEASE_S) {
++            return OMACVM_GP_NONE;
++        }
++        p->sent_at = now;
++        return OMACVM_GP_UNSEEN;
++    }
++    if (p->seen_at == 0 || p->frames || now - p->seen_at >= OMACVM_GP_RESEND_FOR_S ||
++        now - p->sent_at < OMACVM_GP_RESEND_S) {
++        return OMACVM_GP_NONE;
++    }
++    p->sent_at = now;
++    return OMACVM_GP_SEEN;
++}
++
++/* When omacvm_gp_again has something to say next (0: nothing). */
++static inline double omacvm_gp_again_at(const OmacVMGuestPause *p)
++{
++    if (p->told) {
++        return p->sent_at + OMACVM_GP_LEASE_S;
++    }
++    if (p->seen_at == 0 || p->frames) {
++        return 0;
++    }
++    double at = p->sent_at + OMACVM_GP_RESEND_S;
++    return at < p->seen_at + OMACVM_GP_RESEND_FOR_S ? at : 0;
 +}
 +
 +/*

@@ -94,6 +94,34 @@ int main(void)
     omacvm_gp_feed(&p, false, false, 1);
     check(omacvm_gp_due(&p, 5) == OMACVM_GP_NONE && omacvm_gp_due_at(&p) == 0, "switch off before it was due: never told");
 
+    /* Again, in case the guest did not get it: the lease while told, "seen" until its first frame. */
+    p = fresh();
+    omacvm_gp_feed(&p, true, false, 0);
+    omacvm_gp_due(&p, 2);
+    check(omacvm_gp_again_at(&p) == 2 + OMACVM_GP_LEASE_S && omacvm_gp_again(&p, 2 + OMACVM_GP_LEASE_S - 0.1) == OMACVM_GP_NONE,
+          "told: the lease is due OMACVM_GP_LEASE_S after the last word");
+    check(omacvm_gp_again(&p, 2 + OMACVM_GP_LEASE_S) == OMACVM_GP_UNSEEN && omacvm_gp_again_at(&p) == 2 + 2 * OMACVM_GP_LEASE_S,
+          "... then \"unseen\" again, the next one a lease later");
+    omacvm_gp_feed(&p, true, true, 20);
+    check(omacvm_gp_again_at(&p) == 20 + OMACVM_GP_RESEND_S && omacvm_gp_again(&p, 20.1) == OMACVM_GP_NONE,
+          "seen: \"seen\" again after OMACVM_GP_RESEND_S, not before");
+    check(omacvm_gp_again(&p, 20 + OMACVM_GP_RESEND_S) == OMACVM_GP_SEEN, "... then \"seen\" again (a lost line)");
+    omacvm_gp_frame(&p);
+    check(omacvm_gp_again_at(&p) == 0 && omacvm_gp_again(&p, 21) == OMACVM_GP_NONE, "... until the guest's first frame");
+    p = fresh();
+    omacvm_gp_feed(&p, true, false, 0);
+    omacvm_gp_due(&p, 2);
+    omacvm_gp_feed(&p, true, true, 10);
+    double t = 10;
+    int n = 0;
+    while (omacvm_gp_again_at(&p) > 0 && n < 100) {
+        t = omacvm_gp_again_at(&p);
+        n += omacvm_gp_again(&p, t) == OMACVM_GP_SEEN;
+    }
+    check(n > 0 && t < 10 + OMACVM_GP_RESEND_FOR_S, "no frame ever: \"seen\" again only for OMACVM_GP_RESEND_FOR_S");
+    p = fresh();
+    check(omacvm_gp_again_at(&p) == 0 && omacvm_gp_again(&p, 100) == OMACVM_GP_NONE, "never told: nothing again");
+
     /* Never paused: no hold, frames are not counted. */
     p = fresh();
     check(!omacvm_gp_keep(&p, false, 1) && omacvm_gp_frame(&p) == 0, "never paused: nothing kept, nothing counted");
