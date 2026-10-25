@@ -11,6 +11,8 @@ later than before. A doubled nap that ran out while the thread was up (a
 late wake-up, a slow test) counts as over, so the thread never tests again
 without a nap. From 8 ms on the doubled naps (1 ms) come first again, so a
 long or stuck GPU job still wakes the thread about 1000 times a second.
+OMACVM_VIRGL_FENCE_SHORT_NAPS=0 in QEMU's environment turns the eighths off
+(the doubled naps only, as before); the sync thread logs which it uses.
 
 Why: the doubled naps woke at 1.05, 1.1, 1.2, 1.4, 1.8, 2.6, 3.6 ms, and
 most of the VM's GPU work per frame takes 1-3 ms on the Mac (Hyprland's
@@ -44,7 +46,7 @@ Test: Tests/virgl/test-fence-nap.c (build time, no GL: the schedule against
 fences of 0.05-20 ms with wake-ups on time and late, tests free and slow:
 never a test again without a nap, at most an eighth late past 1 ms plus
 those times, never later than the doubled naps with wake-ups on time, the
-wake-ups).
+switch off = the doubled naps exactly, the wake-ups).
 
 diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 --- a/src/vrend/vrend_renderer.c
@@ -59,7 +61,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
   * counts from the last sleep, not per fence, so fences that finish back to
   * back cannot chain spins: the thread's time-constraint budget per wake
   * (BUDGET, thread_sync) covers the spin and the work around it. */
-@@ -118,6 +119,48 @@
+@@ -118,6 +119,51 @@
  
  /* When the sync thread last woke from a sleep (only it reads or writes). */
  static uint64_t fence_awake_since;
@@ -72,11 +74,14 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 + * 1.4, 1.8, 2.6, 3.6 ms, and most of the VM's frames take 1-3 ms (Hyprland's,
 + * a browser's): a fence done after 1.85 ms was seen at 2.6 ms. From 8 ms on
 + * the doubled naps (1 ms) come first again: a long or stuck job wakes the
-+ * thread about 1000 times a second, as before. */
++ * thread about 1000 times a second, as before.
++ * OMACVM_VIRGL_FENCE_SHORT_NAPS=0 turns the eighths off (doubled naps only). */
 +#define FENCE_NAP_SHARE 8
++static bool fence_short_naps = true;   /* set by the sync thread before its first wait */
 +struct fence_naps {
 +   uint64_t t0, nap, next;             /* next: the doubled naps' wake-up, 0 = from the next test */
 +   uint64_t nap_min, lng, nap_max;
++   bool share;                         /* also wake an eighth of the time waited */
 +};
 +
 +static void fence_naps_start(struct fence_naps *s, uint64_t t0)
@@ -101,14 +106,14 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 +   }
 +   if (!s->next)
 +      s->next = now + s->nap;
-+   if (now - s->t0 <= s->lng)
++   if (!s->share || now - s->t0 <= s->lng)
 +      return s->next;
 +   return MIN2(s->next, now + MAX2((now - s->t0) / FENCE_NAP_SHARE, s->nap_min));
 +}
  
  /* While the render thread runs guest commands (virgl_renderer_submit_cmd),
   * a fence test on the sync thread takes Apple GL's share-group lock that the
-@@ -8412,9 +8455,12 @@
+@@ -8412,9 +8458,13 @@
           mach_timebase_info(&tb);
        uint64_t t0 = mach_absolute_time();
        const uint64_t spin = FENCE_SPIN_NS * tb.denom / tb.numer;
@@ -119,12 +124,13 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 +         .nap_min = FENCE_NAP_NS * tb.denom / tb.numer,
 +         .lng = FENCE_LONG_NS * tb.denom / tb.numer,
 +         .nap_max = FENCE_NAP_MAX_NS * tb.denom / tb.numer,
++         .share = fence_short_naps,
 +      };
 +      fence_naps_start(&naps, t0);
        for (;;) {
           GLenum glret = glClientWaitSync(fence->glsyncobj, 0, 0);
           if (glret == GL_WAIT_FAILED)
-@@ -8426,15 +8472,13 @@
+@@ -8426,15 +8476,13 @@
              /* Afterwards the wait starts over: spin and short naps first. */
              fence_wait_render(now);
              t0 = fence_awake_since;
@@ -142,3 +148,14 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
        }
     }
  #endif
+@@ -8562,6 +8610,10 @@
+       fence_busy_on = !(busy && !strcmp(busy, "0")) && fence_busy_sem != MACH_PORT_NULL;
+       virgl_info("sync thread: fence tests %s the render thread's commands\n",
+                  fence_busy_on ? "wait for the end of" : "run beside");
++      const char *naps = getenv("OMACVM_VIRGL_FENCE_SHORT_NAPS");
++      fence_short_naps = !(naps && !strcmp(naps, "0"));
++      virgl_info("sync thread: fence waits %s\n", fence_short_naps ?
++                 "also wake an eighth of the time waited" : "doubled naps only");
+    }
+ #endif
+ 

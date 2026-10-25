@@ -6,6 +6,7 @@
  *   an eighth of the fence's time late;
  * - wake-ups late and tests slow (20/5 and 60/30 us): every nap ends after the test before it
  *   (no test again without a nap), at most an eighth late plus those times, on average earlier;
+ * - OMACVM_VIRGL_FENCE_SHORT_NAPS=0 (share off): exactly the schedule before;
  * - a long job still gets about 1000 wake-ups a second, 2-3 ms fences a few more than before.
  * No GL, no clock: the times are made up (ns stand in for mach ticks). */
 #include "vrend/vrend_renderer.c"
@@ -15,9 +16,10 @@
 /* When a fence done after DONE ns is seen: a test starts at t (seen if done by then) and takes
  * COST, a nap that should end at wake ends LATE after it. UINT64_MAX: a nap that does not end
  * after its test, or one longer than 1 ms. */
-static uint64_t seen_at(uint64_t done, uint64_t late, uint64_t cost, unsigned *wakes)
+static uint64_t seen_at(uint64_t done, uint64_t late, uint64_t cost, bool share, unsigned *wakes)
 {
-   struct fence_naps s = { .nap_min = FENCE_NAP_NS, .lng = FENCE_LONG_NS, .nap_max = FENCE_NAP_MAX_NS };
+   struct fence_naps s = { .nap_min = FENCE_NAP_NS, .lng = FENCE_LONG_NS, .nap_max = FENCE_NAP_MAX_NS,
+                           .share = share };
    uint64_t t = 0;
    unsigned n = 0;
    fence_naps_start(&s, 0);
@@ -56,13 +58,14 @@ static int sweep(uint64_t late, uint64_t cost)
 {
    uint64_t sum = 0, sum_before = 0, count = 0;
    for (uint64_t done = 50000; done <= 20000000; done += 5000) {
-      uint64_t seen = seen_at(done, late, cost, NULL), before = seen_doubled(done, late, cost, NULL);
+      uint64_t seen = seen_at(done, late, cost, true, NULL), before = seen_doubled(done, late, cost, NULL);
       if (seen == UINT64_MAX) {
          fprintf(stderr, "a fence of %llu us (late %llu us, test %llu us): a nap ends before its test\n",
                  (unsigned long long)(done / 1000), (unsigned long long)(late / 1000),
                  (unsigned long long)(cost / 1000));
          return 1;
       }
+      CHECK(seen_at(done, late, cost, false, NULL) == before);
       if (!late && !cost && seen > before) {
          fprintf(stderr, "a fence of %llu us is seen at %llu us, the doubled naps saw it at %llu us\n",
                  (unsigned long long)(done / 1000), (unsigned long long)(seen / 1000),
@@ -98,14 +101,14 @@ int main(void)
 
    /* The case from QEMU's trace. */
    CHECK(seen_doubled(1850000, 0, 0, NULL) == 2600000);
-   CHECK(seen_at(1850000, 0, 0, NULL) - 1850000 <= 1850000 / FENCE_NAP_SHARE);
+   CHECK(seen_at(1850000, 0, 0, true, NULL) - 1850000 <= 1850000 / FENCE_NAP_SHARE);
 
    /* Wake-ups: a few more for 2-3 ms fences; a 100 ms job ~1000 a second, as before. */
    unsigned w2, w3, w100, b2, b3, b100, l100, lb100;
-   seen_at(2000000, 0, 0, &w2); seen_doubled(2000000, 0, 0, &b2);
-   seen_at(3000000, 0, 0, &w3); seen_doubled(3000000, 0, 0, &b3);
-   seen_at(100000000, 0, 0, &w100); seen_doubled(100000000, 0, 0, &b100);
-   seen_at(100000000, 60000, 30000, &l100); seen_doubled(100000000, 60000, 30000, &lb100);
+   seen_at(2000000, 0, 0, true, &w2); seen_doubled(2000000, 0, 0, &b2);
+   seen_at(3000000, 0, 0, true, &w3); seen_doubled(3000000, 0, 0, &b3);
+   seen_at(100000000, 0, 0, true, &w100); seen_doubled(100000000, 0, 0, &b100);
+   seen_at(100000000, 60000, 30000, true, &l100); seen_doubled(100000000, 60000, 30000, &lb100);
    CHECK(w2 <= b2 + 8 && w3 <= b3 + 10);
    CHECK(w100 <= b100 + 20 && l100 <= lb100 + 20);
    fprintf(stderr, "PASS: fence naps: wake-ups 2 ms %u (%u), 3 ms %u (%u), 100 ms %u (%u), "
