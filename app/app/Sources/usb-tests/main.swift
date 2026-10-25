@@ -46,6 +46,13 @@ let iphone = dev(0x05ac, 0x12a8, "iPhone", drivers: ["AppleUSBHostiOSDevice"], [
     I(number: 1, interfaceClass: 0xff, users: ["usbmuxd"]),
 ])
 expect(iphone.availability == .usedByMac("macOS uses it (iPhone, iPad or photo import)"), "an iPhone stays with the Mac")
+// Personal Hotspot over the cable, no photo import open: its own driver still names it.
+let iphoneNet = dev(0x05ac, 0x12a8, "iPhone", drivers: ["AppleUSBHostiOSDevice"], [
+    I(number: 0, interfaceClass: 2, users: ["AppleUSBNCMControl"]),
+    I(number: 1, interfaceClass: 0xff, users: ["usbmuxd"]),
+])
+expect(iphoneNet.availability == .usedByMac("macOS uses it (iPhone, iPad or photo import)"),
+       "an iPhone with its network on stays an iPhone")
 let cam = dev(0x03e7, 0xf63d, "Opal C1", cls: 0xef, [
     I(number: 0, interfaceClass: 0xff, users: []),
     I(number: 1, interfaceClass: 0x0e, users: ["UVCAssistant"]),

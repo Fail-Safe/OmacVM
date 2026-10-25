@@ -113,9 +113,11 @@ public struct USBDevice: Equatable, Sendable {
         if deviceClass == 0x11 || interfaces.contains(where: { $0.interfaceClass == 0x11 }) {
             return .notOffered("a USB-C adapter's info device")
         }
-        // The interfaces' drivers say best what macOS uses it as (a CDC composite
-        // driver on the device is there for serial ports and network adapters alike).
-        let users = interfaces.flatMap(\.users) + drivers
+        // A device's own driver names it best (an iPhone), but the CDC composite
+        // driver is there for serial ports and network adapters alike: there the
+        // interfaces' drivers say what it is.
+        let generic = drivers.filter { $0 == "AppleUSBCDCCompositeDevice" }
+        let users = drivers.filter { !generic.contains($0) } + interfaces.flatMap(\.users) + generic
         if let u = users.first { return .usedByMac(USBDevice.reason(u)) }
         return .free
     }
