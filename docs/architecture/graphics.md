@@ -979,7 +979,7 @@ bench lock and are indications only):
   vblank timer onto it, at most an eighth of a period per vblank. QEMU puts
   the guest's vblank the lead before each tick's commit; the lead is when the
   guest's frames are ready after their vblank (the latest of the last 64 + 1
-  ms, down 0.5 ms a second, 2 ms .. a period less 1 ms), timed on the grid
+  ms, down 2 ms a second, 2 ms .. a period less 1 ms), timed on the grid
   the guest got. Hyprland then draws right after a vblank and its frame is
   in the queue just before the commit: the wait in QEMU goes from anywhere
   up to a refresh to about the margin. While a guest follows, a tick with two

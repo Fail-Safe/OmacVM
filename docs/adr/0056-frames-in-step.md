@@ -64,7 +64,7 @@ because the wait is in the phase, not in the queue.
    the full rate's period measured over the link's run of ticks (a link
    slowed to 60 or 24 Hz on a ProMotion panel still ticks on that grid). The
    lead is when the guest's frames are ready after their vblank: the latest
-   of the last 64 plus 1 ms, up at once, down by at most 0.5 ms a second, at
+   of the last 64 plus 1 ms, up at once, down by at most 2 ms a second, at
    least 2 ms, at most a period less 1 ms (`ui/omacvm-vsync.h`, tested in
    `test-vsync-follow.c`). Frames are timed on the grid the guest got at its
    last ask, and not for six vblanks after that grid moved: timed on the

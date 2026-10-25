@@ -7,7 +7,7 @@ next point of a refresh grid (host ns, period in ps, so an hour of
 a run of the display link's ticks (a link slowed to 60 or 24 Hz on a
 120 Hz panel still ticks on that grid), and the lead: when the guest's
 frames are ready after their vblank, the latest of the last 64 plus 1
-ms, up at once, down by at most 0.5 ms a second, at least 2 ms, at most
+ms, up at once, down by at most 2 ms a second, at least 2 ms, at most
 a period less 1 ms; and when late frames should wait in the queue
 instead (the frames need more than that, or more than 1 in 100 came
 late). Also OmacVM's
@@ -105,7 +105,7 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +#define OMACVM_LEAD_N 64
 +#define OMACVM_LEAD_MIN_S 0.002
 +#define OMACVM_LEAD_MARGIN_S 0.001
-+#define OMACVM_LEAD_DOWN_S 0.0005
++#define OMACVM_LEAD_DOWN_S 0.002
 +#define OMACVM_LEAD_SPARE_S 0.001
 +#define OMACVM_LEAD_START_S 0.005
 +

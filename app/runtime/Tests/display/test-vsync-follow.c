@@ -46,7 +46,7 @@ int main(void)
     CHECK(fabs(omacvm_lead_quantile(&l, 0.0) - 0.003) < 1e-9);
     double v = omacvm_lead_value(&l, 1 / 60.0, 0.005);
     CHECK(fabs(v - 0.0059) < 1e-9);                      /* up at once: 4.9 + 1 ms */
-    CHECK(fabs(omacvm_lead_value(&l, 1 / 60.0, 0.009) - 0.0085) < 1e-9);   /* down 0.5 ms at most */
+    CHECK(fabs(omacvm_lead_value(&l, 1 / 60.0, 0.012) - 0.010) < 1e-9);    /* down 2 ms at most */
     CHECK(fabs(omacvm_lead_value(&l, 1 / 60.0, 0.0062) - 0.0059) < 1e-9);  /* down to it when close */
     OmacVMLead one = { 0 };
     for (int i = 0; i < 63; i++) {
