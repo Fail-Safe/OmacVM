@@ -14,10 +14,12 @@ for rendered resources", a9cc9905ddb7 "drm/virtio: Recalculate
 ignore_damage_clips on every update", Christian Hergert), squashed;
 omacvm-virtio-gpu-build skips it on a kernel that has it.
 Test: src/tests/virtio-gpu-load.sh (the builder applies it only to a kernel
-with the old line). Not done yet: in a VM whose window is composited,
-QEMU's COCOA_GL_TRACE=1 logs "scanout flush region=" boxes smaller than the
-plane while only the pointer moves, and OMACVM_GL_PRESENT_DAMAGE=check finds
-no pixel that differs from a full draw.
+with the old line), src/tests/virtio-gpu-patches.sh (applies to v7.2.11 and
+v7.3 after the deep-colour and cursor-plane patches). In a VM (Mac mini,
+7.2.11, Hyprland's software pointer moving): QEMU's tiled present got the
+pointer's boxes (8x16 at first) and drew 3127 of 3596 frames a minute in
+tiles, its check found 0 of 201 tiles that differ from a full draw; with
+the stock driver every frame stayed whole.
 --- a/drivers/gpu/drm/virtio/virtgpu_plane.c
 +++ b/drivers/gpu/drm/virtio/virtgpu_plane.c
 @@ -138,6 +138,7 @@
