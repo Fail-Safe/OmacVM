@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.3 (unreleased)
+
+- **The VM tells the Mac which part of each frame changed.** OmacVM.app VMs now load OmacVM's own
+  build of the VM's graphics driver at every start (before, only for HDR or the pointer layer): the
+  standard driver of the VM's kernel with Linux 7.4's fix that keeps the compositor's damage, so the
+  app can redraw only what changed. Its 10-bit formats stay off unless HDR and 10-bit colour is on.
+  Update VM builds it (internet once, a few seconds); until it is built, or if it fails, the
+  standard driver loads as before. A change that does not fit a newer kernel is left out of that
+  kernel's build and the rest stays (HDR keeps working). `omacvm check` has a "Changed parts" line.
+
 ## 3.2.2 (unreleased)
 
 - **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has

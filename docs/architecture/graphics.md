@@ -987,9 +987,11 @@ bench lock and are indications only):
   (`hdr`, shown only while a display can show HDR; ADR 0049): a start with
   it sends SMBIOS `omacvm.deepcolor=1` and `OMACVM_GL_EDR=1` (not in GPU
   safe mode, and only with an EDR display: `Settings.hdrStart`, one
-  `OmacVM: HDR:` line in qemu.log). The guest loads its 10-bit virtio-gpu
-  driver for that start only (built ahead by `omacvm apply`; the stock one
-  otherwise and on any failure; `/run/omacvm/virtio-gpu` says which) and
+  `OmacVM: HDR:` line in qemu.log). The guest's own virtio-gpu driver
+  (built ahead by `omacvm apply`; loaded at every start on kernels before
+  7.4 for its damage fix, ADR 0051) offers its 10-bit formats for that
+  start only (`deep_color=1`; the stock driver when it is not built and on
+  any failure; `/run/omacvm/virtio-gpu` says which) and
   `omacvm-display-sync` runs Virtual-1 at 10 bits: PQ with
   `max_luminance = 203 x edr` while QEMU sends the window display's
   headroom (`"edr"`, once a second, on a 10 % move; 1 while Extra
