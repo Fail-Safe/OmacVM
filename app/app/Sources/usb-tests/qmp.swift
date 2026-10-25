@@ -58,6 +58,7 @@ final class TestQMP: USBQMPTransport {
 
     /// Writes the command and does not wait for its answer.
     func send(_ command: String, _ arguments: [String: Any]?) throws {
+        guard !closed else { throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "this connection is closed"]) }
         var args = arguments
         if emulate, command == "device_add", args?["driver"] as? String == "usb-host" {
             args = ["driver": "usb-tablet", "id": args?["id"] ?? "", "bus": args?["bus"] ?? ""]
@@ -79,7 +80,10 @@ final class TestQMP: USBQMPTransport {
             if let t = r["return"] as? String { return ["text": t] }
             return r["return"] as? [String: Any] ?? [:]
         }
-        throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "QEMU closed the socket"])
+        // No answer (closed, or none in 5 s): this connection is done, so a late
+        // answer is never read as the next command's.
+        close()
+        throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "QEMU closed the socket or did not answer"])
     }
 }
 
