@@ -77,16 +77,20 @@ fetch_and_make() {   # KERNEL VERSION WORK
   cp -R "$3/drivers" "$3/stock"
   # Deep colour (HDR) is the base. On top, in this order: the cursor plane and
   # the vsync lock (experimental; the second's hunks sit on the first's) and
-  # Linux 7.4's damage fix (only on a kernel without it).
-  # One that does not apply is left out; when the build fails, the last one
-  # still in goes out and it builds again. What was left out is said (for
-  # --status and the loader), so a newer kernel never takes HDR or the
-  # others down with it.
-  local -a use=("$patch_file") left=()
-  local p damage=""
+  # Linux 7.4's damage fix (only on a kernel with the line it replaces).
+  # One that does not apply or build is left out and said (for --status and
+  # the loader), so a newer kernel never takes HDR or the others down with it.
+  local -a use=("$patch_file") left=() try
+  local p q i damage built=""
   tree "$3" "${use[@]}" || { echo "omacvm-virtio-gpu: no build: deep_color does not apply to $version"; return 1; }
+  # The line Linux 7.4's fix replaces (ours goes on), or the line it puts in
+  # (the kernel's own); neither: not known, so ours stays out.
   if grep -q 'new_plane_state->ignore_damage_clips = true;' "$src/virtgpu_plane.c"; then damage=ours
-  else damage=kernel; fi
+  elif grep -q 'new_plane_state->fb && bo->dumb;' "$src/virtgpu_plane.c"; then damage=kernel
+  else
+    damage=unknown
+    left+=("damage_clips: $version's virtgpu_plane.c has neither the line it replaces nor Linux 7.4's fix")
+  fi
   for p in "$cursor_file" "$vsync_file" "$damage_file"; do
     [[ $p != "$damage_file" || $damage == ours ]] || continue
     if [[ $p == "$vsync_file" && " ${use[*]} " != *" $cursor_file "* ]]; then
@@ -95,23 +99,47 @@ fetch_and_make() {   # KERNEL VERSION WORK
     if tree "$3" "${use[@]}" "$p"; then use+=("$p")
     else left+=("$(option_of "$p"): $(option_of "$p") does not apply to $version"); fi
   done
-  while :; do
-    tree "$3" "${use[@]}"
-    # Out of tree: the trace header sits next to the sources.
-    sed -i 's|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH .|' "$src/virtgpu_trace.h"
-    echo 'CFLAGS_virtgpu_trace_points.o := -I$(src)' >> "$src/Makefile"
-    if make -s -j"$(nproc)" -C "$mods/$kernel/build" M="$src" CONFIG_DRM_VIRTIO_GPU=m modules; then
-      for p in ${left[@]+"${left[@]}"}; do echo "omacvm-virtio-gpu: built without $p"; done
-      if [[ $damage == kernel ]]; then echo "omacvm-virtio-gpu: damage fix: the kernel's own"
-      elif [[ " ${use[*]} " == *" $damage_file "* ]]; then echo "omacvm-virtio-gpu: damage fix: ours"; fi
-      cat "$src/virtio-gpu.ko" >&3
-      return 0
-    fi
-    (( ${#use[@]} > 1 )) || { echo "omacvm-virtio-gpu: no build: deep_color does not build on $version"; return 1; }
-    p=${use[${#use[@]} - 1]}
-    left=("$(option_of "$p"): $(option_of "$p") does not build on $version" ${left[@]+"${left[@]}"})
-    unset 'use[${#use[@]}-1]'
-  done
+  # All that apply; when that build fails, without one extra patch at a time
+  # (the last first; the vsync lock goes with the cursor plane it sits on),
+  # then deep colour alone.
+  if make_with "$kernel" "$3" "${use[@]}"; then built=1
+  else
+    for (( i = ${#use[@]} - 1; i >= 1; i-- )); do
+      p=${use[i]} try=()
+      for q in "${use[@]}"; do
+        [[ $q == "$p" || ( $p == "$cursor_file" && $q == "$vsync_file" ) ]] || try+=("$q")
+      done
+      make_with "$kernel" "$3" "${try[@]}" || continue
+      left+=("$(option_of "$p"): $(option_of "$p") does not build on $version")
+      [[ $p != "$cursor_file" || " ${use[*]} " != *" $vsync_file "* ]] ||
+        left+=("vsync_lock: it needs cursor_plane, which is left out")
+      use=("${try[@]}") built=1
+      break
+    done
+  fi
+  if [[ -z $built ]] && (( ${#use[@]} > 2 )) && make_with "$kernel" "$3" "$patch_file"; then
+    for p in "${use[@]:1}"; do
+      left+=("$(option_of "$p"): left out, the build on $version failed with two or more of the extra patches")
+    done
+    use=("$patch_file") built=1
+  fi
+  [[ -n $built ]] || { echo "omacvm-virtio-gpu: no build: deep_color does not build on $version"; return 1; }
+  for p in ${left[@]+"${left[@]}"}; do echo "omacvm-virtio-gpu: built without $p"; done
+  # The word goes as it is into the build's file "damage" (the loader and
+  # omacvm check read it): ours, kernel (the kernel's own), unknown.
+  if [[ $damage != ours ]]; then echo "omacvm-virtio-gpu: damage fix: $damage"
+  elif [[ " ${use[*]} " == *" $damage_file "* ]]; then echo "omacvm-virtio-gpu: damage fix: ours"; fi
+  cat "$src/virtio-gpu.ko" >&3
+}
+
+make_with() {   # KERNEL WORK PATCH...: those patches on the stock sources, built; 1 if one does not apply or it does not build
+  local kernel=$1 src=$2/drivers/gpu/drm/virtio
+  shift
+  tree "$@" || return 1
+  # Out of tree: the trace header sits next to the sources.
+  sed -i 's|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH .|' "$src/virtgpu_trace.h"
+  echo 'CFLAGS_virtgpu_trace_points.o := -I$(src)' >> "$src/Makefile"
+  make -s -j"$(nproc)" -C "$mods/$kernel/build" M="$src" CONFIG_DRM_VIRTIO_GPU=m modules
 }
 
 tree() {   # WORK PATCH...: the stock sources again, these patches on them; 1 if one does not apply
@@ -166,7 +194,7 @@ build() {   # KERNEL: 0 = built, current or no headers; 1 = failed
     failed "$kernel" "the build is not a module for $kernel"; rc=1
   # The stamp last: a module without its stamp is never loaded.
   # What the build left out (a patch that does not fit this kernel) and whose
-  # damage fix it has ("ours", "kernel"): kept for --status, the loader, omacvm check.
+  # damage fix it has ("ours", "kernel", "unknown"): kept for --status, the loader, omacvm check.
   elif ! { install -d -o root -g root -m 0755 "$root/$kernel" &&
            rm -f "$root/$kernel/stamp" "$root/$kernel/error" "$root/$kernel/without" "$root/$kernel/damage" &&
            install -o root -g root -m 0644 "$stage/virtio-gpu.ko" "$root/$kernel/virtio-gpu.ko" &&
@@ -179,7 +207,10 @@ build() {   # KERNEL: 0 = built, current or no headers; 1 = failed
   else
     say "$kernel: built (loaded only when one of the app's switches starts the VM)"
     while IFS= read -r v; do say "$kernel: without $v"; done < "$stage/without"
-    [[ $(cat "$stage/damage") != kernel ]] || say "$kernel: the damage fix is the kernel's own"
+    case $(cat "$stage/damage") in
+      kernel) say "$kernel: the damage fix is the kernel's own" ;;
+      unknown) say "$kernel: not known whether the kernel keeps the damage (no damage fix added)" ;;
+    esac
   fi
   rm -rf "$work" "$stage"; work="" stage=""
   return $(( rc != 0 ))
