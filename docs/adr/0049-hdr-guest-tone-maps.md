@@ -49,9 +49,12 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
    kernel is left out of that kernel's build (deep colour stays; the
    builder's `without` file and `--status` say which), and the loader
    passes only the options the build has. In the initramfs nothing loads
-   for any start: the firmware's framebuffer shows the boot until udev
-   loads the driver from the real root; a real root without the loader
-   gets the stock driver. What follows is the state before.) `omacvm
+   for any start (as for 10-bit starts before): QEMU's boot logo stays until
+   udev loads the driver from the real root, so a question or an emergency
+   shell in the initramfs would not show (app VMs have no disk encryption;
+   the VMs have no firmware framebuffer for Linux to use there). A real root
+   without the loader gets the stock driver. What follows is the state
+   before.) `omacvm
    apply` builds it on every app VM (7 s; downloaded, patched and built as
    a user id of its own, root only installs it) into `/usr/local/lib/omacvm/virtio-gpu/K`,
    which depmod never sees; a modprobe `install` rule loads it only when

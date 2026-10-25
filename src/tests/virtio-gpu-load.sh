@@ -279,7 +279,7 @@ run_rule() {   # LOADER (a path) ROOT: runs the rule with the loader, modprobe a
   sh -c "$cmd"
 }
 mkdir -p "$T/ri/etc" "$T/rr/etc"; : > "$T/ri/etc/initrd-release"
-run_rule "$T/r/missing" "$T/ri"; expect "rule: no loader in the initramfs: nothing yet (the real root loads it, the firmware's framebuffer shows the boot)" "0 " "$? $(calls)"
+run_rule "$T/r/missing" "$T/ri"; expect "rule: no loader in the initramfs: nothing yet (the real root loads it; QEMU's boot logo until then)" "0 " "$? $(calls)"
 run_rule "$T/r/missing" "$T/rr"; expect "rule: a real root without the loader: the stock driver" "0 $STOCK" "$? $(calls)"
 printf '#!/bin/sh\necho "loader $*" >> "$CALLS"\n' > "$T/r/ok"; chmod +x "$T/r/ok"
 run_rule "$T/r/ok" "$T/rr"; expect "rule: the loader, and nothing else when it loaded a driver" "0 loader opt=1;" "$? $(calls)"

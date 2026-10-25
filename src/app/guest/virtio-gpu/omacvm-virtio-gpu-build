@@ -206,9 +206,9 @@ rule_text() {
 # this kernel and the start gains from it (its damage fix; 10-bit colour, the
 # pointer layer, frames in step only when the app's switches ask), else the stock one
 # (and the stock one if it fails). In the initramfs (no loader there;
-# mkinitcpio's kms hook puts virtio_gpu in it) nothing loads yet, the
-# firmware's framebuffer shows the boot: udev loads it again from the real
-# root, through the loader. A real root without the loader gets the stock one.
+# mkinitcpio's kms hook puts virtio_gpu in it) nothing loads yet: QEMU's boot
+# logo stays until udev loads it again from the real root, through the
+# loader. A real root without the loader gets the stock one.
 install virtio_gpu if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif [ -e /etc/initrd-release ]; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi
 EOF
 }
