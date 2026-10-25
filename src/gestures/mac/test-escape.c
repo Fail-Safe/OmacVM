@@ -85,8 +85,22 @@ static void moveSpace(World *w, int dir) {
   for (int k = 0; k < nWorld; k++) if (&world[k] != w && idx(&world[k], w->sp[j]) >= 0 && world[k].sp[0] == w->sp[0]) world[k].cur = w->cur;
   if (owner[w->cur] && owner[w->cur] != finder) front = owner[w->cur];
 }
-static int warps;
-static void fakeWarp(CGPoint p) { pointer = p; warps++; }
+// Our warp moves the pointer, but macOS's shortcut posted by Gestures still
+// moves the display the pointer was on before it (the mini, OmacVM.app's VM
+// full screen on two displays, 2026-10-24): keys go by homePointer while the
+// pointer is away. Dock swipes carry their own place.
+static int warps, warpedAway; static CGPoint homePointer;
+static void fakeWarp(CGPoint p) {
+  warps++;
+  if (!warpedAway) { homePointer = pointer; warpedAway = 1; }
+  else if (p.x == homePointer.x && p.y == homePointer.y) warpedAway = 0;
+  pointer = p;
+}
+static World *keyDisplay(void) {
+  if (!warpedAway) return underPointer();
+  for (int i = 0; i < nWorld; i++) if (CGRectContainsPoint(world[i].b, homePointer)) return &world[i];
+  return NULL;
+}
 static int same(Hotkey a, Hotkey b) { return a.enabled && b.enabled && a.keycode == b.keycode && a.flags == b.flags; }
 // "macOS": the key is one of the user's Space shortcuts (as set now) -> that move.
 static double lateKeys;   // macOS moves the Space only this many verify periods after the key
@@ -99,6 +113,7 @@ static int fakeKey(Hotkey k) {
   Hotkey mc = hotkeyFrom(binding, HOTKEY_MISSION_CONTROL);
   World *w = underPointer();
   if (same(k, l) || same(k, r)) {
+    w = keyDisplay();
     if (spaceKeys < 4) movedOn[spaceKeys] = w ? w->id : 0;
     spaceKeys++;
     int dir = same(k, l) ? -1 : 1;
@@ -167,6 +182,16 @@ static int fakeActivate(pid_t pid, CGWindowID win) {
   for (int i = 0; s && i < nWorld; i++) if (idx(&world[i], s) >= 0) world[i].cur = s;
   return 1;
 }
+// All the VM's windows on any Space (one per display in full screen).
+static int fakeAllVMWindows(pid_t pid, CGWindowID *out, int cap) {
+  int k = 0;
+  for (int sp = 0; sp < MAX_SPACE_ID && k < cap; sp++) if (owner[sp] == pid && winOn[sp]) out[k++] = winOn[sp];
+  return k;
+}
+// The guest's answer to "Q" (the escape combo asks which display has the
+// VM's focus): this line at once, NULL for none (a guest from before 3.1.32).
+static const char *focusReply; static int asks;
+static void fakeAskFocus(void) { asks++; if (focusReply) guestLine(clients[0].fd, clients[0].gen, focusReply); }
 static int fakeHide(pid_t pid) { hidden++; hiddenPid = pid; if (front == pid) front = finder; return 1; }
 static pid_t fakeFront(void) { return front; }
 static pid_t fakeFinder(void) { return finder; }
@@ -347,7 +372,7 @@ static void layout(int displays, const uint64_t *a, int na, const uint64_t *b, i
 int main(void) {
   activateFn = fakeActivate; finderFn = fakeFinder; frontFn = fakeFront; vmWindowFn = fakeVMWindow;
   spacesFn = fakeSpaces; windowSpaceFn = fakeWindowSpace; pointerFn = fakePointer;
-  vmWindowsFn = fakeVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll;
+  vmWindowsFn = fakeVMWindows; vmAllWindowsFn = fakeAllVMWindows; askFocusFn = fakeAskFocus; focusWait = 0.05; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll;
   warpFn = fakeWarp; warpSettle = 0; isQemuFn = fakeIsQemu;
   hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld;
   swipeFn = fakeSwipe; saveSignFn = fakeSaveSign; swipeOutFn = fakeSwipeOut; swipeOutEvery = 0; swipeOutGap = 0;
@@ -597,20 +622,23 @@ int main(void) {
   sent(); settle(vm, NET_APP);
   world[1].cur = 302; front = vm; settle(vm, NET_APP); sent();
 
-  // "Swipe all monitors": macOS moves the pointer's display only, so the
-  // pointer visits the other display for its shortcut and comes back.
-  all = 1; warps = 0;
+  // "Swipe all monitors": macOS's shortcut for the pointer's display, a Dock
+  // swipe for the other one (the shortcut from Gestures would move the
+  // pointer's display again); the pointer visits it and comes back.
+  all = 1; warps = 0; swipeMoves = 1;
   CGPoint before = pointer;
-  check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 201 && world[1].cur == 301, "all: both displays move out of the VM");
-  check(movedOn[0] != movedOn[1] && warps == 2 && pointer.x == before.x && pointer.y == before.y,
-        "all: ... one shortcut on each display (the pointer went there and back)");
+  World *pw = underPointer();
+  check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 1 && world[0].cur == 201 && world[1].cur == 301,
+        "all: both displays move out of the VM");
+  check(pw && movedOn[0] == pw->id && warps == 2 && pointer.x == before.x && pointer.y == before.y,
+        "all: ... the shortcut on the pointer's display, a Dock swipe on the other (the pointer went there and back)");
   sent(); settle(vm, NET_APP);
-  check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 202 && world[1].cur == 302 && front == vm,
+  check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 1 && world[0].cur == 202 && world[1].cur == 302 && front == vm,
         "all: ... and both back into it");
   settle(vm, NET_APP); sent();
   // Neither display moves: nothing, no notice.
-  keysIgnored = 1;
-  check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 202 && world[1].cur == 302 && !mcKeys &&
+  keysIgnored = 1; swipeMoves = 0;
+  check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[0].cur == 202 && world[1].cur == 302 && !mcKeys &&
         !strcmp(sent(), "S esc ctrl-opt|"), "all, the shortcut ignored: nothing moves, no notice");
   keysIgnored = 0;
   press(K, HID, 0); sent(); front = vm; world[0].cur = 202; world[1].cur = 302; settle(vm, NET_APP); sent();
@@ -625,6 +653,144 @@ int main(void) {
   check(press(K, HID, 0) == 1 && spaceKeys == 1, "Spaces shared by the displays, all: one shortcut, not two");
   sent(); settle(vm, NET_APP);
   all = 0;
+
+  // ---- The VM full screen on both displays (OmacVM.app: its main window on
+  // the MacBook, a second window on the external, each its own Space); the
+  // external left by hand (a swipe), so the combo did not note where from.
+  // In macOS with the pointer on the external, the combo goes back into the
+  // VM's Space there, not the main window's (that display stays as it is) ----
+  {
+    const uint64_t mbp[] = { 211, 212 }, ext[] = { 311, 312 };
+    layout(2, mbp, 2, ext, 2);
+    owner[211] = terminal; winOn[211] = 11; owner[212] = vm; winOn[212] = 27;
+    owner[311] = safari; winOn[311] = 44; owner[312] = vm; winOn[312] = 28;
+    world[0].cur = 212; world[1].cur = 312; front = vm; pointer = CGPointMake(3000, 600);
+    frontChanged(vm, NET_APP, 1, "Omarchy", 27, 0); sent();
+    world[1].cur = 311; front = safari;   // swiped out on the external
+    frontChanged(safari, -1, 0, "", 44, 1); sent();
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && lastKey.keycode == 124 && movedOn[0] == 2,
+          "external left by hand: the combo there moves the external back (Move right a space)");
+    check(world[1].cur == 312 && world[0].cur == 212 && front == vm, "... into the VM's Space on the external; the MacBook as it was");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 27, 0); sent();
+    // The VM's Space on the external not beside the one shown: its window
+    // there to the front (macOS shows its Space), not the main window.
+    const uint64_t ext3[] = { 311, 313, 312 };
+    layout(2, mbp, 2, ext3, 3);
+    owner[313] = finder;
+    world[0].cur = 211; world[1].cur = 311; front = safari; pointer = CGPointMake(3000, 600);
+    frontChanged(safari, -1, 0, "", 44, 1); sent(); wentTo = 0; wentWin = 0;
+    check(press(K, HID, 0) == 1 && !spaceKeys && wentTo == vm && wentWin == 28 && world[1].cur == 312,
+          "... two Spaces away: the VM's window on the external to the front, not the main window");
+    check(world[0].cur == 211, "... the MacBook stays on its desktop");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 27, 0); sent();
+    // Left by the combo: as before, back to the Space it left.
+    world[0].cur = 212; world[1].cur = 312; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 27, 0); sent();
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[1].cur == 313 && world[0].cur == 212,
+          "the combo on the external: out there only (one Space toward where it came from)");
+    settle(vm, NET_APP); sent();
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[1].cur == 312 && world[0].cur == 212 && front == vm, "... and back in there");
+    settle(vm, NET_APP); sent();
+    owner[313] = 0;
+  }
+
+  // ---- "Focused monitor" with the VM on both displays: the display with the
+  // VM's own focus (Hyprland's focused output, which the guest says on "Q"),
+  // not the one the Mac's pointer was left on (Omarchy does not warp the
+  // pointer when the focus moves by keyboard) ----
+  {
+    const uint64_t mbp[] = { 221, 222 }, ext[] = { 321, 322 };
+    layout(2, mbp, 2, ext, 2);
+    owner[221] = terminal; winOn[221] = 11; owner[222] = vm; winOn[222] = 29;
+    owner[321] = safari; winOn[321] = 44; owner[322] = vm; winOn[322] = 30;
+    world[0].cur = 221; world[1].cur = 321; front = terminal; pointer = CGPointMake(1000, 700);
+    frontChanged(terminal, -1, 0, "", 11, 1); sent();
+    world[0].cur = 222; world[1].cur = 322; front = vm;
+    frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    // The real question goes over the connection as "Q".
+    askFocus();
+    check(!strcmp(sent(), "Q|"), "focus: the question to the guest is \"Q\"");
+    focusReply = "D 2560 0 1920 1200"; asks = 0; warps = 0; swipeMoves = 1;   // Hyprland's focus on the external
+    check(press(K, HID, 0) == 1 && asks == 1 && !spaceKeys && swipes == 1 && world[1].cur == 321,
+          "focus on the external, pointer on the MacBook: the external moves out (its Dock swipe)");
+    check(world[0].cur == 222 && warps == 2, "... the MacBook stays on the VM (the pointer went there and back)");
+    settle(vm, NET_APP); sent();
+    // Back in from macOS goes by the pointer (macOS's focus), as before; the
+    // external is put back by hand here for the next rows.
+    front = safari; frontChanged(safari, -1, 0, "", 44, 1); sent();
+    world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    focusReply = "D -"; asks = 0;
+    check(press(K, HID, 0) == 1 && asks == 1 && spaceKeys == 1 && movedOn[0] == 1 && world[0].cur == 221 && world[1].cur == 322,
+          "the guest does not know (\"D -\"): the pointer's display, as before");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    focusReply = "D 0 0 2560 1440";
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && movedOn[0] == 1 && world[0].cur == 221 && !warps,
+          "focus where the pointer is: that display, no detour");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    focusReply = "D 9000 9000 100 100";
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && movedOn[0] == 1 && world[1].cur == 322,
+          "a place on no display of the VM: the pointer's display");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    focusReply = "D 1 2 x";
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && movedOn[0] == 1, "junk for an answer: not taken, the pointer's display after the wait");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    // No answer (a guest from before 3.1.32): the pointer's display after the
+    // wait, and that guest is not waited for again.
+    check(clients[0].focusSilent, "... junk counts as no answer");
+    focusReply = NULL; asks = 0; clients[0].focusSilent = 0;
+    double t0 = monoNow();
+    check(press(K, HID, 0) == 1 && asks == 1 && spaceKeys == 1 && movedOn[0] == 1 && monoNow() - t0 >= focusWait,
+          "no answer: the pointer's display, after waiting focusWait");
+    check(clients[0].focusSilent, "... that guest is not waited for again");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent(); warps = 0;
+    focusReply = "D 2560 0 1920 1200";
+    check(press(K, HID, 0) == 1 && !spaceKeys && swipes == 1 && world[1].cur == 321 && world[0].cur == 222 && !clients[0].focusSilent,
+          "... until it answers again: then its focus counts");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+    world[0].cur = 222; world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    // Pressed again while the question is open: back in the VM, nothing moves.
+    focusReply = NULL; clients[0].focusSilent = 0; focusWait = 0.3; spaceKeys = 0;
+    CGEventRef fd1 = key(1, K, HID, 0), fu1 = key(0, K, HID, 0);
+    tapCb(NULL, kCGEventKeyDown, fd1, NULL); tapCb(NULL, kCGEventKeyUp, fu1, NULL);
+    CFRelease(fd1); CFRelease(fu1);
+    for (int i = 0; i < 4; i++) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);
+    fd1 = key(1, K, HID, 0); fu1 = key(0, K, HID, 0);
+    tapCb(NULL, kCGEventKeyDown, fd1, NULL); tapCb(NULL, kCGEventKeyUp, fu1, NULL);
+    CFRelease(fd1); CFRelease(fu1);
+    settleSteps();
+    check(capturing && !spaceKeys && world[0].cur == 222 && world[1].cur == 322, "pressed again while asking: back in the VM, nothing moves");
+    focusWait = 0.05; clients[0].focusSilent = 0; sent();
+    // "All monitors": no question, both move.
+    all = 1; asks = 0; focusReply = "D 2560 0 1920 1200";
+    check(press(K, HID, 0) == 1 && !asks && spaceKeys == 1 && swipes == 1 && world[0].cur == 221 && world[1].cur == 321,
+          "all monitors: no question, both displays move");
+    sent(); settle(vm, NET_APP); press(K, HID, 0); sent(); all = 0; swipeMoves = 0;
+    // The VM on one display only: no question (the pointer says it).
+    world[0].cur = 221; world[1].cur = 322; front = vm; pointer = CGPointMake(3000, 600);
+    frontChanged(vm, NET_APP, 1, "Omarchy", 30, 0); sent(); asks = 0;
+    check(press(K, HID, 0) == 1 && !asks && spaceKeys == 1 && world[1].cur == 321, "the VM on one display: no question");
+    sent(); settle(vm, NET_APP); sent();
+    // Out by the VM's focus (the external), back in, then the fingers take the
+    // MacBook out: the keyboard goes to what the MacBook shows now, not to
+    // what the external showed at the last combo.
+    world[0].cur = 222; world[1].cur = 322; front = vm; pointer = CGPointMake(1000, 700);
+    frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    focusReply = "D 2560 0 1920 1200"; swipeMoves = 1;
+    check(press(K, HID, 0) == 1 && world[1].cur == 321 && world[0].cur == 222, "focus on the external: out there (again)");
+    settle(vm, NET_APP); sent();
+    world[1].cur = 322; front = vm; frontChanged(vm, NET_APP, 1, "Omarchy", 29, 0); sent();
+    world[0].cur = 221;   // macOS's swipe followed the fingers on the MacBook; the VM still shows on the external
+    TakeRun fr = { .follows = 1, .toward = -1, .d = { .ok = 1, .n = 2, .id = 1, .b = CGRectMake(0, 0, 2560, 1440), .vmSpace = 222 } };
+    went = 0; wentTo = 0; wentWin = 0;
+    takeLanded(fr, 0); settleSteps();
+    check(wentTo == terminal && wentWin == 11, "... then a swipe out with the fingers on the MacBook: the keyboard to the MacBook's app, not Finder");
+    sent(); front = terminal; frontChanged(terminal, -1, 0, "", 11, 1); sent(); swipeMoves = 0;
+    focusReply = NULL;
+  }
 
   // ---- Not the real keyboard, a held key, other combos: as before ----
   front = finder; world[0].cur = 401; world[1].cur = 401;
@@ -895,6 +1061,28 @@ int main(void) {
     r3 = press(K, HID, 0);
     check(r3 == 1 && !mcKeys && world[0].cur == 473, "two presses 0.45 s apart: out, then back in, no Mission Control");
     doublePress = 0; sent(); settle(vm, NET_APP); sent();
+    // Ctrl+Option still held, Esc pressed again after doublePress but before
+    // the first press's move went out (it waits for the keys to come up):
+    // back to the VM (capture on), and that move is dropped. Before: capture
+    // on, then the move out ran anyway (the user's log, 2026-10-22 16:05).
+    escaped = 0; front = vm; world[0].cur = 473; frontChanged(vm, NET_APP, 1, "Omarchy", 26, 0); sent(); lastComboAt = -1;
+    heldPolls = 30; keys = spaceKeys = mcKeys = swipes = 0;
+    CGEventRef d1 = key(1, K, HID, 0), u1 = key(0, K, HID, 0);
+    tapCb(NULL, kCGEventKeyDown, d1, NULL); tapCb(NULL, kCGEventKeyUp, u1, NULL);
+    CFRelease(d1); CFRelease(u1);
+    for (int i = 0; i < 5; i++) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);   // the move waits for the keys
+    check(!capturing && escaped && !spaceKeys && heldPolls > 0, "pressed again, keys held: the first press's move still waits");
+    d1 = key(1, K, HID, 0); u1 = key(0, K, HID, 0);
+    tapCb(NULL, kCGEventKeyDown, d1, NULL); tapCb(NULL, kCGEventKeyUp, u1, NULL);
+    CFRelease(d1); CFRelease(u1);
+    heldPolls = 0; settleSteps();
+    check(capturing && !escaped && !spaceKeys && !swipes && !mcKeys && world[0].cur == 473,
+          "... the second press: back in the VM (capture on), the first press's move dropped");
+    check(!strcmp(sent(), "S esc ctrl-opt|S on|"), "... the guest lets go, then takes the keys again");
+    // The next press works as before.
+    r3 = press(K, HID, 0);
+    check(r3 == 1 && spaceKeys == 1 && world[0].cur == 472, "... and the next press moves out as before");
+    sent(); settle(vm, NET_APP); sent();
   }
 
   // ---- After Mission Control + Esc on Desktop 1, the VM's app still in
@@ -1134,11 +1322,12 @@ int main(void) {
     check(spaceKeys == 1 && movedOn[0] == 2 && world[1].cur == 301 && world[0].cur == 202,
           "swipe out, two displays: only the pointer's display moves (EscapeSwipe default)");
     sent(); settle(vm, NET_APP); press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
-    all = 1; keys = spaceKeys = 0;
+    all = 1; keys = spaceKeys = swipes = 0; swipeMoves = 1;
     guestLine(clients[0].fd, g0, "X left"); settleSteps();
-    check(spaceKeys == 2 && world[0].cur == 201 && world[1].cur == 301, "swipe out, EscapeSwipe all: both displays move");
+    check(spaceKeys == 1 && swipes == 1 && world[0].cur == 201 && world[1].cur == 301,
+          "swipe out, EscapeSwipe all: both displays move (the other one by its Dock swipe)");
     sent(); settle(vm, NET_APP); press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
-    all = 0;
+    all = 0; swipeMoves = 0;
     // The guest's own reader: lines in pieces, a too long one skipped, then
     // closing the client here ends the reader.
     layout(1, three3, 3, NULL, 0); world[0].cur = 102; front = vm; pointer = CGPointMake(1000, 700);
@@ -1446,11 +1635,11 @@ int main(void) {
     world[0].cur = 202; world[1].cur = 302; front = vm; pointer = CGPointMake(3000, 600); all = 1;
     settle(vm, NET_APP); guestGot(); takeLook();
     check(takeDisp.ok && takeDisp.id == 2 && takeDisp.left && !takeDisp.right, "follow, two displays: the pointer's display 2, a Space on its left");
-    nDockEv = 0; spaceKeys = 0;
+    nDockEv = 0; spaceKeys = 0; swipes = 0; swipeMoves = 1;
     padSwipe(3, 0.3, 0.6, 30); padLift(); guestGot();
-    check(world[1].cur == 301 && world[0].cur == 201 && spaceKeys == 1 && movedOn[0] == 1,
-          "follow, EscapeSwipe all: display 2 with the fingers, display 1 one step with the shortcut");
-    all = 0;
+    check(world[1].cur == 301 && world[0].cur == 201 && !spaceKeys && swipes == 1,
+          "follow, EscapeSwipe all: display 2 with the fingers, display 1 one step with its Dock swipe");
+    all = 0; swipeMoves = 0;
     settle(vm, NET_APP); press(K, HID, 0); settle(vm, NET_APP); guestGot();
     dockPostFn = dockPost; takeClockFn = monoNow; hidSwipeFn = hidSwipeOS;
     pthread_mutex_lock(&padLock); nPads = 0; activePad = -1; pthread_mutex_unlock(&padLock);

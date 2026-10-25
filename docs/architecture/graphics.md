@@ -404,8 +404,11 @@ uniforms or a vertex shader's window each draw reads it back
 (`glGetBufferSubData`).
 Test: `test-const-ubo` (all three modes; case 22 for the guest buffer).
 
-Context switches: on CGL, every handover between GL contexts flushes the
-context it leaves. A `glWaitSync` in another context waits only for a fence
+Context switches: on CGL, every handover through `vrend_sync_make_current`
+flushes the context it leaves. Plain `make_current` calls (switching,
+creating and destroying guest contexts) do not; work across guest contexts
+is ordered by the guest's fences, which are flushed when they are made.
+A `glWaitSync` in another context waits only for a fence
 that was flushed (ARB_sync); `eglMakeCurrent` and `glXMakeCurrent` flush the
 context they leave, and upstream relies on that, but `CGLSetCurrentContext`
 (QEMU's Cocoa make-current) does not, and Apple's `glWaitSync` on an

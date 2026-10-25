@@ -115,6 +115,10 @@ if [[ ${OMACVM_E2E_LAPTOP:-} != 1 && $(ioreg -rc AppleSmartBattery 2>/dev/null) 
 fi
 idle=$(( $(ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF; exit}') / 1000000000 ))
 (( idle >= 300 || ${OMACVM_E2E_IGNORE_IDLE:-0} == 1 )) || die "someone used this Mac ${idle}s ago: wait until it is idle 5 min"
+# A Screen Sharing session: someone may be watching this screen (its input also counts as HID input). Only a
+# session left alone for 30 min does not count.
+shares=$(pmset -g assertions 2>/dev/null | grep -c 'screensharingd.*Remote user is connected')
+(( shares == 0 || idle >= 1800 || ${OMACVM_E2E_IGNORE_IDLE:-0} == 1 )) || die "a Screen Sharing session is connected (input ${idle}s ago): wait until it ends or is idle 30 min"
 LOCKS=()
 lock() {   # DIR: ours, or taken now (same owner counts: the caller may hold it)
   local o; o=$(cat "$1/owner" 2>/dev/null)
@@ -278,7 +282,7 @@ try:
 except Exception:
     print("no answer from the VM"); sys.exit(0)
 bits = []
-for k in ("error", "already", "seconds", "asked", "answer"):
+for k in ("error", "already", "seconds", "asked", "answer", "question"):
     if o.get(k): bits.append(f"{k}: {str(o[k])[:160]}")
 for k in ("before", "after"):
     v = o.get(k)
@@ -368,10 +372,15 @@ window() {   # the launcher's window on this VM (the VM must be stopped): its pi
   for ((i = 0; i < 20; i++)); do
     p=$(launcher_pid)
     if [[ -n $p && $("$OUT/ax" "$p" dump 2>/dev/null | head -1) == "windows: "[1-9]* ]]; then
-      sleep 1
-      # Never press anything in a window that shows another VM (a kept one of another test).
-      "$OUT/ax" "$p" text 2>/dev/null | grep -qF "$VM" || { echo "the window shows another VM" >&2; return 1; }
-      echo "$p"; return 0
+      # Never press anything in a window that shows another VM (a kept one of another test). The window
+      # may still be filling in: up to 10 s for the VM's name.
+      local k
+      for ((k = 0; k < 10; k++)); do
+        sleep 1
+        "$OUT/ax" "$p" text 2>/dev/null | grep -qF "$VM" && { echo "$p"; return 0; }
+      done
+      "$OUT/ax" "$p" text > "$OUT/${PFX}window-other.txt" 2>&1
+      echo "the window shows another VM ($OUT/${PFX}window-other.txt)" >&2; return 1
     fi
     sleep 1
   done
@@ -431,7 +440,7 @@ use_vm() {   # NAME [CLONE_FROM]: the VM of this pass (an APFS clone of a kept o
 }
 
 update_vm_window() {   # Update VM in the app's window (VM stopped): 0 when the VM has this app's OmacVM
-  local p t0 i v want
+  local p t0 i v want rc
   want=$(appver); t0=$(date +%s)
   rm -f "$VMD/logs/update.log" "$VMD/update.log"
   if (( HIDDEN )); then   # the script the button runs, without the window
@@ -442,7 +451,13 @@ update_vm_window() {   # Update VM in the app's window (VM stopped): 0 when the 
     [[ $v == "$want" ]]; return
   fi
   p=$(window) || { echo "no window on $VM"; return 1; }
-  if ! "$OUT/ax" "$p" press "Update VM" > "$OUT/ax-update-vm.txt" 2>&1; then
+  "$OUT/ax" "$p" press "Update VM" > "$OUT/ax-update-vm.txt" 2>&1; rc=$?
+  # -25204 (cannot complete): the app's main thread was busy when the press came, e.g. right after
+  # the app updated itself. The press may have gone through: Update VM writes its log at once.
+  if (( rc )) && grep -q 'press failed: -25204' "$OUT/ax-update-vm.txt"; then
+    for ((i = 0; i < 60; i += 2)); do [[ -s $VMD/logs/update.log || -s $VMD/update.log ]] && { rc=0; echo " (update.log written: the press went through)" >> "$OUT/ax-update-vm.txt"; break; }; sleep 2; done
+  fi
+  if (( rc )); then
     close_window
     v=$(cat "$VMD/omacvm-version" 2>/dev/null)
     if [[ -n $v && $(printf '%s\n%s\n' "$v" "$want" | sort -V | tail -1) == "$v" ]]; then
@@ -622,6 +637,8 @@ step_switches() {
       # Not for this Mac or VM: the row says so and Space changes nothing.
       title=$(feat title "$n")
       cc row "$title"; s=$CCS
+      # The last job's toast can cover the row's line below the table for a few seconds: once more.
+      [[ $s == *"row: "* ]] || { sleep 5; cc row "$title"; s=$CCS; }
       [[ $s == *"row: off, unavailable"* || $s == *"row: off, off"* || $s == *"no row"* ]] \
         && res "switch-$n" skip "not on this Mac ($(feat reason "$n")); ${s:0:120}" \
         || res "switch-$n" FAIL "unavailable here ($(feat reason "$n")) but the row says: $s"
@@ -768,7 +785,9 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
   [[ -z $e && $(cat "$OUT/${PFX}ax-check.txt") == pressed* ]] && res window-check-now ok "$(grep -iE 'up to date|is ready|checked|newest' "$OUT/${PFX}window-check.txt" | head -1)" \
     || res window-check-now FAIL "$(cat "$OUT/${PFX}ax-check.txt"); $e"
   # The switch of the compact window (3.0.5), or the Turn On…/Turn Off… button before it.
+  # The settings window (3.1.0) names the switch "Fast network", (experimental) beside it.
   sw=""; "$OUT/ax" "$p" has "Fast network (experimental)" > "$OUT/${PFX}ax-fastnet-has.txt" 2>&1 && sw="Fast network (experimental)"
+  [[ -z $sw ]] && "$OUT/ax" "$p" has "Fast network" >> "$OUT/${PFX}ax-fastnet-has.txt" 2>&1 && sw="Fast network"
   if [[ -n $sw ]] || "$OUT/ax" "$p" has "Turn On…" >/dev/null 2>&1 || "$OUT/ax" "$p" has "Turn Off…" >/dev/null 2>&1; then
     blk=$(netd_blocked)
     if [[ -n $blk ]]; then

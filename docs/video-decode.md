@@ -5,7 +5,7 @@ In OmacVM.app, videos in the VM are decoded by the Mac's own video decoder
 second keeps the VM's CPU far less busy: about 0.3 cores in Google Chrome
 154 and 0.4 to 0.6 in Omarchy's own Chromium, instead of 1.0 to 1.6 (see
 [Numbers](#numbers) and [Chromium](#chromium-from-arch-linux-arm)). Google
-Chrome 155 and newer use it since 3.1.33 (up to 1080p) and at every size
+Chrome 155 and newer use it since 3.2.0 (up to 1080p) and at every size
 since 3.2.1, with no more dropped frames than its CPU decoders: YouTube 4K at
 0.6 cores of the VM instead of 1.5 to 1.9
 ([Chrome's converted frames](#chromes-converted-frames)).
@@ -27,9 +27,9 @@ Browsers in an OmacVM.app VM:
   VP9; `chrome://gpu` shows *Video Decode: Hardware accelerated* and
   `chrome://media-internals` *VaapiVideoDecoder*. Install it with
   `src/bench/install-chrome.sh` (Arch Linux ARM has no package). Chrome 155
-  and newer decode in hardware from OmacVM 3.1.33 with Update VM (before:
+  and newer decode in hardware from OmacVM 3.2.0 with Update VM (before:
   on the CPU, *Plane 0 is out of bounds: ... > 4096* in Chrome's log; see
-  [Chrome's converted frames](#chromes-converted-frames)); 3.1.33 kept
+  [Chrome's converted frames](#chromes-converted-frames)); 3.2.0 kept
   1440p and 4K on the CPU, 3.2.1 decodes them on the media engine too.
   `OMACVM_VA_EXPORT=0` in Chrome's environment keeps it on the CPU,
   `OMACVM_VA_MAX=1920` only 1440p and 4K.
@@ -40,7 +40,7 @@ Browsers in an OmacVM.app VM:
   Firefox spends it is not measured yet.
 - **Brave** (Linux ARM, from Brave's `.deb`): like Chrome. YouTube 4K at
   60 fps in VP9 and AV1 (Brave 1.96, early October). Later it showed
-  Chrome's "Plane 0 is out of bounds" too; the 3.1.33 fix shares Chrome's
+  Chrome's "Plane 0 is out of bounds" too; the 3.2.0 fix shares Chrome's
   code but was tested in Chrome 156 only.
 - **Chromium from Arch Linux ARM** (Omarchy's default browser): H.264 and
   VP9, YouTube included, through a V4L2 decoder that `omacvm apply` adds to
@@ -176,7 +176,7 @@ Vulkan or when GBM can make NV12 buffers, which virgl cannot. So Chrome
 converts each frame on the GPU (VA-API video processing, Mesa's video
 compositor: one shader pass on the Mac's GPU) into an ARGB surface of its
 own, and hands that surface back to VA-API. Six things stood in the way,
-all fixed in 3.1.33:
+all fixed in 3.2.0:
 
 - Chrome first checks each plane against its dma-buf's size
   (`vaapi_wrapper.cc`, `ValidateAndGetPlaneInfo`). Mesa's virgl gives a

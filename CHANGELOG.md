@@ -3,7 +3,10 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.1.33 (unreleased)
+## 3.2.0
+
+Chrome decodes video on the Mac's media engine again, ⌃⌥ Esc takes the right display out of the VM, the
+VM's time zone follows the Mac, macOS's Three Finger Drag stays macOS's, and the camera comes back.
 
 - **Google Chrome decodes video on the Mac's media engine again, up to 1080p.** Chrome 155 and
   newer had gone back to decoding YouTube and video calls on the VM's CPU (Chrome's log: "Plane 0
@@ -20,14 +23,46 @@ in more words.
   QEMU's on the Mac only from 1.11 to 1.01: the conversion costs the Mac's graphics thread
   most of what the VM saves. `OMACVM_VA_EXPORT=0` in Chrome's environment in the VM keeps it on
   the CPU. Needs the app update and Update VM; restart Chrome after it.
+- **Three Finger Drag.** With macOS's Three Finger Drag on (System Settings > Accessibility >
+  Pointer Control > Trackpad Options > Dragging style), dragging with three fingers in the
+  full-screen VM also switched Omarchy's workspaces. Three fingers now stay macOS's drag and only
+  four-finger swipes go to the VM, as macOS itself does then. The setting is read live; with it
+  off (the default) three and four fingers both switch workspaces as before.
+- **The camera comes back.** After the MacBook's lid closed (or a USB or display camera was
+  unplugged) while a Linux app used the camera, the VM's picture stayed black until the app or
+  the VM was started again: the camera's session kept the camera that was gone. Each start now
+  picks the camera again (the built-in one while the lid is open, else macOS's default, else
+  the first there is), and a camera that is gone, suspended or gives no picture for 5 s (20 s for
+  its first) is started again with whichever camera there is then; a camera plugged in meanwhile
+  is taken at once.
+- **The VM's time zone follows the Mac's.** The VM took the Mac's time zone only when it was set
+  up, so after a trip its clock was off by the time difference. The Bridge now sends the Mac's
+  zone, and the VM follows it at every start and within seconds of a change on the Mac. A zone
+  you set in the VM yourself (Omarchy's menu, `timedatectl`) from now on is kept; set it back to
+  the Mac's and it follows again. `omacvm check` shows which (line "time zone"). One set before
+  this update is taken over by the Mac's once: set it again after the update to keep it.
+- **⌃⌥ Esc on an external display.** With the VM full screen on the MacBook and an external
+  display, ⌃⌥ Esc moved the display under the Mac's pointer. Omarchy does not move the pointer when
+  you go to the other display with the keyboard, so often the other display went to macOS and the
+  one you worked on stayed on the VM, and you had to swipe it out by hand. ⌃⌥ Esc now moves the
+  display that has the VM's focus ("Focused monitor"), and the keyboard goes there. Back in from
+  macOS also works on the external now: before, after you left it with a swipe, ⌃⌥ Esc there
+  brought the MacBook's display back into the VM instead. Needs the VM's update (Update VM);
+  until then the display under the pointer, as before.
+- **⌃⌥ Esc with "All monitors".** With the VM full screen on two displays, ⌃⌥ Esc moved only the
+  display under the pointer with macOS's shortcut; the other one needed a Dock swipe to go out and
+  stayed on macOS on the way back in. Both displays now move, out and back in.
+- **⌃⌥ Esc pressed again quickly.** A second ⌃⌥ Esc right after the first (while Control and
+  Option were still down) set the trackpad back to the VM but still moved to macOS. Now it keeps
+  you in the VM.
 
 ## 3.1.32
 
 - **Vulkan windows show each new frame at once.** With "Vulkan windows without a copy" on (the
   default since 3.1.26, macOS 26 and newer), a Vulkan app's window showed its previous frame for
   one screen refresh after each new one: in Zed the caret jumped back a character for a moment on
-  every move, a window that draws all the time was about 50 ms late, and one that draws as fast as
-  it can could tear. The Mac's OpenGL does not send one context's work when another one takes
+  every move, a window that draws all the time was one swapchain cycle late (about 50 ms at
+  60 Hz), and one that draws as fast as it can could tear. The Mac's OpenGL does not send one context's work when another one takes
   over, so the copy of the window's frame for the desktop went out one frame late; it is now sent
   first. Thanks to @epicoun for the report and its details (#499). If you added
   `MESA_VK_WSI_DEBUG=sw,nowlts` to `~/.config/environment.d/50-vulkan-present.conf` to get around
