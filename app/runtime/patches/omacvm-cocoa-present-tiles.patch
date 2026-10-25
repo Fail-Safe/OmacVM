@@ -24,8 +24,9 @@ many frames went in tiles (and, with =check, how many checks differed).
 Why: WindowServer composites the whole window again for every new whole
 surface, also when only the pointer moved. MacBook Air M2, the VM full
 screen at 60 Hz with a guest that sends its damage (#520's driver), the
-pointer moving: 3.13 W instead of 3.75 W for the whole Mac, WindowServer
-43 instead of 154 GPU ms/s, the same frame rate, pictures identical.
+pointer moving: 3.13-3.17 W instead of 3.55-3.75 W for the whole Mac (two
+sets), WindowServer 43 instead of 155 GPU ms/s, the same frame rate,
+pictures identical.
 
 The guest must say what changed: Linux before 7.4 flushes the whole plane
 on every page flip (the frame-path work, #520, backports the fix), and then

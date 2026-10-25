@@ -66,8 +66,12 @@ MacBook Air M2, the VM full screen at 60 Hz with #520's driver, A/B/A/B,
 180 s windows, whole-Mac power: the pointer moving (Hyprland draws it) 3.13 /
 3.12 W with tiles, 3.75 / 3.75 W without (WindowServer 43 vs 154 GPU ms/s,
 guest 59.9 frames a second either way); a scrolling terminal and typing: no
-change. Pictures of the window, tiles on vs off: 0 pixels differ; the check
-mode never found a differing tile.
+change. A second set with the final code (three rounds, a new clone of the
+same VM): 3.16 / 3.16 / 3.17 W with tiles, 3.55 / 3.56 / 3.55 W without
+(WindowServer 43 vs 155 GPU ms/s, 59.9 frames a second either way). So the
+pointer moving costs 0.39-0.62 W (11-17 %) less. Pictures of the window,
+tiles on vs off: 0 pixels differ; the check mode never found a differing tile
+(0 of 524 checks in the second set).
 
 ## Consequences
 
