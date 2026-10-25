@@ -600,7 +600,10 @@ app)
     out=$(as_user hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.name == "Virtual-1") | "\(.currentFormat) \(.colorManagementPreset)"' 2>/dev/null)
     case "$st|$out" in
       omacvm*"|XRGB2101010 hdr"|omacvm*"|XBGR2101010 hdr")
-        if [[ $(cat "$RUN/omacvm/display-sync/tonemap" 2>/dev/null) == clamp ]]; then ok "HDR output" "10-bit, HDR (PQ) on the main window's display"
+        # Hyprland's SDR copy of each frame for screen sharing (omacvm_app.lua: only while something captures).
+        keep=$(as_user hyprctl getoption render:keep_unmodified_copy 2>/dev/null | sed -n 's/^int: //p' | head -1)
+        [[ $keep == 0 ]] && keep="; SDR copy only while capturing" || keep="; an SDR copy of every frame (render:keep_unmodified_copy ${keep:-?})"
+        if [[ $(cat "$RUN/omacvm/display-sync/tonemap" 2>/dev/null) == clamp ]]; then ok "HDR output" "10-bit, HDR (PQ) on the main window's display$keep"
         else warn "HDR output" "Virtual-1 is HDR (PQ), but Hyprland tone-maps the windows (pages look gray): no tonemap = \"clamp\" window rule from omacvm-display-sync"; fi ;;
       omacvm*"|XRGB2101010 "*|omacvm*"|XBGR2101010 "*) ok "HDR output" "10-bit colour (${out#* }); HDR where the app's window shows it" ;;
       omacvm*) warn "HDR output" "the 10-bit driver runs, but Virtual-1 is ${out:-not known} (an own rule for it in monitors.lua?)" ;;
