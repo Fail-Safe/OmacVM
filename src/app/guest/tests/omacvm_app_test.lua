@@ -47,6 +47,30 @@ write(cfg .. "/hypr/monitors.lua",
 -- Nothing kept yet (first login): no rule.
 check("no kept rule: nothing set", #load_config({ "Virtual-1", "NOTCH" }) == 0)
 
+-- Hyprland's unmodified SDR copy of each HDR frame only while something
+-- captures the output (render:keep_unmodified_copy 0), at every load.
+local keep
+for _, c in ipairs(configs) do
+  if c.render and c.render.keep_unmodified_copy ~= nil then keep = c.render.keep_unmodified_copy end
+end
+check("HDR: SDR copy for captures only", keep == 0)
+
+-- A keep_unmodified_copy the user set in their own Hyprland files wins: ours
+-- is not set then. A comment that names it does not count.
+local function keep_set()
+  for _, c in ipairs(configs) do
+    if c.render and c.render.keep_unmodified_copy ~= nil then return true end
+  end
+  return false
+end
+write(cfg .. "/hypr/looknfeel.lua", 'hl.config({ render = { keep_unmodified_copy = 2 } })\n')
+load_config({ "Virtual-1" })
+check("HDR: the user's own keep_unmodified_copy wins", not keep_set())
+write(cfg .. "/hypr/looknfeel.lua", '-- render.keep_unmodified_copy: see the wiki\nhl.config({ render = { direct_scanout = 1 } })\n')
+load_config({ "Virtual-1" })
+check("HDR: a comment naming it does not count", keep_set())
+os.remove(cfg .. "/hypr/looknfeel.lua")
+
 -- The screen's kept rule comes back as it was sent (Omanotch's NOTCH output
 -- above it can no longer push it aside with "auto").
 rule_file("Virtual-1", 'hl.monitor({ output = "Virtual-1", mode = "' .. MODE .. '", position = "0x0", scale = "2" })\n')

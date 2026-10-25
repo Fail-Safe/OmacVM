@@ -1,5 +1,5 @@
 From: OmacVM
-Subject: [PATCH] cocoa: the pointer's layer as bright as the boosted frames
+Subject: [PATCH] cocoa: the pointer's layer as bright as the boosted frames, soft edges right
 
 What: QEMU's cursor layer (the guest's pointer over the window: the
 app's switch "Pointer on its own layer", ADR 0054) gets the frames' gain
@@ -20,10 +20,14 @@ Before the switch Hyprland drew the pointer into the frames, so it was
 boosted with them. HDR without Extra brightness needs nothing: SDR white
 is the Mac's 1.0 there, as the 8-bit image.
 
-Edges: the frames blend the pointer's soft edge in the guest (sRGB
-values), macOS blends this layer over the frames itself. Fully opaque
-and fully clear pixels are the same light; the few soft-edge pixels may
-differ by a little while boosted.
+Soft edges: virtio-gpu's cursor image is premultiplied (Xcursor themes
+are; the Mac pointer path, omacvm-cocoa-hw-cursor.patch, takes it so),
+but the layer took it as straight alpha: the white outline's soft edge
+came out darker than the guest draws it (MacBook Air, the switch on
+against the stock driver: 107 pixels around the pointer, up to 55 levels).
+Both images now take it premultiplied. The frames blend the pointer in
+the guest (sRGB values), macOS blends this layer itself: while boosted
+the few soft-edge pixels may still differ by a little.
 
 Threads: main thread only (the image comes from cocoa_cursor_define's
 main-queue block, the gain from omacvm_bright_look).
@@ -44,19 +48,19 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  #include "ui/omacvm-present-damage.h"
  #include "hw/core/boards.h"
  #include "system/system.h"
-@@ -185,6 +186,12 @@
- static QemuClipboardInfo *cbinfo;
+@@ -186,6 +187,12 @@
  static QemuEvent cbevent;
  static QemuCocoaPasteboardTypeOwner *cbowner;
-+
+ 
 +/*
 + * OmacVM: the gain of the pointer's image (ADR 0054): the frames' gain
 + * while extra brightness boosts them, else 1x. Main thread.
 + */
 +static int omacvm_pointer_gain_c = OMACVM_BRIGHT_ONE;
- 
++
  #ifdef CONFIG_OPENGL
  
+ @interface QemuCGLLayer : CAOpenGLLayer
 @@ -1504,9 +1511,6 @@
  
  - (void)setCursor:(QEMUCursor *)given_cursor
@@ -67,7 +71,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      cursor_unref(cursor);
      cursor = given_cursor;
  
-@@ -1515,31 +1519,79 @@
+@@ -1515,31 +1519,80 @@
      }
  
      cursor_ref(cursor);
@@ -126,7 +130,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +            32, //bitsPerPixel
 +            cursor->width * 4, //bytesPerRow
 +            colorspace, //colorspace
-+            kCGBitmapByteOrder32Little | kCGImageAlphaFirst, //bitmapInfo
++            /* premultiplied, as virtio-gpu sends it (soft edges came out dark) */
++            kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst, //bitmapInfo
 +            provider, //provider
 +            NULL, //decode
 +            0, //interpolate
@@ -166,7 +171,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      [cursorLayer setContents:(id)image];
      [self updateCursorLayout];
      [CATransaction commit];
-@@ -11143,6 +11195,13 @@
+@@ -11143,6 +11196,13 @@
          if (want != was && omacvm_guest_ready) {
              omacvm_edr_look();      /* HDR: the guest's headroom is 1 while boosted */
          }

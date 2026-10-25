@@ -5,6 +5,47 @@ in more words.
 
 ## 3.2.2 (unreleased)
 
+- **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has
+  odd characters in its command line.** omacvm reads the Mac's process list to find the VM's
+  QEMU. One line that is not UTF-8 (a file name in an old encoding, binary arguments) made
+  macOS's awk stop there, so omacvm missed the VM after it: a control centre switch then tried to
+  start the running VM and ended with "did not get an address" (#545; found in the 3.2.1 test on
+  a MacBook Air). The same line made `pgrep -f` fail, so `omacvm check` could miss a running
+  Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
+  download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
+  Mac.
+
+- **Control centre switches right after another one are not turned away.** When a switch's job
+  ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
+  switch was refused with "unknown VM" at once and the control centre asked again, so that switch
+  took about 12 s instead of 7-9 s (#528; reproduced in a test VM 3 of 3 times). The Bridge now looks again
+  at once and waits for it (about 1 s), then backs off as before when the VM stays out of reach.
+  Its log also says why it did not take a VM (not running, not set up, the SSH error) and which
+  VM the app named. Needs `omacvm update` (or the app's update) on the Mac.
+
+- **USB devices** (experimental): a device that QEMU took longer than 3 s to add was reported as
+  not connected, but the VM often got it anyway: QEMU finished the add after the app had stopped
+  waiting (#526; 6 of 6 times against a real QEMU). The app now waits up to 15 s for QEMU's
+  answer, and without one asks QEMU which devices the VM has: one QEMU added late counts as
+  connected, one it does not have is removed again. Needs the app update.
+
+- **Mac input methods** (experimental): the Mac's input method stays on while the VM moves the
+  keyboard focus for a moment. Each time a text field in the VM lost the focus, the Mac switched
+  its input method off at once, and on again with the next key; in the debug capture from
+  @Vocllum (#357) the terminal lost and took its focus right after Enter, and WeChat Input typed
+  English from then on without a Shift tap. When only the VM's field goes (the VM keeps the
+  keyboard), the input method now goes off 0.2 s later, and not at all when a field takes the
+  focus again within that time. Keys still go to the VM as keys while no field has the focus, and
+  what was marked is still dropped when the field goes. A Shift tap within those 0.2 s still reaches the
+  input method and can switch its mode. Not tried with WeChat Input itself (no
+  test Mac has it). Needs the app update.
+
+- **HDR costs the Mac's graphics less.** With HDR and 10-bit colour on, Omarchy's compositor drew every
+  window twice per frame: once for the screen and once into an SDR copy it keeps for screen sharing. The
+  copy is now made only while a screenshot or a screen share runs. The screen shows the same pixels and
+  screenshots look the same; the Mac's GPU does 10-19 % less work per frame with HDR on (scrolling, video,
+  a terminal). A `keep_unmodified_copy` you set in your own Hyprland config still wins. Needs Update VM.
+
 - **Frames in step with the Mac (experimental, off).** A new switch in the VM window's Display
   section. The VM's display clock had its own beat: a frame it drew right after one refresh of
   the Mac's display waited for the next one, anywhere up to a whole refresh, while the screen was
@@ -17,19 +58,19 @@ in more words.
   being skipped. On a still screen nothing changes. The same frames and pixels (checked), the
   same rate; MacBook Air M2 power within 1 % (pointer moving, scrolling). Needs Update VM (it builds the VM's
   graphics driver, internet once); counts from the next start of the VM.
+
 - **Pointer on its own layer (experimental, off).** A new switch in the VM window's Display section.
   With it, moving the pointer no longer redraws the VM's screen: the VM puts its pointer on the
   graphics card's cursor layer, and the app shows that layer over the window, the same pointer in
   the same place (with Extra brightness as bright as the picture). Only the drawing of the VM's
   picture for each move goes; the VM still sends a frame per move. MacBook Air M2 (60 Hz), pointer
-  moving, whole Mac: 3.47-3.50 W against 3.74-3.75 W with the VM drawing the pointer itself (-7 %);
-  scrolling and video the same. Same pixels in the whole window on the Air; on a MacBook Pro M1 Max
-  with HDR at 120 Hz the same pixels around the pointer (an 8-bit capture). The pointer moves on its
-  own, like the Mac's: while you drag something it can be a frame ahead of it. Only in the VM's main
-  window: on other displays the VM draws the pointer as before. Not together with the hidden
-  `macPointer` setting. Needs Update VM (it builds the VM's graphics driver, internet once); counts
-  from the next start of the VM. With HDR on, Update VM builds that driver again too; until it has,
-  an HDR start uses the stock driver and `omacvm check` says so.
+  moving, whole Mac: 3.32-3.52 W with the switch against 3.58-3.80 W without it (-0.26 W, -7 %);
+  scrolling and video the same. On the Air the window shows the same pixels as without the switch
+  (3 pixels one level off, as between two pictures without it). The pointer moves on its own, like the Mac's: while you drag something it can be a frame
+  ahead of it. Only in the VM's main window: on other displays the VM draws the pointer as before.
+  Not together with the hidden `macPointer` setting. Needs Update VM (it builds the VM's graphics
+  driver, internet once); counts from the next start of the VM. With HDR on, Update VM builds that
+  driver again too; until it has, an HDR start uses the stock driver and `omacvm check` says so.
 
 ## 3.2.1
 

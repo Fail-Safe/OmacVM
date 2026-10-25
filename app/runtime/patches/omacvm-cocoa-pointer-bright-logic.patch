@@ -4,6 +4,7 @@ Subject: [PATCH] ui: the pointer's image with extra brightness, tested without A
 What: a header with no AppKit in it: the gain the pointer's image gets
 (the frames' gain while extra brightness boosts them, else 1x) and the
 image in half floats, extended linear sRGB, premultiplied, its colour
+(premultiplied as virtio-gpu sends it: divided by its alpha first)
 decoded as the frames are (omacvm_bright_linear) and times that gain.
 Used by omacvm-cocoa-pointer-bright.patch (which explains the why).
 
@@ -19,7 +20,7 @@ diff --git a/ui/omacvm-pointer-bright.h b/ui/omacvm-pointer-bright.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-pointer-bright.h
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,58 @@
 +/*
 + * OmacVM: the guest's pointer image with extra brightness (ADR 0054, 0050).
 + *
@@ -33,9 +34,10 @@ new file mode 100644
 + * the frames are boosted, the image gets the same g: decoded to linear
 + * light like the frames (omacvm_bright_linear) and times g.
 + *
-+ * In: QEMU's cursor pixels as the 8-bit layer takes them (32 bits, bytes
-+ * B G R A, alpha not premultiplied, sRGB). Out: half floats R G B A,
-+ * premultiplied, extended linear sRGB; the colour times g, the alpha as it
++ * In: QEMU's cursor pixels as virtio-gpu sends them (32 bits, bytes B G R A,
++ * premultiplied alpha, sRGB; Xcursor themes are premultiplied). Out: half
++ * floats R G B A, premultiplied, extended linear sRGB: each colour divided
++ * by its alpha, decoded, times g and times the alpha again; the alpha as it
 + * is.
 + */
 +#ifndef OMACVM_POINTER_BRIGHT_H
@@ -60,18 +62,18 @@ new file mode 100644
 +                                                int gain_c, _Float16 *dst)
 +{
 +    double g = gain_c / (double)OMACVM_BRIGHT_ONE;
-+    double lin[256];
 +
-+    for (int i = 0; i < 256; i++) {
-+        lin[i] = omacvm_bright_linear(i / 255.0);
-+    }
 +    for (size_t i = 0; i < n; i++) {
 +        uint32_t p = src[i];
-+        double a = (p >> 24) / 255.0;
++        unsigned a8 = p >> 24;
++        double a = a8 / 255.0;
 +
-+        dst[4 * i + 0] = (_Float16)(lin[(p >> 16) & 0xff] * g * a);
-+        dst[4 * i + 1] = (_Float16)(lin[(p >> 8) & 0xff] * g * a);
-+        dst[4 * i + 2] = (_Float16)(lin[p & 0xff] * g * a);
++        for (int c = 0; c < 3; c++) {
++            unsigned v = (p >> (16 - 8 * c)) & 0xff;
++            /* premultiplied: the colour itself is v / a (at most 1) */
++            double k = a8 ? (v >= a8 ? 1.0 : (double)v / a8) : 0;
++            dst[4 * i + c] = (_Float16)(omacvm_bright_linear(k) * g * a);
++        }
 +        dst[4 * i + 3] = (_Float16)a;
 +    }
 +}

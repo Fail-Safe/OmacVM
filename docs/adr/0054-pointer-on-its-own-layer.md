@@ -47,7 +47,9 @@ that place the cursor by its hotspot at their own mouse position.
    (`Pointer layer`).
 4. **Same picture.** The image is Hyprland's own cursor image at the same
    place; QEMU draws it 1:1 over the window (the layer is sized in guest
-   pixels). The pointer is not in the guest's frames any more; in-guest
+   pixels), premultiplied as virtio-gpu sends it (QEMU's layer took it as
+   straight alpha before: the white outline's soft edge came out up to 55
+   levels darker). The pointer is not in the guest's frames any more; in-guest
    screenshots and recordings get it the way they do on any hardware cursor
    (Hyprland adds it to the copy when the client asks for the pointer).
 5. **As bright as the frames.** With Extra brightness ([0050](0050-extra-brightness.md))
@@ -69,13 +71,17 @@ that place the cursor by its hotspot at their own mouse position.
 - Experimental and off by default: hotspot-less placement relies on QEMU
   drawing the image itself; a cursor bigger than the plane (64x64) or
   Hyprland's zoom goes back to the software pointer by Hyprland's own rules.
-- What was checked: the same pixels in the whole window on a MacBook Air
-  (SDR, 60 Hz; today's setup with the stock driver against the switch on),
-  and around the pointer over a page on the M1 Max with HDR at 120 Hz
-  (an 8-bit sRGB capture, so it cannot show light above SDR white). The
-  pointer's soft edge is blended by macOS over the frames, not by the guest
-  into them: with Extra brightness on, those few edge pixels may differ a
-  little.
+- What was checked: whole-window pixels on a MacBook Air (SDR, 60 Hz),
+  today's setup (stock driver) against the switch on, a boot each: only the
+  pointer's soft edge differed (107-123 pixels, up to 55 levels: the
+  straight-alpha bug in 4.); after the fix 0 and 3 pixels (1 level, the
+  rounding two pictures of today's setup show too). Extra brightness: on
+  the mini, a boosted layer with the patch's pointer image and an HDR
+  capture (page 2.00, the new pointer image 2.00, the old 8-bit one 1.00).
+  Not yet checked on screen: HDR at 120 Hz and Extra brightness on an XDR
+  panel (queued on the M1 Max, tracks/m1-bench-queue.md). The pointer's soft edge is blended by macOS over the
+  frames, not by the guest into them: with Extra brightness on, those few
+  edge pixels may differ a little.
 - The pointer layer moves when the guest moves the plane, not with the
   frames: while dragging a window or selecting text it can be a frame ahead
   of what it drags (as the Mac's own pointer). Check a drag before the

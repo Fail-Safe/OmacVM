@@ -5,8 +5,8 @@
 #     against them (no QEMU, no display);
 #   - with a patched ui/cocoa.m: the wiring (the image in half floats,
 #     extended linear sRGB, times the frames' gain while they are boosted,
-#     the layer with EDR; the 8-bit image otherwise; the gain follows the
-#     frames' in omacvm_bright_look);
+#     the layer with EDR; the 8-bit image otherwise; both premultiplied, as
+#     virtio-gpu sends it; the gain follows the frames' in omacvm_bright_look);
 #   - with --self-test [<ui/cocoa.m without the patch>]: every wiring check
 #     fails on that code (CI: a stub; the runtime build: the real cocoa.m
 #     before the patch).
@@ -30,7 +30,8 @@ checks() {
   chk "boosted: extended linear sRGB" has "$img" 'CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearSRGB)'
   chk "boosted: half floats, premultiplied" has "$img" 'kCGBitmapByteOrder16Little | kCGBitmapFloatComponents |'
   chk "boosted: 64 bits a pixel" has "$img" 'CGImageCreate(cursor->width, cursor->height, 16, 64, cursor->width * 8,'
-  chk "not boosted: the 8-bit image as before" has "$img" 'kCGBitmapByteOrder32Little | kCGImageAlphaFirst'
+  chk "not boosted: the 8-bit image, premultiplied as virtio-gpu sends it" has "$img" 'kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst, //bitmapInfo'
+  chk "no image takes it as straight alpha (soft edges dark)" bash -c '[[ -n $1 ]] && ! grep -qF "kCGImageAlphaFirst" <<<"$1"' _ "$img"
   chk "the layer has EDR while boosted" has "$img" '[cursorLayer setWantsExtendedDynamicRangeContent:boost];'
   chk "macOS does not tone-map it (as the frames)" has "$img" 'setToneMapMode:boost ? CAToneMapModeNever : CAToneMapModeAutomatic'
   chk "it asks for 2x only (macOS 26+)" has "$img" 'CGFloat need = boost ? OMACVM_BRIGHT_TARGET : 0;'
