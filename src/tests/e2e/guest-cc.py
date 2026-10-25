@@ -183,7 +183,7 @@ def state_of(title: str, text: str) -> dict:
     hint = below_table(text)
     line = row_line(text, title)
     note = line.split(title, 1)[1].strip(" │") if title in line else ""
-    m = re.search(r"·\s+(on|off),\s+(works|needs you|failing|off|unavailable|not checked|working)", hint)
+    m = re.search(r"·\s+(on|off),\s+(works|needs you|failing|off|unavailable|not checked|working|from the next start)", hint)
     return {"on": m.group(1) if m else None, "status": m.group(2) if m else None, "note": note, "below": hint}
 
 
@@ -303,7 +303,8 @@ def cmd_toggle(a: list[str]) -> None:
         _, text, seen3 = watch(lambda s: state_of(title, s)["on"] == want and state_of(title, s)["status"] in ("works", "off"), 30)
         after = state_of(title, text)
         seen2 += [x for x in seen3 if x not in seen2]
-    out(done and after["status"] in ("works", "off"), before=before, after=after, asked=question, started=started,
+    # "from the next start": a switch the running VM takes at its next start (Mac input, Touch ID).
+    out(done and after["status"] in ("works", "off", "from the next start"), before=before, after=after, asked=question, started=started,
         seconds=round(time.monotonic() - t0, 1), first=first, trouble=seen1 + [x for x in seen2 if x not in seen1], screen=text)
 
 
