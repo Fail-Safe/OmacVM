@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.1 (unreleased)
+
+- **Pointer on its own layer (experimental, off).** A new switch in the VM window's Display section.
+  With it, moving the pointer no longer redraws the VM's screen: the VM puts its pointer on the
+  graphics card's cursor layer, and the app shows that layer over the window, the same pointer in
+  the same place (checked pixel for pixel). Only the drawing of the VM's picture for each move
+  goes; the VM still sends a frame per move. MacBook Air M2, pointer moving: 3.47-3.50 W instead
+  of 3.74-3.75 W for the whole Mac (-7 %); scrolling and video the same as before. Only in the
+  VM's main window: on other displays the VM draws the pointer as before. Not together with the
+  hidden `macPointer` setting. Needs Update VM (it builds the VM's graphics driver, internet
+  once); counts from the next start of the VM.
+
 ## 3.2.0
 
 Chrome decodes video on the Mac's media engine again, ⌃⌥ Esc takes the right display out of the VM, the
