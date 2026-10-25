@@ -25,10 +25,12 @@
  * /run/omacvm/host.env); an older one shows them black, and then the CPU is
  * better. Other apps keep Mesa's one page. OMACVM_VA_EXPORT=1 or 0 overrides.
  * Chromium's decoders see a largest size of 1920 x 1920 (OMACVM_VA_MAX, 0:
- * none; encoders and video processing keep Mesa's): above that its hardware
- * path dropped far more frames than its CPU decoders in our test VMs (4K VP9
- * on an M2: 31 % against 0.1 %), so 1440p and 4K stay on the CPU; calls and
- * 1080p get the media engine. Only in Chromium's processes, also when
+ * none; encoders and video processing keep Mesa's) unless the Mac's runtime
+ * decodes beside its GPU thread (omacvm.vadecasync=1, below): an older one
+ * waited for every picture on that thread, and above 1080p Chrome's hardware
+ * path then dropped far more frames than its CPU decoders (4K VP9 on an M2: 38 %
+ * against 7 %). With the newer one there is no limit (4K: 6-7 % on the M2 and
+ * on an M4 Max, the CPU 7-8 %). Only in Chromium's processes, also when
  * OMACVM_VA_EXPORT=1 forces the export hint elsewhere.
  *
  * Waiting for the picture (Chromium): the Mac's runtime decodes beside its GPU
@@ -98,20 +100,23 @@ static VAStatus (*mesa_query_surface_attributes)(VADriverContextP, VAConfigID,
                                                  VASurfaceAttrib *, unsigned int *);
 static int export_sized(void);
 static int chromium(void);
+static int host_decodes_async(void);
 
 /* Chromium's hardware decoding up to this many pixels wide and high (see the top);
- * OMACVM_VA_MAX=0: no limit; not a number: 1920. */
+ * OMACVM_VA_MAX=0: no limit; not set or not a number: none on a runtime that
+ * decodes beside its GPU thread, else 1920. */
 static int chromium_max(void)
 {
     const char *env = getenv("OMACVM_VA_MAX");
+    int dflt = host_decodes_async() ? 0 : 1920;
     char *end;
     unsigned long v;
 
     if (!env || !*env)
-        return 1920;
+        return dflt;
     v = strtoul(env, &end, 10);
     if (*end)
-        return 1920;
+        return dflt;
     return v > INT_MAX ? INT_MAX : (int)v;
 }
 
@@ -278,6 +283,16 @@ static int export_sized(void)
 
 /* ---- Waiting for the picture (see the top) ---- */
 
+/* The Mac's runtime decodes beside its GPU thread (read once, at the driver's start). */
+static int host_decodes_async(void)
+{
+    static int on = -1;
+
+    if (on < 0)
+        on = host_says("OMACVM_VADECASYNC=1\n");
+    return on;
+}
+
 static int decode_wait_on(void)
 {
     static int on = -1;
@@ -287,7 +302,7 @@ static int decode_wait_on(void)
         int c = chromium();
 
         env = getenv("OMACVM_VA_DECODE_WAIT");
-        on = env && *env ? *env == '1' : c && host_says("OMACVM_VADECASYNC=1\n");
+        on = env && *env ? *env == '1' : c && host_decodes_async();
     }
     return on;
 }
@@ -982,6 +997,7 @@ static VAStatus shim_init(VADriverContextP ctx)
     }
     if (st == VA_STATUS_SUCCESS && ctx->vtable && ctx->vtable->vaCreateSurfaces2) {
         export_sized();
+        host_decodes_async();
         mesa_create_surfaces2 = ctx->vtable->vaCreateSurfaces2;
         ctx->vtable->vaCreateSurfaces2 = create_surfaces2;
     }
