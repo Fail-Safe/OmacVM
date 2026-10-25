@@ -25,8 +25,9 @@ in the guest's planes (the sync thread waits for that after the GL fence,
 2 s at most, then a warning; polled fences stay unretired). A buffer the
 guest destroys drops the pictures still on their way into it; a decoder that
 goes away first puts its last pictures in. A picture the media engine has had
-for 1 s is given up (logged), when it is waited for and in the poll.
-OMACVM_VIDEO_DECODE_SYNC=1: END_FRAME waits for each picture, as before. With OMACVM_VIDEO_DEBUG=1 the per-120-frames line
+for 1 s is given up (logged), when it is waited for and in the poll. The sync
+thread reads the fence's context again after its waits: the context may have
+gone away meanwhile. OMACVM_VIDEO_DECODE_SYNC=1: END_FRAME waits for each picture, as before. With OMACVM_VIDEO_DEBUG=1 the per-120-frames line
 says how many pictures were in flight at most.
 Why: in Google Chrome's hardware decoding of YouTube 4K60 (AV1, MacBook Pro M4
 Max) QEMU's GPU thread was busy 94 % of the time: 55 % of it waiting in
@@ -48,7 +49,8 @@ END_FRAME, another context's clear of a plane right after END_FRAME (the draw
 path's check), a fence after END_FRAME then the GL texture read past vrend
 (fails without the fence hook), a buffer and the decoder destroyed with
 pictures in flight, a picture that never comes back (OMACVM_TEST_VIDEO_LOSE=N,
-a test hook: the fence after it signals after 1 s, polled too); polled fences,
+a test hook: the fence after it signals after 1 s, polled too), a context
+destroyed while its fence waits for a picture (not reported); polled fences,
 sync-thread fences and OMACVM_VIDEO_DECODE_SYNC=1.
 test-video-decode.c and test-video-padding.c (they read through transfers)
 pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
@@ -856,17 +858,27 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  }
  
  /* Sync thread: hold the fence until its encoder frames are given back
-@@ -9549,6 +9572,9 @@
-       perror("failed to write to eventfd\n");
+@@ -9550,6 +9573,9 @@
     if (!vrend_video_encode_wait(fence->video_seq, 2000) && late++ < 5)
        virgl_warn("video: encoder frame not back after 2 s; fence %" PRIu64 " signalled anyway\n",
-+                 fence->fence_id);
+                  fence->fence_id);
 +   if (!vrend_video_decode_wait(fence->video_dec_seq, 2000) && late++ < 5)
 +      virgl_warn("video: decoded picture not in after 2 s; fence %" PRIu64 " signalled anyway\n",
-                  fence->fence_id);
++                 fence->fence_id);
  }
  #else
-@@ -13644,6 +13670,7 @@
+ static bool fence_video_ready(UNUSED const struct vrend_fence *fence) { return true; }
+@@ -9662,6 +9688,9 @@
+       list_addtail(&fence->fences, &vrend_state.fence_list);
+    }
+    vrend_state.fence_waiting = NULL;
++   /* OmacVM: read again after the waits (a decoded picture's can be long): the
++    * context may have gone away meanwhile (vrend_free_fences_for_context) */
++   ctx = fence->ctx;
+    mtx_unlock(&vrend_state.fence_mutex);
+ 
+    if (!vrend_state.use_async_fence_cb) {
+@@ -13644,6 +13673,7 @@
  
     if (!vrend_hw_switch_context(ctx, true))
        return EINVAL;
@@ -874,7 +886,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  
     assert(check_transfer_iovec(res, info));
     if (info->iovec && info->iovec_cnt) {
-@@ -13886,6 +13913,7 @@
+@@ -13886,6 +13916,7 @@
                                     const struct vrend_transfer_info *info)
  {
     static int copy_log_budget = 8;
@@ -882,7 +894,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
     if (copy_log_budget > 0) {
        virgl_warn("copy_transfer3d: dst target=%u base.target=%u samples=%u format=%s level=%u box=[%d,%d,%d %dx%dx%d]\n",
                   dst_res->target, dst_res->base.target, dst_res->base.nr_samples,
-@@ -13960,6 +13988,7 @@
+@@ -13960,6 +13991,7 @@
                                               struct vrend_resource *src_res,
                                               const struct vrend_transfer_info *info)
  {
@@ -890,7 +902,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
     if (!resource_contains_box(src_res, info->box, info->level)) {
        vrend_report_context_error(ctx, VIRGL_ERROR_CTX_RESOURCE_OUT_OF_RANGE, src_handle);
        return EINVAL;
-@@ -14474,6 +14503,8 @@
+@@ -14474,6 +14506,8 @@
        vrend_report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_RESOURCE, dst_handle);
        return;
     }
@@ -899,7 +911,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  
     if (!resource_contains_box(src_res, src_box, src_level)) {
        vrend_report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_CMD_BUFFER, src_handle);
-@@ -15029,6 +15060,8 @@
+@@ -15029,6 +15063,8 @@
        vrend_report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_RESOURCE, dst_handle);
        return;
     }
@@ -908,7 +920,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  
     if (ctx->in_error)
        return;
-@@ -15186,8 +15219,10 @@
+@@ -15186,8 +15222,10 @@
     fence->fence_id = fence_id;
  #ifdef ENABLE_VIDEO
     fence->video_seq = vrend_state.video_available ? vrend_video_encode_seq() : 0;
@@ -919,7 +931,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  #endif
  
  #ifdef HAVE_EPOXY_EGL_H
-@@ -15836,8 +15871,37 @@
+@@ -15836,6 +15874,35 @@
  void vrend_renderer_pause_render_condition(struct vrend_context *ctx, bool pause)
  {
     vrend_pause_render_condition(ctx, pause);
@@ -929,8 +941,8 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +{
 +   if (vrend_state.current_hw_ctx && vrend_state.current_hw_ctx->sub)
 +      vrend_pause_render_condition(vrend_state.current_hw_ctx, pause);
- }
- 
++}
++
 +static void vrend_video_ready_sub(const struct vrend_sub_context *sub_ctx)
 +{
 +#ifdef ENABLE_VIDEO
@@ -952,11 +964,9 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +#else
 +   (void)sub_ctx;
 +#endif
-+}
-+
+ }
+ 
  void vrend_render_condition(struct vrend_context *ctx,
-                             uint32_t handle,
-                             bool condition,
 --- a/src/vrend/vrend_renderer.h
 +++ b/src/vrend/vrend_renderer.h
 @@ -124,6 +124,10 @@

@@ -14,7 +14,9 @@
  *   read straight from the GL texture once it signalled (no vrend in between);
  * - a buffer and a decoder destroyed with pictures in flight: the other pictures land;
  * - a picture the media engine never gives back (OMACVM_TEST_VIDEO_LOSE): the
- *   fence after it signals once the picture is given up after 1 s, also polled.
+ *   fence after it signals once the picture is given up after 1 s, also polled;
+ * - a context destroyed while the sync thread waits for its fence's picture:
+ *   that fence is not reported (the context is gone).
  * OMACVM_TEST_THREAD_SYNC=1: fences reported by the sync thread (QEMU's way).
  * OMACVM_VIDEO_DECODE_SYNC=1 (END_FRAME waits, as before): the timing check is
  * skipped, everything else must hold the same.
@@ -70,6 +72,15 @@ static void check(int ok, const char *what)
 
 static volatile uint32_t fence_done;
 static uint32_t fence_next;
+static volatile uint64_t ctx_fence_last[4];
+
+static void write_ctx_fence(void *cookie, uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_id)
+{
+   (void)cookie;
+   (void)ring_idx;
+   if (ctx_id < 4)
+      __atomic_store_n(&ctx_fence_last[ctx_id], fence_id, __ATOMIC_RELEASE);
+}
 
 static void write_fence(void *cookie, uint32_t fence)
 {
@@ -101,11 +112,12 @@ static int make_current(void *cookie, int scanout, virgl_renderer_gl_context ctx
 }
 
 static struct virgl_renderer_callbacks callbacks = {
-   .version = 1,
+   .version = 3,
    .write_fence = write_fence,
    .create_gl_context = create_gl_context,
    .destroy_gl_context = destroy_gl_context,
    .make_current = make_current,
+   .write_context_fence = write_ctx_fence,
 };
 
 struct cmds {
@@ -702,8 +714,24 @@ int main(void)
       snprintf(line, sizeof(line), "the decoder goes on after it (luma PSNR %.1f dB)", p);
       check(p > 30, line);
    }
-   virgl_renderer_context_destroy(2);
+
+   /* 7: the decoding context goes away while its fence waits for a picture: the
+    * fence is dropped with the context, never reported for it (with
+    * OMACVM_VIDEO_DECODE_SYNC=1 the fence has nothing to wait for) */
+   if (!sync_mode) {
+      send_picture(11, 0, 3);
+      virgl_renderer_context_create_fence(1, 0, 0, 77);
+      usleep(20000);                    /* the sync thread is in the picture's wait */
+   }
    virgl_renderer_context_destroy(1);
+   if (!sync_mode) {
+      usleep(50000);
+      uint64_t last = __atomic_load_n(&ctx_fence_last[1], __ATOMIC_ACQUIRE);
+      snprintf(line, sizeof(line), "a context destroyed while its fence waits for a picture: "
+               "the fence is not reported (last %llu)", (unsigned long long)last);
+      check(last != 77, line);
+   }
+   virgl_renderer_context_destroy(2);
    virgl_renderer_cleanup(&cookie);
 
    if (failures) {
