@@ -472,6 +472,18 @@ the VM's SSH on `127.0.0.1:<port>`.
   (`omacvm-cocoa-cursor-stays-hidden.patch`; in a VM:
   `src/tests/pointer-reveal-vm.sh`). OmacVM Gestures leaves the Mac's
   pointer over the app's VMs to QEMU.
+- Pointer on its own layer (experimental, off; the VM window's Display
+  section, `defaults write org.omacvm.app pointerPlane -bool true`, from the
+  VM's next start; ADR 0054): the VM loads OmacVM's virtio-gpu driver with
+  the option `cursor_plane=1` (built by Update VM like the 10-bit one), which
+  shows its cursor plane to Hyprland: since Linux 6.8 a virtual GPU hides it
+  from compositors that send no cursor hotspots, and Hyprland's aquamarine
+  sends none. `omacvm_app.lua` then puts the pointer there (from a CPU
+  buffer), and QEMU shows that image over its window, 1:1 at the plane's
+  place, so a pointer move no longer redraws the VM's screen. Only the main
+  window's output gets the plane; external displays keep Hyprland's own
+  pointer. Not with the hidden Mac pointer setting (that one needs the
+  hotspot). `omacvm check` says "Pointer layer".
 - Mac pointer for the VM (experimental, off, no switch in the window yet:
   `defaults write org.omacvm.app macPointer -bool true`, from the VM's
   next start): Omarchy is asked to put its pointer on virtio-gpu's cursor

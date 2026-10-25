@@ -11,7 +11,9 @@ the Mac's GPU. QEMU here shows the plane's image at the plane's top left
 (the cursor layer over its main window), so it needs no hotspot: with
 cursor_plane=1 the feature bit is cleared and the plane shows. Only the
 first output gets a cursor plane then: QEMU shows the image over its main
-window only, and the other outputs keep drawing their own pointer.
+window only, and the other outputs keep drawing their own pointer. The
+option is readable by every user (0444): Hyprland's config reads it as the
+desktop user.
 
 Applies after linux-virtio-gpu-deep-color.patch. Upstream: not for
 sending (the hotspot rule is right for hosts that place the cursor by its
@@ -49,7 +51,7 @@ shows the pointer on plane 1 (AR24 64x64).
  
 +bool virtio_gpu_cursor_plane;
 +MODULE_PARM_DESC(cursor_plane, "Show the cursor plane to compositors that send no cursor hotspots (the host shows the image at the plane's top left)");
-+module_param_named(cursor_plane, virtio_gpu_cursor_plane, bool, 0400);
++module_param_named(cursor_plane, virtio_gpu_cursor_plane, bool, 0444);
 +
  static int virtio_gpu_pci_quirk(struct drm_device *dev)
  {
