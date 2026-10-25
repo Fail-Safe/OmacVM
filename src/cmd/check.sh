@@ -470,6 +470,19 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     "Vulkan windows are copied"*) warn "Vulkan windows" "vkWindowsNoCopy is on, but they are copied this run: $(grep -o 'no IOSurfaces: [^)]*' "$miclog" | tail -1)" ;;
   esac
 fi
+# Show directly on the display this run (experimental: the app's directDisplay switch).
+# QEMU says "on" at the start, then what the display does with the window; nothing
+# when the switch is off.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  dd=$(grep -o 'cocoa: direct to display[:,].*' "$miclog" | grep -v 'last minute' | tail -1)
+  case $dd in
+    *"the display shows the window itself"*) ok "Show directly on the display" "on: the display shows the VM's window itself (experimental)" ;;
+    *"composited by WindowServer"*) ok "Show directly on the display" "on, but composited now: not full screen, or another window is over the VM (experimental)" ;;
+    *"off for this run"*) warn "Show directly on the display" "directDisplay is on, but off this run: ${dd#*off for this run (}" ;;
+    *"off ("*) warn "Show directly on the display" "directDisplay is on, but off this run: ${dd#*off (}" ;;
+    *": on ("*) ok "Show directly on the display" "on (experimental); no frame shown yet" ;;
+  esac
+fi
 # HDR and 10-bit colour this run (experimental: the app's hdr switch). The app
 # says "on (...)" or, with the switch on, "off (why)"; nothing when it is off.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then

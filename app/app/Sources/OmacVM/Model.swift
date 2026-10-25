@@ -564,6 +564,16 @@ enum Settings {
             UserDefaults.standard.set(newValue, forKey: "vkWindowsNoCopy")
         }
     }
+    /// Show directly on the display (experimental, off by default): QEMU
+    /// draws the VM's frames into a CAMetalLayer's drawables
+    /// (omacvm-cocoa-present-direct.patch, OMACVM_GL_DIRECT=1), so macOS can
+    /// show the full-screen window itself, without WindowServer's composite,
+    /// while no other window covers it. GPU safe mode keeps it off. Read at
+    /// each start of the VM.
+    static var directDisplay: Bool {
+        get { !gpuSafeMode && UserDefaults.standard.bool(forKey: "directDisplay") }
+        set { UserDefaults.standard.set(newValue, forKey: "directDisplay") }
+    }
     /// Added to the sound delay the app tells the VM (AudioLatencyWatch), in
     /// ms, -500 ... 500: negative when the sound comes early in the VM's
     /// videos, positive when it still comes late (a device that under-reports).

@@ -37,6 +37,7 @@ MainActor.assumeIsolated {
         case "gpuOffMainLoop": Settings.gpuOffMainLoop = value == "true"
         case "shareKeyboard": Settings.shareKeyboard = value == "true"
         case "vkWindowsNoCopy": Settings.vkWindowsNoCopy = value == "true"
+        case "directDisplay": Settings.directDisplay = value == "true"
         case "hdr": Settings.hdr = value == "true"
         case "extraBrightness": Settings.extraBrightness = value == "true"
         case "pointerPlane": Settings.pointerPlane = value == "true"

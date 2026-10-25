@@ -216,6 +216,25 @@ struct KeepDockAwayRow: View {
     }
 }
 
+/// Show directly on the display (Settings.directDisplay, experimental, off
+/// by default): read by each start of the VM.
+struct DirectDisplayRow: View {
+    var tick = 0
+    @State private var on = Settings.directDisplay
+
+    static let info = "In full screen, the Mac's display shows the VM's picture itself, as it does for full-screen games, instead of macOS's window server copying it onto the screen for every frame. The picture, the frame rate (also 120 Hz), HDR and brightness stay the same; the Mac's graphics do less for each frame, which saves battery while the screen moves (scrolling, video). It works while nothing else is on top of the VM: a notification, a menu, or another app's always-on-top window (even a tiny one) makes macOS copy the picture again until it is gone. In a window it changes nothing. Experimental: off by default. GPU safe mode turns it off. Counts from the next start of the VM."
+
+    var body: some View {
+        SettingRow(title: "Show directly on the display", badge: "experimental",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "In full screen, less work for the Mac's graphics. From the next start of the VM.",
+                   info: Self.info, probe: "direct-display") {
+            RowSwitch(title: "Show directly on the display", isOn: $on, enabled: !Settings.gpuSafeMode)
+        }
+        .onChange(of: on) { _, v in if v != Settings.directDisplay { Settings.directDisplay = v } }
+        .onChange(of: tick) { _, _ in on = Settings.directDisplay }
+    }
+}
+
 /// HDR and 10-bit colour (Settings.hdr, experimental, off by default): read
 /// by each start of the VM (Settings.hdrStart). Shown only with a display
 /// that can show HDR.

@@ -524,6 +524,12 @@ final class Runner {
         if Settings.vkWindowsNoCopy {
             env["OMACVM_VK_WINDOWS"] = "iosurface"
         }
+        // Show directly on the display (directDisplay, experimental;
+        // omacvm-cocoa-present-direct.patch): QEMU says in qemu.log whether it
+        // is on and whether the display shows the window itself.
+        if Settings.directDisplay {
+            env["OMACVM_GL_DIRECT"] = "1"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"

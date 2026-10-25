@@ -188,6 +188,7 @@ struct SettingsSections: View {
                     NotchSkipRow(state: state, previewInfo: preview?.notchSkipInfo ?? false)
                 }
                 KeepDockAwayRow(tick: state.tick)
+                DirectDisplayRow(tick: state.tick)
                 if preview?.hdr ?? Mac.hasHDRDisplay {
                     HDRRow(tick: state.tick)
                 }
