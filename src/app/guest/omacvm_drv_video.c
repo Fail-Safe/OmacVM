@@ -45,7 +45,9 @@
  * source region is scaled to the picture's part of them. Chrome converts into
  * an import of its own frame (the dma-buf it exported): such an RGB import whose
  * buffer holds the rounded planes (Mesa made it) is imported at the rounded
- * size, so the conversion may draw all of it. OMACVM_VA_FILL=0 or 1 overrides.
+ * size, so the conversion may draw all of it. Only Mesa's own 4:2:0 surfaces
+ * get the source scaling (an imported one has the planes it came with).
+ * OMACVM_VA_FILL=0 or 1 overrides.
  *
  * Limits: the Mac says in its video caps how many decoders and encoders a VM
  * should keep open at once. Past a somewhat higher limit of its own it gives
@@ -283,23 +285,49 @@ static int import_rounded(VADriverContextP ctx, unsigned int format, unsigned in
                           unsigned int height, VASurfaceID *surfaces, VASurfaceAttrib *attribs,
                           unsigned int num_attribs, VAStatus *st);
 static int fill_on(void);
+static void own420_add(VADriverContextP ctx, const VASurfaceID *ids, unsigned n, uint32_t w,
+                       uint32_t h);
 
 /* A new surface that Mesa allocates (no buffer of the app's, no memory type
  * of its own) gets the export hint added. */
+static VAStatus create_surfaces_plain(VADriverContextP ctx, unsigned int format,
+                                      unsigned int width, unsigned int height,
+                                      VASurfaceID *surfaces, unsigned int num_surfaces,
+                                      VASurfaceAttrib *attribs, unsigned int num_attribs);
+
 static VAStatus create_surfaces2(VADriverContextP ctx, unsigned int format, unsigned int width,
                                  unsigned int height, VASurfaceID *surfaces,
                                  unsigned int num_surfaces, VASurfaceAttrib *attribs,
                                  unsigned int num_attribs)
 {
-    VASurfaceAttrib list[32];
     unsigned int i;
-    int plain = export_sized() && num_attribs < sizeof(list) / sizeof(list[0]) &&
-                (attribs || !num_attribs);
+    int imported = 0;
     VAStatus st;
 
     if (num_surfaces == 1 && fill_on() &&
         import_rounded(ctx, format, width, height, surfaces, attribs, num_attribs, &st))
         return st;
+    for (i = 0; attribs && i < num_attribs; i++)
+        imported |= attribs[i].type == VASurfaceAttribExternalBufferDescriptor;
+    st = create_surfaces_plain(ctx, format, width, height, surfaces, num_surfaces, attribs,
+                               num_attribs);
+    /* Mesa's own 4:2:0 surfaces: their planes are rounded (see render_picture) */
+    if (st == VA_STATUS_SUCCESS && !imported && fill_on() &&
+        (format & (VA_RT_FORMAT_YUV420 | VA_RT_FORMAT_YUV420_10)))
+        own420_add(ctx, surfaces, num_surfaces, width, height);
+    return st;
+}
+
+/* Mesa's vaCreateSurfaces2, exportable at their real size where export_sized() says so. */
+static VAStatus create_surfaces_plain(VADriverContextP ctx, unsigned int format,
+                                      unsigned int width, unsigned int height,
+                                      VASurfaceID *surfaces, unsigned int num_surfaces,
+                                      VASurfaceAttrib *attribs, unsigned int num_attribs)
+{
+    VASurfaceAttrib list[32];
+    unsigned int i;
+    int plain = export_sized() && num_attribs < sizeof(list) / sizeof(list[0]) &&
+                (attribs || !num_attribs);
 
     for (i = 0; plain && i < num_attribs; i++) {
         if (!(attribs[i].flags & VA_SURFACE_ATTRIB_SETTABLE))
@@ -508,6 +536,41 @@ static struct bumped {
 } bumped[64];
 static unsigned nbumped, next_bumped;
 
+/* 4:2:0 surfaces Mesa allocated (not imports), so with planes rounded up to 16:
+ * their own size. A full table forgets the oldest (its pictures then as before). */
+static struct bumped own420[512];
+static unsigned nown420, next_own420;
+
+static void own420_add(VADriverContextP ctx, const VASurfaceID *ids, unsigned n, uint32_t w,
+                       uint32_t h)
+{
+    pthread_mutex_lock(&tgt_lock);
+    for (unsigned i = 0; i < n; i++) {
+        if (nown420 < sizeof(own420) / sizeof(own420[0])) {
+            own420[nown420++] = (struct bumped){ ctx, ids[i], w, h };
+        } else {
+            own420[next_own420] = (struct bumped){ ctx, ids[i], w, h };
+            next_own420 = (next_own420 + 1) % nown420;
+        }
+    }
+    pthread_mutex_unlock(&tgt_lock);
+}
+
+static int own420_size(VADriverContextP ctx, VASurfaceID id, uint32_t *w, uint32_t *h)
+{
+    int found = 0;
+
+    pthread_mutex_lock(&tgt_lock);
+    for (unsigned i = 0; i < nown420 && !found; i++)
+        if (own420[i].drv == ctx && own420[i].id == id) {
+            *w = own420[i].width;
+            *h = own420[i].height;
+            found = 1;
+        }
+    pthread_mutex_unlock(&tgt_lock);
+    return found;
+}
+
 static int bumped_size(VADriverContextP ctx, VASurfaceID id, uint32_t *w, uint32_t *h)
 {
     int found = 0;
@@ -537,6 +600,18 @@ static void bumped_forget(VADriverContextP ctx, const VASurfaceID *ids, int n)
         if (hit && bumped[i].drv == ctx) {
             bumped[i] = bumped[--nbumped];
             next_bumped = 0;
+        } else {
+            i++;
+        }
+    }
+    for (i = 0; i < nown420;) {
+        int hit = n < 0;
+
+        for (int k = 0; k < n && !hit; k++)
+            hit = own420[i].id == ids[k];
+        if (hit && own420[i].drv == ctx) {
+            own420[i] = own420[--nown420];
+            next_own420 = 0;
         } else {
             i++;
         }
@@ -648,11 +723,6 @@ static void region_scaled(const VARectangle *r, uint32_t w, uint32_t h, VARectan
     out->height = (uint16_t)(((uint64_t)in.height * h + ah / 2) / ah);
 }
 
-static int is_yuv420(uint32_t fourcc)
-{
-    return fourcc == VA_FOURCC_NV12 || fourcc == VA_FOURCC_P010;
-}
-
 /* Video processing (Chromium) from or into a surface whose size is not a multiple
  * of 16: the source region is scaled to the picture's part of the rounded planes,
  * and a whole RGB destination becomes its rounded planes' size, so Chrome's
@@ -688,7 +758,7 @@ static VAStatus render_picture(VADriverContextP ctx, VAContextID context, VABuff
         unsigned int size = 0, count = 0;
         void *data = NULL;
         VAProcPipelineParameterBuffer *pp;
-        uint32_t sw = 0, sh = 0, sf;
+        uint32_t sw = 0, sh = 0;
         int src_fix, out_fix;
 
         if (ctx->vtable->vaBufferInfo(ctx, buffers[i], &type, &size, &count) !=
@@ -698,8 +768,9 @@ static VAStatus render_picture(VADriverContextP ctx, VAContextID context, VABuff
         if (ctx->vtable->vaMapBuffer(ctx, buffers[i], &data) != VA_STATUS_SUCCESS || !data)
             continue;
         pp = data;
-        sf = surface_info(ctx, pp->surface, &sw, &sh);
-        src_fix = is_yuv420(sf) && sw && sh && sw <= 16384 && sh <= 16384 && ((sw | sh) & 15);
+        /* only Mesa's own 4:2:0 surfaces: an imported one has the planes it came with */
+        src_fix = own420_size(ctx, pp->surface, &sw, &sh) && sw && sh && sw <= 16384 &&
+                  sh <= 16384 && ((sw | sh) & 15);
         out_fix = fill && (!pp->output_region ||
                            (!pp->output_region->x && !pp->output_region->y &&
                             pp->output_region->width == w && pp->output_region->height == h));
