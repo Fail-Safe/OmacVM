@@ -12,7 +12,9 @@
  *   command: the planes as its render target) clears after the picture went in;
  * - a fence made after END_FRAME signals only once the picture is in the planes:
  *   read straight from the GL texture once it signalled (no vrend in between);
- * - a buffer and a decoder destroyed with pictures in flight: the other pictures land.
+ * - a buffer and a decoder destroyed with pictures in flight: the other pictures land;
+ * - a picture the media engine never gives back (OMACVM_TEST_VIDEO_LOSE): the
+ *   fence after it signals once the picture is given up after 1 s, also polled.
  * OMACVM_TEST_THREAD_SYNC=1: fences reported by the sync thread (QEMU's way).
  * OMACVM_VIDEO_DECODE_SYNC=1 (END_FRAME waits, as before): the timing check is
  * skipped, everything else must hold the same.
@@ -382,8 +384,13 @@ static void destroy_buffer(unsigned b)
  * DECODE_BITSTREAM, END_FRAME in one submit of context 1. Returns the submit's time.
  * The host takes the data and the description at DECODE_BITSTREAM: one buffer each will do.
  * Pictures go in stream order (a P picture needs the one before it). */
+static unsigned pictures_sent;
+/* the picture whose output the host drops (test hook, numbered from 1) */
+#define LOST_PICTURE 29
+
 static uint64_t send_picture(uint32_t codec, unsigned b, int f)
 {
+   pictures_sent++;
    clear_plane(R_Y(b), 1, W, H, 1);
    memcpy(bits, avc.au[f], avc.au_size[f]);
    memset(&desc, 0, sizeof(desc));
@@ -494,6 +501,9 @@ int main(void)
    char line[300];
 
    setvbuf(stdout, NULL, _IONBF, 0);
+   char lose[16];
+   snprintf(lose, sizeof(lose), "%d", LOST_PICTURE);
+   setenv("OMACVM_TEST_VIDEO_LOSE", lose, 1);
    const char *ds = getenv("OMACVM_VIDEO_DECODE_SYNC");
    sync_mode = ds && *ds == '1';
    main_ctx = soft_gl_context(NULL);
@@ -675,6 +685,23 @@ int main(void)
    p = read_luma(R_Y(0), 1, 0);
    snprintf(line, sizeof(line), "a new decoder afterwards decodes (luma PSNR %.1f dB)", p);
    check(p > 30, line);
+
+   /* 6: the media engine never gives a picture back: the fence after it waits for
+    * the give-up after 1 s, not 2 s (sync thread) or for ever (polled) */
+   if (!sync_mode) {
+      check(pictures_sent + 1 == LOST_PICTURE, "the lost picture is the next one");
+      send_picture(11, 1, 1);
+      uint64_t t0 = now_ns();
+      int r = wait_fence();
+      double s = (now_ns() - t0) / 1e9;
+      snprintf(line, sizeof(line), "a picture that never comes back: the fence after it "
+               "signals after %.2f s (given up after 1 s)", s);
+      check(!r && s < 1.6, line);
+      send_picture(11, 2, 2);
+      p = read_luma(R_Y(2), 1, 2);
+      snprintf(line, sizeof(line), "the decoder goes on after it (luma PSNR %.1f dB)", p);
+      check(p > 30, line);
+   }
    virgl_renderer_context_destroy(2);
    virgl_renderer_context_destroy(1);
    virgl_renderer_cleanup(&cookie);

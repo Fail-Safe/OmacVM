@@ -25,8 +25,8 @@ in the guest's planes (the sync thread waits for that after the GL fence,
 2 s at most, then a warning; polled fences stay unretired). A buffer the
 guest destroys drops the pictures still on their way into it; a decoder that
 goes away first puts its last pictures in. A picture the media engine has had
-for 1 s is given up (logged). OMACVM_VIDEO_DECODE_SYNC=1: END_FRAME waits for
-each picture, as before. With OMACVM_VIDEO_DEBUG=1 the per-120-frames line
+for 1 s is given up (logged), when it is waited for and in the poll.
+OMACVM_VIDEO_DECODE_SYNC=1: END_FRAME waits for each picture, as before. With OMACVM_VIDEO_DEBUG=1 the per-120-frames line
 says how many pictures were in flight at most.
 Why: in Google Chrome's hardware decoding of YouTube 4K60 (AV1, MacBook Pro M4
 Max) QEMU's GPU thread was busy 94 % of the time: 55 % of it waiting in
@@ -47,8 +47,9 @@ after END_FRAME, six at once, another context's copy region right after
 END_FRAME, another context's clear of a plane right after END_FRAME (the draw
 path's check), a fence after END_FRAME then the GL texture read past vrend
 (fails without the fence hook), a buffer and the decoder destroyed with
-pictures in flight; polled fences, sync-thread fences and
-OMACVM_VIDEO_DECODE_SYNC=1.
+pictures in flight, a picture that never comes back (OMACVM_TEST_VIDEO_LOSE=N,
+a test hook: the fence after it signals after 1 s, polled too); polled fences,
+sync-thread fences and OMACVM_VIDEO_DECODE_SYNC=1.
 test-video-decode.c and test-video-padding.c (they read through transfers)
 pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 --- a/src/vrend/virgl_video.h
@@ -355,7 +356,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
          if (vt_debug && (codec->out_w != CVPixelBufferGetWidth(pix) ||
                           codec->out_h != CVPixelBufferGetHeight(pix) ||
                           codec->pic_w != pic_w || codec->pic_h != pic_h)) {
-@@ -709,17 +839,222 @@
+@@ -709,17 +839,243 @@
      codec->held_next = (codec->held_next + 1) % 3;
      if (vt_debug && codec->frames % 120 == 0) {
          uint64_t wall = now_ns() - codec->ns_wall_start;
@@ -413,8 +414,17 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +static void dec_output(struct virgl_video_codec *codec, uint64_t seq, OSStatus status,
 +                       CVImageBufferRef image)
 +{
++    static long long lose = -1;
 +    bool found = false;
 +
++    /* test hook (Tests/virgl/test-video-decode-async.c): picture number N never
++     * comes back, as when the media engine stops answering */
++    if (lose < 0) {
++        const char *e = getenv("OMACVM_TEST_VIDEO_LOSE");
++        lose = e ? atoll(e) : 0;
++    }
++    if (lose && seq == (uint64_t)lose)
++        return;
 +    pthread_mutex_lock(&dec_lock);
 +    for (unsigned i = 0; i < VT_DEC_MAX_JOBS; i++) {
 +        struct dec_job *job = &codec->djobs[i];
@@ -521,6 +531,18 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +    return true;
 +}
 +
++/* The oldest picture sent 1 s ago or more and still not in? */
++static bool dec_head_stuck(struct virgl_video_codec *codec)
++{
++    const struct dec_job *job = &codec->djobs[codec->dj_head];
++    bool stuck;
++
++    pthread_mutex_lock(&dec_lock);
++    stuck = job->seq && !job->out && now_ns() - job->sent_ns >= 1000000000ull;
++    pthread_mutex_unlock(&dec_lock);
++    return stuck;
++}
++
 +static void dec_deliver(struct virgl_video_codec *codec, bool block)
 +{
 +    while (codec->dj_count && dec_give_back(codec, block))
@@ -581,7 +603,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  /* H.264                                                                     */
  /* ------------------------------------------------------------------------ */
  
-@@ -1095,8 +1430,7 @@
+@@ -1095,8 +1451,7 @@
          }
      }
  
@@ -591,7 +613,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
      bytes_free(&au.sample);
      return 0;
  }
-@@ -1847,8 +2181,7 @@
+@@ -1847,8 +2202,7 @@
          if (!set_format(codec, fmt))
              goto done;
      }
@@ -601,7 +623,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
      ret = 0;
  done:
      bytes_free(&au.sample);
-@@ -1982,8 +2315,7 @@
+@@ -1982,8 +2336,7 @@
      /* One frame per sample, hidden ones too: VideoToolbox returns a picture
       * for hidden frames as well, which a later show_existing_frame shows
       * from the guest's surface. */
@@ -611,7 +633,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
      return 0;
  }
  
-@@ -2197,8 +2529,7 @@
+@@ -2197,8 +2550,7 @@
      if (seq >= 0 && (unsigned)seq < first)
          bytes_append(&sample, data + obus[seq].start, obus[seq].end - obus[seq].start);
      bytes_append(&sample, data + obus[first].start, obus[last].end - obus[first].start);
@@ -621,20 +643,26 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
      bytes_free(&sample);
      return 0;
  }
-@@ -3238,9 +3569,79 @@
-             break;
-     done = enc_seq_open > seq;
-     pthread_mutex_unlock(&enc_wait_lock);
-+    return done;
-+}
-+
+@@ -3241,6 +3593,85 @@
+     return done;
+ }
+ 
 +/* Decoders: pictures that are in go into the guest's planes (vrend's thread,
 + * with a GL context of its share group current). */
 +void virgl_video_decode_poll(void)
 +{
-+    for (struct virgl_video_codec *c = dec_list; c; c = c->dec_next)
-+        if (c->dj_count)
++    for (struct virgl_video_codec *c = dec_list; c; c = c->dec_next) {
++        if (!c->dj_count)
++            continue;
++        dec_deliver(c, false);
++        /* the oldest picture not in after 1 s: given up (its deadline is past,
++         * so this does not wait), so the fences behind it do not wait 2 s each,
++         * or, polled, until something reads its planes */
++        while (c->dj_count && dec_head_stuck(c)) {
++            dec_give_back(c, true);
 +            dec_deliver(c, false);
++        }
++    }
 +}
 +
 +bool virgl_video_decode_busy(void)
@@ -670,9 +698,9 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +    pthread_mutex_lock(&dec_lock);
 +    done = dec_open > seq;
 +    pthread_mutex_unlock(&dec_lock);
-     return done;
- }
- 
++    return done;
++}
++
 +/* Waits up to TIMEOUT_MS until every picture sent up to SEQ was given back
 + * (the sync thread); false on time out. */
 +bool virgl_video_decode_wait(uint64_t seq, uint32_t timeout_ms)
@@ -701,7 +729,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  /* An encoder goes away: VideoToolbox finishes (its callback must not come
   * later), the jobs are dropped without feedback (vrend drops its buffers). */
  static void enc_codec_gone(struct virgl_video_codec *codec)
-@@ -3453,8 +3854,11 @@
+@@ -3453,8 +3884,11 @@
             codec->kind == VT_KIND_H264 ? "H.264" : codec->kind == VT_KIND_VP9 ? "VP9" :
             codec->kind == VT_KIND_HEVC ? "HEVC" : "AV1",
             args->width, args->height);
@@ -714,7 +742,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
      return codec;
  }
  
-@@ -3466,7 +3870,20 @@
+@@ -3466,7 +3900,20 @@
      if (!codec)
          return;
      vt_log("codec done: %u frames, %u errors\n", codec->frames, codec->errors);
@@ -735,7 +763,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
      if (codec->entrypoint == PIPE_VIDEO_ENTRYPOINT_ENCODE)
          enc_codec_gone(codec);
      if (codec->format)
-@@ -3519,6 +3936,16 @@
+@@ -3519,6 +3966,16 @@
  
  void virgl_video_destroy_buffer(struct virgl_video_buffer *buffer)
  {
