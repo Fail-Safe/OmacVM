@@ -3,6 +3,22 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.1 (unreleased)
+
+- **Google Chrome plays 1440p and 4K video on the Mac's media engine.** The Mac's graphics
+  thread for the VM, which runs every app's drawing in it, waited for the media engine on each
+  picture (about 5 ms for a 4K one on a MacBook Air M2, 3 ms on an M4 Max). Above 1080p Chrome's
+  own drawing and the desktop's waited behind it, so the media engine dropped many more frames
+  than Chrome's CPU decoders (YouTube 4K: 38 % against 7 % on the Air, 13-20 % against 8 % on a
+  MacBook Pro M4 Max), and 3.2.0 kept 1440p and 4K on the CPU. Pictures now finish beside that
+  thread, and Chrome's decoder waits for each one instead of the thread. YouTube 4K60 now drops
+  6.3-6.8 % on the media engine against 7-8 % on the CPU, with the VM at 0.6 cores instead of
+  1.5-1.9 and QEMU on the Mac at 0.9-1.0 instead of 1.4-1.8; 1440p the same within a frame in a
+  hundred. Firefox, mpv and FFmpeg no longer hold up the VM's other apps while a picture decodes
+  either. Needs the app update and Update VM; restart Chrome after it. `OMACVM_VA_MAX=1920` in
+  Chrome's environment keeps 1440p and 4K on the CPU, `OMACVM_VIDEO_DECODE_SYNC=1` in QEMU's
+  has the thread wait for each picture as before.
+
 ## 3.2.0
 
 Chrome decodes video on the Mac's media engine again, ⌃⌥ Esc takes the right display out of the VM, the
