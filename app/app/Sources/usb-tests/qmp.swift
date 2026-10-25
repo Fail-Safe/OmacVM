@@ -18,6 +18,9 @@ final class TestQMP: USBQMPTransport {
     init?(path: String) {
         fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
+        // Never hang on a QEMU that does not answer: 5 s a read.
+        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         withUnsafeMutableBytes(of: &addr.sun_path) { p in path.utf8CString.withUnsafeBytes { p.copyMemory(from: $0) } }
@@ -30,7 +33,14 @@ final class TestQMP: USBQMPTransport {
         }
     }
 
-    deinit { Darwin.close(fd) }
+    private var closed = false
+    /// QEMU takes one client at a time: the next one gets in once this one closes.
+    func close() {
+        if !closed { Darwin.close(fd) }
+        closed = true
+    }
+
+    deinit { close() }
 
     private func read() -> [String: Any]? {
         while true {
@@ -46,7 +56,8 @@ final class TestQMP: USBQMPTransport {
         }
     }
 
-    func execute(_ command: String, _ arguments: [String: Any]?) throws -> [String: Any] {
+    /// Writes the command and does not wait for its answer.
+    func send(_ command: String, _ arguments: [String: Any]?) throws {
         var args = arguments
         if emulate, command == "device_add", args?["driver"] as? String == "usb-host" {
             args = ["driver": "usb-tablet", "id": args?["id"] ?? "", "bus": args?["bus"] ?? ""]
@@ -56,6 +67,10 @@ final class TestQMP: USBQMPTransport {
         var data = try JSONSerialization.data(withJSONObject: req)
         data.append(0x0a)
         _ = data.withUnsafeBytes { write(fd, $0.baseAddress, data.count) }
+    }
+
+    func execute(_ command: String, _ arguments: [String: Any]?) throws -> [String: Any] {
+        try send(command, arguments)
         while let r = read() {
             if r["event"] != nil { continue }
             if let e = r["error"] as? [String: Any] {
@@ -99,7 +114,7 @@ func qmpIntegration(qemu: String, expect: (Bool, String) -> Void) {
         expect(false, "qmp: QEMU starts (\(error.localizedDescription))")
         return
     }
-    defer { p.terminate(); p.waitUntilExit() }
+    defer { kill(p.processIdentifier, SIGCONT); p.terminate(); p.waitUntilExit() }
     var client: TestQMP?
     for _ in 0..<50 where client == nil {
         Thread.sleep(forTimeInterval: 0.1)
@@ -148,4 +163,44 @@ func qmpIntegration(qemu: String, expect: (Bool, String) -> Void) {
     s.unplugged(location: free.location)
     clock.timers.forEach { $0() }
     expect(((try? USBQMP.attached(over: q)) ?? ["?"]).isEmpty && s.plugs.isEmpty, "qmp: session: unplugged: removed from the VM")
+
+    // #526: a device_add the app gives up on (its 3 s timeout), as the app
+    // does it: one connection per command, closed when it gives up. (a) QEMU
+    // runs and adds it before that: connected. (b) QEMU is stopped when the
+    // add is sent and the connection closes (QEMU then adds it or drops it):
+    // whatever QEMU did, the app's answer and info usb agree.
+    q.close()
+    final class GivesUp: USBQMPTransport {
+        let sock: String, qemu: pid_t, stopped: Bool
+        init(sock: String, qemu: pid_t, stopped: Bool) { self.sock = sock; self.qemu = qemu; self.stopped = stopped }
+        func execute(_ command: String, _ arguments: [String: Any]?) throws -> [String: Any] {
+            guard let c = TestQMP(path: sock) else {
+                throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "QEMU took no connection"])
+            }
+            c.emulate = true
+            guard command == "device_add" else { return try c.execute(command, arguments) }
+            if stopped { kill(qemu, SIGSTOP) }
+            try c.send(command, arguments)
+            Thread.sleep(forTimeInterval: 0.2)
+            c.close()
+            if stopped { kill(qemu, SIGCONT) }
+            throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "QMP command device_add timed out"])
+        }
+    }
+    let id = USBQMP.qemuID(location: d.location)
+    let running = GivesUp(sock: sock, qemu: p.processIdentifier, stopped: false)
+    let ra = USBQMP.attach(d, over: running)
+    let hasA = ((try? USBQMP.attached(over: running)) ?? []).contains(id)
+    expect(ra == .attached && hasA, "qmp #526: device_add given up on, QEMU added it: connected (\(ra), info usb has it: \(hasA))")
+    expect(USBQMP.detach(location: d.location, over: running), "qmp #526: and removed again")
+    var landed = 0
+    for n in 1...5 {
+        let stopped = GivesUp(sock: sock, qemu: p.processIdentifier, stopped: true)
+        let rb = USBQMP.attach(d, over: stopped)
+        let has = ((try? USBQMP.attached(over: running)) ?? []).contains(id)
+        if has { landed += 1 }
+        expect((rb == .attached) == has, "qmp #526: given up while QEMU was stopped (\(n)): the app said \(rb), info usb has it: \(has)")
+        _ = USBQMP.detach(location: d.location, over: running)
+    }
+    print("qmp #526: of 5 adds given up on while QEMU was stopped, QEMU made \(landed)")
 }
