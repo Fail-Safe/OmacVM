@@ -33,7 +33,7 @@ the runtime build runs it on the real cocoa.m before this patch).
 Applies after omacvm-cocoa-present-damage.patch (it uses its rects, rules
 and checks), before omacvm-cocoa-no-app-nap.patch.
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index ddc7a29..79359c8 100644
+index ddc7a29..d8fbf51 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -57,6 +57,7 @@
@@ -109,7 +109,7 @@ index ddc7a29..79359c8 100644
 +static unsigned present_tile_gen;       /* the grid's generation */
 +static unsigned present_base_gen;       /* a whole frame of this generation was drawn */
 +static OmacvmPTGrid present_tg;
-+#define PRESENT_TILE_BUFS 3
++#define PRESENT_TILE_BUFS 5      /* as the whole surfaces: one shown, three queued, one drawn */
 +static IOSurfaceRef present_tsurf[OMACVM_PT_MAX][PRESENT_TILE_BUFS];
 +static GLuint present_ttex[OMACVM_PT_MAX][PRESENT_TILE_BUFS];
 +static OmacvmPDRect present_td;         /* changed since the last frame drawn */
