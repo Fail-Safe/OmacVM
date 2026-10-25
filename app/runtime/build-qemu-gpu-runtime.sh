@@ -996,6 +996,15 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-extra-brightn
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
 grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
+# OmacVM: partial present: only the box the guest changed since a surface's last
+# draw is drawn into it again (the guest's flush rects; Linux 7.4 or OmacVM's
+# virtio-gpu driver sends them). Its rules' test, then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damage-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damage.patch"
+"$native_dir/Tests/display/test-present-damage.sh" || \
+  die "the partial present's rules fail their test (test-present-damage.sh)"
+"$native_dir/Tests/display/test-present-damage.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the partial present is not wired as tested (test-present-damage.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
