@@ -58,6 +58,7 @@ checks() {
   chk "off unless OMACVM_GL_PRESENT_DAMAGE=1 or =check" has "$present" \
     'present_damage_on = e && !strcmp(e, "1") ? 1 : e && !strcmp(e, "check") ? 2 : 0;'
   chk "the check mode is wired" has "$present" 'cocoa_gl_present_pd_check(src, flip, n, pd);'
+  chk "the check draws in the surfaces' format" has "$pdcheck" 'present_deep ? GL_RGBA16F : GL_RGBA8'
 }
 if [[ ${1:-} == --self-test ]]; then
   old=${2:-}
