@@ -502,6 +502,17 @@ the VM's SSH on `127.0.0.1:<port>`.
   pointer. With Extra brightness QEMU gives the layer the frames' gain, so
   the pointer is as bright as the page under it. Not with the hidden Mac pointer setting (that one needs the
   hotspot). `omacvm check` says "Pointer layer".
+- Frames in step with the Mac (experimental, off; the VM window's Display
+  section, `defaults write org.omacvm.app vsyncLock -bool true`, from the
+  VM's next start; ADR 0056): the VM loads OmacVM's virtio-gpu driver with
+  `vsync_lock=1` (built by Update VM like the 10-bit one), whose vblank
+  timer then follows the Mac display's refresh as QEMU's present gives it:
+  the guest's vblank comes just early enough before each refresh that the
+  frame Hyprland draws after it is shown at that refresh. While the screen
+  moves (an animation, scrolling, a video, the pointer), input then shows up
+  to a refresh sooner. The same frames at the same rate; a still screen and
+  frames that come one at a time are as before. `omacvm check` says
+  "Frames in step".
 - Mac pointer for the VM (experimental, off, no switch in the window yet:
   `defaults write org.omacvm.app macPointer -bool true`, from the VM's
   next start): Omarchy is asked to put its pointer on virtio-gpu's cursor

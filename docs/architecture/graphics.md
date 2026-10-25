@@ -112,7 +112,7 @@ on CGL, not on ANGLE.
 | Guest scanout textures as IOSurfaces (zero copy present) | planned | ADR 0010 option 3 |
 | Frames on the display's refresh (jitter buffer, display link thread) | built: `pacing-hdr` | `qemu-cocoa-gl-present-vsync.patch`, ADR 0020 |
 | Colour-tagged frames, 10-bit scanout, HDR (PQ, EDR) | built: `pacing-hdr`, `hdr` (the app's switch, off by default; the guest tone-maps into the display's headroom) | `qemu-cocoa-gl-present-color.patch`, `omacvm-cocoa-hdr-headroom*.patch`, `src/app/guest/virtio-gpu/`, ADR 0021, 0049 |
-| Guest paced by the host's vsync | planned | ADR 0020 option 1 |
+| Guest paced by the host's vsync (its vblank timer follows the Mac's refresh) | built: `input-vsync` (the app's switch "Frames in step with the Mac", experimental, off) | `src/app/guest/virtio-gpu/linux-virtio-gpu-vsync-lock.patch`, `omacvm-vsync-follow*.patch`, ADR 0056 |
 | Chrome's GL renderer without "virgl" (Skia keeps instanced drawing) | built: `gpu-browser` (3.1.32) | `src/app/guest/50-omacvm-chrome.drirc` |
 
 Chrome's renderer string: Skia turns instanced drawing off when the GL
@@ -970,7 +970,25 @@ bench lock and are indications only):
   delay from a finished guest frame to the glass is set by the guest's vblank
   phase (free-running), between ~3 ms and one refresh more. Only a guest
   vblank locked to the host's (ADR 0020 option 1, a guest module change)
-  can take the average half refresh off.
+  can take the average half refresh off: "Frames in step with the Mac"
+  below (ADR 0056, experimental).
+- **Frames in step with the Mac** (`vsyncLock`, experimental, off; ADR 0056):
+  the guest's virtio-gpu driver (OmacVM's, `vsync_lock=1`) asks QEMU every
+  half second for the refresh grid (OmacVM's command 0x0f00: the guest
+  counter of the next vblank it should have, the period in ps) and moves its
+  vblank timer onto it, at most an eighth of a period per vblank. QEMU puts
+  the guest's vblank the lead before each tick's commit; the lead is when the
+  guest's frames are ready after their vblank (the latest of the last 64 + 1
+  ms, down 0.5 ms a second, 2 ms .. a period less 1 ms), timed on the grid
+  the guest got. Hyprland then draws right after a vblank and its frame is
+  in the queue just before the commit: the wait in QEMU goes from anywhere
+  up to a refresh to about the margin. While a guest follows, a tick with two
+  frames shows the newer (the older came late: one repeat instead of a
+  refresh of delay until the trim), except while the frames are too slow to
+  follow (the lead at its cap, or more than 1 in 100 late): then late frames
+  wait as without it. Nothing changes for single frames or a still screen;
+  `omacvm check` says "Frames in step"; trace `cocoa_present_follow` once a
+  second (lead, the frames' median and latest, late frames).
 - **Locks**: `present_lock` (an `os_unfair_lock`) guards the queue and the
   counters; nothing on the display link thread or the commit queue takes the
   BQL. The link pauses 0.25 s after the last frame, or after a second of

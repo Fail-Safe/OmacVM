@@ -40,5 +40,6 @@ a new record replaces it and says so.
 | [0051](0051-partial-present.md) | Partial present: QEMU draws only the box the guest changed since a surface's last draw | accepted, built (`frame-path`), off by default |
 | [0053](0053-disk-flush-barrier.md) | A guest disk flush is a write barrier on the Mac's drive (F_BARRIERFSYNC), so the VM's file system is safer at a power cut | accepted, built (`disk`, 3.2.1) |
 | [0054](0054-pointer-on-its-own-layer.md) | The pointer on its own layer: virtio-gpu's cursor plane shown without hotspots, QEMU draws the image; direct scanout measured, not built | accepted, built (`guest-scanout`), off by default |
+| [0056](0056-frames-in-step.md) | Frames in step with the Mac: the guest's vblank timer follows a refresh grid QEMU gives (OmacVM's virtio-gpu command), the vblank a measured lead before each commit | accepted, built (`input-vsync`), off by default |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).
