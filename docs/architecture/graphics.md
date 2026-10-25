@@ -100,6 +100,7 @@ on CGL, not on ANGLE.
 | GPU safe mode (the old fence and frame path) | built: `gpu-native`, hidden | `gpuSafeMode` default |
 | Present on each flush | built: `gpu-native` | `qemu-cocoa-gl-present-on-flush.patch` |
 | IOSurface present | built: `gpu-native` | `qemu-cocoa-gl-present-iosurface.patch` |
+| Partial present (only the box the guest changed; needs Linux 7.4 or OmacVM's driver for real rects) | built: `frame-path`, off by default (`OMACVM_GL_PRESENT_DAMAGE=1`) | `omacvm-cocoa-present-damage*.patch`, ADR 0051 |
 | Blob alignment for 16 KiB pages | built: `gpu-native`, `gpu-venus` | `qemu-virtio-gpu-blob-alignment.patch` |
 | Venus on MoltenVK | built: `gpu-venus`, merged into `gpu-native`, hidden switch | see section 6 |
 | KosmicKrisp on macOS 26 | built, in release builds (3.0.0, ADR 0035) | `virgl-darwin-vulkan-beside.patch` + `virgl-darwin-kosmickrisp-fallback.patch` |

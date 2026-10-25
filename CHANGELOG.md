@@ -39,6 +39,12 @@ in more words.
   where 200 git commits took 0.97 s instead of 0.70 s; the barrier itself costs 0.2-0.75 ms on the
   Macs we measured, the most on an M1 Max. Installing 222 packages, git checkouts and big copies
   took the same time. `omacvm check` shows it as "disk flush". Needs the app update.
+- **Partial present, built, off for now.** OmacVM.app's QEMU draws the whole frame into the window's
+  picture for every frame, also when only the pointer moved. It can now draw only the part the VM says
+  changed. In a bench on a MacBook Air M2 (no VM) the full draw cost 0.19 W at 60 frames a second and
+  0.47 W at 120, a small box a few hundredths. It stays off until a VM run shows it draws right, and it
+  needs a VM that says what changed in its desktop's frames (Linux 7.4, or OmacVM's own driver with
+  that fix). `OMACVM_GL_PRESENT_DAMAGE=1` in the app's environment turns it on for tests.
 
 ## 3.2.0
 
