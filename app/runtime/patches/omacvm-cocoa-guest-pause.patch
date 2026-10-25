@@ -43,10 +43,11 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
  #include "hw/core/boards.h"
  #include "system/system.h"
  #include "system/runstate.h"
-@@ -181,6 +182,17 @@
+@@ -180,6 +181,17 @@
+ #ifdef CONFIG_OPENGL
  static void omacvm_present_seen_again(void);
  #endif
- 
++
 +/*
 + * OmacVM: the guest stops drawing while the window cannot be seen
 + * (omacvm-cocoa-guest-pause.patch, ui/omacvm-guest-pause.h). Fed on the
@@ -57,10 +58,9 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +static bool omacvm_gp_dark;     /* the guest's display went off while told (BQL) */
 +static void omacvm_gp_update(void);
 +static void omacvm_gp_hello(NSDictionary *hello);
-+
+ 
  static NSInteger cbchangecount = -1;
  static QemuClipboardInfo *cbinfo;
- static QemuEvent cbevent;
 @@ -4841,6 +4853,7 @@
          return;
      }
@@ -69,10 +69,12 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
      if (!seen) {
          since = CACurrentMediaTime();
  #ifdef CONFIG_OPENGL
-@@ -8207,6 +8220,15 @@
+@@ -8205,6 +8218,15 @@
+     if (!qatomic_read(&omacvm_window_seen) && !always) {
+         gl_dirty = true;
          omacvm_frames_unseen++;
-         return true;
-     }
++        return true;
++    }
 +    /*
 +     * OmacVM: the guest's display is off since its window was out of sight
 +     * (omacvm-cocoa-guest-pause.patch): the window keeps its last picture
@@ -80,11 +82,9 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +     */
 +    if (omacvm_gp_keep(&omacvm_gp, gl_scanout_borrow != NULL, CACurrentMediaTime())) {
 +        gl_dirty = false;
-+        return true;
-+    }
+         return true;
+     }
  
-     if (gl_scanout_borrow) {
-         DisplayGLTexture texture = gl_scanout_borrow(gl_scanout_id);
 @@ -9092,6 +9114,9 @@
  
  static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
@@ -123,12 +123,10 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
  
      if (locked != omacvm_ds_timer.locked) {
          omacvm_ds_locked_at = omacvm_ds_clock();
-@@ -11261,8 +11300,187 @@
-         omacvm_bright_look();
-     }];
+@@ -11263,6 +11302,191 @@
      omacvm_bright_look();
-+}
-+
+ }
+ 
 +/*
 + * OmacVM: the guest stops drawing while the VM's window cannot be seen
 + * (OmacVM.app's "Pause drawing while hidden", experimental; rules in
@@ -166,8 +164,8 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +    } else {
 +        omacvm_gp_switch = 0;
 +    }
- }
- 
++}
++
 +static void omacvm_gp_send(OmacVMGpTell tell)
 +{
 +    if (tell == OMACVM_GP_NONE || omacvm_chan_fd < 0 || !omacvm_guest_ready || !omacvm_gp_able) {
@@ -273,7 +271,13 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +    if (always < 0) {
 +        always = getenv("OMACVM_PRESENT_HIDDEN") != NULL;
 +    }
-+    bool seen = always || (qatomic_read(&omacvm_window_seen) && !omacvm_ds_screen_locked &&
++    /*
++     * The window's own state now, not only the last occlusion notice: a
++     * window that was never shown (ordered out from the start) sends none.
++     */
++    NSWindow *w = [cocoaView window];
++    bool on_screen = !w || ([w isVisible] && ([w occlusionState] & NSWindowOcclusionStateVisible));
++    bool seen = always || (on_screen && !omacvm_ds_screen_locked &&
 +                           !omacvm_ds_asleep && !omacvm_ds_away && !omacvm_ds_test_locked);
 +    with_bql(^{
 +        tell = omacvm_gp_feed(&omacvm_gp, omacvm_gp_switch == 1 && omacvm_gp_able, seen, now);
@@ -311,7 +315,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
  static void omacvm_send_layout(void)
  {
      NSMutableArray *outputs = [NSMutableArray array];
-@@ -11482,6 +11700,7 @@
+@@ -11482,6 +11706,7 @@
              omacvm_last_layout = nil;
              omacvm_edr_set(omacvm_edr_now());
              omacvm_edr_watch();
@@ -319,7 +323,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
              update = true;
          }
          if ([d[@"external"] isKindOfClass:[NSNumber class]] &&
-@@ -11511,6 +11730,7 @@
+@@ -11511,6 +11736,7 @@
      }
      omacvm_chan_fd = -1;
      omacvm_guest_ready = false;
@@ -327,7 +331,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
      omacvm_chan_tries = 0;
      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC),
                     dispatch_get_main_queue(), ^{ omacvm_chan_connect(); });
-@@ -12572,6 +12792,7 @@
+@@ -12572,6 +12798,7 @@
  #endif
      omacvm_head_delegate = [[OmacVMHeadDelegate alloc] init];
      omacvm_ds_watch_lock();

@@ -40,7 +40,8 @@ grep -q '#include "ui/omacvm-guest-pause.h"' "$m" || fail "the rules are not inc
 grep -q 'omacvm_gp_update();' <<<"$seen" && grep -q 'omacvm_gp_update();' <<<"$lock" &&
   grep -q 'omacvm_gp_update();' <<<"$init" || fail "the window's state does not reach the rules"
 # Seen = some of the window on screen and nobody locked out; OMACVM_PRESENT_HIDDEN draws anyway.
-grep -q 'qatomic_read(&omacvm_window_seen) && !omacvm_ds_screen_locked' <<<"$update" &&
+grep -q '\[w isVisible\] && (\[w occlusionState\] & NSWindowOcclusionStateVisible)' <<<"$update" &&
+  grep -q 'bool seen = always || (on_screen && !omacvm_ds_screen_locked &&' <<<"$update" &&
   grep -q '!omacvm_ds_asleep && !omacvm_ds_away && !omacvm_ds_test_locked' <<<"$update" &&
   grep -q 'getenv("OMACVM_PRESENT_HIDDEN")' <<<"$update" || fail "seen is not worked out as tested"
 grep -q 'tell = omacvm_gp_feed(&omacvm_gp, omacvm_gp_switch == 1 && omacvm_gp_able, seen, now);' <<<"$update" &&
