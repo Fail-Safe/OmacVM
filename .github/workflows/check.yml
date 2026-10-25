@@ -486,7 +486,7 @@ jobs:
           app/runtime/Tests/display/test-pointer-bright.sh
           app/runtime/Tests/display/test-pointer-bright.sh --self-test
 
-      - name: The guest's vblanks on the Mac's refresh (ADR 0055; grid, period, lead; the checks catch a tree without it)
+      - name: The guest's vblanks on the Mac's refresh (ADR 0056; grid, period, lead; the checks catch a tree without it)
         run: app/runtime/Tests/display/test-vsync-follow.sh
 
       - name: Extra brightness's gain, shader and omacvm check line (ADR 0050; the checks catch code without it)

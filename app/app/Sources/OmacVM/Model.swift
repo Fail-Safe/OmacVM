@@ -684,7 +684,7 @@ enum Settings {
     /// Frames in step with the Mac (experimental, off by default): the VM
     /// loads its virtio-gpu driver with vsync_lock=1 (SMBIOS
     /// omacvm.vsynclock=1), whose vblank timer then follows the Mac display's
-    /// refresh as QEMU's present gives it (ADR 0055). While frames come
+    /// refresh as QEMU's present gives it (ADR 0056). While frames come
     /// steadily a frame no longer waits up to a refresh on the Mac: input shows
     /// sooner, same frames, same rate. The VM window's switch (VsyncLockRow)
     /// or defaults write org.omacvm.app vsyncLock -bool true. Read at each start.
