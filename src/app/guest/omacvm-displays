@@ -640,7 +640,9 @@ class Pause:
     mac(names) takes the Mac's list, cast() a screen share starting or
     ending, apply() makes Hyprland match: off for an unseen output that is
     on (and not shared), on again only for outputs this agent turned off.
-    An output the guest turned off itself (Omarchy's idle) is left as it is.
+    An output the guest had turned off itself before the pause (Omarchy's
+    idle) is left as it is; one it turns off during the pause cannot be told
+    apart (it is off already) and comes on with the window.
     """
 
     def __init__(self, set_dpms=dpms, monitors=lambda: hypr_json("j/monitors"), path: Path = PAUSED,

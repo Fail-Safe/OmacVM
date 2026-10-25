@@ -569,7 +569,10 @@ it on, a VM whose window nobody can see stops drawing, as a macOS app does:
   touched: every frame, at the display's full rate.
 - A screen share or a recording of that display from inside the VM keeps it
   drawing (any window share keeps every display drawing). A display the VM
-  turned off itself (Omarchy's idle) is left off.
+  had turned off itself before the pause (Omarchy's idle) is left off. If
+  Omarchy's idle comes while the display is paused, the agent cannot tell
+  it apart (the display is off already), so the display comes on with the
+  window and shows Omarchy's lock screen.
 - QEMU tells only a display agent that says it can (Update VM brings it;
   `omacvm check`'s "every Mac display" line says "pause while hidden: ready"
   and which display is paused). "Unseen" is said again every 5 s; with no
