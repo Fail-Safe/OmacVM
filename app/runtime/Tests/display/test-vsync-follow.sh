@@ -20,10 +20,16 @@ problems() {   # QEMU source folder
   grep -q '#include "ui/omacvm-vsync.h"' "$m" 2>/dev/null || echo "ui/cocoa.m does not use ui/omacvm-vsync.h"
   grep -q 'omacvm_vsync_publish((int64_t)llround(present_sync.grid_vblank \* 1e9), ps);' "$m" 2>/dev/null ||
     echo "the display link does not give the grid to the guest"
-  grep -q 'present_sync.grid_vblank = deadline - present_sync.follow_lead;' "$m" 2>/dev/null ||
-    echo "the guest's vblank is not the lead before the commit"
-  grep -q 'omacvm_lead_add(&present_sync.lead,$' "$m" 2>/dev/null && grep -q 'omacvm_vsync_since(now, present_sync.ans_vblank,' "$m" 2>/dev/null ||
+  grep -q 'omacvm_lead_clamp(present_sync.follow_lead, present_sync.grid_period);' "$m" 2>/dev/null ||
+    echo "the guest's vblank is not the lead (within its limits) before the commit"
+  grep -q 'omacvm_lead_frame(&present_sync.lead, now, present_sync.ans_vblank,' "$m" 2>/dev/null ||
     echo "the lead does not follow when the guest's frames are ready"
+  grep -q 'bool follow = asked && omacvm_vsync_locked();' "$m" 2>/dev/null ||
+    echo "frames count as in step without the guest saying so"
+  grep -q 'omacvm_vsync_grid_fresh(now, vsync_published_ns);' "$1/ui/omacvm-vsync.c" 2>/dev/null ||
+    echo "an old grid is handed to the guest"
+  grep -q 'omacvm_vsync_for_guest(le32_to_cpu(req.flags), le32_to_cpu(req.version),' "$g" 2>/dev/null ||
+    echo "virtio-gpu does not pass the guest's ask on"
   grep -q '(input || (present_sync.follow && !present_sync.follow_buffered))' "$m" 2>/dev/null ||
     echo "a late frame waits a refresh while the guest follows"
   grep -q 'present_sync.follow_buffered = omacvm_follow_buffered(&present_sync.lead,' "$m" 2>/dev/null ||
@@ -38,7 +44,7 @@ mkdir -p "$work/old/ui" "$work/old/hw/display" "$work/old/target/arm/hvf"
 echo 'static bool cocoa_gl_present_vsync(double T)' > "$work/old/ui/cocoa.m"
 : > "$work/old/hw/display/virtio-gpu-virgl.c"
 : > "$work/old/target/arm/hvf/hvf.c"
-[[ $(problems "$work/old" | wc -l) -ge 8 ]] || { echo "FAIL: the wiring checks pass without the patch"; exit 1; }
+[[ $(problems "$work/old" | wc -l) -ge 11 ]] || { echo "FAIL: the wiring checks pass without the patch"; exit 1; }
 
 if (( $# )); then
   p=$(problems "$1")

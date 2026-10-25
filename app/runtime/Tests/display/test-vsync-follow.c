@@ -89,6 +89,50 @@ int main(void)
     CHECK(fabs(omacvm_vsync_since(9.996, 10.0, 0.01) - 0.006) < 1e-9);
     CHECK(omacvm_vsync_since(1, 1, 0) < 0);
 
-    puts("ok   vsync follow: grid points, period, lead");
+    /* A grid is handed out only while the link publishes it (100 ms). */
+    CHECK(omacvm_vsync_grid_fresh(1000000000, 1000000000));
+    CHECK(omacvm_vsync_grid_fresh(1100000000, 1000000000));
+    CHECK(!omacvm_vsync_grid_fresh(1100000001, 1000000000));   /* the link paused */
+    CHECK(!omacvm_vsync_grid_fresh(5, 0));                      /* never published */
+
+    /* The guest's frames are on the grid only when its ask says so, at the grid's rate. */
+    CHECK(omacvm_vsync_guest_locked(OMACVM_VSYNC_LOCKED, 1, 16666667, p60));
+    CHECK(omacvm_vsync_guest_locked(OMACVM_VSYNC_LOCKED, 2, 16666667, p60));     /* a later version */
+    CHECK(!omacvm_vsync_guest_locked(0, 1, 16666667, p60));                       /* not on the grid */
+    CHECK(!omacvm_vsync_guest_locked(OMACVM_VSYNC_LOCKED, 0, 16666667, p60));     /* no version */
+    CHECK(!omacvm_vsync_guest_locked(OMACVM_VSYNC_LOCKED, 1, 0, p60));            /* no mode */
+    CHECK(!omacvm_vsync_guest_locked(OMACVM_VSYNC_LOCKED, 1, 16666667, 8333333333ull)); /* 60 Hz mode, 120 Hz grid */
+    CHECK(omacvm_vsync_guest_locked(OMACVM_VSYNC_LOCKED, 1, 8333000, 8333333333ull));
+    CHECK(!omacvm_vsync_guest_locked(OMACVM_VSYNC_LOCKED, 1, 8000000, 8333333333ull));  /* 4 % off */
+
+    /* A fixed or adapted lead stays within its limits. */
+    CHECK(fabs(omacvm_lead_clamp(0.030, 1 / 60.0) - (1 / 60.0 - OMACVM_LEAD_SPARE_S)) < 1e-12);
+    CHECK(fabs(omacvm_lead_clamp(0.030, 1 / 120.0) - (1 / 120.0 - OMACVM_LEAD_SPARE_S)) < 1e-12);
+    CHECK(omacvm_lead_clamp(0.0005, 1 / 60.0) == OMACVM_LEAD_MIN_S);
+    CHECK(omacvm_lead_clamp(0.004, 1 / 60.0) == 0.004);
+
+    /* Frames more than a period late count as late, not early: one frame per vblank. */
+    OmacVMLead fr = { 0 };
+    double P = 0.01;
+    for (int i = 0; i < 20; i++) {
+        omacvm_lead_frame(&fr, 100.0 + i * P + 0.003, 100.0, P);   /* 3 ms after each vblank */
+    }
+    CHECK(fr.n == 19);                                            /* each added when the next comes */
+    CHECK(fabs(omacvm_lead_quantile(&fr, 1.0) - 0.003) < 1e-9);
+    /* Vblank 20's frame 12 ms after it (into the next period), vblank 21's at 3 ms after its own. */
+    omacvm_lead_frame(&fr, 100.0 + 20 * P + 0.012, 100.0, P);
+    omacvm_lead_frame(&fr, 100.0 + 21 * P + 0.003, 100.0, P);
+    omacvm_lead_frame(&fr, 100.0 + 22 * P + 0.003, 100.0, P);
+    CHECK(fabs(omacvm_lead_quantile(&fr, 1.0) - 0.012) < 1e-9);  /* fmod alone said 2 ms */
+    CHECK(omacvm_follow_buffered(&fr, P, 100, 0));              /* 12 + 1 ms > a period less 1 ms */
+    omacvm_lead_reset(&fr);
+    CHECK(!fr.held && fr.n == 0);
+    /* Not every vblank has a frame (a still pointer): a gap is not a late frame. */
+    omacvm_lead_frame(&fr, 200.0 + 0.004, 200.0, P);
+    omacvm_lead_frame(&fr, 200.0 + 3 * P + 0.004, 200.0, P);
+    omacvm_lead_frame(&fr, 200.0 + 4 * P + 0.004, 200.0, P);
+    CHECK(fr.n == 2 && fabs(omacvm_lead_quantile(&fr, 1.0) - 0.004) < 1e-9);
+
+    puts("ok   vsync follow: grid points, period, lead, fresh grid, guest on the grid, late frames");
     return 0;
 }

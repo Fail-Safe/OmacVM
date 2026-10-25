@@ -10,8 +10,13 @@ frames are ready after their vblank, the latest of the last 64 plus 1
 ms, up at once, down by at most 2 ms a second, at least 2 ms, at most
 a period less 1 ms; and when late frames should wait in the queue
 instead (the frames need more than that, or more than 1 in 100 came
-late). Also OmacVM's
-virtio-gpu command and answer numbers, and the shared state's calls.
+late). Late frames: a frame that lands between the same two vblanks as
+the one after it was more than a period late (Hyprland draws one frame
+per vblank), so it counts a period later (the grid alone reads it as
+early). Whether a grid is fresh enough to hand out (100 ms) and whether a
+guest's ask says its frames are on it (LOCKED, version 1, its mode's
+period the grid's within 2 %). Also OmacVM's virtio-gpu command and answer
+numbers, and the shared state's calls.
 
 Why its own file: so the rules are tested without QEMU or a window
 (app/runtime/Tests/display/test-vsync-follow.sh applies this patch to an
@@ -22,7 +27,7 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 
 --- /dev/null
 +++ b/ui/omacvm-vsync.h
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,267 @@
 +/*
 + * OmacVM: the guest's vblanks in step with the Mac display's refresh.
 + *
@@ -51,12 +56,43 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +#define OMACVM_VIRTIO_GPU_CMD_VSYNC 0x0f00
 +#define OMACVM_VIRTIO_GPU_RESP_OK_VSYNC 0x11f0
 +#define OMACVM_VSYNC_VALID (1u << 0)
++/* The ask (version 1): flags, version and the mode's frame time after the scanout. */
++#define OMACVM_VSYNC_LOCKED (1u << 0)   /* the guest's timer was on the last grid */
++#define OMACVM_VSYNC_VERSION 1
++/*
++ * A grid not published for this long is not handed out: the display link
++ * paused (a still screen), and a ProMotion panel starts its refresh again at
++ * a phase of its own. The guest asks again in 0.1-0.5 s.
++ */
++#define OMACVM_VSYNC_GRID_AGE_NS 100000000ll
 +
 +/*
 + * Host times are ns of mach_absolute_time (CACurrentMediaTime() x 1e9);
 + * periods are in ps so a 120 Hz grid does not drift by a rounded ns per
 + * refresh.
 + */
++
++/* A grid published at `published_ns` (0: never) is fresh enough to hand out at `now_ns`. */
++static inline bool omacvm_vsync_grid_fresh(int64_t now_ns, int64_t published_ns)
++{
++    return published_ns > 0 && now_ns - published_ns <= OMACVM_VSYNC_GRID_AGE_NS;
++}
++
++/*
++ * The guest's ask says its frames are on the grid: version 1 or later, LOCKED,
++ * and its mode's frame time is the grid's period (within 2 %). Only then is
++ * the newest frame shown and the lead measured.
++ */
++static inline bool omacvm_vsync_guest_locked(uint32_t flags, uint32_t version,
++                                             uint32_t mode_period_ns, uint64_t period_ps)
++{
++    if (version < OMACVM_VSYNC_VERSION || !(flags & OMACVM_VSYNC_LOCKED) ||
++        !mode_period_ns || !period_ps) {
++        return false;
++    }
++    double mode_ps = mode_period_ns * 1000.0;
++    return fabs(mode_ps - (double)period_ps) <= mode_ps / 50;
++}
 +
 +/* Grid: the first grid point at or after now. */
 +static inline int64_t omacvm_vsync_next(int64_t vblank_ns, uint64_t period_ps,
@@ -112,11 +148,15 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +typedef struct OmacVMLead {
 +    double after[OMACVM_LEAD_N];   /* frame ready, seconds after its vblank */
 +    int n, next;
++    /* The last frame, kept until the next shows whether it was late (omacvm_lead_frame). */
++    bool held;
++    double held_start, held_after;
 +} OmacVMLead;
 +
 +static inline void omacvm_lead_reset(OmacVMLead *l)
 +{
 +    l->n = l->next = 0;
++    l->held = false;
 +}
 +
 +/* A frame was ready `after` seconds after the grid's vblank before it. */
@@ -154,11 +194,20 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +    return s[k < 0 ? 0 : k >= n ? n - 1 : k];
 +}
 +
-+/* The lead for a period (seconds); `now` is the current one, kept with too few frames. */
-+static inline double omacvm_lead_value(const OmacVMLead *l, double period, double now)
++/* A lead within its limits for a period: at least the minimum, at most a period less the spare. */
++static inline double omacvm_lead_clamp(double lead, double period)
 +{
 +    double hi = period - OMACVM_LEAD_SPARE_S;
 +
++    if (lead > hi) {
++        lead = hi;
++    }
++    return lead < OMACVM_LEAD_MIN_S ? OMACVM_LEAD_MIN_S : lead;
++}
++
++/* The lead for a period (seconds); `now` is the current one, kept with too few frames. */
++static inline double omacvm_lead_value(const OmacVMLead *l, double period, double now)
++{
 +    if (!(period > 0)) {
 +        return now;
 +    }
@@ -166,13 +215,7 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +        double want = omacvm_lead_quantile(l, 1.0) + OMACVM_LEAD_MARGIN_S;
 +        now = want >= now ? want : (want > now - OMACVM_LEAD_DOWN_S ? want : now - OMACVM_LEAD_DOWN_S);
 +    }
-+    if (now < OMACVM_LEAD_MIN_S) {
-+        now = OMACVM_LEAD_MIN_S;
-+    }
-+    if (now > hi) {
-+        now = hi;
-+    }
-+    return now;
++    return omacvm_lead_clamp(now, period);
 +}
 +
 +/*
@@ -206,12 +249,44 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +    return d < 0 ? d + period : d;
 +}
 +
++/*
++ * A following guest's frame, ready at t: kept for the lead. The grid alone
++ * cannot tell a frame more than a period late from an early one (both land
++ * between the same two vblanks), but Hyprland draws one frame per vblank:
++ * when the next frame lands between the same two vblanks, the one before
++ * belonged to the vblank before them and counts a period later. Each frame
++ * is added when the next comes.
++ */
++static inline void omacvm_lead_frame(OmacVMLead *l, double t, double vblank, double period)
++{
++    double after = omacvm_vsync_since(t, vblank, period);
++
++    if (after < 0) {
++        return;
++    }
++    double start = t - after;            /* the grid's vblank before t */
++    if (l->held) {
++        bool same = fabs(start - l->held_start) < period / 2;
++        omacvm_lead_add(l, l->held_after + (same ? period : 0));
++    }
++    l->held = true;
++    l->held_start = start;
++    l->held_after = after;
++}
++
 +/* The shared state (ui/omacvm-vsync.c); any thread. */
 +void omacvm_vsync_publish(int64_t vblank_ns, uint64_t period_ps);
 +void omacvm_vsync_withdraw(void);
 +void omacvm_vsync_set_counter_offset(uint64_t mach_offset);
-+/* For the guest: its counter at the next vblank it should have, and the period. */
-+bool omacvm_vsync_for_guest(uint64_t *counter, uint64_t *period_ps);
++/*
++ * For the guest: its counter at the next vblank it should have, and the
++ * period; false: no fresh grid. Its ask's flags, version and mode period say
++ * whether its frames are on the grid (omacvm_vsync_guest_locked).
++ */
++bool omacvm_vsync_for_guest(uint32_t flags, uint32_t version, uint32_t mode_period_ns,
++                            uint64_t *counter, uint64_t *period_ps);
++/* The guest's last ask said its frames are on the grid it got. */
++bool omacvm_vsync_locked(void);
 +/* The grid the guest got last (host ns, ps) and when it last moved; false: none. */
 +bool omacvm_vsync_answered(int64_t *vblank_ns, uint64_t *period_ps, int64_t *moved_ns);
 +/* When a guest last asked (host ns; 0: never). */
