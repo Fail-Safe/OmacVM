@@ -210,7 +210,7 @@ jobs:
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
-      - name: input-latency-vm's stage split on a made-up QEMU trace (no VM)
+      - name: input-latency-vm without a VM (its stage split on a made-up QEMU trace, it refuses ~/OmacVM)
         run: src/tests/input-latency-harness.sh
 
       - name: omacvm gestures (the escape combo, Swipe out to macOS, Magic Mouse swipe; a throwaway domain)

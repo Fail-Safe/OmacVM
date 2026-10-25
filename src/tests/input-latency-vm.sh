@@ -54,6 +54,15 @@ while (( $# )); do
     *) sed -n '9,13s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
+# Never the person's own VMs (~/OmacVM/<name>): a run writes the VM's disk and EFI variables and
+# switches its Mac links off in the guest for good.
+own=$(cd "$HOME/OmacVM" 2>/dev/null && pwd -P)
+vmr=$(cd "$VMD" 2>/dev/null && pwd -P)
+if [[ $VMD == "$HOME/OmacVM" || $VMD == "$HOME/OmacVM/"* ]] ||
+   [[ -n $own && -n $vmr && ( $vmr == "$own" || $vmr == "$own/"* ) ]]; then
+  echo "input-latency-vm: $VMD is one of your own VMs (~/OmacVM): use a copy of a test VM" >&2
+  exit 1
+fi
 # A runtime from the build (qemu-system-aarch64) or from an app bundle (named OmacVM there).
 QEMU=$RT/bin/qemu-system-aarch64
 [[ -x $QEMU ]] || QEMU=$RT/bin/OmacVM
