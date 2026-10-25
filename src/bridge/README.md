@@ -109,7 +109,7 @@ control (HDMI) reports `has_volume: false`, `volume: null`.
 
 ```bash
 H=(-H "Authorization: Bearer $T" -H 'Content-Type: application/json')
-curl "${H[@]}" -d '{"volume": 0.4}'            $B/audio/volume   # or {"delta": 0.05}; raising unmutes
+curl "${H[@]}" -d '{"volume": 0.4}'            $B/audio/volume   # or {"delta": 0.05}; 0 mutes, raising unmutes
 curl "${H[@]}" -d '{"volume": 0.6, "scope": "input"}' $B/audio/volume
 curl "${H[@]}" -d '{"muted": "toggle"}'        $B/audio/mute     # true | false | "toggle"
 curl "${H[@]}" -d '{"uid": "BuiltInSpeakerDevice"}' $B/audio/output   # /audio/input likewise

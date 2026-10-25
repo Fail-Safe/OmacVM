@@ -1,6 +1,7 @@
 // Offline tests of keys-model.swift (when the media-key tap is created again,
-// and when it must go because a permission was taken away)
-// and wifi-model.swift (a steady Wi-Fi state). No permissions, no Wi-Fi.
+// and when it must go because a permission was taken away),
+// the mute that goes with the Mac's volume at 0 (OutputMute), and
+// wifi-model.swift (a steady Wi-Fi state). No permissions, no Wi-Fi.
 import CoreGraphics
 import Foundation
 
@@ -488,6 +489,45 @@ if let d = UserDefaults(suiteName: "org.omacvm.test.share-keyboard.bridge.\(getp
   check(false, "share keyboard: a throwaway defaults domain")
 }
 check(ShareKeyboard.place(ShareKeyboard.on(nil)) == .headInsertEventTap, "share keyboard: no domain: at the head")
+
+// ---- OutputMute: the Mac's output at volume 0 ----
+// A Mac output as Audio.setVolume/stepVolume drive it. 0 on its volume control
+// is not silence (MacBook Pro and Mac mini speakers: -63.5 dB), only its mute is.
+struct FakeOutput {
+  var volume: Double, muted: Bool
+  mutating func set(_ target: Double, unmute: Bool = false) {
+    let t = max(0, min(1, target))
+    if let m = OutputMute.after(before: volume, target: t, unmute: unmute) { muted = m }
+    volume = t
+  }
+  mutating func key(up: Bool, steps: Double = 16) { set(((volume * steps).rounded() + (up ? 1 : -1)) / steps, unmute: true) }
+  mutating func muteKey() { muted.toggle() }
+}
+var o = FakeOutput(volume: 2 / 16, muted: false)
+o.key(up: false); check(o.volume == 1 / 16 && !o.muted, "volume 0: one step above 0 still plays")
+o.key(up: false); check(o.volume == 0 && o.muted, "volume 0: the volume-down key to 0 mutes the output")
+o.key(up: false); check(o.volume == 0 && o.muted, "volume 0: down again at 0 stays muted")
+o.key(up: true); check(o.volume == 1 / 16 && !o.muted, "volume 0: volume up from 0 unmutes at the first step")
+o = FakeOutput(volume: 2 / 16, muted: false)
+o.muteKey(); o.key(up: false); check(o.volume == 1 / 16 && !o.muted, "volume 0: down after the mute key unmutes, as macOS's keys")
+o.key(up: false); check(o.volume == 0 && o.muted, "volume 0: ... and mutes again at 0 (the user's 23:58 log: 0.0 unmuted)")
+o = FakeOutput(volume: 0.5, muted: false)
+o.muteKey(); o.key(up: true); check(o.volume == 0.5625 && !o.muted, "volume 0: unmute with a key keeps the level, one step up")
+o = FakeOutput(volume: 5 / 64, muted: false)
+var levels: [Double] = []
+for _ in 0..<5 { levels.append(o.volume); check(!o.muted, "volume 0: fine step \(Int(o.volume * 64))/64 plays"); o.key(up: false, steps: 64) }
+check(o.volume == 0 && o.muted && levels == levels.sorted(by: >), "volume 0: fine steps 5..1/64 go down one by one, then 0 mutes")
+o = FakeOutput(volume: 0.3, muted: false)
+o.set(0); check(o.muted, "volume 0: the bar's slider at 0 mutes")
+o.set(0.25); check(o.volume == 0.25 && !o.muted, "volume 0: the slider up from 0 unmutes")
+o.muteKey(); o.set(0.4); check(o.muted, "volume 0: the slider leaves a mute set above 0 as it is")
+o = FakeOutput(volume: 0.04, muted: false)
+o.set(0.04 - 0.05); check(o.volume == 0 && o.muted, "volume 0: omacvm-bridge volume -5 to 0 mutes")
+o.set(0.05, unmute: true); check(o.volume == 0.05 && !o.muted, "volume 0: omacvm-bridge volume +5 from 0 unmutes")
+check(OutputMute.after(before: 0.5, target: 0.0004, unmute: false) == true, "volume 0: below 0.0005 (shown as 0.000) counts as 0")
+check(OutputMute.after(before: nil, target: 0.4, unmute: false) == nil, "volume 0: the slider leaves the mute alone when the volume could not be read")
+check(OutputMute.after(before: nil, target: 0, unmute: false) == true, "volume 0: ... but 0 still mutes")
+check(OutputMute.after(before: nil, target: 0.4, unmute: true) == false, "volume 0: ... and a key still unmutes")
 
 if failed > 0 { print("\(failed) failed"); exit(1) }
 print("models: all ok")

@@ -48,6 +48,13 @@ in more words.
 - **USB devices** (experimental): the list now says that a USB network adapter, or another Mac on a
   USB-C cable, is a network adapter that macOS keeps. It said serial port.
 
+- **Volume 0 is silent.** With a VM in front, the volume-down key to 0 % (or Omarchy's volume
+  slider at 0) set the Mac's volume to 0 but did not mute it, and 0 is not silence on a Mac's
+  speakers: MacBook Pro and Mac mini speakers still play at -63.5 dB there, only 4 dB under the
+  first step. A mute pressed before was cleared by the next volume-down, and 0 stayed unmuted. The
+  Bridge now mutes the Mac's output at 0, as macOS does, and volume up from 0 unmutes it again.
+  Needs `omacvm update` (or the app's update) on the Mac; nothing changes in the VM.
+
 ## 3.2.0
 
 Chrome decodes video on the Mac's media engine again, ⌃⌥ Esc takes the right display out of the VM, the
