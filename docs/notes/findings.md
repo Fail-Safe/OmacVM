@@ -260,3 +260,46 @@ Options for later (none started; parked on 2026-10-21):
    costs about a third of the M1 Max's (211 µs on the Mac), a guest fsync went
    from 0.38 to 0.63 ms; git commits +40 %, installs and checkouts the same.
    Not measured in a VM on the M1 Max, where the estimate above still holds.
+
+## GPU work in an OmacVM.app VM: where the time goes (October 2026)
+
+Measured on a Mac mini M4 (10-core GPU, macOS 27.0) with 3.1.27, a VM with 4 CPUs and 6 GB, Vulkan on Venus
+with KosmicKrisp, OpenCL on rusticl and Zink. Same program versions on the Mac and in the VM (llama.cpp b11760,
+Llama 3.2 3B Instruct Q4_K_M, whisper.cpp v1.9.5 base.en, darktable 5.6.1, Geekbench 7.1.0), medians of 3, nothing
+else running. "VM %" is the VM's speed against the Mac's.
+
+| Work | Mac | VM | VM % |
+|---|---|---|---|
+| llama.cpp prompt (pp512, t/s) | Metal 550; Vulkan: MoltenVK 423, KosmicKrisp 160 | 159 | 29 % of Metal, 99 % of KosmicKrisp |
+| llama.cpp generation (tg128, t/s) | Metal 46.3; KosmicKrisp 45.8 | 45.2 | 98 % |
+| whisper.cpp encoder (ms) | Metal 47 | 104 | 45 % |
+| Geekbench 7 GPU (one run each) | Metal 52630, OpenCL 33795 | OpenCL 17879 | 53 % of OpenCL |
+| darktable RAW export (s) | OpenCL 3.5, CPU 3.7 | OpenCL 5.8, CPU 2.0 | OpenCL slower than the VM's own CPU |
+| one dispatch, submit + wait (us) | KosmicKrisp 101, Metal 158 | 185 | 55 % |
+| OpenCL kernel + clFinish (us) | Apple's OpenCL 165 | 229 | 72 % |
+
+- **The loss is in KosmicKrisp's shader translation, not in Venus.** llama.cpp's prompt processing runs at 99 % of
+  the same driver on the Mac; that driver itself is at 29 % of Metal and 38 % of MoltenVK. KosmicKrisp never
+  unrolls a loop, so llama.cpp's matmul keeps its accumulators in scratch memory and its caches in if-else trees.
+  Unrolling loops of up to 32 iterations before local arrays are lowered gives llama.cpp's prompt +130 % natively
+  on an M1 Max and an M2 and +22 % on an M4 (in a VM: +119 % on an M2, +15 % on an M4 Max). But on an M2 it costs
+  Dawn's WebGPU matmul 25 %, and a model's first pipeline creation takes 54 % longer (about 1.4 s more, once:
+  Metal caches the shaders after), so it is not shipped. Also: KosmicKrisp scalarizes every ALU operation and never merges
+  loads into vectors, where MoltenVK's MSL keeps `half2` fma and vector loads (look with `MESA_KK_DEBUG=msl`).
+- **MoltenVK is the faster driver for llama.cpp** (VM: pp512 432 t/s against 159, tg128 42.6 against 45.2) but has
+  no OpenCL (Zink needs nullDescriptor), its pipeline barriers cost 38 us per dispatch on the Mac (in the VM,
+  64 dispatches recorded with barriers take 1.3 ms against 0.36 ms on KosmicKrisp) and it has no copy-free Vulkan windows. `OMACVM_VULKAN_DRIVER=moltenvk` for the app
+  picks it for a test.
+- **Each GPU round trip costs ~85 us more in the VM** (submit + wait 185 against 101 us). Polling the fence in the
+  guest instead of sleeping saves only ~19 us: most of it is on the Mac (the Venus ring thread's wake-up, the fence
+  through the render server, QEMU's main loop and the interrupt). Token generation and big kernels do not
+  notice it. The ring thread's naps end late on macOS (10 us take 16). Looking for the next command 200 us longer
+  before napping was tried and dropped: submit + wait got 12-15 us faster on the M4s (Mac mini 185 -> 170, MacBook
+  Pro M4 Max 154 -> 142), but 64 dispatches recorded with barriers got twice as slow on the M4 Max (285 ->
+  587 us; M1 Max 516 -> 657) and vkcube 10 % slower; WebGPU, GTK4's first frame and scrolling stayed the same.
+- KosmicKrisp re-records a command buffer that is submitted again (Metal's are one-shot): 77 us per
+  `vkQueueSubmit` of the same buffer, MoltenVK 6 us.
+- Geekbench 7's Linux ARM preview lists no Vulkan device, only OpenCL. Arch Linux ARM's darktable 5.6.1 (October
+  2026) is linked against OpenEXR 3.4 while the repo has 3.5; the measurement used OpenEXR 3.4.16 built next to it.
+- **Where:** `src/bench/gpu/` (`vklaunch`, `cllaunch`, `mtllaunch`)
+  measure a dispatch's round trip; `MESA_KK_DEBUG=msl` prints KosmicKrisp's MSL.

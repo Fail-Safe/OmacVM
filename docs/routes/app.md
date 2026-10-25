@@ -79,6 +79,23 @@ VM runs, and goes back by itself when a new version does not start
   (120 Hz on a MacBook Pro).
 - GPU in browsers: WebGL 1 and 2 on the hardware in Chromium, Google Chrome,
   Brave and Firefox (`virgl (Apple M4 Max)`), no flags.
+- For faster pages, use Google Chrome instead of Omarchy's Chromium. If
+  Chrome is not installed yet: Omarchy menu > Install > Browser > Chrome
+  (from the AUR). That writes a new `~/.config/chrome-flags.conf` with
+  Omarchy's flags only, so run `omacvm apply --vm "<VM name>" --vm-type app`
+  once afterwards, with the VM running, and restart Chrome: it puts back
+  OmacVM's Chrome flags (scroll momentum, Mac input methods, video
+  encoding). Without them Chrome glides too much on a trackpad. Chrome
+  installed with OmacVM's `install-chrome.sh` (Google's .deb) blocks the
+  AUR package ("exists in filesystem"): keep it, or remove
+  `/opt/google/chrome` first. At the same version in the same VM,
+  Speedometer 3.1 was 17 % higher in Chrome; JetStream, MotionMark, WebGL
+  and scrolling were within 4 %
+  ([numbers](../benchmarks/README.md#google-chrome-vs-omarchys-chromium-macbook-pro-m4-max-2026-10-25)).
+  Arch Linux ARM's Chromium is built without Google's profile-guided
+  optimization and with another clang, and runs without Google's field
+  trials; the test does not tell which of them makes the difference. Chrome also decodes AV1 and
+  HEVC on the Mac's media engine, Omarchy's Chromium only H.264 and VP9.
 - Video decoding on the Mac's media engine (since 2.7.0): H.264, VP9 and AV1
   in Google Chrome (YouTube 4K at 60 fps, the VM's CPU nearly idle), VP9 in
   Brave, H.264 and VP9 in Firefox (AV1 not yet), H.264, VP9 and HEVC in mpv,

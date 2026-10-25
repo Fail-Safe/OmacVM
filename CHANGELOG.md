@@ -54,6 +54,15 @@ in more words.
   0.47 W at 120, a small box a few hundredths. It stays off until a VM run shows it draws right, and it
   needs a VM that says what changed in its desktop's frames (Linux 7.4, or OmacVM's own driver with
   that fix). `OMACVM_GL_PRESENT_DAMAGE=1` in the app's environment turns it on for tests.
+- **USB devices** (experimental): the list now says that a USB network adapter, or another Mac on a
+  USB-C cable, is a network adapter that macOS keeps. It said serial port.
+
+- **Volume 0 is silent.** With a VM in front, the volume-down key to 0 % (or Omarchy's volume
+  slider at 0) set the Mac's volume to 0 but did not mute it, and 0 is not silence on a Mac's
+  speakers: MacBook Pro and Mac mini speakers still play at -63.5 dB there, only 4 dB under the
+  first step. A mute pressed before was cleared by the next volume-down, and 0 stayed unmuted. The
+  Bridge now mutes the Mac's output at 0, as macOS does, and volume up from 0 unmutes it again.
+  Needs `omacvm update` (or the app's update) on the Mac; nothing changes in the VM.
 
 ## 3.2.0
 

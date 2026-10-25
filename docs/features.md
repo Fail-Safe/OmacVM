@@ -217,9 +217,11 @@ setting for the whole Mac, all VMs included.
 
 Media keys while a VM is in front (OmacVM.app full screen or in a window;
 Parallels, UTM and Fusion full screen): volume and mute change the Mac's
-output, with Omarchy's popup. When the output has no volume macOS can set
-(an audio interface such as a Focusrite Scarlett), they change the VM's own
-volume instead, with Omarchy's popup, not macOS's greyed-out panel.
+output, with Omarchy's popup. Volume down to 0 also mutes it, as 0 alone
+still plays quietly on a Mac's speakers; volume up unmutes. When the output
+has no volume macOS can set (an audio interface such as a Focusrite
+Scarlett), they change the VM's own volume instead, with Omarchy's popup,
+not macOS's greyed-out panel.
 With ⌘ held they go to the VM (OmacVM.app), never to the Mac's volume:
 ⌘ + mute, volume down, volume up (F10, F11, F12 on Apple keyboards) are
 Omarchy's screenshot keys (window, region, display; ⌘⌥ + volume up records).
