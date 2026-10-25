@@ -132,7 +132,18 @@ local function value(key, sub)
   return v
 end
 rule_file("Virtual-1", "")
+-- Every setting the config writes, as "section.key=value" (for what differs).
+local function settings()
+  local t = {}
+  for _, c in ipairs(configs) do
+    for sec, kv in pairs(c) do
+      if type(kv) == "table" then for k, v in pairs(kv) do t[sec .. "." .. k .. "=" .. tostring(v)] = true end end
+    end
+  end
+  return t
+end
 load_config({ "Virtual-1" })
+local stock = settings()
 check("stock driver: the pointer drawn into the frames", value("cursor", "no_hardware_cursors") == 1)
 check("stock driver: no CPU buffer", value("cursor", "use_cpu_buffer") == nil)
 write(params .. "/cursor_plane", "N\n")
@@ -142,7 +153,12 @@ write(params .. "/cursor_plane", "Y\n")
 load_config({ "Virtual-1" })
 check("cursor_plane: the pointer on the plane, from a CPU buffer", value("cursor", "no_hardware_cursors") == 0
   and value("cursor", "use_cpu_buffer") == 1)
-check("cursor_plane: nothing else set", value("render", "direct_scanout") == nil)
+local new = {}
+for k in pairs(settings()) do if not stock[k] then new[#new + 1] = k end end
+table.sort(new)
+check("cursor_plane: only the pointer's two settings differ from the stock driver's",
+  table.concat(new, " ") == "cursor.no_hardware_cursors=0 cursor.use_cpu_buffer=1")
+check("cursor_plane: no direct scanout", value("render", "direct_scanout") == nil)
 os.getenv = real_getenv
 
 if failed > 0 then
