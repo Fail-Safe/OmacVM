@@ -45,6 +45,8 @@ in more words.
   0.47 W at 120, a small box a few hundredths. It stays off until a VM run shows it draws right, and it
   needs a VM that says what changed in its desktop's frames (Linux 7.4, or OmacVM's own driver with
   that fix). `OMACVM_GL_PRESENT_DAMAGE=1` in the app's environment turns it on for tests.
+- **USB devices** (experimental): the list now says that a USB network adapter, or another Mac on a
+  USB-C cable, is a network adapter that macOS keeps. It said serial port.
 
 ## 3.2.0
 
