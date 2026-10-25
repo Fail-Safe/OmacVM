@@ -16,6 +16,8 @@ body() { awk -v h="$2" 'index($0, h) == 1 && $0 !~ /;$/ {on=1} on {print} on && 
 chk() { local what=$1; shift; if "$@"; then echo "ok $what"; else echo "FAIL $what"; fi; }
 has() { grep -qF -- "$2" <<<"$1"; }
 hasnt() { ! grep -qF -- "$2" <<<"$1"; }
+# A function found (not empty) without the text: an empty body would pass a plain hasnt.
+lacks() { [[ -n $1 ]] && hasnt "$1" "$2"; }
 order() {
   awk -v a="$2" -v b="$3" -v c="${4:-}" '
     !x && index($0, a) {x=NR; next}
@@ -32,7 +34,7 @@ checks() {
   show=$(body "$m" 'static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushed,')
   showt=$(body "$m" 'static void cocoa_gl_present_show_tiles(PresentFrame *f)')
   queue=$(body "$m" 'static void cocoa_gl_present_queue_frame(PresentFrame f)')
-  vsync=$(body "$m" 'static bool cocoa_gl_present_vsync(double T)')
+  vsync=$(body "$m" 'static bool cocoa_gl_present_vsync(double T')
   skip=$(body "$m" 'static void present_frame_skip(PresentFrame *older, PresentFrame *next)')
   viewsz=$(body "$m" 'static void omacvm_splash_view_size(uint32_t w, uint32_t h)')
   hide=$(body "$m" 'static void present_tiles_hide(void)')
@@ -75,7 +77,7 @@ checks() {
   chk "a merged frame passes its tiles on" has "$queue" 'present_frame_skip(last, &f);'
   chk "a frame pushed out of a full queue passes its tiles on" has "$queue" \
     'present_frame_skip(&present_sync.queue[0], &present_sync.queue[1]);'
-  chk "the vsync tick drops no tiles" hasnt "$vsync" 'surface_put(drop.surf);'
+  chk "the vsync tick drops no tiles" lacks "$vsync" 'surface_put(drop.surf);'
   chk "the vsync tick shows tile frames" has "$vsync" 'present_frame_show(&show);'
   chk "without tiles a skipped frame just goes (as before)" order "$skip" 'if (present_tiles_on <= 0) {' 'present_frame_put(older);'
   chk "a new view size hides the tiles" has "$viewsz" 'present_tiles_hide();'
