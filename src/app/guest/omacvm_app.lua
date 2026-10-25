@@ -26,9 +26,28 @@ if mac then pcall(hl.config, { cursor = { use_cpu_buffer = 1 } }) end
 -- share; Hyprland redraws the whole output for the first captured frame). The
 -- screen shows the same pixels and screenshots are the same; each HDR frame
 -- costs the Mac's GPU 10-19 % less. No effect in SDR (no copy there either
--- way). This file loads after the user's own config, so it also wins over a
--- keep_unmodified_copy set there. pcall: an older Hyprland lacks the option.
-pcall(hl.config, { render = { keep_unmodified_copy = 0 } })
+-- way). A keep_unmodified_copy the user set in their own Hyprland files wins:
+-- then it is not set here. pcall: an older Hyprland lacks the option.
+local function user_sets(word)
+  local home = os.getenv("XDG_CONFIG_HOME") or ((os.getenv("HOME") or "") .. "/.config")
+  for _, name in ipairs({ "hyprland", "looknfeel", "input", "bindings", "autostart", "envs", "monitors", "monitor_workspaces" }) do
+    local f = io.open(home .. "/hypr/" .. name .. ".lua", "r")
+    if f then
+      for line in f:lines() do
+        local code = line:gsub("%-%-.*$", "")
+        if code:find(word, 1, true) then
+          f:close()
+          return true
+        end
+      end
+      f:close()
+    end
+  end
+  return false
+end
+if not user_sets("keep_unmodified_copy") then
+  pcall(hl.config, { render = { keep_unmodified_copy = 0 } })
+end
 -- A config reload drops the rules omacvm-display-sync gave the outputs, and
 -- each output would take monitors.lua's rule ("auto" place, cached mode) until
 -- display-sync runs again after the reload. With Omanotch's NOTCH output above
