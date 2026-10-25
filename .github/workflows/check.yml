@@ -486,6 +486,9 @@ jobs:
           app/runtime/Tests/display/test-extra-brightness.sh
           src/tests/extra-brightness-check.sh
 
+      - name: The window's surfaces lossless-compressed (the checks catch code without it)
+        run: app/runtime/Tests/display/test-present-lossless.sh
+
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 

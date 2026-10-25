@@ -54,6 +54,13 @@ in more words.
   first step. A mute pressed before was cleared by the next volume-down, and 0 stayed unmuted. The
   Bridge now mutes the Mac's output at 0, as macOS does, and volume up from 0 unmutes it again.
   Needs `omacvm update` (or the app's update) on the Mac; nothing changes in the VM.
+- **Less power to show the VM's window (macOS 27).** OmacVM.app now keeps the VM's picture in the
+  Mac's lossless-compressed format, so the Mac's graphics move fewer bytes for every frame: on a MacBook
+  Air M2 scrolling in the VM takes 0.20 W less at 60 Hz (4.45 W instead of 4.65 W, 4 %) and 0.37 W
+  less at 120 Hz (6.18 W instead of 6.55 W, 6 %, on a 120 Hz virtual display); the picture is the same
+  pixel for pixel. A video changes little (its frames compress less). To turn it off:
+  `launchctl setenv OMACVM_GL_LOSSLESS 0`, then quit and reopen the app (`launchctl unsetenv
+  OMACVM_GL_LOSSLESS` turns it on again).
 
 ## 3.2.0
 
