@@ -372,10 +372,15 @@ window() {   # the launcher's window on this VM (the VM must be stopped): its pi
   for ((i = 0; i < 20; i++)); do
     p=$(launcher_pid)
     if [[ -n $p && $("$OUT/ax" "$p" dump 2>/dev/null | head -1) == "windows: "[1-9]* ]]; then
-      sleep 1
-      # Never press anything in a window that shows another VM (a kept one of another test).
-      "$OUT/ax" "$p" text 2>/dev/null | grep -qF "$VM" || { echo "the window shows another VM" >&2; return 1; }
-      echo "$p"; return 0
+      # Never press anything in a window that shows another VM (a kept one of another test). The window
+      # may still be filling in: up to 10 s for the VM's name.
+      local k
+      for ((k = 0; k < 10; k++)); do
+        sleep 1
+        "$OUT/ax" "$p" text 2>/dev/null | grep -qF "$VM" && { echo "$p"; return 0; }
+      done
+      "$OUT/ax" "$p" text > "$OUT/${PFX}window-other.txt" 2>&1
+      echo "the window shows another VM ($OUT/${PFX}window-other.txt)" >&2; return 1
     fi
     sleep 1
   done
