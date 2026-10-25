@@ -83,8 +83,17 @@ because the wait is in the phase, not in the queue.
 
 ## Consequences
 
-- See the table in work/tracks/input-vsync.md and docs/architecture/graphics.md
-  section 12 ("Frames in step with the Mac").
+- Mac mini M4, 60 Hz, while the screen moves: keys 1.5-2.4 ms sooner, the
+  pointer 2.4-4.5 ms, keys while the terminal scrolls 4-7 ms; repeats +
+  drops 21 instead of 77 in the quiet runs (the free phase drifts and the
+  trims drop frames). At 120 Hz about 1 ms: the guest's frames are ready 5
+  ms after their vblank (median) and up to a refresh, so the lead sits at its
+  cap and late frames wait as before. The gain is smaller than the model's
+  half refresh because the lead covers the slowest frame. Tables:
+  work/tracks/input-vsync.md; docs/architecture/graphics.md section 12.
+- MacBook Air M2 (60 Hz, pointer moving and scrolling, 180 s windows, off on
+  on off): whole-Mac power the same within the rounds' spread (+0.5 to
+  +1.4 %), the same frames a second, 0 pixels differ.
 - Same frames: the guest still draws one frame per vblank at the display's
   rate (60, 120 Hz, ProMotion); only when it draws moves. Nothing changes on a
   still screen or for frames that come one at a time (typing on an idle
