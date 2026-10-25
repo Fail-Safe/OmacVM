@@ -218,6 +218,12 @@ Then, in the key path (also for keys from the full-grab tap):
   input source, another window or app in front): the context is
   deactivated and the input method commits or keeps its text, as in a Mac
   app; a commit still reaches the field.
+- Only the guest's field gone while the VM keeps the keyboard and the
+  source is an input method (`omacvm_ime_off_later`): the context is
+  deactivated 0.2 s later, and not when a field takes the focus again
+  meanwhile. A terminal drops and takes its focus right after Enter, and
+  some input methods (WeChat Input) go back to their first mode at each
+  deactivate and activate (#357). Keys follow the guest's focus at once.
 - Input source switching: while the conditions above hold except the
   input-method one, macOS's "Select the previous/next input source"
   shortcuts (symbolic hot keys 60 and 61, Ctrl+Space by default) and the
