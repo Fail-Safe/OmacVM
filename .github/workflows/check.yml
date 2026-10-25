@@ -486,6 +486,9 @@ jobs:
           app/runtime/Tests/display/test-pointer-bright.sh
           app/runtime/Tests/display/test-pointer-bright.sh --self-test
 
+      - name: The guest's vblanks on the Mac's refresh (ADR 0055; grid, period, lead; the checks catch a tree without it)
+        run: app/runtime/Tests/display/test-vsync-follow.sh
+
       - name: Extra brightness's gain, shader and omacvm check line (ADR 0050; the checks catch code without it)
         run: |
           app/runtime/Tests/display/test-extra-brightness.sh
@@ -566,6 +569,9 @@ jobs:
 
       - name: The 10-bit virtio-gpu driver loads only for a start that asks, else the stock one (loader, modprobe rule, builder; offline)
         run: src/tests/virtio-gpu-load.sh
+
+      - name: OmacVM's virtio-gpu vblank timer comes onto the Mac's refresh grid (vsync_lock's math, simulated)
+        run: src/tests/virtio-gpu-vsync.sh
 
       - name: Chromium's no-AV1 extension survives an apply of other features (its place, 3.1.4's path moved, check)
         run: src/tests/chromium-no-av1.sh
