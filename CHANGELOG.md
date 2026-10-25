@@ -5,6 +5,15 @@ in more words.
 
 ## 3.2.2 (unreleased)
 
+- **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has
+  odd characters in its command line.** omacvm reads the Mac's process list to find the VM's
+  QEMU. One line that is not UTF-8 (a file name in an old encoding, binary arguments) made
+  macOS's awk stop there, so omacvm missed the VM after it: a control centre switch then tried to
+  start the running VM and ended with "did not get an address" (#545; found in the 3.2.1 test on
+  a MacBook Air). The same line made `pgrep -f` fail, so `omacvm check` could miss a running
+  Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
+  download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
+  Mac.
 - **Tiled present, built, off for now.** OmacVM.app shows every frame of the VM as a new whole
   picture, so macOS redraws the whole window for each one, also when only the pointer moved. With
   tiles, only the 256x256 squares the VM changed get a new picture. MacBook Air M2, the VM full
