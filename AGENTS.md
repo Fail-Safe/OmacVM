@@ -500,6 +500,7 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 | WebGPU and GPU compute (with Vulkan) | `features` `gpu-compute=on\|off` (`omacvm enable\|disable gpu-compute`, the control centre); switched while the VM is stopped: + `gpu-compute-pending`, set up at the next start (as Mac input) | on (no word = on) | VM |
 | Graphics without QEMU's lock | `gpuOffMainLoop` (bool; hidden `gpuMainLoop` and `gpuSafeMode` force it off; read at each start; ADR 0046) | `true` (3.1.18 to 3.1.25: `false`, experimental; switch from 3.1.19) | app |
 | Vulkan windows without a copy | `vkWindowsNoCopy` (bool; hidden `vkWindowsCopy` and `gpuSafeMode` force it off; read at each start; QEMU env `OMACVM_VK_WINDOWS=iosurface`, KosmicKrisp only; ADR 0047) | `true` (3.1.24 and 3.1.25: `false`, experimental) | app |
+| Draw only what changed (experimental) | `presentTiles` (bool; GPU safe mode keeps it off; read at each start: QEMU env `OMACVM_GL_PRESENT_TILES=1`; a frame that changed little goes to WindowServer as a few tile layers over the last whole frame; needs a guest that sends its damage (Linux 7.4, OmacVM's driver with the fix); qemu.log `cocoa: tiled present: ...`; check line "Draw only what changed"; ADR 0055) | `false` | app |
 | Closing the window | `closeAction`: `shutdown`, `keepRunning`, `ask` (QEMU: `OMACVM_CLOSE_ACTION`) | `shutdown` | app |
 | Start in: Window / Full screen | `startFullScreen` (bool) | `true` | app |
 | Start in: Full screen including notch | `notch-mode`: `fullpanel` (`omacvm fullscreen`) | native (no file) | VM |
