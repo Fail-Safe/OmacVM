@@ -60,4 +60,9 @@ has "the guest's caret is checked before use" "$(cat "$src")" 'omacvm_ime_rect_o
 # A caret as tall as its field (a GTK entry taller than its line): the candidate
 # window goes to the field's middle, where GTK draws the line, not its top.
 has "a caret taller than a line: its middle" "$(body "$src" 'static NSRect omacvm_ime_caret(void)')" 'r.origin.y = NSMidY(r) - 20;'
+# Only the guest's field gone: the context goes off 0.2 s later, unless it comes back (#357).
+up=$(body "$src" 'static void omacvm_ime_update(void)')
+has "the input method off later when only the guest's field went" "$up" 'if (!active && omacvm_ime_off_later(&omacvm_ime)) {'
+has "... a later off only for that change" "$up" 'if (gen == omacvm_ime_off_gen) {'
+has "... else at once" "$up" '} else if (!active) {'
 exit $fail
