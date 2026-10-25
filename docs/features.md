@@ -7,7 +7,7 @@ The short version is the grid at the top of the [README](../README.md).
 | **The bar beside the notch** | With [Omanotch](../src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. The bar is as tall as macOS's menu bar, or exactly as tall as the notch (`defaults write ch.gillesgoetsch.omanotch flush -bool true`). OmacVM.app too: its full screen has a Space of its own, below the camera, and Omanotch fills the strip (on by default for new VMs on a Mac with a notch) |
 | **Full screen including notch** *(experimental, OmacVM.app, off by default)* | The VM uses the whole built-in display, including the strip beside the camera notch, and draws its bar there itself, split around the notch; Omanotch is not needed for this. Per VM: **Start in** > **Full screen including notch, no Omanotch needed (experimental)** in the app's VM window, `omacvm fullscreen --vm NAME notch` or the control centre. External displays stay as they are ([more](#full-screen-including-notch)) |
 | **Skip the notch** *(OmacVM.app, off by default)* | On the bar beside the notch, items that don't fit on their side continue on its other side, in the same order, instead of going behind the notch. They only hide when both sides are full. Either full screen; external displays keep their bar. **Display** > **Skip the notch** in the app's VM window (its (i) shows a picture), `omacvm notch --vm NAME --skip on` or the control centre |
-| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥ Esc takes you back to macOS, and from macOS back into the VM. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
+| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. With macOS's Three Finger Drag on, three fingers drag as in macOS and four switch workspaces. ⌃⌥ Esc takes you back to macOS, and from macOS back into the VM. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling on a trackpad in every direction with your Mac's own acceleration and momentum, pinch included; mice scroll one to one. On by default ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
 | **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
@@ -23,6 +23,7 @@ The short version is the grid at the top of the [README](../README.md).
 | **Night Shift and True Tone** | The Mac's Night Shift in Omarchy's bar, with Omarchy's own night light icon, lit while it is on. A click opens a panel like Omarchy's own: Night Shift, its strength and True Tone, all on the Mac (Super+Ctrl+N switches Night Shift directly). It replaces Omarchy's own night light, so the screen is never tinted twice |
 | **Wallpaper follows the theme** | Switch Omarchy's theme or background and the Mac's desktop wallpaper follows, on every Space (macOS also shows it behind its own lock screen) |
 | **The Mac's clock** | Omarchy's clock at the far right of the bar, in your Mac's menu bar format (day, date, 12 or 24 hours, seconds, language) |
+| **The Mac's time zone** *(with the Bridge)* | The VM's time zone follows the Mac's: at every start and when the Mac's changes (you travel). A zone you set in the VM yourself is kept; set it back to the Mac's and it follows again |
 | **The Mac's battery** | On a MacBook, Omarchy's battery icon and panel show the Mac's charge and charging, as on a laptop, plus time left and Omarchy's low-battery warning (not tested yet with the Mac on battery; the VM never suspends for it). Parallels does this itself; OmacVM adds it on UTM, VMware Fusion and OmacVM.app |
 | **Your keyboard layout** | Taken from the Mac |
 | **Chromium video on the Mac** *(OmacVM.app, on by default)* | Omarchy's own Chromium decodes H.264 and VP9 (YouTube included) on the Mac's media engine, as Google Chrome and Brave do on their own: YouTube 4K takes about half the CPU it takes otherwise. A small kernel module and a sandboxed decoder service in the VM; a video it cannot take plays on the CPU. Off: `omacvm disable chromium-video` ([details](video-decode.md#chromium-from-arch-linux-arm)) |
@@ -149,7 +150,7 @@ globeKeyToVM -bool false` and a VM restart leave it with macOS.
 
 **⌃⌥ Esc** (Control + Option + Escape) in the VM takes you
 straight back to macOS: the trackpad and keys go back to macOS and the
-monitor under the pointer moves to the Space beside the VM's, toward the one
+focused monitor moves to the Space beside the VM's, toward the one
 you came from, with macOS's own "Move left/right a space" shortcut (System
 Settings › Keyboard › Keyboard Shortcuts › Mission Control; ⌃← and ⌃→
 unless you changed them) and its own animation. The VM stays full screen in
@@ -161,8 +162,11 @@ a swipe or Mission Control works as well. Press **⌃⌥ Esc twice** quickly
 Mission Control, Esc closes it, and one **⌃⌥ Esc** closes it and takes you
 back into the VM.
 
-OmacVM.app's **Escape combo** setting: *Focused monitor* (the one under the
-pointer, the default) or *All monitors*, every monitor that shows the VM. For
+OmacVM.app's **Escape combo** setting: *Focused monitor* (the default) or
+*All monitors*, every monitor that shows the VM. The focused monitor is the
+one you work on in the VM: with the VM full screen on several monitors in
+OmacVM.app, the one with Omarchy's focus (also when you moved there with the
+keyboard and the pointer stayed behind), else the one under the pointer. For
 every route also in the control centre (the VM's `omacvm`, rows *Escape
 combo*, *Magic Mouse swipe*, *Swipe out to macOS*) and on the Mac with
 `omacvm gestures escape all` (or `pointer`); the same setting everywhere.
@@ -174,6 +178,9 @@ If the shortcut is off or did not move the Space (macOS 15 ignores it on a
 MacBook's built-in display), OmacVM swipes the Space like a trackpad. If that
 did not move it either, or macOS gives no Spaces information, nothing else
 happens (no notice); the trackpad is macOS's, so a swipe still works.
+A monitor other than the one under the pointer (the focused monitor elsewhere,
+or *All monitors*) is always swiped: the shortcut from OmacVM moves only the
+monitor the pointer is on.
 Back in, if the shortcut does not land, the VM's window comes to the front
 and macOS shows its Space.
 

@@ -285,11 +285,17 @@ jobs:
       - name: Battery watts and time left (Mac snapshot, VM agent, module on a kernel stand-in)
         run: src/tests/battery.sh
 
+      - name: The VM's time zone follows the Mac's (agent on a stand-in for /, a zone set by hand kept)
+        run: src/tests/timezone.sh
+
       - name: Gestures offline test (which VM gets them)
         run: src/gestures/mac/test.sh
 
       - name: Bridge offline tests (media-key tap, where each media key goes, Wi-Fi state)
         run: src/bridge/mac/test-models.sh
+
+      - name: Camera picked again after the lid closed, an unplug or no picture (a camera stand-in)
+        run: src/bridge/mac/test-camera.sh
 
       - name: Bridge wallpaper store (embedded image URLs, no desktop changes)
         run: src/bridge/mac/test-wallpaper.sh
