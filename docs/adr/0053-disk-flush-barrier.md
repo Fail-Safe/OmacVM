@@ -1,4 +1,4 @@
-# 0051: A guest disk flush is a write barrier on the Mac's drive
+# 0053: A guest disk flush is a write barrier on the Mac's drive
 
 Status: accepted, built (`disk`, 3.2.1).
 

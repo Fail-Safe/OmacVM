@@ -412,7 +412,7 @@ OmacVM.app (QEMU's window code, mac-ime on only): ◀▶ Omarchy's Fcitx5 + Omac
   waited for (at most a minute together); `@factory` stays (factory reset). Check line "freeing disk space";
   `src/tests/disk-space.sh`.
   OmacVM.app's QEMU turns each guest flush into `fcntl(F_BARRIERFSYNC)`
-  (`qemu-darwin-disk-flush-barrier.patch`, ADR 0051; `OMACVM_DISK_FLUSH=full|fsync`), qemu.log
+  (`qemu-darwin-disk-flush-barrier.patch`, ADR 0053; `OMACVM_DISK_FLUSH=full|fsync`), qemu.log
   "OmacVM: disk flush: ...", check line "disk flush"; `src/tests/disk-flush.sh`,
   `app/runtime/Tests/disk/test-flush.sh`.
 - Kernel: stock `linux-aarch64`, booted as `/boot/vmlinuz-linux` (a copy of

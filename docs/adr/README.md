@@ -37,6 +37,6 @@ a new record replaces it and says so.
 | [0048](0048-freed-space-back-to-the-mac.md) | What the VM frees goes back to the Mac; 2 update snapshots instead of omarchy-mac's 5, a trim at every full apply | accepted, built (`disk`, `disk-followup`) |
 | [0049](0049-hdr-guest-tone-maps.md) | HDR and 10-bit colour: the guest tone-maps into the Mac's headroom, its 10-bit driver loaded only per start | accepted, built (`hdr`), off by default |
 | [0050](0050-extra-brightness.md) | Extra brightness: QEMU draws the VM's frames up to 2x on an XDR display, live from the app's switch; it wins over HDR while on | accepted, built (`extraBrightness`), off by default |
-| [0051](0051-disk-flush-barrier.md) | A guest disk flush is a write barrier on the Mac's drive (F_BARRIERFSYNC), so a power cut leaves the VM's file system whole | accepted, built (`disk`, 3.2.1) |
+| [0053](0053-disk-flush-barrier.md) | A guest disk flush is a write barrier on the Mac's drive (F_BARRIERFSYNC), so a power cut leaves the VM's file system whole | accepted, built (`disk`, 3.2.1) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

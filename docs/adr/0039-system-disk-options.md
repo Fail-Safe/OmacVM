@@ -14,7 +14,7 @@ On macOS, QEMU's raw file code (block/file-posix.c, QEMU 11.1.1):
 - `aio=threads` is the only choice (native and io_uring are Linux-only).
 - A guest flush becomes `fdatasync()`/`fsync()`, not `F_FULLFSYNC`: about
   70 µs, so flushes are cheap with `cache=writeback`. (Since 3.2.1 it is
-  `F_BARRIERFSYNC`: ADR 0051.)
+  `F_BARRIERFSYNC`: ADR 0053.)
 - Discard becomes `fcntl(F_PUNCHHOLE)`: APFS frees the space, 4 KiB at a time.
 - Write-zeroes has no macOS path (ENOTSUP), so QEMU writes real zeros:
   `detect-zeroes=unmap` cannot make holes.
