@@ -570,7 +570,7 @@ jobs:
       - name: Sound does not hang on Chromium's video decoder (WirePlumber rule, install order, off); its device starts the daemon
         run: src/tests/vdec-wireplumber.sh
 
-      - name: The 10-bit virtio-gpu driver loads only for a start that asks, else the stock one (loader, modprobe rule, builder; offline)
+      - name: OmacVM's virtio-gpu driver loads when it adds the damage fix or a start asks, else the stock one (loader, modprobe rule, builder; offline)
         run: src/tests/virtio-gpu-load.sh
 
       - name: Chromium's no-AV1 extension survives an apply of other features (its place, 3.1.4's path moved, check)
@@ -703,7 +703,7 @@ jobs:
       - name: omarchy-mac's ARM package targets that Omarchy's repo has (bash 5, as in the VM)
         run: src/tests/omarchy-targets.sh
 
-      - name: The 10-bit virtio-gpu driver's loader and builder on Linux (GNU tools, as in the VM)
+      - name: OmacVM's virtio-gpu driver's loader and builder on Linux (GNU tools, as in the VM)
         run: src/tests/virtio-gpu-load.sh
 
       - name: OmacVM.app's hyprpicker patch applies and leaves no buffer files in the runtime folder
