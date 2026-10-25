@@ -271,8 +271,11 @@ cc() {   # ARGS...: guest-cc.py in the VM. Sets CCJ (its JSON, kept as $OUT/cc-<
   # (a short line); call it directly, never in $(...): the two would be lost with the subshell.
   CCN=$(( ${CCN:-0} + 1 ))
   CCJ=$OUT/${PFX}cc-$CCN-$1.json
-  local q="" a rc
-  for a in "$@"; do q+=" $(printf '%q' "$a")"; done
+  local q="" a rc r="'\\''"
+  # Each argument in single quotes, its bytes as they are: bash 3.2's printf %q
+  # writes a byte of some characters on its own (… = E2 '\200' A6), and that
+  # line in ssh's arguments here is not UTF-8 (#545).
+  for a in "$@"; do a=${a//\'/$r}; q+=" '$a'"; done
   gssh "python3 /var/lib/omacvm-e2e/guest-cc.py$q" > "$CCJ" 2> "$CCJ.err"
   rc=$?
   CCS=$(/usr/bin/python3 - "$CCJ" <<'PY'

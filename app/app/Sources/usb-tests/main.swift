@@ -46,6 +46,13 @@ let iphone = dev(0x05ac, 0x12a8, "iPhone", drivers: ["AppleUSBHostiOSDevice"], [
     I(number: 1, interfaceClass: 0xff, users: ["usbmuxd"]),
 ])
 expect(iphone.availability == .usedByMac("macOS uses it (iPhone, iPad or photo import)"), "an iPhone stays with the Mac")
+// Personal Hotspot over the cable, no photo import open: its own driver still names it.
+let iphoneNet = dev(0x05ac, 0x12a8, "iPhone", drivers: ["AppleUSBHostiOSDevice"], [
+    I(number: 0, interfaceClass: 2, users: ["AppleUSBNCMControl"]),
+    I(number: 1, interfaceClass: 0xff, users: ["usbmuxd"]),
+])
+expect(iphoneNet.availability == .usedByMac("macOS uses it (iPhone, iPad or photo import)"),
+       "an iPhone with its network on stays an iPhone")
 let cam = dev(0x03e7, 0xf63d, "Opal C1", cls: 0xef, [
     I(number: 0, interfaceClass: 0xff, users: []),
     I(number: 1, interfaceClass: 0x0e, users: ["UVCAssistant"]),
@@ -77,6 +84,23 @@ let stick = dev(0x0781, 0x5581, "Ultra", [I(number: 0, interfaceClass: 8, users:
 expect(stick.availability == .usedByMac("macOS uses it as a disk"), "a USB stick stays with the Mac")
 let ftdi = dev(0x0403, 0x6001, "FT232R USB UART", [I(number: 0, interfaceClass: 0xff, users: ["AppleUSBFTDI"])])
 expect(ftdi.availability == .usedByMac("macOS uses it as a serial port"), "an FTDI serial adapter stays with the Mac")
+// A Mac on a USB-C cable (macOS's NCM network), as the IORegistry showed it on the Mac mini (2026-10-25): the
+// CDC composite driver on the device, the network drivers on its interfaces.
+let macCable = dev(0x05ac, 0x1905, "Mac", drivers: ["AppleUSBCDCCompositeDevice"], [
+    I(number: 0, interfaceClass: 2, users: ["AppleUSBNCM11Control"]), I(number: 1, interfaceClass: 0x0a, users: []),
+    I(number: 2, interfaceClass: 2, users: ["AppleUSBNCM11Control"]), I(number: 3, interfaceClass: 0x0a, users: []),
+])
+expect(macCable.availability == .usedByMac("macOS uses it as a network adapter"),
+       "a Mac on a USB-C cable (NCM) is a network adapter, not a serial port")
+let ecm = dev(0x0bda, 0x8153, "USB 10/100/1000 LAN", drivers: ["AppleUSBCDCCompositeDevice"], [
+    I(number: 0, interfaceClass: 2, users: ["AppleUSBCDCECMControl"]), I(number: 1, interfaceClass: 0x0a, users: ["AppleUSBCDCECMData"]),
+])
+expect(ecm.availability == .usedByMac("macOS uses it as a network adapter"), "an ECM network adapter is a network adapter")
+let acm = dev(0x2341, 0x0043, "Arduino Uno", drivers: ["AppleUSBCDCCompositeDevice"], [
+    I(number: 0, interfaceClass: 2, users: ["AppleUSBCDCACMControl"]), I(number: 1, interfaceClass: 0x0a, users: ["AppleUSBCDCACMData"]),
+])
+expect(acm.availability == .usedByMac("macOS uses it as a serial port"), "a CDC ACM board is a serial port")
+expect(USBDevice.reason("SyncMate") == "in use on the Mac (SyncMate)", "an app name with ncm in it is not a network adapter")
 let driverOnDevice = dev(0x1234, 0x5678, "Thing", drivers: ["SomeVendorDriver"], [I(number: 0, interfaceClass: 0xff, users: [])])
 expect(driverOnDevice.availability == .usedByMac("in use on the Mac (SomeVendorDriver)"), "a driver on the device itself counts")
 expect(USBDevice.ignoredDeviceChild(className: "AppleUSBHostCompositeDevice")
@@ -238,6 +262,74 @@ expect(USBQMP.attach(boardA, over: sq, wait: { _ in }) == .failed("QEMU did not 
        "attach: info usb never answers: removed again, QEMU's failure (not \"a Mac app is using it\")")
 fq.addFails = "QMP command device_add failed: failed to open host usb device 1:0"
 expect(USBQMP.attach(boardA, over: fq, wait: { _ in }) == .busy, "device_add refused (macOS has it): busy")
+fq.addFails = nil
+// #526: device_add gets no answer in time (a slow device), but QEMU adds it
+// after all. The app must never report "not connected" for a device the VM has.
+final class LateQMP: USBQMPTransport {
+    var sent: [String] = []
+    var attached = Set<String>()
+    var lands = true          // QEMU finishes the add after the app gave up waiting
+    var busyChecks = 0        // info usb calls that get no answer first (QEMU still busy adding)
+    var notSent = false       // the connection failed before device_add went out
+    func execute(_ command: String, _ arguments: [String: Any]?) throws -> [String: Any] {
+        sent.append(command)
+        let id = arguments?["id"] as? String ?? ""
+        switch command {
+        case "device_add":
+            if notSent { throw NSError(domain: "qmp", code: 3, userInfo: [NSLocalizedDescriptionKey: "cannot connect to QMP socket"]) }
+            if lands { attached.insert(id) }
+            throw USBQMPNoAnswer("QMP command device_add timed out")
+        case "device_del":
+            guard attached.remove(id) != nil else {
+                throw NSError(domain: "qmp", code: 1, userInfo: [NSLocalizedDescriptionKey: "QMP command device_del failed: Device '\(id)' not found"])
+            }
+            return [:]
+        default:
+            if busyChecks > 0 {
+                busyChecks -= 1
+                throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "QMP socket did not send a valid greeting"])
+            }
+            return ["text": attached.map { "  Device 0.1, Port 1, Speed 12 Mb/s, Product X, ID: \($0)" }.joined(separator: "\n")]
+        }
+    }
+}
+// A clock the waits move on (each look against a busy QEMU also takes time).
+final class TestClock { var t = 0.0 }
+func lateAttach(_ q: LateQMP, lookTakes: Double = 0) -> USBAttachResult {
+    let c = TestClock()
+    return USBQMP.attach(boardA, over: q, wait: { c.t += $0 + lookTakes }, now: { c.t })
+}
+let lq = LateQMP()
+let lateResult = lateAttach(lq)
+expect(lateResult == .attached && lq.attached == ["usbh-01100000"],
+       "#526: device_add got no answer but QEMU added it: info usb lists it, so it is connected (\(lateResult))")
+let lq2 = LateQMP()
+lq2.busyChecks = 6
+let busyResult = lateAttach(lq2)
+expect(busyResult == .attached && lq2.attached == ["usbh-01100000"],
+       "#526: QEMU busy with the add for a while (info usb no answer 6 times), then lists it: connected (\(busyResult))")
+let lq3 = LateQMP()
+lq3.lands = false
+let lostResult = lateAttach(lq3)
+expect(lostResult == .busy && lq3.attached.isEmpty && lq3.sent.last == "device_del"
+       && lq3.sent.filter { $0 == "human-monitor-command" }.count == 10,
+       "#526: device_add without an answer, info usb never lists it: 10 looks, removed again in case it lands, busy: QEMU answered, so the add was refused (macOS has it) (\(lostResult))")
+let lq4 = LateQMP()
+lq4.busyChecks = 1000
+let deadResult = lateAttach(lq4, lookTakes: 2)
+let deadLooks = lq4.sent.filter { $0 == "human-monitor-command" }.count
+expect(deadResult == .failed("QEMU did not answer") && lq4.sent.last == "device_del" && deadLooks <= 4,
+       "#526: QEMU answers nothing, each look takes 2 s: given up after \(USBQMP.lateWait) s (\(deadLooks) looks), removed again")
+let lq5 = LateQMP()
+lq5.notSent = true
+let notSentResult = lateAttach(lq5)
+expect(notSentResult == .failed("Error Domain=qmp Code=3 \"cannot connect to QMP socket\" UserInfo={NSLocalizedDescription=cannot connect to QMP socket}")
+       && lq5.sent == ["device_add"],
+       "#526: a device_add that never reached QEMU: its own error at once, no looks (\(notSentResult))")
+let lq6 = LateQMP()
+lq6.busyChecks = 15
+let slowResult = lateAttach(lq6, lookTakes: 0.1)
+expect(slowResult == .attached, "#526: QEMU answers info usb only after 5.6 s, then lists it: still within the wait, connected (\(slowResult))")
 
 // MARK: The session, on fakes (no device, no VM, no window)
 final class FakeMachine: USBMachine {

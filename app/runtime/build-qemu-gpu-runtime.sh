@@ -656,6 +656,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-playback-th
 # OmacVM: the main loop (sound card timers, virgl) at user-interactive QoS, so a
 # busy guest on a busy Mac no longer delays it and the sound stays clean.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-main-loop-qos.patch"
+# OmacVM: a guest disk flush is a write barrier on the Mac's drive
+# (F_BARRIERFSYNC; OMACVM_DISK_FLUSH=full|fsync), so a power cut cannot leave
+# the guest's file system half written.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-disk-flush-barrier.patch"
+"$native_dir/Tests/disk/test-flush.sh" "$source_dir" "$work_dir/disk-tests"
 # OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
 # OmacVM tests: OMACVM_COCOA_HIDDEN=1 (no window), OMACVM_BACKGROUND=1 (window
@@ -991,6 +996,22 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-extra-brightn
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-extra-brightness.patch"
 "$native_dir/Tests/display/test-extra-brightness.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: extra brightness is not wired as tested (test-extra-brightness.sh)"
+# OmacVM: partial present: only the box the guest changed since a surface's last
+# draw is drawn into it again (the guest's flush rects; Linux 7.4 or OmacVM's
+# virtio-gpu driver sends them). Its rules' test, then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damage-logic.patch"
+"$native_dir/Tests/display/test-present-damage.sh" --self-test "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a partial present wiring check passes without the patch (test-present-damage.sh)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damage.patch"
+"$native_dir/Tests/display/test-present-damage.sh" || \
+  die "the partial present's rules fail their test (test-present-damage.sh)"
+"$native_dir/Tests/display/test-present-damage.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the partial present is not wired as tested (test-present-damage.sh)"
+# OmacVM: the window's 8-bit surfaces lossless-compressed ('&BGA'): QEMU's draw
+# and WindowServer's composite move fewer bytes; plain surfaces after a failure.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-lossless.patch"
+"$native_dir/Tests/display/test-present-lossless.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the lossless surfaces are not wired as tested (test-present-lossless.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
@@ -1293,6 +1314,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-view-swizzle-share
 # OmacVM: only the decoded picture of an AV1 or VP9 frame is copied (VideoToolbox's AV1 frame is as
 # large as Mesa's surface: its extra rows showed as a green bar in Chrome's hardware decoding).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-video-picture-size.patch"
+# OmacVM: decoded pictures finish beside QEMU's GPU thread (it waited for the media engine on every
+# picture: Chrome's 4K hardware decoding dropped frames); planes and fences wait for their pictures.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-decode-async.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.

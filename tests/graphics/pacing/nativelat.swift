@@ -2,8 +2,15 @@
 // (layer-backed, as a native app draws) that changes its picture on each key down and each mouse move.
 // inputlat measures it like the VM's window (same events, same capture), so the difference is what the
 // VM adds. The events are taken in NSApplication.sendEvent, as QEMU takes them (an app in the background
-// has no key window). Never takes the focus; quits after SECONDS.
+// has no key window). Never takes the focus; quits after SECONDS. Prints "key T", "move T" (the
+// event reached the app) and "drew T" (the view drew the change) in wall-clock microseconds, for
+// input-latency-vm.sh's breakdown.
 import AppKit
+
+func mark(_ what: String) {
+  var tv = timeval(); gettimeofday(&tv, nil)
+  print(what, Int64(tv.tv_sec) * 1_000_000 + Int64(tv.tv_usec)); fflush(stdout)
+}
 
 // Keys flip the whole window; moves flip a square in the lower right corner, outside the part
 // inputlat's keymove looks at (so moves make a native app redraw every frame, as in the VM).
@@ -12,6 +19,7 @@ final class Probe: NSView {
   let square = CALayer()
   override var wantsUpdateLayer: Bool { true }
   override func updateLayer() {
+    mark("drew")
     layer?.backgroundColor = (flip ? NSColor.white : NSColor.black).cgColor
     if square.superlayer == nil { layer?.addSublayer(square) }
     square.frame = CGRect(x: bounds.width * 0.75, y: bounds.height * 0.05, width: bounds.width * 0.2, height: bounds.height * 0.2)
@@ -24,8 +32,8 @@ final class Probe: NSView {
 var probe: Probe?
 final class App: NSApplication {
   override func sendEvent(_ e: NSEvent) {
-    if e.type == .keyDown { probe?.toggle() }
-    if e.type == .mouseMoved { probe?.move() }
+    if e.type == .keyDown { mark("key"); probe?.toggle() }
+    if e.type == .mouseMoved { mark("move"); probe?.move() }
     super.sendEvent(e)
   }
 }

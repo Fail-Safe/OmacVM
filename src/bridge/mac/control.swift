@@ -222,12 +222,13 @@ final class Control {
     // Graphics memory is asked every 2 s while the control centre is open:
     // its answers are not logged (refusals still are).
     var quiet = false
-    func answer(_ code: Int, _ obj: [String: Any], _ note: String = "") {
+    func answer(_ code: Int, _ obj: [String: Any], _ note: String = "", key: String? = nil) {
       let line = "control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))"
       // Refusals once a minute per address, VM and reason: a guest that
       // floods (or any guest, from addresses of its own) must not fill the
       // log the report reads.
-      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(note)", line) } else if !quiet { log(line) }
+      // (One key with and without "looking again", and for any SSH error text.)
+      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(key ?? note.replacingOccurrences(of: lookingText, with: ""))", line) } else if !quiet { log(line) }
       guard let s = signer else { return respond(fd, code, obj) }
       let data = jsonData(obj) + Data("\n".utf8)
       let sig = answerMAC(key: s.key, nonce: s.nonce, status: code, body: data)
@@ -235,7 +236,8 @@ final class Control {
       close(fd)
     }
     func refuse(_ e: PolicyError, _ extra: [String: Any] = [:]) {
-      answer(e.status, ["error": e.message, "code": e.code].merging(extra) { a, _ in a }, e.code)
+      // Logged once a minute per VM, code and reason.
+      answer(e.status, ["error": e.message, "code": e.code].merging(extra) { a, _ in a }, refusalNote(e), key: refusalLogKey(e))
     }
 
     let cli: String
@@ -277,8 +279,10 @@ final class Control {
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
         return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
       }
+      vmName = name   // the VM the app named, also in the log of a refusal
       let ssh = routeNeedsSSH(route)
-      switch vmForApp(name, vmList(cli, fresh: fresh, every: VMListCache.appEvery, key: "app/" + name, listed: { appVMListed(name, $0) }) {
+      switch vmForApp(name, vmList(cli, fresh: fresh, every: VMListCache.appEvery, key: "app/" + name, listed: { appVMListed(name, $0) },
+                        ready: { appVMReady(name, $0) }) {
                         if case .success = vmForApp(name, $0, ssh: ssh) { return true }; return false }, ssh: ssh) {
       case .success(let v): vm = v
       case .failure(let e): return refuse(lookingAgain(e), looking(e))
@@ -286,7 +290,8 @@ final class Control {
       viaApp = true
       if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
     } else {
-      switch vmForPeer(peer, vmList(cli, fresh: fresh, key: "address " + peer, listed: { peerListed(peer, $0) }) {
+      switch vmForPeer(peer, vmList(cli, fresh: fresh, key: "address " + peer, listed: { peerListed(peer, $0) },
+                         ready: { peerReady(peer, $0) }) {
                          if case .success = vmForPeer(peer, $0) { return true }; return false }) {
       case .success(let v): vm = v
       case .failure(let e): return refuse(lookingAgain(e), looking(e))
@@ -460,9 +465,9 @@ final class Control {
   /// background when it is due (`fresh` false: never for its age).
   /// `listed`: the list has it as running, but it is refused (the Mac cannot
   /// reach it, or OmacVM did not set it up; one that just started again): a
-  /// run at most every VMListCache.refusedEvery (a guest asking again and
-  /// again never makes the Bridge probe every VM each second), waited for as
-  /// below while it goes; else the cache at once. A VM
+  /// run at once, then backing off (VMListCache.refused: a guest asking again
+  /// and again never makes the Bridge probe every VM each second), waited for
+  /// as below while it goes; else the cache at once. A VM
   /// it does not have (or has as not running): a fresh run first (at most
   /// once per `every` seconds), waited for up to VMListCache.unknownWait
   /// (`fresh` false: not waited for, graphics memory is asked every 2 s with
@@ -470,10 +475,10 @@ final class Control {
   /// is found by that run instead of a minute later.
   private func vmList(_ cli: String, fresh: Bool = true, every: Double = VMListCache.addressEvery,
                       wait: Double = VMListCache.unknownWait, key: String, listed: ([VMEntry]) -> Bool,
-                      known: ([VMEntry]) -> Bool) -> [VMEntry] {
+                      ready: ([VMEntry]) -> Bool, known: ([VMEntry]) -> Bool) -> [VMEntry] {
     let (list, start, waitFor) = q.sync { () -> ([VMEntry], Bool, Int?) in
       if known(vms.list) {
-        vms.reached(key: key)
+        if ready(vms.list) { vms.reached(key: key) }
         return (vms.list, fresh && vms.shouldRefresh(known: true, now: Date()), nil)
       }
       if listed(vms.list) { let r = vms.refused(key: key, now: Date()); return (vms.list, r.start, r.waitFor) }
@@ -484,7 +489,10 @@ final class Control {
     if start { refreshVMs(cli) }
     guard fresh, let n = waitFor else { return list }
     waitForRun(n, until: Date().addingTimeInterval(wait))
-    return q.sync { vms.list }
+    return q.sync { () -> [VMEntry] in
+      if ready(vms.list) { vms.reached(key: key) }   // the look found it: its back-off starts over
+      return vms.list
+    }
   }
 
   /// Signalled when a run of the VM list ends (refreshVMs).
@@ -602,13 +610,15 @@ final class Control {
         let cli: String
         switch controlCLI() { case .success(let c): cli = c; case .failure(let e): return (nil, nil, nil, e, asked) }
         // Touch ID needs no SSH to the VM: one the Mac cannot reach just now still gets it.
-        found = vmForApp(name, vmList(cli, every: VMListCache.appEvery, wait: touchIDListWait, key: "app/" + name, listed: { appVMListed(name, $0) }) {
+        found = vmForApp(name, vmList(cli, every: VMListCache.appEvery, wait: touchIDListWait, key: "app/" + name, listed: { appVMListed(name, $0) },
+                        ready: { appVMReady(name, $0) }) {
           if case .success = vmForApp(name, $0, ssh: false) { return true }; return false }, ssh: false)
       }
     } else {
       let cli: String
       switch controlCLI() { case .success(let c): cli = c; case .failure(let e): return (nil, nil, nil, e, nil) }
-      found = vmForPeer(peer, vmList(cli, wait: touchIDListWait, key: "address " + peer, listed: { peerListed(peer, $0) }) {
+      found = vmForPeer(peer, vmList(cli, wait: touchIDListWait, key: "address " + peer, listed: { peerListed(peer, $0) },
+                         ready: { peerReady(peer, $0) }) {
         if case .success = vmForPeer(peer, $0) { return true }; return false })
     }
     switch found { case .success(let v): vm = v; case .failure(let e): return (nil, nil, nil, lookingAgain(e), asked) }

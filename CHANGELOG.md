@@ -3,6 +3,106 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.2 (unreleased)
+
+- **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has
+  odd characters in its command line.** omacvm reads the Mac's process list to find the VM's
+  QEMU. One line that is not UTF-8 (a file name in an old encoding, binary arguments) made
+  macOS's awk stop there, so omacvm missed the VM after it: a control centre switch then tried to
+  start the running VM and ended with "did not get an address" (#545; found in the 3.2.1 test on
+  a MacBook Air). The same line made `pgrep -f` fail, so `omacvm check` could miss a running
+  Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
+  download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
+  Mac.
+
+- **Control centre switches right after another one are not turned away.** When a switch's job
+  ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
+  switch was refused with "unknown VM" at once and the control centre asked again, so that switch
+  took about 12 s instead of 7-9 s (#528; reproduced in a test VM 3 of 3 times). The Bridge now looks again
+  at once and waits for it (about 1 s), then backs off as before when the VM stays out of reach.
+  Its log also says why it did not take a VM (not running, not set up, the SSH error) and which
+  VM the app named. Needs `omacvm update` (or the app's update) on the Mac.
+
+- **USB devices** (experimental): a device that QEMU took longer than 3 s to add was reported as
+  not connected, but the VM often got it anyway: QEMU finished the add after the app had stopped
+  waiting (#526; 6 of 6 times against a real QEMU). The app now waits up to 15 s for QEMU's
+  answer, and without one asks QEMU which devices the VM has: one QEMU added late counts as
+  connected, one it does not have is removed again. Needs the app update.
+
+- **Mac input methods** (experimental): the Mac's input method stays on while the VM moves the
+  keyboard focus for a moment. Each time a text field in the VM lost the focus, the Mac switched
+  its input method off at once, and on again with the next key; in the debug capture from
+  @Vocllum (#357) the terminal lost and took its focus right after Enter, and WeChat Input typed
+  English from then on without a Shift tap. When only the VM's field goes (the VM keeps the
+  keyboard), the input method now goes off 0.2 s later, and not at all when a field takes the
+  focus again within that time. Keys still go to the VM as keys while no field has the focus, and
+  what was marked is still dropped when the field goes. A Shift tap within those 0.2 s still reaches the
+  input method and can switch its mode. Not tried with WeChat Input itself (no
+  test Mac has it). Needs the app update.
+
+## 3.2.1
+
+Google Chrome plays 1440p and 4K video on the Mac's media engine, call tiles show the whole picture,
+the VM's window takes less power on macOS 27, the VM's disk is safer at a power cut, and volume 0 is
+silent.
+
+- **Google Chrome plays 1440p and 4K video on the Mac's media engine.** The Mac's graphics
+  thread for the VM, which runs every app's drawing in it, waited for the media engine on each
+  picture (about 5 ms for a 4K one on a MacBook Air M2, 3 ms on an M4 Max). Above 1080p Chrome's
+  own drawing and the desktop's waited behind it, so the media engine dropped many more frames
+  than Chrome's CPU decoders (YouTube 4K: 38 % against 7 % on the Air, 13-20 % against 8 % on a
+  MacBook Pro M4 Max), and 3.2.0 kept 1440p and 4K on the CPU. Pictures now finish beside that
+  thread, and Chrome's decoder waits for each one instead of the thread. A 60 fps video in
+  Chrome now drops about as many frames on the media engine as on the CPU at 4K, 1440p and
+  1080p (Air: 0.1-1.2 % against 0.1-1.9 %, M4 Max: 2.3-2.7 % against 1.5-4.1 %), with the VM at
+  0.4 cores instead of 1.0-1.3 on the Air (0.6-0.8 on the M4 Max). 1080p, already on the media
+  engine in 3.2.0, drops fewer frames than before: 0.2-1.2 % against 7-18 % on the Air, 2.3-2.7 %
+  against 5.0-5.6 % on the M4 Max. Needs the app update and Update VM; restart Chrome after it.
+  `OMACVM_VA_MAX=1920` in Chrome's environment keeps 1440p and 4K on the CPU;
+  `OMACVM_VIDEO_DECODE_SYNC=1` in the app's environment brings back 3.2.0's way (the thread
+  waits for each picture, Chrome up to 1080p).
+- **Video call tiles in Google Chrome show the whole picture.** With hardware decoding (3.2.0)
+  a 320x180 tile showed its picture squeezed into the top 168 rows and 12 rows of nothing below
+  it (8 rows at 360p and on 1080p video, a strip on the right of 854-wide video): the VM's
+  video driver rounds Chrome's frames up to a multiple of 16 rows and columns, and Chrome showed
+  the rounded frame as its own size. The VM's VA-API driver now has those frames filled to their
+  rounded size and reads only the picture's part of the decoded planes, so Chrome puts every
+  row where its own CPU decoders do (checked at 320x180, 480x270, 640x360, 854x480 and 1080p in
+  VP9, AV1 and H.264). Only in Chromium-based apps and with Mesa up to 26.2 (a newer Mesa
+  turns it off until it is checked); needs Update VM, then restart Chrome. `OMACVM_VA_FILL=0`
+  in Chrome's environment turns it off.
+- **Less power to show the VM's window (macOS 27).** OmacVM.app now keeps the VM's picture in the
+  Mac's lossless-compressed format, so the Mac's graphics move fewer bytes for every frame: on a MacBook
+  Air M2 scrolling in the VM takes 0.20 W less at 60 Hz (4.45 W instead of 4.65 W, 4 %) and 0.37 W
+  less at 120 Hz (6.18 W instead of 6.55 W, 6 %, on a 120 Hz virtual display); the picture is the same
+  pixel for pixel. A video changes little (its frames compress less). To turn it off:
+  `launchctl setenv OMACVM_GL_LOSSLESS 0`, then quit and reopen the app (`launchctl unsetenv
+  OMACVM_GL_LOSSLESS` turns it on again).
+- **The VM's disk is safer at a power cut.** When Omarchy saves a file for good, the Mac's drive now
+  gets a write barrier: nothing written after it reaches the flash before what came before it.
+  Until now a power cut (a Mac mini or Studio losing power, a held power button) could leave
+  the VM's btrfs half written and unmountable, because macOS's fsync stops at the drive's cache.
+  With the barrier only the last moments before the cut should be lost (a real power cut was not
+  tested). Each synced write costs a little more: 0.25 ms per guest fsync on a MacBook Pro M4 Max,
+  where 200 git commits took 0.97 s instead of 0.70 s; the barrier itself costs 0.2-0.75 ms on the
+  Macs we measured, the most on an M1 Max. Installing 222 packages, git checkouts and big copies
+  took the same time. `omacvm check` shows it as "disk flush". Needs the app update.
+- **Volume 0 is silent.** With a VM in front, the volume-down key to 0 % (or Omarchy's volume
+  slider at 0) set the Mac's volume to 0 but did not mute it, and 0 is not silence on a Mac's
+  speakers: MacBook Pro and Mac mini speakers still play at -63.5 dB there, only 4 dB under the
+  first step. A mute pressed before was cleared by the next volume-down, and 0 stayed unmuted. The
+  Bridge now mutes the Mac's output at 0, as macOS does, and volume up from 0 unmutes it again.
+  Needs `omacvm update` on the Mac (OmacVM.app: the app's update, then Update VM, which installs
+  the new Bridge); nothing changes in the VM.
+- **USB devices** (experimental): the list now says that a USB network adapter, or another Mac on a
+  USB-C cable, is a network adapter that macOS keeps. It said serial port.
+- **Partial present, built, off for now.** OmacVM.app's QEMU draws the whole frame into the window's
+  picture for every frame, also when only the pointer moved. It can now draw only the part the VM says
+  changed. In a bench on a MacBook Air M2 (no VM) the full draw cost 0.19 W at 60 frames a second and
+  0.47 W at 120, a small box a few hundredths. It stays off until a VM run shows it draws right, and it
+  needs a VM that says what changed in its desktop's frames (Linux 7.4, or OmacVM's own driver with
+  that fix). `OMACVM_GL_PRESENT_DAMAGE=1` in the app's environment turns it on for tests.
+
 ## 3.2.0
 
 Chrome decodes video on the Mac's media engine again, ⌃⌥ Esc takes the right display out of the VM, the

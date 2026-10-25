@@ -6,8 +6,9 @@ launchctl bootout gui/$(id -u)/$LABEL 2>/dev/null || true
 # Gone before its permission is reset below (#192: a Bridge from before 3.0.4
 # that lost Accessibility while it ran could hold the Mac's media keys and clicks).
 EXE="$HOME/Applications/OmacVMBridge.app/Contents/MacOS/omacvm-bridge"
-for _ in $(seq 50); do pgrep -f "^$EXE" >/dev/null || break; sleep 0.1; done
-pkill -KILL -f "^$EXE" 2>/dev/null || true
+# LC_ALL=C: in a UTF-8 locale pgrep -f fails on any process line that is not UTF-8 (#545).
+for _ in $(seq 50); do LC_ALL=C pgrep -f "^$EXE" >/dev/null || break; sleep 0.1; done
+LC_ALL=C pkill -KILL -f "^$EXE" 2>/dev/null || true
 rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
 rm -rf "$HOME/Applications/OmacVMBridge.app"
 tccutil reset Accessibility org.omacvm.bridge >/dev/null 2>&1 || true

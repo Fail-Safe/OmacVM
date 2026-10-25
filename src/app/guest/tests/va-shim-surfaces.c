@@ -9,7 +9,8 @@
  * added (Mesa then makes it exportable, with a dma-buf of its real size); imports and
  * surfaces with a memory type of their own pass unchanged; in a Chromium process (a
  * --type= argument) the largest surface size reported for a decoding config is at most
- * OMACVM_VA_MAX (default 1920, 0: Mesa's), for encoding and video processing Mesa's.
+ * OMACVM_VA_MAX (default 1920, or WANT_DEFAULT_MAX: 0 on a runtime that decodes beside its
+ * GPU thread; 0: Mesa's), for encoding and video processing Mesa's.
  * no: everything unchanged.
  */
 #include <dlfcn.h>
@@ -177,8 +178,12 @@ int main(int argc, char **argv)
         unsigned int nq = 8, maxw = 0, maxh = 0, i420 = 0;
         const char *env = getenv("OMACVM_VA_MAX");
         char *end = NULL;
-        unsigned long v = env && *env ? strtoul(env, &end, 10) : 1920;
-        unsigned int want = end && *end ? 1920 : v > 4096 || !v ? 4096 : (unsigned int)v;
+        const char *dflt_env = getenv("WANT_DEFAULT_MAX");
+        unsigned long dflt = dflt_env && *dflt_env ? strtoul(dflt_env, NULL, 10) : 1920;
+        unsigned long v = env && *env ? strtoul(env, &end, 10) : dflt;
+        if (end && *end)
+            v = dflt;
+        unsigned int want = v > 4096 || !v ? 4096 : (unsigned int)v;
 
         if (!yes || !chromium || config)
             want = 4096;
