@@ -21,7 +21,7 @@ mode, the fallbacks, errors kept); the runtime build checks the call is in.
 
 --- a/block/file-posix.c
 +++ b/block/file-posix.c
-@@ -1702,7 +1702,76 @@
+@@ -1702,7 +1702,78 @@
      return 0;
  }
  #endif /* linux */
@@ -60,7 +60,9 @@ mode, the fallbacks, errors kept); the runtime build checks the call is in.
 +
 +static bool omacvm_flush_unsupported(int err)
 +{
-+    return err == ENOTSUP || err == ENOTTY || err == EINVAL;
++    /* ENOTSUP (45) and EOPNOTSUPP (102) are different numbers on macOS */
++    return err == ENOTSUP || err == EOPNOTSUPP || err == ENOTTY ||
++           err == EINVAL;
 +}
 +
 +static int omacvm_darwin_flush(int fd)
@@ -98,7 +100,7 @@ mode, the fallbacks, errors kept); the runtime build checks the call is in.
  static int handle_aiocb_flush(void *opaque)
  {
      RawPosixAIOData *aiocb = opaque;
-@@ -1713,7 +1782,11 @@
+@@ -1713,7 +1784,11 @@
          return -s->page_cache_inconsistent;
      }
  
