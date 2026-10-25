@@ -7,10 +7,12 @@
 # from an older app's hidden one, omacvm.pointerplane=1 from the switch "Pointer
 # on its own layer") and it is built for the running kernel; else, and on any
 # failure, the stock driver. The VM never goes without one.
-# omacvm.pointerplane=1 adds the option cursor_plane=1 (the pointer on the
-# cursor plane), but not with omacvm.hwcursor=1 (the Mac pointer needs the
-# hotspot that this plane does not get). /run/omacvm/virtio-gpu says which:
-# "omacvm" (and the option) or "stock WHY".
+# Each switch adds its own module option: 10-bit deep_color=1 (the 10-bit
+# formats; without it the driver offers what the stock one does), the pointer
+# layer cursor_plane=1, but not with omacvm.hwcursor=1 (the Mac pointer needs
+# the hotspot that this plane does not get). /run/omacvm/virtio-gpu says
+# which: "omacvm" (10-bit) or "omacvm 8-bit", then " cursor_plane=1" with
+# the plane, or "stock WHY".
 #   omacvm-virtio-gpu-load [module options]
 set -u
 umask 022
@@ -27,23 +29,19 @@ say() {
   { mkdir -p "${status%/*}" && printf '%s\n' "$1" > "$status.tmp" && mv -f "$status.tmp" "$status"; } 2>/dev/null
 }
 
-# Why the stock driver, or nothing when this start asks for ours. With
-# omacvm.pointerplane=1 ours gets cursor_plane=1 (opts).
-asked() {
-  local host
-  # The strings follow the SMBIOS structure's formatted area (omacvm-smbios
-  # skips it; a grep over the raw bytes would miss the first string).
-  if ! host=$(python3 -I "$here/../omacvm-smbios" "$P/sys/firmware/dmi/entries" 2>/dev/null); then
-    why="SMBIOS strings unreadable"; return 1
-  fi
-  if grep -qx 'OMACVM_POINTERPLANE=1' <<< "$host" && ! grep -qx 'OMACVM_HWCURSOR=1' <<< "$host"; then
-    opts+=(cursor_plane=1)
-  fi
-  grep -qxE 'OMACVM_(DEEPCOLOR|HDR)=1' <<< "$host" || ((${#opts[@]})) || { why="not asked for this start"; return 1; }
-}
-
-opts=() why=""
-if ! asked; then
+# The strings follow the SMBIOS structure's formatted area (omacvm-smbios
+# skips it; a grep over the raw bytes would miss the first string).
+# deep: 10-bit asked (deep_color=1); plane: the pointer layer asked
+# (cursor_plane=1), never with the Mac pointer.
+deep=0 plane=0 why=""
+if ! host=$(python3 -I "$here/../omacvm-smbios" "$P/sys/firmware/dmi/entries" 2>/dev/null); then
+  why="SMBIOS strings unreadable"
+else
+  grep -qxE 'OMACVM_(DEEPCOLOR|HDR)=1' <<< "$host" && deep=1
+  grep -qx 'OMACVM_POINTERPLANE=1' <<< "$host" && ! grep -qx 'OMACVM_HWCURSOR=1' <<< "$host" && plane=1
+  (( deep || plane )) || why="not asked for this start"
+fi
+if [[ -n $why ]]; then
   :
 elif [[ ! -f $ko ]]; then
   why="not built for $kernel"
@@ -53,8 +51,13 @@ else
   for dep in $(modinfo -F depends "$ko" 2>/dev/null | tr ',' ' '); do
     modprobe -q "$dep" 2>/dev/null
   done
-  if err=$(insmod "$ko" ${opts[@]+"${opts[@]}"} "$@" 2>&1); then
-    say "omacvm${opts[*]:+ ${opts[*]}}"
+  opts=()
+  (( plane )) && opts+=(cursor_plane=1)
+  opts+=("$@")
+  (( deep )) && opts+=(deep_color=1)
+  if err=$(insmod "$ko" ${opts[@]+"${opts[@]}"} 2>&1); then
+    s=omacvm; (( deep )) || s="omacvm 8-bit"; (( plane )) && s+=" cursor_plane=1"
+    say "$s"
     exit 0
   fi
   why="insmod failed: $(printf '%s\n' "$err" | head -1)"

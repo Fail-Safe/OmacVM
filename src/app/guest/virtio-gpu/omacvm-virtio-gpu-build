@@ -1,8 +1,9 @@
 #!/bin/bash
 # OmacVM.app, 10-bit colour (HDR) and the pointer on its own layer: the
-# guest's virtio-gpu driver with 10-bit scanout formats
-# (linux-virtio-gpu-deep-color.patch) and the module option cursor_plane
-# (linux-virtio-gpu-cursor-plane.patch), built for each kernel
+# guest's virtio-gpu driver with two module options: deep_color (10-bit
+# scanout formats, linux-virtio-gpu-deep-color.patch) and cursor_plane
+# (linux-virtio-gpu-cursor-plane.patch); without them it is the stock
+# driver. Built for each kernel
 # into /usr/local/lib/omacvm/virtio-gpu/<kernel>/, where depmod does not see
 # it. It stays dormant: the modprobe rule written here hands virtio_gpu to
 # omacvm-virtio-gpu-load, which loads it only for a VM start with one of the

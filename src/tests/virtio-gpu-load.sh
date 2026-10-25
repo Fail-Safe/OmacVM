@@ -126,16 +126,16 @@ expect "not asked: only the stock driver, with the options" "$STOCK" "$(calls)"
 guest omacvm.deepcolor=1 omacvm.vkwindows=1
 load; expect "asked (the first string), built: exit 0" 0 $?
 expect "asked, built: ours" "omacvm" "$(said)"
-expect "asked, built: its dependencies first, then ours with the options" \
-  "modinfo -F depends $KO;modprobe -q drm;modprobe -q virtio_dma_buf;insmod $KO opt=1;" "$(calls)"
+expect "asked, built: its dependencies first, then ours with the options and deep_color=1" \
+  "modinfo -F depends $KO;modprobe -q drm;modprobe -q virtio_dma_buf;insmod $KO opt=1 deep_color=1;" "$(calls)"
 
 guest omacvm.screen=3024x1964 omacvm.hdr=1
 load; expect "an older app's omacvm.hdr=1: ours" "omacvm" "$(said)"
-has "omacvm.hdr=1: insmod" "insmod $KO opt=1;" "$(calls)"
+has "omacvm.hdr=1: insmod with deep_color=1" "insmod $KO opt=1 deep_color=1;" "$(calls)"
 
 guest omacvm.pointerplane=1 omacvm.screen=3024x1964
-load; expect "pointer on its own layer (omacvm.pointerplane=1): ours, its option said" "omacvm cursor_plane=1" "$(said)"
-has "omacvm.pointerplane=1: insmod with cursor_plane=1, then the given options" "insmod $KO cursor_plane=1 opt=1;" "$(calls)"
+load; expect "pointer on its own layer (omacvm.pointerplane=1): ours at 8 bits, its option said" "omacvm 8-bit cursor_plane=1" "$(said)"
+has "omacvm.pointerplane=1: insmod with cursor_plane=1, then the given options, no deep_color (the stock formats)" "insmod $KO cursor_plane=1 opt=1;" "$(calls)"
 
 guest omacvm.pointerplane=1 omacvm.hwcursor=1
 load; expect "pointer plane with the Mac pointer (needs the hotspot): not ours" "stock not asked for this start" "$(said)"
@@ -146,11 +146,11 @@ load; expect "10-bit, pointer plane and Mac pointer: ours without cursor_plane" 
 
 guest omacvm.deepcolor=1 omacvm.pointerplane=1
 load; expect "10-bit and pointer plane: ours with cursor_plane=1" "omacvm cursor_plane=1" "$(said)"
-has "10-bit and pointer plane: insmod with it" "insmod $KO cursor_plane=1 opt=1;" "$(calls)"
+has "10-bit and pointer plane: insmod with both" "insmod $KO cursor_plane=1 opt=1 deep_color=1;" "$(calls)"
 
 guest omacvm.deepcolor=1
 load; expect "10-bit only: no cursor_plane" "omacvm" "$(said)"
-has "10-bit only: insmod with the given options only" "insmod $KO opt=1;" "$(calls)"
+has "10-bit only: insmod with the given options and deep_color=1" "insmod $KO opt=1 deep_color=1;" "$(calls)"
 
 guest omacvm.pointerplane=0
 load; expect "pointer plane switch off (=0): stock" "stock not asked for this start" "$(said)"
@@ -176,7 +176,7 @@ guest omacvm.deepcolor=1
 FAKE_INSMOD_FAIL=1 load; expect "insmod fails: exit 0 (the stock driver loaded)" 0 $?
 expect "insmod fails: stock, and insmod's message" \
   "stock insmod failed: insmod: ERROR: could not insert module $KO: Invalid module format" "$(said)"
-has "insmod fails: then the stock driver" "insmod $KO opt=1;$STOCK" "$(calls)"
+has "insmod fails: then the stock driver" "insmod $KO opt=1 deep_color=1;$STOCK" "$(calls)"
 
 guest omacvm.deepcolor=1
 rm -rf "$T/root/sys"
@@ -184,7 +184,7 @@ load; expect "no SMBIOS strings at all: stock" "stock not asked for this start" 
 
 guest omacvm.deepcolor=1
 OMACVM_VIRTIO_GPU_TEST_ROOT=$T/root "$LOAD" 2>> "$T/load.err"
-expect "no module options: none passed" "modinfo -F depends $KO;modprobe -q drm;modprobe -q virtio_dma_buf;insmod $KO;" "$(calls)"
+expect "no module options: only deep_color=1" "modinfo -F depends $KO;modprobe -q drm;modprobe -q virtio_dma_buf;insmod $KO deep_color=1;" "$(calls)"
 expect "the loader writes nothing to stderr" "" "$(cat "$T/load.err")"
 
 # ---------- the modprobe rule, as modprobe runs it (sh -c, $CMDLINE_OPTS filled in) ----------
@@ -279,6 +279,12 @@ rm -rf "$B" && mkdir -p "$B/$VG" "$B/lib/modules/$K/kernel"
 cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$B/$VG/"
 builder --hook > /dev/null
 expect "no build anywhere: no modprobe rule" "-" "$([[ -e $RULE ]] && echo rule || echo -)"
+
+# The 10-bit formats only with deep_color=1: a pointer-layer start offers the stock formats.
+DEEP=$(cat "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch")
+has "deep colour: the option, read-only" "module_param_named(deep_color, virtio_gpu_deep_color, bool, 0444);" "$DEEP"
+has "deep colour: the primary plane's 10-bit formats only with it" "} else if (vgdev->has_virgl_3d && virtio_gpu_deep_color) {" "$DEEP"
+has "deep colour: a 10-bit framebuffer only with it" "!(vgdev->has_virgl_3d && virtio_gpu_deep_color &&" "$DEEP"
 
 # The build patches deep colour first, then the cursor plane (that patch's hunks sit on the first one's).
 has "build: the cursor-plane patch after the deep-colour one" "$(printf '  patch -s -d "$3" -p1 -f -i "$patch_file"\n  patch -s -d "$3" -p1 -f -i "$cursor_file"')" "$(cat "$BUILD")"
