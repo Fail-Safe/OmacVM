@@ -1012,6 +1012,15 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damag
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-lossless.patch"
 "$native_dir/Tests/display/test-present-lossless.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the lossless surfaces are not wired as tested (test-present-lossless.sh)"
+# OmacVM: "Pause drawing while hidden" (experimental, off by default): the
+# guest's display agent is told when the main window has been out of sight
+# for 2 s and turns that display off, so the guest stops drawing; seen again,
+# at once, the last picture kept until the guest's first frame. Its rules'
+# test, then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-guest-pause-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-guest-pause.patch"
+"$native_dir/Tests/display/test-guest-pause.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: pausing the guest's drawing is not wired as tested (test-guest-pause.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
