@@ -656,6 +656,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-playback-th
 # OmacVM: the main loop (sound card timers, virgl) at user-interactive QoS, so a
 # busy guest on a busy Mac no longer delays it and the sound stays clean.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-main-loop-qos.patch"
+# OmacVM: a guest disk flush is a write barrier on the Mac's drive
+# (F_BARRIERFSYNC; OMACVM_DISK_FLUSH=full|fsync), so a power cut cannot leave
+# the guest's file system half written.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-disk-flush-barrier.patch"
+"$native_dir/Tests/disk/test-flush.sh" "$source_dir" "$work_dir/disk-tests"
 # OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
 # OmacVM tests: OMACVM_COCOA_HIDDEN=1 (no window), OMACVM_BACKGROUND=1 (window
@@ -1304,6 +1309,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-view-swizzle-share
 # OmacVM: only the decoded picture of an AV1 or VP9 frame is copied (VideoToolbox's AV1 frame is as
 # large as Mesa's surface: its extra rows showed as a green bar in Chrome's hardware decoding).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-video-picture-size.patch"
+# OmacVM: decoded pictures finish beside QEMU's GPU thread (it waited for the media engine on every
+# picture: Chrome's 4K hardware decoding dropped frames); planes and fences wait for their pictures.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-decode-async.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.

@@ -194,6 +194,38 @@ Night run on 2026-10-21, MacBook Pro M1 Max (32 GB, macOS 27.0.1), VM with
   update, OmacVM keeps 2 (`src/guest/disk-space.sh`), and GRUB lists them for
   2 s at every start (grub-btrfsd). `/home` is not in them.
 
+Second round on 2026-10-25, MacBook Pro M4 Max (internal SSD, macOS 27.0.1),
+VM with 4 vCPUs / 4 GB, the VM's own btrfs (`compress=zstd:1`,
+`discard=async`; NVMe queue: scheduler none, 4 queues, read-ahead 128 KiB),
+fio 3.42 with direct I/O on both sides, median of 3. In the VM direct I/O only
+skips the guest's cache: with `cache=writeback` its reads can still come from
+the Mac's file cache (below).
+
+| Test | Mac | VM | VM as % of the Mac |
+|---|---|---|---|
+| Seq write 1M, QD8 | 7161 MB/s | 1237 MB/s | 17 % |
+| Random read 4k, QD32 | 202k IOPS | 91.7k IOPS | 45 % |
+| Random read 4k, QD1 | 15.4k IOPS (60 µs) | 19.6k IOPS (44 µs) | 127 % |
+| Random write 4k, QD32 | 48.1k IOPS | 14.8k IOPS | 31 % |
+| Seq read 1M | 6400 MB/s | 19.7 GB/s | from the Mac's file cache |
+
+- The VM reads faster than the Mac at queue depth 1 and in big reads because
+  `cache=writeback` keeps disk.img in the Mac's file cache: a "cold" start in
+  the VM (its own cache dropped) often reads from the Mac's memory. Cold in the
+  VM: `python3` with four modules 0.06 s, `git status` on 20k files 0.03 s,
+  headless Chromium to its first page 0.19 s.
+- Write speed is btrfs (the raw NVMe disk takes 7 GB/s, ADR 0039), as on the
+  M1 Max.
+- QEMU's side was checked again for this round, nothing better found: aio
+  threads is the only mode on macOS, `cache=none` costs 70 % of random
+  writes, the guest already uses no I/O scheduler, NVMe already has a queue
+  per vCPU; virtio-blk + iothread still waits for its pause hang (ADR 0039).
+- TRIM: deleting 2 GiB and `fstrim /` took disk.img from 14443 to 10531 MiB
+  on the Mac (the trim also returned blocks earlier test runs had freed, whose
+  async discards were lost at power-off: ADR 0048).
+- The guest's flushes are write barriers since 3.2.1 (ADR 0053, #516); these
+  rows ran with them.
+
 Options for later (none started; parked on 2026-10-21):
 
 1. **nodatacow and no compression on heavy-write folders** (containers,
@@ -224,4 +256,7 @@ Options for later (none started; parked on 2026-10-21):
    the M1 Max per call: fsync 21–36 µs, `F_BARRIERFSYNC` 0.66–0.75 ms,
    `F_FULLFSYNC` 5.7–6.0 ms. With `F_BARRIERFSYNC` a guest fsync would go from
    about 0.45 ms to roughly 1.1–1.9 ms (estimate: btrfs sends 1–2 flushes per
-   fsync). Not decided.
+   fsync). Done in 3.2.1 (ADR 0053): measured on the M4 Max, whose barrier
+   costs about a third of the M1 Max's (211 µs on the Mac), a guest fsync went
+   from 0.38 to 0.63 ms; git commits +40 %, installs and checkouts the same.
+   Not measured in a VM on the M1 Max, where the estimate above still holds.
