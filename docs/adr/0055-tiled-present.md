@@ -1,11 +1,12 @@
 # 0055: Tiled present: only the changed tiles of a frame go to WindowServer
 
 Status: accepted, built (`omacvm-cocoa-present-tiles*.patch`), off by default:
-`OMACVM_GL_PRESENT_TILES=1` (`=check` for tests). It acts only when the guest
-says what changed: Linux 7.4, or OmacVM's virtio-gpu driver with the damage
-fix ([0051](0051-partial-present.md), #520); the app gets an experimental
-switch for it together with that driver (a switch that does nothing on
-today's 7.2 guests would mislead). Notes and numbers:
+the experimental switch "Draw only what changed" (`presentTiles`, the VM
+window's Display section) or `OMACVM_GL_PRESENT_TILES=1` (`=check` for tests).
+It acts only when the guest says what changed: Linux 7.4, or OmacVM's
+virtio-gpu driver with the damage fix ([0051](0051-partial-present.md), #520,
+loaded at every start); the switch ships with that driver (on a stock 7.2
+guest it would do nothing). Notes and numbers:
 work/tracks/window-draw.md.
 
 ## Context
