@@ -197,7 +197,9 @@ Night run on 2026-10-21, MacBook Pro M1 Max (32 GB, macOS 27.0.1), VM with
 Second round on 2026-10-25, MacBook Pro M4 Max (internal SSD, macOS 27.0.1),
 VM with 4 vCPUs / 4 GB, the VM's own btrfs (`compress=zstd:1`,
 `discard=async`; NVMe queue: scheduler none, 4 queues, read-ahead 128 KiB),
-fio 3.42 with direct I/O on both sides, median of 3:
+fio 3.42 with direct I/O on both sides, median of 3. In the VM direct I/O only
+skips the guest's cache: with `cache=writeback` its reads can still come from
+the Mac's file cache (below).
 
 | Test | Mac | VM | VM as % of the Mac |
 |---|---|---|---|
@@ -221,8 +223,8 @@ fio 3.42 with direct I/O on both sides, median of 3:
 - TRIM: deleting 2 GiB and `fstrim /` took disk.img from 14443 to 10531 MiB
   on the Mac (the trim also returned blocks earlier test runs had freed, whose
   async discards were lost at power-off: ADR 0048).
-- The guest's flushes are write barriers since 3.2.1 (ADR 0051); these rows
-  ran with them.
+- The guest's flushes are write barriers since 3.2.1 (ADR 0053, #516); these
+  rows ran with them.
 
 Options for later (none started; parked on 2026-10-21):
 
