@@ -87,7 +87,9 @@ public enum USBQMP {
         _ = try? qmp.execute("device_del", ["id": id])
         // QEMU never answered "info usb": not a Mac app's doing.
         if !answered { return .failed("QEMU did not answer") }
-        return late ? .failed("QEMU did not answer in time") : .busy
+        // QEMU answered but does not have it: the add was refused, most often
+        // because macOS or a Mac app holds the device. Also after a late add.
+        return .busy
     }
 
     /// Takes it from the VM (the Mac gets it back when QEMU closes it).

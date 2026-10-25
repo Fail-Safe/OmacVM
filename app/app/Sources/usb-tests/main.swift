@@ -311,9 +311,9 @@ expect(busyResult == .attached && lq2.attached == ["usbh-01100000"],
 let lq3 = LateQMP()
 lq3.lands = false
 let lostResult = lateAttach(lq3)
-expect(lostResult == .failed("QEMU did not answer in time") && lq3.attached.isEmpty && lq3.sent.last == "device_del"
+expect(lostResult == .busy && lq3.attached.isEmpty && lq3.sent.last == "device_del"
        && lq3.sent.filter { $0 == "human-monitor-command" }.count == 10,
-       "#526: device_add without an answer, info usb never lists it: 10 looks, removed again in case it lands, failed (\(lostResult))")
+       "#526: device_add without an answer, info usb never lists it: 10 looks, removed again in case it lands, busy: QEMU answered, so the add was refused (macOS has it) (\(lostResult))")
 let lq4 = LateQMP()
 lq4.busyChecks = 1000
 let deadResult = lateAttach(lq4, lookTakes: 2)
