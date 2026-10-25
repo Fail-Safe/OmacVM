@@ -19,6 +19,15 @@ hl.config({ cursor = { no_hardware_cursors = mac and 0 or 1 } })
 -- The cursor plane from a CPU buffer (a dumb buffer: virtio-gpu copies it to
 -- the Mac with the plane update); pcall: an older Hyprland lacks the option.
 if mac then pcall(hl.config, { cursor = { use_cpu_buffer = 1 } }) end
+-- HDR: with Virtual-1 in PQ and its SDR white at 203 nits, Hyprland 0.56's
+-- default ("auto") keeps an unmodified SDR copy of every frame for screen
+-- sharing: every window is drawn twice, into a second colour target. 0 makes
+-- that copy only while something captures the output (a screenshot, a screen
+-- share; Hyprland redraws the whole output for the first captured frame). The
+-- screen shows the same pixels and screenshots are the same; each HDR frame
+-- costs the Mac's GPU 10-20 % less. No effect in SDR (no copy there either
+-- way). pcall: an older Hyprland lacks the option.
+pcall(hl.config, { render = { keep_unmodified_copy = 0 } })
 -- A config reload drops the rules omacvm-display-sync gave the outputs, and
 -- each output would take monitors.lua's rule ("auto" place, cached mode) until
 -- display-sync runs again after the reload. With Omanotch's NOTCH output above
