@@ -224,6 +224,8 @@ Then, in the key path (also for keys from the full-grab tap):
   meanwhile. A terminal drops and takes its focus right after Enter, and
   some input methods (WeChat Input) go back to their first mode at each
   deactivate and activate (#357). Keys follow the guest's focus at once.
+  Modifier keys still reach the input method in those 0.2 s, as while a
+  field has the focus: a Shift tap in that moment can switch its mode.
 - Input source switching: while the conditions above hold except the
   input-method one, macOS's "Select the previous/next input source"
   shortcuts (symbolic hot keys 60 and 61, Ctrl+Space by default) and the

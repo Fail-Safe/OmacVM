@@ -12,7 +12,8 @@ in more words.
   English from then on without a Shift tap. When only the VM's field goes (the VM keeps the
   keyboard), the input method now goes off 0.2 s later, and not at all when a field takes the
   focus again within that time. Keys still go to the VM as keys while no field has the focus, and
-  what was marked is still dropped when the field goes. Not tried with WeChat Input itself (no
+  what was marked is still dropped when the field goes. A Shift tap within those 0.2 s still reaches the
+  input method and can switch its mode. Not tried with WeChat Input itself (no
   test Mac has it). Needs the app update.
 
 ## 3.2.1
