@@ -14,6 +14,46 @@ in more words.
   VM's main window: on other displays the VM draws the pointer as before. Not together with the
   hidden `macPointer` setting. Needs Update VM (it builds the VM's graphics driver, internet
   once); counts from the next start of the VM.
+- **Google Chrome plays 1440p and 4K video on the Mac's media engine.** The Mac's graphics
+  thread for the VM, which runs every app's drawing in it, waited for the media engine on each
+  picture (about 5 ms for a 4K one on a MacBook Air M2, 3 ms on an M4 Max). Above 1080p Chrome's
+  own drawing and the desktop's waited behind it, so the media engine dropped many more frames
+  than Chrome's CPU decoders (YouTube 4K: 38 % against 7 % on the Air, 13-20 % against 8 % on a
+  MacBook Pro M4 Max), and 3.2.0 kept 1440p and 4K on the CPU. Pictures now finish beside that
+  thread, and Chrome's decoder waits for each one instead of the thread. A 60 fps video in
+  Chrome now drops about as many frames on the media engine as on the CPU at 4K, 1440p and
+  1080p (Air: 0.1-1.2 % against 0.1-1.9 %, M4 Max: 2.3-2.7 % against 1.5-4.1 %), with the VM at
+  0.4 cores instead of 1.0-1.3 on the Air (0.6-0.8 on the M4 Max). 1080p, already on the media
+  engine in 3.2.0, drops fewer frames than before: 0.2-1.2 % against 7-18 % on the Air, 2.3-2.7 %
+  against 5.0-5.6 % on the M4 Max. Needs the app update and Update VM; restart Chrome after it.
+  `OMACVM_VA_MAX=1920` in Chrome's environment keeps 1440p and 4K on the CPU;
+  `OMACVM_VIDEO_DECODE_SYNC=1` in the app's environment brings back 3.2.0's way (the thread
+  waits for each picture, Chrome up to 1080p).
+- **Video call tiles in Google Chrome show the whole picture.** With hardware decoding (3.2.0)
+  a 320x180 tile showed its picture squeezed into the top 168 rows and 12 rows of nothing below
+  it (8 rows at 360p and on 1080p video, a strip on the right of 854-wide video): the VM's
+  video driver rounds Chrome's frames up to a multiple of 16 rows and columns, and Chrome showed
+  the rounded frame as its own size. The VM's VA-API driver now has those frames filled to their
+  rounded size and reads only the picture's part of the decoded planes, so Chrome puts every
+  row where its own CPU decoders do (checked at 320x180, 480x270, 640x360, 854x480 and 1080p in
+  VP9, AV1 and H.264). Only in Chromium-based apps and with Mesa up to 26.2 (a newer Mesa
+  turns it off until it is checked); needs Update VM, then restart Chrome. `OMACVM_VA_FILL=0`
+  in Chrome's environment turns it off.
+- **The VM's disk is safer at a power cut.** When Omarchy saves a file for good, the Mac's drive now
+  gets a write barrier: nothing written after it reaches the flash before what came before it.
+  Until now a power cut (a Mac mini or Studio losing power, a held power button) could leave
+  the VM's btrfs half written and unmountable, because macOS's fsync stops at the drive's cache.
+  With the barrier only the last moments before the cut should be lost (a real power cut was not
+  tested). Each synced write costs a little more: 0.25 ms per guest fsync on a MacBook Pro M4 Max,
+  where 200 git commits took 0.97 s instead of 0.70 s; the barrier itself costs 0.2-0.75 ms on the
+  Macs we measured, the most on an M1 Max. Installing 222 packages, git checkouts and big copies
+  took the same time. `omacvm check` shows it as "disk flush". Needs the app update.
+- **Partial present, built, off for now.** OmacVM.app's QEMU draws the whole frame into the window's
+  picture for every frame, also when only the pointer moved. It can now draw only the part the VM says
+  changed. In a bench on a MacBook Air M2 (no VM) the full draw cost 0.19 W at 60 frames a second and
+  0.47 W at 120, a small box a few hundredths. It stays off until a VM run shows it draws right, and it
+  needs a VM that says what changed in its desktop's frames (Linux 7.4, or OmacVM's own driver with
+  that fix). `OMACVM_GL_PRESENT_DAMAGE=1` in the app's environment turns it on for tests.
 
 ## 3.2.0
 

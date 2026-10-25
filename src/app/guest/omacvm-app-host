@@ -9,7 +9,9 @@
 # pointer: omacvm_app.lua) and omacvm.notchpointer (QEMU parks the guest's
 # pointer in NOTCH as the Mac's leaves for the strip: notchcast does not hide it)
 # and omacvm.vaexport (the runtime draws VA-API's RGB frames: the VA driver
-# shim sizes Chromium's surfaces, omacvm_drv_video.c).
+# shim sizes Chromium's surfaces, omacvm_drv_video.c) and omacvm.vadecasync
+# (the runtime decodes beside its GPU thread: the shim lets Chromium's decoder
+# wait for each picture).
 set -euo pipefail
 out=/run/omacvm/host.env
 install -d -m755 /run/omacvm
