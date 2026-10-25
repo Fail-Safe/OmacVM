@@ -10,14 +10,13 @@ in more words.
   graphics card's cursor layer, and the app shows that layer over the window, the same pointer in
   the same place (with Extra brightness as bright as the picture). Only the drawing of the VM's
   picture for each move goes; the VM still sends a frame per move. MacBook Air M2 (60 Hz), pointer
-  moving, whole Mac: 3.47-3.50 W against 3.74-3.75 W with the VM drawing the pointer itself (-7 %);
-  scrolling and video the same. Same pixels in the whole window on the Air; on a MacBook Pro M1 Max
-  with HDR at 120 Hz the same pixels around the pointer (an 8-bit capture). The pointer moves on its
-  own, like the Mac's: while you drag something it can be a frame ahead of it. Only in the VM's main
-  window: on other displays the VM draws the pointer as before. Not together with the hidden
-  `macPointer` setting. Needs Update VM (it builds the VM's graphics driver, internet once); counts
-  from the next start of the VM. With HDR on, Update VM builds that driver again too; until it has,
-  an HDR start uses the stock driver and `omacvm check` says so.
+  moving, whole Mac: 3.32-3.52 W with the switch against 3.58-3.80 W without it (-0.26 W, -7 %);
+  scrolling and video the same. On the Air the window shows the same pixels as without the switch
+  (3 pixels one level off, as between two pictures without it). The pointer moves on its own, like the Mac's: while you drag something it can be a frame
+  ahead of it. Only in the VM's main window: on other displays the VM draws the pointer as before.
+  Not together with the hidden `macPointer` setting. Needs Update VM (it builds the VM's graphics
+  driver, internet once); counts from the next start of the VM. With HDR on, Update VM builds that
+  driver again too; until it has, an HDR start uses the stock driver and `omacvm check` says so.
 
 ## 3.2.1
 

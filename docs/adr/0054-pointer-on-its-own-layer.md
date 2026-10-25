@@ -74,9 +74,12 @@ that place the cursor by its hotspot at their own mouse position.
 - What was checked: whole-window pixels on a MacBook Air (SDR, 60 Hz),
   today's setup (stock driver) against the switch on, a boot each: only the
   pointer's soft edge differed (107-123 pixels, up to 55 levels: the
-  straight-alpha bug in 4., fixed), and Extra brightness with a boosted
-  layer and an HDR capture (page 2.00, the new pointer image 2.00, the old
-  8-bit one 1.00). The pointer's soft edge is blended by macOS over the
+  straight-alpha bug in 4.); after the fix 0 and 3 pixels (1 level, the
+  rounding two pictures of today's setup show too). Extra brightness: on
+  the mini, a boosted layer with the patch's pointer image and an HDR
+  capture (page 2.00, the new pointer image 2.00, the old 8-bit one 1.00).
+  Not yet checked on screen: HDR at 120 Hz and Extra brightness on an XDR
+  panel (queued on the M1 Max, tracks/m1-bench-queue.md). The pointer's soft edge is blended by macOS over the
   frames, not by the guest into them: with Extra brightness on, those few
   edge pixels may differ a little.
 - The pointer layer moves when the guest moves the plane, not with the
