@@ -92,9 +92,10 @@ because the wait is in the phase, not in the queue.
   sits at its cap and late frames wait as before. The gain is smaller than the model's
   half refresh because the lead covers the slowest frame. Tables:
   work/tracks/input-vsync.md; docs/architecture/graphics.md section 12.
-- MacBook Air M2 (60 Hz, pointer moving and scrolling, 180 s windows, off on
-  on off): whole-Mac power the same within the rounds' spread (+0.5 to
-  +1.4 %), the same frames a second, 0 pixels differ.
+- MacBook Air M2 (60 Hz, pointer moving and scrolling, 180 s windows, two
+  sets, 4 rounds a side): whole-Mac power within 1 % (+0.9 % and +0.7 %
+  on the means, the rounds of one side spread up to 205 mW), the same
+  frames a second, the GPU no busier, 0 pixels differ.
 - Same frames: the guest still draws one frame per vblank at the display's
   rate (60, 120 Hz, ProMotion); only when it draws moves. Nothing changes on a
   still screen or for frames that come one at a time (typing on an idle

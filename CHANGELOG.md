@@ -15,7 +15,7 @@ in more words.
   drops). At 120 Hz: keys 2.6 ms, the pointer 1.3 ms, keys while the terminal scrolls 1.8 ms
   sooner; when the VM's frames need more than a refresh, late frames wait as before rather than
   being skipped. On a still screen nothing changes. The same frames and pixels (checked), the
-  same rate; MacBook Air M2 power the same within noise. Needs Update VM (it builds the VM's
+  same rate; MacBook Air M2 power within 1 % (pointer moving, scrolling). Needs Update VM (it builds the VM's
   graphics driver, internet once); counts from the next start of the VM.
 - **Pointer on its own layer (experimental, off).** A new switch in the VM window's Display section.
   With it, moving the pointer no longer redraws the VM's screen: the VM puts its pointer on the
