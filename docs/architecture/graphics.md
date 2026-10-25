@@ -1182,7 +1182,10 @@ window on the same display (`nativelat.swift`), the floor macOS itself sets.
   atomic `moveCursor` schedules one), so QEMU still presents the unchanged
   frame. Mini, 3024x1896@60, pointer circles 60/s: QEMU GPU 84-94 -> 23-38
   ms/s. The Mac pointer setting still needs the hotspot (aquamarine with
-  hotspots, or its legacy path) and stays as it was.
+  hotspots, or its legacy path) and stays as it was. On an 8-bit start the
+  driver offers the stock formats (10-bit only with `deep_color=1`, HDR).
+  With Extra brightness the layer's image gets the frames' gain (half
+  floats, extended linear sRGB, EDR: `omacvm-cocoa-pointer-bright*.patch`).
 - Posted mouse moves (`CGEventPostToPid`) reach no app's view, so pointer
   rows go in through QMP (no AppKit; AppKit's part for keys is under 1 ms).
 

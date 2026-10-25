@@ -35,7 +35,10 @@ that place the cursor by its hotspot at their own mouse position.
    (`omacvm-virtio-gpu-load`) then loads OmacVM's driver with
    `cursor_plane=1` (also on an 8-bit start), never together with the hidden
    `macPointer` (`omacvm.hwcursor=1`): that one makes the image the Mac's
-   own cursor, which needs the hotspot this plane does not get.
+   own cursor, which needs the hotspot this plane does not get. The 10-bit
+   formats come only with `deep_color=1` (an HDR start, as in #520), so on
+   an 8-bit start OmacVM's driver differs from the stock one by the cursor
+   plane only.
 3. **Hyprland follows the running driver, not the switch.** `omacvm_app.lua`
    reads `/sys/module/virtio_gpu/parameters/cursor_plane`; with `Y` it sets
    `cursor:no_hardware_cursors = 0` and `use_cpu_buffer = 1` (a dumb buffer
@@ -47,6 +50,15 @@ that place the cursor by its hotspot at their own mouse position.
    pixels). The pointer is not in the guest's frames any more; in-guest
    screenshots and recordings get it the way they do on any hardware cursor
    (Hyprland adds it to the copy when the client asks for the pointer).
+5. **As bright as the frames.** With Extra brightness ([0050](0050-extra-brightness.md))
+   the frames show SDR white at up to 2x, and an 8-bit image would stay at
+   1x (a white pointer at half the brightness of the page under it). While
+   the frames are boosted, QEMU makes the image in half floats, extended
+   linear sRGB, decoded like the frames and times their gain, and shows the
+   layer with EDR as theirs (`omacvm-cocoa-pointer-bright*.patch`); it
+   follows the gain when it moves and goes back to the 8-bit image when the
+   boost stops. HDR without Extra brightness needs nothing: SDR white is the
+   Mac's 1.0 there, as the 8-bit image.
 
 ## Consequences
 
@@ -57,6 +69,20 @@ that place the cursor by its hotspot at their own mouse position.
 - Experimental and off by default: hotspot-less placement relies on QEMU
   drawing the image itself; a cursor bigger than the plane (64x64) or
   Hyprland's zoom goes back to the software pointer by Hyprland's own rules.
+- What was checked: the same pixels in the whole window on a MacBook Air
+  (SDR, 60 Hz; today's setup with the stock driver against the switch on),
+  and around the pointer over a page on the M1 Max with HDR at 120 Hz
+  (an 8-bit sRGB capture, so it cannot show light above SDR white). The
+  pointer's soft edge is blended by macOS over the frames, not by the guest
+  into them: with Extra brightness on, those few edge pixels may differ a
+  little.
+- The pointer layer moves when the guest moves the plane, not with the
+  frames: while dragging a window or selecting text it can be a frame ahead
+  of what it drags (as the Mac's own pointer). Check a drag before the
+  default changes.
+- The layer uses one scale for both axes. While the window size and the
+  guest's mode differ (a resize, until the guest follows), the frames
+  stretch on each axis and the pointer can sit a little off for that time.
 - Direct scanout of full-screen windows was measured in the same lane
   (QEMU GPU -30 % for mpv full screen) and not built: in Omarchy's real use
   it would change pixels (mpv's colour description, Omarchy's 0.985 window

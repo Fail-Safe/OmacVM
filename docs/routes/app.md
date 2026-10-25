@@ -499,7 +499,8 @@ the VM's SSH on `127.0.0.1:<port>`.
   buffer), and QEMU shows that image over its window, 1:1 at the plane's
   place, so a pointer move no longer redraws the VM's screen. Only the main
   window's output gets the plane; external displays keep Hyprland's own
-  pointer. Not with the hidden Mac pointer setting (that one needs the
+  pointer. With Extra brightness QEMU gives the layer the frames' gain, so
+  the pointer is as bright as the page under it. Not with the hidden Mac pointer setting (that one needs the
   hotspot). `omacvm check` says "Pointer layer".
 - Mac pointer for the VM (experimental, off, no switch in the window yet:
   `defaults write org.omacvm.app macPointer -bool true`, from the VM's
