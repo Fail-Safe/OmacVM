@@ -25,6 +25,7 @@ enum SettingsDump {
             "vkWindowsNoCopy": Settings.vkWindowsNoCopy,
             "hdr": Settings.hdr,
             "extraBrightness": Settings.extraBrightness,
+            "pauseWhileHidden": Settings.pauseWhileHidden,
             "closeAction": Settings.closeAction.rawValue,
             "appIconTheme": IconTheme.choice(stored: UserDefaults.standard.object(forKey: IconTheme.key)).id,
             "escapeSwipe": EscapeSetting.current().rawValue,
