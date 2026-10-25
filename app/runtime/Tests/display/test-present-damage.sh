@@ -36,12 +36,15 @@ checks() {
   part=$(awk '/bool part = /{on=1} on {printf "%s ", $0} on && /;/ {exit}' <<<"$present" | tr -s ' \t' ' ')
   chk "the rules are included" grep -q '#include "ui/omacvm-present-damage.h"' "$m"
   chk "the guest's flush rects are collected" has "$flush" 'omacvm_pd_add(&present_pd, x, y, w, h);'
+  chk "a flush marks the scanout buffer as flushed" has "$flush" 'present_pd_unflushed = false;'
+  chk "a new scanout buffer is marked as not flushed yet" order "$tex" \
+    'present_pd_unflushed |= backing_id != gl_scanout_id;' 'gl_scanout_id = backing_id;'
   chk "new surfaces are drawn in full" has "$alloc" 'omacvm_pd_reset(&present_pd, present_nsurf,'
   chk "the present asks what surface n needs" has "$present" 'omacvm_pd_take(&present_pd, n, &pd)'
   chk "another frame size draws in full" has "$present" 'omacvm_pd_frame(&present_pd, w, h);'
   chk "a change of path or buffer draws in full" has "$present" 'omacvm_pd_all_full(&present_pd);'
   for want in 'omacvm_pd_take(&present_pd, n, &pd)' 'present_damage_on' 'gl_scanout_borrow' \
-              '!splash' '!boost' 'w == present_w' 'h == present_h' \
+              '!present_pd_unflushed' '!splash' '!boost' 'w == present_w' 'h == present_h' \
               'gl_scanout_x == 0' 'gl_scanout_y == 0' 'gl_scanout_w == w' 'gl_scanout_h == h'; do
     chk "a partial draw needs: $want" has "$part" "$want"
   done

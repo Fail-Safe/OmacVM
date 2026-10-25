@@ -11,8 +11,9 @@ surfaces, another frame size, a scaled frame, the boot logo, the 2D
 console, extra brightness, another colour path (deep colour, HDR), a
 scanout buffer not among the last four seen (a compositor's own buffers
 rotate; a client's buffer scanned out directly may come with damage that is
-not relative to what was shown), a scanout that is part of its resource,
-and a box of three quarters of the frame or more.
+not relative to what was shown), a new scanout buffer until its first
+flush, a scanout that is part of its resource, and a box of three quarters
+of the frame or more.
 Off by default for now (every frame in full, as before):
 OMACVM_GL_PRESENT_DAMAGE=1 turns it on; =check (tests) also draws every
 30th partial frame in full into a texture of its own and compares them
@@ -50,7 +51,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
  #include "hw/core/boards.h"
  #include "system/system.h"
  #include "system/runstate.h"
-@@ -7427,6 +7428,111 @@
+@@ -7427,6 +7428,117 @@
   */
  static bool present_deep_failed;
  static unsigned present_next;
@@ -75,6 +76,12 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
 +#define PRESENT_PD_IDS 4
 +static uint32_t present_pd_ids[PRESENT_PD_IDS];   /* scanout ids seen last */
 +static bool present_pd_logged;
++/*
++ * The guest switched the scanout to another buffer and has not flushed it
++ * yet: its rects come with that flush, so a present before it (timer, new
++ * surfaces, the window showing again) draws the new buffer in full.
++ */
++static bool present_pd_unflushed;
 +static GLuint present_pd_check_tex, present_pd_check_fbo;
 +static uint32_t present_pd_check_w, present_pd_check_h;
 +static uint64_t present_pd_checks, present_pd_bad, present_pd_frames_part;
@@ -162,7 +169,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
  static dispatch_queue_t present_queue;
  static QEMUTimer *present_timer;
  static int64_t present_last_ns;
-@@ -7988,6 +8094,7 @@
+@@ -7988,6 +8100,7 @@
      present_deep = deep;
      present_linear = linear;
      present_next = 0;
@@ -170,7 +177,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
      return true;
  }
  
-@@ -8124,6 +8231,50 @@
+@@ -8124,6 +8237,50 @@
      unsigned n = (present_next + i) % present_nsurf;
      present_next = (n + 1) % present_nsurf;
  
@@ -208,7 +215,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
 +    }
 +    OmacvmPDRect pd;
 +    bool part = omacvm_pd_take(&present_pd, n, &pd) && present_damage_on &&
-+                gl_scanout_borrow && !splash && !boost &&
++                gl_scanout_borrow && !present_pd_unflushed && !splash && !boost &&
 +                w == present_w && h == present_h &&
 +                gl_scanout_x == 0 && gl_scanout_y == 0 &&
 +                gl_scanout_w == w && gl_scanout_h == h;
@@ -221,7 +228,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
      glBindFramebuffer(GL_FRAMEBUFFER, present_fbo);
      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                             GL_TEXTURE_RECTANGLE, present_tex[n], 0);
-@@ -8132,8 +8283,18 @@
+@@ -8132,8 +8289,18 @@
      glDisable(GL_SCISSOR_TEST);
      /* The guest's alpha means nothing here: the window is opaque. */
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -242,7 +249,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
      glActiveTexture(GL_TEXTURE0);
      if (splash) {
-@@ -8151,6 +8312,10 @@
+@@ -8151,6 +8318,10 @@
          }
      }
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -253,12 +260,22 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
      glBindTexture(GL_TEXTURE_2D, 0);
      glBindFramebuffer(GL_FRAMEBUFFER, 0);
      GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-@@ -8875,6 +9040,8 @@
+@@ -8855,6 +9026,8 @@
+                                      uint32_t x, uint32_t y,
+                                      uint32_t w, uint32_t h)
+ {
++    /* OmacVM: partial present: a new buffer's rects come with its flush. */
++    present_pd_unflushed |= backing_id != gl_scanout_id;
+     gl_scanout_id = backing_id;
+     gl_scanout_borrow = backing_borrow;
+     gl_scanout_x = x;
+@@ -8875,6 +9048,9 @@
  {
      gl_dirty = true;
      omacvm_hold_dirty = true;
 +    /* What changed, for the surfaces' next draws (partial present). */
 +    omacvm_pd_add(&present_pd, x, y, w, h);
++    present_pd_unflushed = false;
  
      /*
       * Show the guest's frame now, not on the next 30 ms refresh tick:
