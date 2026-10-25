@@ -5,14 +5,15 @@ in more words.
 
 ## 3.2.1 (unreleased)
 
-- **The VM's disk survives a power cut.** When Omarchy saves a file for good, the Mac's drive now
+- **The VM's disk is safer at a power cut.** When Omarchy saves a file for good, the Mac's drive now
   gets a write barrier: nothing written after it reaches the flash before what came before it.
   Until now a power cut (a Mac mini or Studio losing power, a held power button) could leave
   the VM's btrfs half written and unmountable, because macOS's fsync stops at the drive's cache.
-  Now at most the last moments before the cut are lost. It costs about 0.25 ms per flush: on a
-  MacBook Pro M4 Max, 200 git commits took 0.97 s instead of 0.70 s; installing 222 packages,
-  git checkouts and big copies took the same time. `omacvm check` shows it as "disk flush".
-  Needs the app update.
+  With the barrier only the last moments before the cut should be lost (a real power cut was not
+  tested). Each synced write costs a little more: 0.25 ms per guest fsync on a MacBook Pro M4 Max,
+  where 200 git commits took 0.97 s instead of 0.70 s; the barrier itself costs 0.2-0.75 ms on the
+  Macs we measured, the most on an M1 Max. Installing 222 packages, git checkouts and big copies
+  took the same time. `omacvm check` shows it as "disk flush". Needs the app update.
 
 ## 3.2.0
 
