@@ -681,6 +681,18 @@ enum Settings {
         get { UserDefaults.standard.bool(forKey: "pointerPlane") }
         set { UserDefaults.standard.set(newValue, forKey: "pointerPlane") }
     }
+    /// Draw only what changed (experimental, off by default): QEMU's tiled
+    /// present (OMACVM_GL_PRESENT_TILES=1, ADR 0055): a frame that changed in
+    /// a few 256x256 tiles goes to WindowServer as those tiles only. Needs a
+    /// VM whose driver sends what changed (OmacVM's virtio-gpu driver with
+    /// Linux 7.4's damage fix, #520, or Linux 7.4); else every frame stays
+    /// whole, as off. Not in GPU safe mode. The VM window's switch
+    /// (PresentTilesRow) or defaults write org.omacvm.app presentTiles -bool
+    /// true. Read at each start.
+    static var presentTiles: Bool {
+        get { UserDefaults.standard.bool(forKey: "presentTiles") }
+        set { UserDefaults.standard.set(newValue, forKey: "presentTiles") }
+    }
     /// Experimental, off by default, no switch in the window yet: the VM
     /// puts its pointer on virtio-gpu's cursor plane and the Mac's own cursor
     /// shows it (QEMU's OMACVM_HW_CURSOR, the guest's omacvm.hwcursor), so it

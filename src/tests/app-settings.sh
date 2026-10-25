@@ -72,6 +72,7 @@ expect "fresh: Vulkan windows without a copy on (vkWindowsNoCopy)" true "$(val a
 expect "fresh: HDR and 10-bit colour off" false "$(val app.hdr)"
 expect "fresh: Extra brightness off" false "$(val app.extraBrightness)"
 expect "fresh: Pointer on its own layer off" false "$(val app.pointerPlane)"
+expect "fresh: Draw only what changed off" false "$(val app.presentTiles)"
 expect "fresh: Closing the window shuts down" shutdown "$(val app.closeAction)"
 expect "fresh: OmacVM's own icon" default "$(val app.appIconTheme)"
 expect "fresh: escape combo: focused monitor" pointer "$(val app.escapeSwipe)"
@@ -99,7 +100,7 @@ done
 
 # (b) Changes as the window makes them, read by the next launches; (c) per VM.
 mkdir -p "$H/Shared"
-for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pointerPlane true" "closeAction ask" "appIconTheme flexoki-light" \
+for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pointerPlane true" "presentTiles true" "closeAction ask" "appIconTheme flexoki-light" \
           "escapeSwipe all" "mouseSwipeFingers 3" "swipeOut true" "updateChecks false"; do
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
@@ -118,6 +119,7 @@ for launch in 1 2; do
   expect "launch $launch: HDR and 10-bit colour on" true "$(val app.hdr)"
   expect "launch $launch: Extra brightness on" true "$(val app.extraBrightness)"
   expect "launch $launch: Pointer on its own layer on" true "$(val app.pointerPlane)"
+  expect "launch $launch: Draw only what changed on" true "$(val app.presentTiles)"
   expect "launch $launch: Closing the window asks" ask "$(val app.closeAction)"
   expect "launch $launch: icon Flexoki Light" flexoki-light "$(val app.appIconTheme)"
   expect "launch $launch: escape combo: all monitors" all "$(val app.escapeSwipe)"

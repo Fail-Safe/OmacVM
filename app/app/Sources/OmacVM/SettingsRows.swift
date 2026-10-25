@@ -275,6 +275,25 @@ struct PointerPlaneRow: View {
     }
 }
 
+/// Draw only what changed (Settings.presentTiles, experimental, off by
+/// default): QEMU's tiled present, read by each start of the VM.
+struct PresentTilesRow: View {
+    var tick = 0
+    @State private var on = Settings.presentTiles
+
+    static let info = "When only a small part of the VM's screen changes (the pointer, a blinking cursor, a clock, a spinner), only that part goes to macOS as new pixels, in squares of 256 x 256; macOS then redraws only those squares of the window instead of all of it. The same picture and the same frame rate, less GPU work and battery: measured on a MacBook Air M2 with the pointer moving, 11-17 % less power for the whole Mac. Pages that scroll or play video change most of the screen and stay as before. It needs the VM's own graphics driver from OmacVM, which tells the Mac what changed in each frame: Update VM builds it (needs internet once). A window that scales the VM's picture (not shown pixel for pixel) draws whole frames as before. Counts from the next start of the VM. Experimental: it may use up to about 85 MB more memory on large displays while parts change. GPU safe mode turns it off."
+
+    var body: some View {
+        SettingRow(title: "Draw only what changed", badge: "experimental",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Small changes go to macOS as small squares, not as a whole new picture. From the next start of the VM.",
+                   info: Self.info, probe: "present-tiles") {
+            RowSwitch(title: "Draw only what changed", isOn: $on, enabled: !Settings.gpuSafeMode)
+        }
+        .onChange(of: on) { _, v in if v != Settings.presentTiles { Settings.presentTiles = v } }
+        .onChange(of: tick) { _, _ in on = Settings.presentTiles }
+    }
+}
+
 /// The sound on its own thread (Settings.audioThread, on by default from
 /// 3.1.17): read by each start of the VM, so a change counts from the next one.
 struct SoundThreadRow: View {
