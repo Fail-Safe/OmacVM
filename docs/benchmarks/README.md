@@ -65,8 +65,9 @@ src/bench/bench.sh ~/bench/mac.jsonl
 OmacVM copies its tools into the VM, so they are in
 `/usr/local/share/omacvm/bench/` after `omacvm update` (or `omacvm apply`).
 
-1. Install Google Chrome for Linux ARM (Arch Linux ARM has no package; this
-   unpacks Google's own `.deb` to `/opt/google/chrome`). Run it again to update:
+1. Install Google Chrome for Linux ARM (this unpacks Google's own `.deb` to
+   `/opt/google/chrome`, so a chosen version can be measured; Chrome from the
+   AUR works too, but not both). Run it again to update:
 
    ```bash
    sudo /usr/local/share/omacvm/bench/install-chrome.sh
@@ -267,10 +268,11 @@ an idle language model server.
 | WebGL Aquarium, 30,000 fish (fps) | 37.6 | 37.8 | 37.5 | same |
 | Scrolling (fps at 75 Hz, p95 ms) | 74.0, 13.4 | 74.0, 13.4 | 73.5, 13.4 | same |
 | WebGPU matmul in the "(WebGPU)" launcher (GFLOPS) | 4804 | no adapter | 4801 | - |
+| Scrolling in the "(WebGPU)" launcher (fps at 75 Hz, X11) | 60.0 | 71.4 (no Graphite) | 57.4 | - |
 
 Speedometer is where the build shows: every Chrome run was above every Chromium run. Arch Linux ARM builds
-Chromium without the profile Google's builds are optimized with (`chrome_pgo_phase=0`), and Chromium runs
-without Google's field trials. The graphics tests are bound by the VM's GPU path, the same for both. Chrome 153
+Chromium without the profile Google's builds are optimized with (`chrome_pgo_phase=0`), with another clang, and
+Chromium runs without Google's field trials; this A/B does not tell which of them it is. The graphics tests are bound by the VM's GPU path, the same for both. Chrome 153
 gave pages no WebGPU adapter in the launcher's route; Chrome 156 does.
 
 ### Browser, Mac mini M4, OmacVM.app 3.1.27 (2026-10-21)
