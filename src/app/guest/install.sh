@@ -17,10 +17,10 @@
 #    changes (hyprpicker/; the package's drew every display on every frame)
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
-#  * OmacVM's virtio-gpu driver (Linux 7.4's damage fix: QEMU redraws only
-#    what changed; HDR; the pointer on its own layer; frames in step with the
-#    Mac), built for every kernel and loaded at every start that gains from
-#    it (omacvm-virtio-gpu-load)
+#  * OmacVM's virtio-gpu driver (HDR; the pointer on its own layer; frames in
+#    step with the Mac; Linux 7.4's damage fix for "Draw only what changed"),
+#    built for every kernel but dormant: loaded only when one of the app's
+#    switches starts the VM (omacvm-virtio-gpu-load)
 #  * Vulkan (Venus), when the VM's Graphics setting gives it Vulkan: a Venus
 #    driver for the Mac's 16 KiB pages while Arch Linux ARM's is too old
 #    (venus/), now and at each boot (the setting can change between starts)
@@ -43,8 +43,8 @@ install -Dm755 omacvm-smbios /usr/local/lib/omacvm/omacvm-smbios
 # hook for new kernels (as a user id of its own, from kernel.org; a kernel
 # without headers is skipped), into /usr/local/lib/omacvm/virtio-gpu/<kernel>, where depmod
 # does not see it. A modprobe rule hands virtio_gpu to omacvm-virtio-gpu-load,
-# which loads it at every start that gains from it (the damage fix, or one
-# of the app's switches), else the stock one.
+# which loads it only when one of the app's switches starts the VM, else the
+# stock one.
 VG=/usr/local/lib/omacvm/virtio-gpu
 install -Dm755 virtio-gpu/omacvm-virtio-gpu-build $VG/omacvm-virtio-gpu-build
 install -Dm755 virtio-gpu/omacvm-virtio-gpu-load $VG/omacvm-virtio-gpu-load

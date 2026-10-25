@@ -423,21 +423,25 @@ kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // e
 if [[ -n $kb ]]; then ok "keyboard layout" "$kb"; else bad "keyboard layout" "no layout from Hyprland"; fi
 
 # The "Changed parts" line: whether the compositor's damage reaches QEMU (Linux
-# 7.4's fix: the kernel's own, or OmacVM's driver with it, loaded at every
-# start). Without it every frame goes to the Mac whole: QEMU's partial
-# present and tiles have nothing to work with. From the build's "damage" file
-# (ours, kernel; none = no build or left out) and the loader's word:
-# "STATUS<TAB>DETAIL". src/tests/damage-check.sh.
-damage_line() {   # BUILD-DAMAGE LOADER-WORD
-  local d=$1 st=$2
+# 7.4's fix: the kernel's own, or OmacVM's driver with it). Without it every
+# frame goes to the Mac whole and "Draw only what changed" (QEMU's tiles) has
+# nothing to work with. From the build's "damage" file (ours, kernel,
+# unknown; none = no build or left out), the loader's word and whether this
+# start asked for it (omacvm.damage=1: the switch on, not in GPU safe mode):
+# with the switch off a missing fix is no fault. "STATUS<TAB>DETAIL".
+# src/tests/damage-check.sh.
+damage_line() {   # BUILD-DAMAGE LOADER-WORD ASKED(1/0)
+  local d=$1 st=$2 asked=${3:-0}
   if [[ $d == kernel ]]; then
-    printf 'ok\t%s\n' "this kernel keeps the compositor's damage itself (Linux 7.4 or newer): the Mac redraws only what changed"
-  elif [[ $d == ours && $st == omacvm* ]]; then
+    printf 'ok\t%s\n' "this kernel keeps the compositor's damage itself (Linux 7.4 or newer): the Mac can redraw only what changed"
+  elif [[ $d == ours && $st == omacvm* && $st != *"without damage_clips"* ]]; then
     printf 'ok\t%s\n' "OmacVM's driver (Linux 7.4's damage fix) tells the Mac what changed in each frame"
+  elif [[ $asked != 1 ]]; then
+    printf 'skip\t%s\n' "Draw only what changed is off: the stock driver of a kernel before 7.4 sends every frame whole"
   elif [[ $d == ours ]]; then
-    printf 'warn\t%s\n' "OmacVM's driver is built but the stock one runs (${st:-no word from omacvm-virtio-gpu-load}): every frame goes to the Mac whole"
+    printf 'warn\t%s\n' "Draw only what changed is on, but the stock driver runs (${st:-no word from omacvm-virtio-gpu-load}): every frame goes to the Mac whole"
   else
-    printf 'skip\t%s\n' "the stock driver of a kernel before 7.4 sends every frame whole (omacvm-virtio-gpu-build --status says why OmacVM's is not built)"
+    printf 'warn\t%s\n' "Draw only what changed is on, but OmacVM's driver for this kernel has no damage fix (${st:-no word from omacvm-virtio-gpu-load}; omacvm-virtio-gpu-build --status says why): every frame goes to the Mac whole"
   fi
 }
 # hdr_copy_note ANSWER: the HDR line's part about Hyprland's SDR copy of each frame for
@@ -656,10 +660,11 @@ app)
       *) warn "HDR output" "the app asked for 10-bit colour, but the stock driver runs: ${st#stock }$( [[ -z $st ]] && echo "no word from omacvm-virtio-gpu-load (omacvm apply, then restart the VM)")" ;;
     esac
   fi
-  # The compositor's damage reaches QEMU (OmacVM's driver at every start, or
-  # the kernel's own fix).
+  # The compositor's damage reaches QEMU (OmacVM's driver when the start asks
+  # for it with "Draw only what changed", or the kernel's own fix).
+  asked=0; grep -qx 'OMACVM_DAMAGE=1' /run/omacvm/host.env 2>/dev/null && asked=1
   IFS=$'\t' read -r ds dd < <(damage_line "$(cat "/usr/local/lib/omacvm/virtio-gpu/$(uname -r)/damage" 2>/dev/null)" \
-    "$(cat /run/omacvm/virtio-gpu 2>/dev/null)")
+    "$(cat /run/omacvm/virtio-gpu 2>/dev/null)" "$asked")
   case $ds in
     ok) ok "Changed parts" "$dd" ;;
     warn) warn "Changed parts" "$dd" ;;

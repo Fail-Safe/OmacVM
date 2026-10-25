@@ -9,8 +9,8 @@
 # Without the options it is the stock driver plus that fix. Built for each
 # kernel into /usr/local/lib/omacvm/virtio-gpu/<kernel>/, where depmod does
 # not see it. The modprobe rule written here hands virtio_gpu to
-# omacvm-virtio-gpu-load, which loads it at every start that gains from it
-# (a switch asks, or the build has the damage fix), else the stock one.
+# omacvm-virtio-gpu-load, which loads it only for a start with one of the
+# app's switches on (it asks over SMBIOS), else the stock one.
 # omacvm apply runs this on every app VM, the pacman hook after
 # kernel updates. Needs the kernel's headers. The driver's sources are the
 # upstream stable release of the kernel's version, from kernel.org; download,
@@ -177,7 +177,7 @@ build() {   # KERNEL: 0 = built, current or no headers; 1 = failed
            stamp_for "$kernel" | install -o root -g root -m 0644 /dev/stdin "$root/$kernel/stamp"; }; then
     failed "$kernel" "could not install it into $root/$kernel"; rc=1
   else
-    say "$kernel: built (loaded from the next start; its options only when the app's switches ask)"
+    say "$kernel: built (loaded only when one of the app's switches starts the VM)"
     while IFS= read -r v; do say "$kernel: without $v"; done < "$stage/without"
     [[ $(cat "$stage/damage") != kernel ]] || say "$kernel: the damage fix is the kernel's own"
   fi
@@ -202,14 +202,14 @@ migrate() {
 rule_text() {
   cat <<'EOF'
 # OmacVM.app (omacvm-virtio-gpu-build): virtio_gpu goes through
-# omacvm-virtio-gpu-load, which loads OmacVM's driver when it is built for
-# this kernel and the start gains from it (its damage fix; 10-bit colour, the
-# pointer layer, frames in step only when the app's switches ask), else the stock one
-# (and the stock one if it fails). In the initramfs (no loader there;
-# mkinitcpio's kms hook puts virtio_gpu in it) nothing loads yet: QEMU's boot
-# logo stays until udev loads it again from the real root, through the
-# loader. A real root without the loader gets the stock one.
-install virtio_gpu if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif [ -e /etc/initrd-release ]; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi
+# omacvm-virtio-gpu-load, which loads OmacVM's driver only for a start with
+# one of the app's switches on (10-bit colour, the pointer on its own
+# layer, frames in step with the Mac, draw only what changed), else the stock
+# one (and the stock one if it fails). In the initramfs (no loader there;
+# mkinitcpio's kms hook puts virtio_gpu in it) such a start loads nothing yet:
+# udev loads it again from the real root, through the loader. Every other
+# start: the stock one, as before.
+install virtio_gpu if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=1 -e omacvm.vsynclock=1 -e omacvm.damage=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi
 EOF
 }
 

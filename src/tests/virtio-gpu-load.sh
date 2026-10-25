@@ -1,10 +1,11 @@
 #!/bin/bash
 # OmacVM.app's virtio-gpu driver, offline. omacvm-virtio-gpu-load loads it
-# with a current build that has the damage fix (every start), or for a start
-# that asks for an option it has (SMBIOS omacvm.deepcolor=1, an older app's
-# omacvm.hdr=1, omacvm.pointerplane=1, omacvm.vsynclock=1), after its dependencies; else the
-# stock driver, and it says why. omacvm-smbios reads the strings as omacvm-app-host
-# did. The modprobe rule falls back to the stock driver without the loader.
+# for a start that asks for an option it has (SMBIOS omacvm.deepcolor=1, an
+# older app's omacvm.hdr=1, omacvm.pointerplane=1, omacvm.vsynclock=1) or for
+# its damage fix (omacvm.damage=1, "Draw only what changed"), after its
+# dependencies; else the stock driver, and it says why. omacvm-smbios reads the
+# strings as omacvm-app-host did. The modprobe rule falls back to the stock
+# driver without the loader (in the initramfs only for a start that asks for none).
 # The builder skips current builds and kernels without headers, drops the old
 # by-hand install and builds of removed kernels, writes the rule only once a
 # build is there, and builds as its own user id; a patch that does not apply
@@ -130,16 +131,32 @@ DEPS="modinfo -F depends $KO;modprobe -q drm;modprobe -q virtio_dma_buf;"
 
 guest omacvm.vkwindows=1 omacvm.screen=3024x1964
 load; expect "not asked, the build has the damage fix: exit 0" 0 $?
-expect "not asked, the damage fix: ours at 8 bits (every start)" "omacvm 8-bit" "$(said)"
-expect "not asked, the damage fix: its dependencies, then ours with only the given options" "$P1${DEPS}insmod $KO opt=1;" "$(calls)"
+expect "not asked, the build has the damage fix: stock (only a switch loads ours)" "stock not asked for this start" "$(said)"
+expect "not asked, the damage fix: only the stock driver, with the options" "$P1$STOCK" "$(calls)"
 
-guest omacvm.vkwindows=1 omacvm.screen=3024x1964; nofix
-load; expect "not asked, the kernel's own damage fix: exit 0" 0 $?
-expect "not asked, the kernel's own fix: stock, and why" "stock not asked for this start" "$(said)"
-expect "not asked, the kernel's own fix: only the stock driver, with the options" "$P1$STOCK" "$(calls)"
+# Draw only what changed (omacvm.damage=1): ours for its damage fix.
+guest omacvm.damage=1 omacvm.screen=3024x1964
+load; expect "omacvm.damage=1, the build has the damage fix: exit 0" 0 $?
+expect "omacvm.damage=1, the damage fix: ours at 8 bits" "omacvm 8-bit" "$(said)"
+expect "omacvm.damage=1: its dependencies, then ours with only the given options" "$P1${DEPS}insmod $KO opt=1;" "$(calls)"
 
-guest omacvm.vkwindows=1; rm "$T/root/$VG/$K/damage"
-load; expect "not asked, the build left the damage fix out: stock" "stock not asked for this start" "$(said)"
+guest omacvm.damage=1; nofix
+load; expect "omacvm.damage=1, the kernel's own damage fix: exit 0" 0 $?
+expect "omacvm.damage=1, the kernel's own fix: stock, and why" "stock not needed: the kernel keeps the damage itself" "$(said)"
+expect "omacvm.damage=1, the kernel's own fix: only the stock driver, with the options" "$P1$STOCK" "$(calls)"
+
+guest omacvm.damage=1; rm "$T/root/$VG/$K/damage"
+load; expect "omacvm.damage=1, the build left the damage fix out: stock, and why" "stock built without damage_clips for $K" "$(said)"
+expect "omacvm.damage=1, no damage fix: no insmod" "$P1$STOCK" "$(calls)"
+guest omacvm.damage=1; echo unknown > "$T/root/$VG/$K/damage"
+load; expect "omacvm.damage=1, the build could not tell (unknown): stock, and why" "stock built without damage_clips for $K" "$(said)"
+guest omacvm.deepcolor=1 omacvm.damage=1; rm "$T/root/$VG/$K/damage"
+load; expect "HDR + omacvm.damage=1, the build left the damage fix out: ours for HDR, and it says so" "omacvm without damage_clips" "$(said)"
+guest omacvm.deepcolor=1 omacvm.damage=1
+load; expect "HDR + omacvm.damage=1: ours, 10-bit" "omacvm" "$(said)"
+has "HDR + omacvm.damage=1: insmod with deep_color=1 only (the damage fix is no option)" "insmod $KO opt=1 deep_color=1;" "$(calls)"
+guest omacvm.damage=0
+load; expect "omacvm.damage=0: stock" "stock not asked for this start" "$(said)"
 
 guest omacvm.deepcolor=1 omacvm.vkwindows=1
 load; expect "asked (the first string), built: exit 0" 0 $?
@@ -159,8 +176,10 @@ guest omacvm.pointerplane=1 omacvm.hwcursor=1; nofix
 load; expect "pointer plane with the Mac pointer (needs the hotspot), no damage fix to add: not ours" "stock not asked for this start" "$(said)"
 expect "pointer plane + Mac pointer: only the stock driver" "$P1$STOCK" "$(calls)"
 guest omacvm.pointerplane=1 omacvm.hwcursor=1
-load; expect "pointer plane with the Mac pointer, the damage fix: ours, no cursor_plane" "omacvm 8-bit" "$(said)"
-has "pointer plane + Mac pointer, the damage fix: insmod without cursor_plane" "insmod $KO opt=1;" "$(calls)"
+load; expect "pointer plane with the Mac pointer, the build has the damage fix, not asked: stock" "stock not asked for this start" "$(said)"
+guest omacvm.pointerplane=1 omacvm.hwcursor=1 omacvm.damage=1
+load; expect "pointer plane with the Mac pointer, omacvm.damage=1: ours, no cursor_plane" "omacvm 8-bit" "$(said)"
+has "pointer plane + Mac pointer, omacvm.damage=1: insmod without cursor_plane" "insmod $KO opt=1;" "$(calls)"
 
 guest omacvm.deepcolor=1 omacvm.pointerplane=1 omacvm.hwcursor=1
 load; expect "10-bit, pointer plane and Mac pointer: ours without cursor_plane" "omacvm" "$(said)"
@@ -204,8 +223,10 @@ guest omacvm.deepcolor=0 omacvm.hdr=0; nofix
 load; expect "switch off (=0): stock" "stock not asked for this start" "$(said)"
 expect "switch off: no insmod" "$P1$STOCK" "$(calls)"
 guest omacvm.deepcolor=0 omacvm.hdr=0
-load; expect "switch off (=0), the damage fix: ours at 8 bits, no deep_color" "omacvm 8-bit" "$(said)"
-has "switch off, the damage fix: insmod without deep_color" "insmod $KO opt=1;" "$(calls)"
+load; expect "switch off (=0), the build has the damage fix: stock" "stock not asked for this start" "$(said)"
+guest omacvm.deepcolor=0 omacvm.hdr=0 omacvm.damage=1
+load; expect "HDR off (=0), omacvm.damage=1: ours at 8 bits, no deep_color" "omacvm 8-bit" "$(said)"
+has "HDR off, omacvm.damage=1: insmod without deep_color" "insmod $KO opt=1;" "$(calls)"
 
 # A build without the cursor plane (its patch did not fit the kernel): only the options it has.
 guest omacvm.deepcolor=1 omacvm.pointerplane=1
@@ -218,7 +239,10 @@ expect "only the pointer layer asked, the build has no cursor_plane, no damage f
 expect "only the pointer layer asked, no cursor_plane: no insmod" "$P1$STOCK" "$(calls)"
 guest omacvm.pointerplane=1
 FAKE_PARMS="deep_color" load
-expect "only the pointer layer asked, no cursor_plane, the damage fix: ours at 8 bits, and it says so" "omacvm 8-bit without cursor_plane" "$(said)"
+expect "only the pointer layer asked, no cursor_plane, the build has the damage fix: stock, and why" "stock built without cursor_plane for $K" "$(said)"
+guest omacvm.pointerplane=1 omacvm.damage=1
+FAKE_PARMS="deep_color" load
+expect "pointer layer + omacvm.damage=1, no cursor_plane: ours at 8 bits, and it says so" "omacvm 8-bit without cursor_plane" "$(said)"
 guest omacvm.deepcolor=1 omacvm.pointerplane=1
 FAKE_PARMS="" load
 expect "modinfo lists no options: all asked, as before" "omacvm cursor_plane=1" "$(said)"
@@ -253,7 +277,7 @@ has "insmod fails: then the stock driver" "insmod $KO opt=1 deep_color=1;$STOCK"
 
 guest omacvm.deepcolor=1
 rm -rf "$T/root/sys"
-load; expect "no SMBIOS strings at all, the damage fix: ours at 8 bits" "omacvm 8-bit" "$(said)"
+load; expect "no SMBIOS strings at all, the build has the damage fix: stock" "stock not asked for this start" "$(said)"
 guest omacvm.deepcolor=1; nofix
 rm -rf "$T/root/sys"
 load; expect "no SMBIOS strings at all, no damage fix to add: stock" "stock not asked for this start" "$(said)"
@@ -267,24 +291,32 @@ expect "the loader writes nothing to stderr" "" "$(cat "$T/load.err")"
 mkdir -p "$T/r"
 OMACVM_VIRTIO_GPU_TEST_ROOT=$T/r "$BUILD" --remove > /dev/null   # nothing there: fine
 rule_line=$(sed -n 's/^install virtio_gpu //p' "$BUILD")
-expect "the rule: the loader if it is there; without it nothing in the initramfs, the stock driver on a real root" \
-  'if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif [ -e /etc/initrd-release ]; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi' \
+expect "the rule: the loader if it is there; without it (the initramfs) nothing for a start that asks for ours, else the stock driver" \
+  'if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=1 -e omacvm.vsynclock=1 -e omacvm.damage=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi' \
   "$rule_line"
-run_rule() {   # LOADER (a path) ROOT: runs the rule with the loader, modprobe and /etc swapped for stand-ins
+run_rule() {   # LOADER (a path) SMBIOS-ROOT: runs the rule with the loader, modprobe and SMBIOS swapped for stand-ins
   local cmd=${rule_line//\$CMDLINE_OPTS/opt=1}
   cmd=${cmd//\/usr\/local\/lib\/omacvm\/virtio-gpu\/omacvm-virtio-gpu-load/$1}
   cmd=${cmd//\/sbin\/modprobe/$T/bin/modprobe}
-  cmd=${cmd//\/etc\/initrd-release/$2/etc/initrd-release}
+  cmd=${cmd//\/sys\/firmware/$2/sys/firmware}
   : > "$CALLS"
   sh -c "$cmd"
 }
-mkdir -p "$T/ri/etc" "$T/rr/etc"; : > "$T/ri/etc/initrd-release"
-run_rule "$T/r/missing" "$T/ri"; expect "rule: no loader in the initramfs: nothing yet (the real root loads it; QEMU's boot logo until then)" "0 " "$? $(calls)"
-run_rule "$T/r/missing" "$T/rr"; expect "rule: a real root without the loader: the stock driver" "0 $STOCK" "$? $(calls)"
+smbios "$T/rs" omacvm.notchskip=1 omacvm.deepcolor=1
+smbios "$T/rn" omacvm.notchskip=1
+smbios "$T/ro" omacvm.pointerplane=1
+smbios "$T/rv" omacvm.vsynclock=1
+smbios "$T/rd" omacvm.damage=1
+run_rule "$T/r/missing" "$T/rn"; expect "rule: no loader (the initramfs), an 8-bit start: the stock driver (boot messages on screen)" "0 $STOCK" "$? $(calls)"
+run_rule "$T/r/missing" "$T/rs"; expect "rule: no loader (the initramfs), a 10-bit start: nothing yet (the real root loads it)" "0 " "$? $(calls)"
+run_rule "$T/r/missing" "$T/ro"; expect "rule: no loader (the initramfs), a pointer-plane start: nothing yet" "0 " "$? $(calls)"
+run_rule "$T/r/missing" "$T/rv"; expect "rule: no loader (the initramfs), a frames-in-step start: nothing yet" "0 " "$? $(calls)"
+run_rule "$T/r/missing" "$T/rd"; expect "rule: no loader (the initramfs), a Draw only what changed start: nothing yet" "0 " "$? $(calls)"
+run_rule "$T/r/missing" "$T/none"; expect "rule: no loader, no SMBIOS: the stock driver" "0 $STOCK" "$? $(calls)"
 printf '#!/bin/sh\necho "loader $*" >> "$CALLS"\n' > "$T/r/ok"; chmod +x "$T/r/ok"
-run_rule "$T/r/ok" "$T/rr"; expect "rule: the loader, and nothing else when it loaded a driver" "0 loader opt=1;" "$? $(calls)"
+run_rule "$T/r/ok" "$T/rs"; expect "rule: the loader, and nothing else when it loaded a driver" "0 loader opt=1;" "$? $(calls)"
 printf '#!/bin/sh\necho "loader $*" >> "$CALLS"\nexit 1\n' > "$T/r/bad"; chmod +x "$T/r/bad"
-run_rule "$T/r/bad" "$T/rr"; expect "rule: a failing loader: the stock driver after all" "0 loader opt=1;$STOCK" "$? $(calls)"
+run_rule "$T/r/bad" "$T/rn"; expect "rule: a failing loader: the stock driver after all" "0 loader opt=1;$STOCK" "$? $(calls)"
 
 # ---------- omacvm-virtio-gpu-build (only what needs no network) ----------
 B=$T/b

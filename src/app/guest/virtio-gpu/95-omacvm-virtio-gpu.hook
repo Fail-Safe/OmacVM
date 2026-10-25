@@ -1,6 +1,6 @@
-# OmacVM.app: build OmacVM's virtio-gpu driver for new kernels (loaded from the
-# next start; until it is built the stock one loads); a failed build never
-# fails the update.
+# OmacVM.app: build OmacVM's virtio-gpu driver for new kernels (it stays
+# dormant until one of the app's switches starts the VM); a failed build
+# never fails the update.
 [Trigger]
 Operation = Install
 Operation = Upgrade
