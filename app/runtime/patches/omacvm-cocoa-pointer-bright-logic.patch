@@ -1,0 +1,79 @@
+From: OmacVM
+Subject: [PATCH] ui: the pointer's image with extra brightness, tested without AppKit
+
+What: a header with no AppKit in it: the gain the pointer's image gets
+(the frames' gain while extra brightness boosts them, else 1x) and the
+image in half floats, extended linear sRGB, premultiplied, its colour
+decoded as the frames are (omacvm_bright_linear) and times that gain.
+Used by omacvm-cocoa-pointer-bright.patch (which explains the why).
+
+Why its own file: so the rules are tested without QEMU or a window
+(app/runtime/Tests/display/test-pointer-bright.sh applies this patch and
+omacvm-cocoa-extra-brightness-logic.patch to an empty folder; at build
+time and in CI).
+
+Upstream: with omacvm-cocoa-pointer-bright.patch; not sent.
+Test: app/runtime/Tests/display/test-pointer-bright.c.
+
+diff --git a/ui/omacvm-pointer-bright.h b/ui/omacvm-pointer-bright.h
+new file mode 100644
+--- /dev/null
++++ b/ui/omacvm-pointer-bright.h
+@@ -0,0 +1,57 @@
++/*
++ * OmacVM: the guest's pointer image with extra brightness (ADR 0054, 0050).
++ *
++ * No AppKit in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-pointer-bright.c); ui/cocoa.m uses it.
++ *
++ * With the switch "Pointer on its own layer" QEMU's cursor layer shows the
++ * guest's pointer over its frames. With extra brightness the frames are
++ * drawn in extended linear sRGB times a gain g (up to 2x). An 8-bit image
++ * stays at 1x, so the pointer would be dimmer than the page under it. While
++ * the frames are boosted, the image gets the same g: decoded to linear
++ * light like the frames (omacvm_bright_linear) and times g.
++ *
++ * In: QEMU's cursor pixels as the 8-bit layer takes them (32 bits, bytes
++ * B G R A, alpha not premultiplied, sRGB). Out: half floats R G B A,
++ * premultiplied, extended linear sRGB; the colour times g, the alpha as it
++ * is.
++ */
++#ifndef OMACVM_POINTER_BRIGHT_H
++#define OMACVM_POINTER_BRIGHT_H
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include "omacvm-bright.h"
++
++/*
++ * The gain for the pointer, in hundredths: g while the frames are boosted
++ * above 1x, else 1x (the plain 8-bit image).
++ */
++static inline int omacvm_pointer_gain(bool boosted, int gain_c)
++{
++    return boosted && gain_c > OMACVM_BRIGHT_ONE ? gain_c : OMACVM_BRIGHT_ONE;
++}
++
++/* n pixels from src into dst (4 half floats each), times gain_c / 100. */
++static inline void omacvm_pointer_bright_pixels(const uint32_t *src, size_t n,
++                                                int gain_c, _Float16 *dst)
++{
++    double g = gain_c / (double)OMACVM_BRIGHT_ONE;
++    double lin[256];
++
++    for (int i = 0; i < 256; i++) {
++        lin[i] = omacvm_bright_linear(i / 255.0);
++    }
++    for (size_t i = 0; i < n; i++) {
++        uint32_t p = src[i];
++        double a = (p >> 24) / 255.0;
++
++        dst[4 * i + 0] = (_Float16)(lin[(p >> 16) & 0xff] * g * a);
++        dst[4 * i + 1] = (_Float16)(lin[(p >> 8) & 0xff] * g * a);
++        dst[4 * i + 2] = (_Float16)(lin[p & 0xff] * g * a);
++        dst[4 * i + 3] = (_Float16)a;
++    }
++}
++
++#endif
