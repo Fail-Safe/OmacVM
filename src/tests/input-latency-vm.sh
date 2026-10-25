@@ -101,7 +101,8 @@ cleanup() {
   pkill -f -- "$PAT" 2>/dev/null
   [[ -n $VD_PID ]] && { kill "$VD_PID" 2>/dev/null; sleep 2; panel_same "after the virtual display went"; }
   [[ -n ${NPID:-} ]] && kill "$NPID" 2>/dev/null
-  rm -rf "$W/run" "$W/inputlat" "$W/vdisplay" "$W/nativelat"
+  rm -rf "$W/run" "$W/inputlat" "$W/vdisplay" "$W/nativelat" "$W/vd.out"
+  rmdir "$W" 2>/dev/null   # kept when the raw rows are in it (no --out)
 }
 trap cleanup EXIT
 trap 'exit 130' INT
