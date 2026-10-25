@@ -192,4 +192,4 @@ Until then, other ways work for some of these:
   device: OmacVM asks again.
 - When QEMU takes longer than 3 s to add a device (a slow device), the app
   reports a failed connect but does not remove the device again: the VM may
-  still get it.
+  still get it (#526).
