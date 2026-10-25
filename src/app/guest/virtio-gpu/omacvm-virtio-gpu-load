@@ -1,14 +1,14 @@
 #!/bin/bash
-# OmacVM.app, 10-bit colour, the pointer on its own layer and vblanks in step
-# with the Mac's refresh: modprobe runs
-# this for virtio_gpu (the install rule in
+# OmacVM.app: modprobe runs this for virtio_gpu (the install rule in
 # /etc/modprobe.d/omacvm-virtio-gpu.conf, from omacvm-virtio-gpu-build), at
-# boot from udev, as root. It loads OmacVM's driver only when this start asks
-# for it (SMBIOS omacvm.deepcolor=1 from the app's HDR switch, omacvm.hdr=1
-# from an older app's hidden one, omacvm.pointerplane=1 from the switch "Pointer
-# on its own layer", omacvm.vsynclock=1 from "Frames in step with the Mac")
-# and it is built for the running kernel; else, and on any
-# failure, the stock driver. The VM never goes without one.
+# boot from udev, as root. It loads OmacVM's driver when it is built for the
+# running kernel and this start gains from it: its build has Linux 7.4's
+# damage fix (the compositor's damage reaches QEMU, which then redraws only
+# what changed), or the start asks for an option (SMBIOS omacvm.deepcolor=1
+# from the app's HDR switch, omacvm.hdr=1 from an older app's hidden one,
+# omacvm.pointerplane=1 from the switch "Pointer on its own layer",
+# omacvm.vsynclock=1 from "Frames in step with the Mac"); else,
+# and on any failure, the stock driver. The VM never goes without one.
 # Each switch adds its own module option: 10-bit deep_color=1 (the 10-bit
 # formats; without it the driver offers what the stock one does), the pointer
 # layer cursor_plane=1, but not with omacvm.hwcursor=1 (the Mac pointer needs
@@ -37,34 +37,30 @@ say() {
 # skips it; a grep over the raw bytes would miss the first string).
 # deep: 10-bit asked (deep_color=1); plane: the pointer layer asked
 # (cursor_plane=1), never with the Mac pointer; follow: vblanks in step with
-# the Mac's refresh asked (vsync_lock=1).
-deep=0 plane=0 follow=0 why=""
-if ! host=$(python3 -I "$here/../omacvm-smbios" "$P/sys/firmware/dmi/entries" 2>/dev/null); then
-  why="SMBIOS strings unreadable"
-else
+# the Mac's refresh asked (vsync_lock=1). Unreadable strings: nothing asked.
+# fix: the build has the damage fix (its file "damage" says "ours").
+deep=0 plane=0 follow=0 fix=0 why=""
+if host=$(python3 -I "$here/../omacvm-smbios" "$P/sys/firmware/dmi/entries" 2>/dev/null); then
   grep -qxE 'OMACVM_(DEEPCOLOR|HDR)=1' <<< "$host" && deep=1
   grep -qx 'OMACVM_POINTERPLANE=1' <<< "$host" && ! grep -qx 'OMACVM_HWCURSOR=1' <<< "$host" && plane=1
   grep -qx 'OMACVM_VSYNCLOCK=1' <<< "$host" && follow=1
-  (( deep || plane || follow )) || why="not asked for this start"
 fi
-if [[ -n $why ]]; then
-  :
-elif [[ ! -f $ko ]]; then
+[[ $(cat "$root/$kernel/damage" 2>/dev/null) == ours ]] && fix=1
+if [[ ! -f $ko ]]; then
   why="not built for $kernel"
-elif [[ $(cat "$root/$kernel/stamp" 2>/dev/null) != "$(cat "$root/linux-virtio-gpu-deep-color.patch" "$root/linux-virtio-gpu-cursor-plane.patch" "$root/linux-virtio-gpu-vsync-lock.patch" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1) $kernel" ]]; then
+elif [[ $(cat "$root/$kernel/stamp" 2>/dev/null) != "$(cat "$root/linux-virtio-gpu-deep-color.patch" "$root/linux-virtio-gpu-cursor-plane.patch" "$root/linux-virtio-gpu-vsync-lock.patch" "$root/linux-virtio-gpu-damage-clips.patch" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1) $kernel" ]]; then
   why="stamp out of date"
 else
-  # Only the options this build has: an experimental patch that did not fit
-  # this kernel is left out of it (omacvm-virtio-gpu-build), and insmod would
-  # refuse an unknown option.
-  # (No list at all from modinfo: as before, all asked options.)
+  # Only the options this build has: a patch that did not fit this kernel is
+  # left out of it (omacvm-virtio-gpu-build), and insmod would refuse an
+  # unknown option. (No list at all from modinfo: as before, all asked options.)
   have=$(modinfo -F parm "$ko" 2>/dev/null | cut -d: -f1)
   without=""
   for o in deep plane follow; do
     case $o in deep) n=deep_color ;; plane) n=cursor_plane ;; follow) n=vsync_lock ;; esac
     if [[ -n $have ]] && (( ${!o} )) && ! grep -qx "$n" <<< "$have"; then printf -v "$o" 0; without+=" without $n"; fi
   done
-  if (( deep || plane || follow )); then
+  if (( deep || plane || follow || fix )); then
     for dep in $(modinfo -F depends "$ko" 2>/dev/null | tr ',' ' '); do
       modprobe -q "$dep" 2>/dev/null
     done
@@ -79,8 +75,12 @@ else
       exit 0
     fi
     why="insmod failed: $(printf '%s\n' "$err" | head -1)"
-  else
+  elif [[ -n $without ]]; then
     why="built${without} for $kernel"
+  else
+    # The kernel has the damage fix itself (or the build left it out): the
+    # stock driver does the same.
+    why="not asked for this start"
   fi
 fi
 say "stock $why"

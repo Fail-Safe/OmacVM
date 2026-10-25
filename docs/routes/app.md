@@ -585,9 +585,12 @@ white; brighter parts go as far as the display can show at its current
 brightness. Macs without an HDR display do not show the switch and keep
 the 8-bit path.
 
-- The VM's 10-bit graphics driver: Update VM builds it (internet once, a
-  few seconds); the VM loads it only for a start with the switch on, else
-  the standard driver.
+- The VM's graphics driver: Update VM builds OmacVM's own (internet once, a
+  few seconds; the standard driver of the VM's kernel with a few changes)
+  and the VM loads it at every start, with its 10-bit formats only for a
+  start with the switch on; when it is not built, the standard driver.
+  Another of its changes (from Linux 7.4) tells the Mac which part of each
+  frame changed, so the window can redraw only that.
 - Which Linux apps send HDR (October 2026): GStreamer does; mpv and
   Chromium show HDR video as SDR for now.
 - Only the main window; windows on other displays stay 8-bit.

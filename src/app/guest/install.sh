@@ -17,9 +17,10 @@
 #    changes (hyprpicker/; the package's drew every display on every frame)
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
-#  * OmacVM's virtio-gpu driver (HDR; the pointer on its own layer),
-#    built for every kernel but dormant: loaded only when one of the app's two
-#    switches starts the VM (omacvm-virtio-gpu-load)
+#  * OmacVM's virtio-gpu driver (Linux 7.4's damage fix: QEMU redraws only
+#    what changed; HDR; the pointer on its own layer; frames in step with the
+#    Mac), built for every kernel and loaded at every start that gains from
+#    it (omacvm-virtio-gpu-load)
 #  * Vulkan (Venus), when the VM's Graphics setting gives it Vulkan: a Venus
 #    driver for the Mac's 16 KiB pages while Arch Linux ARM's is too old
 #    (venus/), now and at each boot (the setting can change between starts)
@@ -35,26 +36,26 @@ systemctl enable qemu-guest-agent >/dev/null 2>&1 || true
 systemctl start --no-block qemu-guest-agent >/dev/null 2>&1 || true
 install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays omacvm-desktop-recover /usr/local/bin/
 # What the Mac tells the VM at start (SMBIOS strings), for omacvm-app-host and
-# the 10-bit driver's loader.
+# the virtio-gpu driver's loader.
 install -Dm755 omacvm-smbios /usr/local/lib/omacvm/omacvm-smbios
-# 10-bit colour (HDR), the pointer on its own layer and frames in step with the
-# Mac's refresh: OmacVM's virtio-gpu driver (10-bit formats, the cursor plane
-# and vsync lock options), built now and by a pacman
+# OmacVM's virtio-gpu driver (Linux 7.4's damage fix on older kernels, the
+# 10-bit formats, the cursor plane and vsync lock options), built now and by a pacman
 # hook for new kernels (as a user id of its own, from kernel.org; a kernel
 # without headers is skipped), into /usr/local/lib/omacvm/virtio-gpu/<kernel>, where depmod
 # does not see it. A modprobe rule hands virtio_gpu to omacvm-virtio-gpu-load,
-# which loads it only when one of the app's switches starts the VM, else the
-# stock one.
+# which loads it at every start that gains from it (the damage fix, or one
+# of the app's switches), else the stock one.
 VG=/usr/local/lib/omacvm/virtio-gpu
 install -Dm755 virtio-gpu/omacvm-virtio-gpu-build $VG/omacvm-virtio-gpu-build
 install -Dm755 virtio-gpu/omacvm-virtio-gpu-load $VG/omacvm-virtio-gpu-load
 install -Dm644 virtio-gpu/linux-virtio-gpu-deep-color.patch $VG/linux-virtio-gpu-deep-color.patch
+install -Dm644 virtio-gpu/linux-virtio-gpu-damage-clips.patch $VG/linux-virtio-gpu-damage-clips.patch
 install -Dm644 virtio-gpu/linux-virtio-gpu-cursor-plane.patch $VG/linux-virtio-gpu-cursor-plane.patch
 install -Dm644 virtio-gpu/linux-virtio-gpu-vsync-lock.patch $VG/linux-virtio-gpu-vsync-lock.patch
 ln -sf $VG/omacvm-virtio-gpu-build /usr/local/bin/omacvm-virtio-gpu-build
 install -Dm644 virtio-gpu/95-omacvm-virtio-gpu.hook /etc/pacman.d/hooks/95-omacvm-virtio-gpu.hook
 $VG/omacvm-virtio-gpu-build --hook > /var/log/omacvm-virtio-gpu.log 2>&1 || true
-echo "OmacVM.app: 10-bit driver $($VG/omacvm-virtio-gpu-build --status 2>/dev/null || true)"
+echo "OmacVM.app: virtio-gpu driver $($VG/omacvm-virtio-gpu-build --status 2>/dev/null || true)"
 # Clipboard both ways, over a virtio port (the agent is try-omarchy's).
 ../../guest/pkg-add wl-clipboard || true
 # uaccess: the logged-in user may open the port (before 73-seat-late.rules).
