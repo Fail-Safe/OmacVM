@@ -252,6 +252,7 @@ run_fuzz_replay()
 run_test("test-darwin-eventfd", "virgl_util.c")
 run_test("test-thread-sync-fallback", "vrend_renderer.c")
 run_test("test-fence-wait-busy", "vrend_renderer.c")
+run_test("test-fence-nap", "vrend_renderer.c")
 run_test("test-core-glsl-shaders", "vrend_shader.c")
 run_test("test-blitter-shaders", "vrend_blitter.c")
 # Vulkan windows without a copy (virgl-vulkan-windows-iosurface.patch): the re-stride and its layout check.

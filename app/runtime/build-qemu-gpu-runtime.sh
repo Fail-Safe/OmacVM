@@ -1269,6 +1269,9 @@ verify_file_sha "Sampler limit patch" "$virgl_caps_sampler_limit_patch" "$virgl_
 patch -d "$virgl_source" -p1 -f -i "$virgl_caps_sampler_limit_patch"
 # OmacVM GPU: the sync thread does not test fences while the render thread runs commands.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait-busy.patch"
+# OmacVM GPU: after the first millisecond a fence wait naps an eighth of the time waited, not
+# doubled naps: a 1-3 ms frame is seen at most an eighth late (input latency, frame waits).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait-proportional.patch"
 # OmacVM GPU: guest GPU memory follows the Mac's memory pressure; status file for the app.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-memory-pressure.patch"
 # OmacVM GPU: the budget's last part is kept for the VM's desktop (Hyprland, the shell): the app
