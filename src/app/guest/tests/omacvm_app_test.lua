@@ -8,12 +8,12 @@ local cfg = os.getenv("XDG_CONFIG_HOME")
 assert(modpath and rt and cfg and rt ~= "", "usage: see the top of this file")
 os.execute("mkdir -p '" .. rt .. "/omacvm/display-sync' '" .. cfg .. "/hypr'")
 
-local monitors, applied, window_rules
+local monitors, applied, window_rules, configs
 hl = {
   get_monitors = function() return monitors end,
   monitor = function(rule) applied[#applied + 1] = rule end,
   window_rule = function(rule) window_rules[#window_rules + 1] = rule end,
-  config = function() end,
+  config = function(c) configs[#configs + 1] = c end,
   on = function() end,
   timer = function() end,
   exec_cmd = function() end,
@@ -28,7 +28,7 @@ end
 local function rule_file(output, text) write(rt .. "/omacvm/display-sync/" .. output .. ".rule", text) end
 
 local function load_config(names)
-  monitors, applied, window_rules = {}, {}, {}
+  monitors, applied, window_rules, configs = {}, {}, {}, {}
   for _, n in ipairs(names) do monitors[#monitors + 1] = { name = n } end
   dofile(modpath)
   return applied
@@ -46,6 +46,30 @@ write(cfg .. "/hypr/monitors.lua",
 
 -- Nothing kept yet (first login): no rule.
 check("no kept rule: nothing set", #load_config({ "Virtual-1", "NOTCH" }) == 0)
+
+-- Hyprland's unmodified SDR copy of each HDR frame only while something
+-- captures the output (render:keep_unmodified_copy 0), at every load.
+local keep
+for _, c in ipairs(configs) do
+  if c.render and c.render.keep_unmodified_copy ~= nil then keep = c.render.keep_unmodified_copy end
+end
+check("HDR: SDR copy for captures only", keep == 0)
+
+-- A keep_unmodified_copy the user set in their own Hyprland files wins: ours
+-- is not set then. A comment that names it does not count.
+local function keep_set()
+  for _, c in ipairs(configs) do
+    if c.render and c.render.keep_unmodified_copy ~= nil then return true end
+  end
+  return false
+end
+write(cfg .. "/hypr/looknfeel.lua", 'hl.config({ render = { keep_unmodified_copy = 2 } })\n')
+load_config({ "Virtual-1" })
+check("HDR: the user's own keep_unmodified_copy wins", not keep_set())
+write(cfg .. "/hypr/looknfeel.lua", '-- render.keep_unmodified_copy: see the wiki\nhl.config({ render = { direct_scanout = 1 } })\n')
+load_config({ "Virtual-1" })
+check("HDR: a comment naming it does not count", keep_set())
+os.remove(cfg .. "/hypr/looknfeel.lua")
 
 -- The screen's kept rule comes back as it was sent (Omanotch's NOTCH output
 -- above it can no longer push it aside with "auto").
