@@ -48,27 +48,46 @@ public enum USBQMP {
         return .failed(String(qemuError.prefix(160)))
     }
 
+    /// An error QEMU itself answered ("QMP command X failed: ..."), not a
+    /// command that got no answer (timed out, socket closed).
+    public static func answeredByQEMU(_ error: String) -> Bool { error.contains(" failed: ") }
+
     /// Adds the device; it counts as given only once "info usb" lists it
     /// (checked every 0.3 s for up to 3 s). Else it is removed again.
+    /// A device_add that got no answer in time (a slow device: QEMU is
+    /// still opening it) may still land (#526): then the same check, and
+    /// longer while QEMU does not answer at all (it answers info usb only once
+    /// the add is done or dropped); one it never lists is removed again, so
+    /// the VM never keeps a device the app says is not connected.
     public static func attach(_ d: USBDevice, over qmp: USBQMPTransport,
                               wait: (Double) -> Void = { Thread.sleep(forTimeInterval: $0) }) -> USBAttachResult {
         let id = qemuID(location: d.location)
+        var late = false
         do {
             _ = try qmp.execute("device_add", attachArguments(d))
         } catch {
-            return reason(qemuError: "\(error)")
+            let e = "\(error)"
+            if answeredByQEMU(e) { return reason(qemuError: e) }
+            late = true
         }
         var answered = false
-        for i in 0..<10 {
+        var i = 0
+        // 10 looks after an answered add; after one without an answer up to
+        // 20 until QEMU answers, then the usual 10 from there.
+        var looks = late ? 20 : 10
+        while i < looks {
             if i > 0 { wait(0.3) }
+            i += 1
             if let ids = try? attached(over: qmp) {
+                if !answered && late { looks = min(looks, i + 9) }
                 answered = true
                 if ids.contains(id) { return .attached }
             }
         }
         _ = try? qmp.execute("device_del", ["id": id])
         // QEMU never answered "info usb": not a Mac app's doing.
-        return answered ? .busy : .failed("QEMU did not answer")
+        if !answered { return .failed("QEMU did not answer") }
+        return late ? .failed("QEMU did not answer in time") : .busy
     }
 
     /// Takes it from the VM (the Mac gets it back when QEMU closes it).
