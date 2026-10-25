@@ -176,6 +176,11 @@ Until then, other ways work for some of these:
   - Connect for two devices macOS uses (a display's camera and its HID
     controls, on the Mac mini): both refused, one log line each, and neither
     reconnected on the Mac, also when QEMU quit.
+  - #526, `usb-tests --qmp` with the 3.2.0 runtime on the Mac mini: a
+    device_add the app gives up on (its connection closed after the add was
+    sent, also with QEMU stopped at that moment) was added by QEMU in 6 of 6
+    tries; 3.2.0's code said the connect failed each time while the VM had
+    it. Now the app says connected, as "info usb" does.
 - Not tested yet: a real free device end to end, and the question over a
   full-screen VM on a Mac (none of the test Macs has a free device plugged
   in). USB devices stay experimental until both are done.
@@ -191,5 +196,7 @@ Until then, other ways work for some of these:
 - A device that gets another product id when it resets (DFU mode) is a new
   device: OmacVM asks again.
 - When QEMU takes longer than 3 s to add a device (a slow device), the app
-  reports a failed connect but does not remove the device again: the VM may
-  still get it (#526).
+  waits for QEMU to answer "info usb" (up to about 6 s, longer when each
+  look itself waits): a device QEMU added late counts as connected, one it
+  does not list is removed again (#526). A QEMU busy for longer than that
+  still could add it after the removal.
