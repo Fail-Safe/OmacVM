@@ -9,6 +9,13 @@ Google Chrome plays 1440p and 4K video on the Mac's media engine, call tiles sho
 the VM's window takes less power on macOS 27, the VM's disk is safer at a power cut, and volume 0 is
 silent.
 
+- **Control centre switches right after another one are not turned away.** When a switch's job
+  ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
+  switch was refused with "unknown VM" at once and the control centre asked again, so that switch
+  took about 12 s instead of 7-9 s (#528). The Bridge now looks again at once and waits for it. Its
+  log also says why it did not take a VM (not running, not set up, or why the Mac cannot reach
+  it), and which VM the app named. Needs `omacvm update` (or the app's update) on the Mac.
+
 - **Google Chrome plays 1440p and 4K video on the Mac's media engine.** The Mac's graphics
   thread for the VM, which runs every app's drawing in it, waited for the media engine on each
   picture (about 5 ms for a 4K one on a MacBook Air M2, 3 ms on an M4 Max). Above 1080p Chrome's
