@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.1 (unreleased)
+## 3.2.1
 
 Google Chrome plays 1440p and 4K video on the Mac's media engine, call tiles show the whole picture,
 the VM's window takes less power on macOS 27, the VM's disk is safer at a power cut, and volume 0 is
