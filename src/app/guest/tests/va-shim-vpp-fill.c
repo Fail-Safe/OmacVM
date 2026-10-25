@@ -12,7 +12,7 @@
  * output region the rounded size (0,0,320,192); the app's buffer has its own regions back
  * afterwards; a 16-aligned source, an imported 320x180 NV12 source (its planes are its own)
  * and an output into part of the frame stay as they are.
- * no: everything as the app gave it.
+ * no: everything as the app gave it. The stand-in says it is Mesa STUB_MESA (26.2.5 if unset).
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -160,6 +160,11 @@ static VAStatus render_picture(VADriverContextP ctx, VAContextID c, VABufferID *
 
 VAStatus __vaDriverInit_1_20(VADriverContextP ctx)
 {
+    static char vendor[80];
+    const char *v = getenv("STUB_MESA");
+
+    snprintf(vendor, sizeof(vendor), "Mesa Gallium driver %s for virgl (stand-in)", v && *v ? v : "26.2.5");
+    ctx->str_vendor = vendor;
     ctx->vtable->vaCreateSurfaces2 = create_surfaces2;
     ctx->vtable->vaExportSurfaceHandle = export_surface;
     ctx->vtable->vaQueryConfigAttributes = query_config_attributes;

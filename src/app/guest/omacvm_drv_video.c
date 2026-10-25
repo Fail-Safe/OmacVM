@@ -46,8 +46,9 @@
  * an import of its own frame (the dma-buf it exported): such an RGB import whose
  * buffer holds the rounded planes (Mesa made it) is imported at the rounded
  * size, so the conversion may draw all of it. Only Mesa's own 4:2:0 surfaces
- * get the source scaling (an imported one has the planes it came with).
- * OMACVM_VA_FILL=0 or 1 overrides.
+ * get the source scaling (an imported one has the planes it came with), and
+ * only with a Mesa this was checked with (FILL_MESA_MAX; a newer one: off,
+ * logged). OMACVM_VA_FILL=0 or 1 overrides.
  *
  * Limits: the Mac says in its video caps how many decoders and encoders a VM
  * should keep open at once. Past a somewhat higher limit of its own it gives
@@ -457,6 +458,26 @@ static VAStatus destroy_surfaces(VADriverContextP ctx, VASurfaceID *list, int n)
 
 /* ---- Chromium's RGB frames fill their planes (see the top) ---- */
 
+/* The fill relies on how Mesa rounds the planes and reads the source region,
+ * checked up to this Mesa (major * 100 + minor); a newer one has the fill off
+ * until it is checked again (OMACVM_VA_FILL=1 turns it on). */
+#define FILL_MESA_MAX 2602
+static int fill_mesa_ok = -1;
+
+/* Mesa's vendor string, "Mesa Gallium driver 26.2.5 for virgl ..." (shim_init) */
+static void fill_mesa_check(const char *vendor)
+{
+    int major = 0, minor = 0;
+
+    if (fill_mesa_ok >= 0)
+        return;
+    fill_mesa_ok = vendor && sscanf(vendor, "Mesa Gallium driver %d.%d", &major, &minor) == 2 &&
+                   major * 100 + minor <= FILL_MESA_MAX;
+    if (!fill_mesa_ok && chromium())
+        fprintf(stderr, "omacvm_drv_video: %s: not checked with this Mesa, call tiles not "
+                "filled (OMACVM_VA_FILL=1 turns it on)\n", vendor ? vendor : "no vendor string");
+}
+
 static int fill_on(void)
 {
     static int on = -1;
@@ -464,7 +485,7 @@ static int fill_on(void)
 
     if (on < 0) {
         env = getenv("OMACVM_VA_FILL");
-        on = env && *env ? *env == '1' : chromium();
+        on = env && *env ? *env == '1' : chromium() && fill_mesa_ok == 1;
     }
     return on;
 }
@@ -1267,6 +1288,8 @@ static VAStatus shim_init(VADriverContextP ctx)
     if (!init)
         return VA_STATUS_ERROR_UNKNOWN;
     st = init(ctx);
+    if (st == VA_STATUS_SUCCESS)
+        fill_mesa_check(ctx->str_vendor);
     if (st == VA_STATUS_SUCCESS && ctx->vtable && ctx->vtable->vaQuerySurfaceAttributes) {
         mesa_query_surface_attributes = ctx->vtable->vaQuerySurfaceAttributes;
         ctx->vtable->vaQuerySurfaceAttributes = query_surface_attributes;

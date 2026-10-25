@@ -1,7 +1,7 @@
 #!/bin/bash
 # OmacVM's VA driver shim and Chrome's call tiles (omacvm_drv_video.c, "Chromium's RGB frames fill
 # their planes"): ARGB imports at the rounded size when their buffer holds it, the video processing
-# regions Mesa gets, only in Chromium's processes. The shim runs against a stand-in for Mesa's
+# regions Mesa gets, only in Chromium's processes and only with a Mesa the fill was checked with. The shim runs against a stand-in for Mesa's
 # driver (va-shim-vpp-fill.c), on Linux with libva's headers (libva-dev).
 #   src/app/guest/tests/va-shim-vpp-fill.sh [SHIM_SOURCE]
 # SHIM_SOURCE: another omacvm_drv_video.c (an older one must fail).
@@ -35,5 +35,9 @@ run "" yes --type=utility
 run "" no
 run "OMACVM_VA_FILL=0" no --type=gpu-process
 run "OMACVM_VA_FILL=1" yes
+# A Mesa newer than the one the fill was checked with: off (logged), unless switched on.
+run "STUB_MESA=26.3.0" no --type=gpu-process
+run "STUB_MESA=26.3.0 OMACVM_VA_FILL=1" yes --type=gpu-process
+run "STUB_MESA=25.1.4" yes --type=gpu-process
 (( fail )) && { echo "va-shim-vpp-fill: FAILED"; exit 1; }
 echo "va-shim-vpp-fill: all ok"
