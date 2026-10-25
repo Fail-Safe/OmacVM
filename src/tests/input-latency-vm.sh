@@ -293,15 +293,16 @@ ev.sort()
 fences.sort()
 resp = {}
 for t, kind, fid in fences:
-    if kind == "resp" and fid not in resp:
-        resp[fid] = t
+    if kind == "resp":
+        resp.setdefault(fid, []).append(t)   # in time order
 def fence_after(after, within=50e3):
-    """The first fence the guest asked for after this time, and when QEMU answered it."""
+    """The first fence any context asked for within 50 us after this time (the trace does not
+    say whose), and when QEMU first answered that id after it was asked."""
     for t, kind, fid in fences:
         if t > after + within:
             return None
         if t >= after and kind == "ctrl":
-            return resp.get(fid)
+            return next((r for r in resp.get(fid, ()) if r >= t), None)
     return None
 def first(name, after, within=300e3):
     for t, n in ev:

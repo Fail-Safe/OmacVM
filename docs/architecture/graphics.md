@@ -1183,7 +1183,9 @@ a virtual display, a clone of a 3.1.30 Omarchy VM (`foot`), 80 events per
 row, 40 s after the desktop came up, several runs interleaved; median ms
 (run to run the medians move by 2-3 ms). Stages from QEMU's trace: the key
 in QEMU's input layer, Hyprland's first GPU submit, the answer to its fence,
-the frame's RESOURCE_FLUSH, QEMU's present done, on screen.
+the frame's RESOURCE_FLUSH, QEMU's present done, on screen. "Its fence" is
+the first fence any context asks for within 50 us after that submit (the
+trace does not say whose), answered before the flush: close, not exact.
 
 | 60 Hz | to screen | Mac -> QEMU | -> Hyprland's GPU work | -> its fence answered | -> flush | -> present done | -> screen |
 |---|---|---|---|---|---|---|---|
