@@ -681,6 +681,17 @@ enum Settings {
         get { UserDefaults.standard.bool(forKey: "pointerPlane") }
         set { UserDefaults.standard.set(newValue, forKey: "pointerPlane") }
     }
+    /// Frames in step with the Mac (experimental, off by default): the VM
+    /// loads its virtio-gpu driver with vsync_lock=1 (SMBIOS
+    /// omacvm.vsynclock=1), whose vblank timer then follows the Mac display's
+    /// refresh as QEMU's present gives it (ADR 0056). While frames come
+    /// steadily a frame no longer waits up to a refresh on the Mac: input shows
+    /// sooner, same frames, same rate. The VM window's switch (VsyncLockRow)
+    /// or defaults write org.omacvm.app vsyncLock -bool true. Read at each start.
+    static var vsyncLock: Bool {
+        get { UserDefaults.standard.bool(forKey: "vsyncLock") }
+        set { UserDefaults.standard.set(newValue, forKey: "vsyncLock") }
+    }
     /// Experimental, off by default, no switch in the window yet: the VM
     /// puts its pointer on virtio-gpu's cursor plane and the Mac's own cursor
     /// shows it (QEMU's OMACVM_HW_CURSOR, the guest's omacvm.hwcursor), so it

@@ -12,6 +12,15 @@ in more words.
   Update VM builds it (internet once, a few seconds); until it is built, or if it fails, the
   standard driver loads as before. A change that does not fit a newer kernel is left out of that
   kernel's build and the rest stays (HDR keeps working). `omacvm check` has a "Changed parts" line.
+- **Tiled present, built, off for now.** OmacVM.app shows every frame of the VM as a new whole
+  picture, so macOS redraws the whole window for each one, also when only the pointer moved. With
+  tiles, only the 256x256 squares the VM changed get a new picture. MacBook Air M2, the VM full
+  screen at 60 Hz with a driver that says what changed, the pointer moving: 3.13-3.17 W instead of
+  3.55-3.75 W for the whole Mac (-11 to -17 %, two sets), the same pixels and frame rate; scrolling
+  and typing the same.
+  It needs a VM that says what changed in its frames (Linux 7.4, or OmacVM's own driver with that
+  fix, #520), so there is no switch yet. `OMACVM_GL_PRESENT_TILES=1` in the app's environment
+  turns it on for tests.
 
 ## 3.2.2
 
@@ -28,7 +37,6 @@ new experimental switch puts the pointer on its own layer.
   Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
   download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
   Mac.
-
 - **Control centre switches right after another one are not turned away.** When a switch's job
   ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
   switch was refused with "unknown VM" at once and the control centre asked again, so that switch
@@ -43,6 +51,24 @@ new experimental switch puts the pointer on its own layer.
   copy is now made only while a screenshot or a screen share runs. The screen shows the same pixels and
   screenshots look the same; the Mac's GPU does 10-19 % less work per frame with HDR on (scrolling, video,
   a terminal). A `keep_unmodified_copy` you set in your own Hyprland config still wins. Needs Update VM.
+
+- **Frames in step with the Mac (experimental, off).** A new switch in the VM window's Display
+  section. The VM's display clock had its own beat: a frame it drew right after one refresh of
+  the Mac's display waited for the next one, anywhere up to a whole refresh, while the screen was
+  moving. With the switch, the VM's clock follows the Mac display's refresh, so its frames are
+  ready just before the Mac shows them. Mac mini, while the screen moves (medians of 60 per mode,
+  two rounds of tests, 6-7 runs a side): at 60 Hz keys 1.5 to 7 ms sooner, the pointer about 6 ms,
+  keys while the terminal itself scrolls 3.5 to 4 ms, with fewer repeated and skipped frames (143
+  instead of 170); at 120 Hz up to 2.6 ms sooner (keys while the pointer moves 0 to 2.6 ms, the
+  terminal 1.7 to 1.8 ms). When the VM's frames need more than a refresh, late frames wait as
+  before. When a frame is too late for its refresh, the newer one is shown and the late one
+  skipped: at 120 Hz that was a few more skipped frames (8 instead of 2 in about 3 minutes of
+  moving frames). On a still screen there is no gain. The same pixels (checked on a MacBook Air)
+  at the same rate (60 or 120 Hz); MacBook Air M2 power within 1 % (pointer moving, scrolling).
+  The VM's driver follows only when its display rate is the Mac's, and if its patch does not fit
+  a newer Linux kernel, Update VM builds the driver without it (HDR and the pointer layer keep
+  working; `omacvm check` says so). Needs Update VM (it builds the VM's graphics driver, internet
+  once); counts from the next start of the VM.
 
 - **Pointer on its own layer (experimental, off).** A new switch in the VM window's Display section.
   With it, moving the pointer no longer redraws the VM's screen: the VM puts its pointer on the

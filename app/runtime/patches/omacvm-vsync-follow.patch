@@ -1,0 +1,563 @@
+From: OmacVM
+Subject: [PATCH] virtio-gpu, cocoa: the guest's vblanks follow the Mac's refresh
+
+What: a guest that asks (OmacVM's virtio-gpu driver with vsync_lock=1,
+src/app/guest/virtio-gpu/linux-virtio-gpu-vsync-lock.patch) gets the
+main window display's refresh grid through OmacVM's own virtio-gpu
+command (0x0f00, answer 0x11f0): the guest counter value of the next
+vblank it should have and the period in ps. Its vblank timer follows
+that grid. The grid: while the guest asked in the last 2 s, each tick of
+the present's display link puts the guest's vblank the lead before that
+refresh's commit (the commit is 3 ms before the vsync,
+qemu-cocoa-gl-present-vsync.patch), at the full rate's period measured
+over the link's run of ticks. The lead follows when the guest's frames
+are ready after their vblank (ui/omacvm-vsync.h: the latest of the last
+64 + 1 ms, once a second; OMACVM_GL_FOLLOW_LEAD_MS fixes it for tests).
+A frame later than the lead misses its refresh, so the lead covers the
+slowest one, not a percentile: the first build (95th percentile + 1 ms)
+had 1-3 late frames a second at 60 Hz, each a repeat. The frames are timed
+on the grid the guest got last (it asks every half second), and not for 6
+vblanks after that grid moved, while the guest's timer comes after it:
+timed on the newest grid, a raised lead made the next frames look late
+and raised it again. While a
+guest follows, a tick that finds more than one frame shows the newest:
+the older one came late for its own refresh (as OMACVM_GL_INPUT_FIRST
+does while input comes), so a late frame costs one repeat, not a
+refresh of delay until the quarter-second trim. Not while the guest's
+frames are too slow to follow (the latest + 1 ms past a period less 1
+ms, or more than 1 in 100 late in the last second: a busy 120 Hz guest
+on the mini had 5 % late, each a dropped frame): then late frames wait in
+the queue as without following, until a second without either. hvf gives the guest
+counter's offset (CNTVCT = mach time less hvf's vtimer offset, set at
+start and after each pause); ui/omacvm-vsync.c keeps the grid between the
+threads (an os_unfair_lock: it lends the commit queue's priority to the
+holder). Each ask (version 1) says whether the guest's timer was on the
+last grid (LOCKED) and the mode's frame time: only while it says so, at
+the grid's rate, do its frames count as in step (newest frame shown, lead
+measured); a guest that asks but does not follow (another rate, no grid
+yet) only gets the grid. A grid the link has not published for 100 ms
+(the link paused on a still screen; a ProMotion panel starts again at a
+phase of its own) is not handed out. Another scanout, no grid, the 2D
+device or OMACVM_GL_VSYNC=0: the answer says no grid and the guest's timer
+runs on its own. A guest that never asks changes nothing.
+
+Why: the guest's vblank timer runs at the display's rate but at its own
+phase. Hyprland draws right after a vblank and QEMU shows the frame at the
+next refresh it is in time for, so while frames come steadily (the pointer
+moving, an animation, a video) each frame waited anywhere up to a refresh
+on the Mac for nothing: a key while the pointer moves took about 11 ms
+more than on an idle screen at 60 Hz (src/tests/input-latency-vm.sh, Mac
+mini, 3.2.0), where a native app waits only for its own next refresh.
+
+Threads: the commit queue (present_lock held) publishes the grid and
+reads when the guest asked; QEMU's present thread adds the arrivals under
+present_lock; virtio-gpu (main loop, BQL) answers under the store's spin
+lock; hvf writes the offset under it. Trace cocoa_present_follow once a
+second: the lead, the frames' median and latest after their vblank, how
+many came late.
+
+Upstream: OmacVM only (its present and its own virtio-gpu command).
+Test: app/runtime/Tests/display/test-vsync-follow.sh (rules, wiring);
+src/tests/virtio-gpu-vsync.sh (the guest's side); end to end
+src/tests/input-latency-vm.sh --smbios omacvm.vsynclock=1.
+Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
+
+--- a/hw/display/virtio-gpu-virgl.c
++++ b/hw/display/virtio-gpu-virgl.c
+@@ -21,6 +21,7 @@
+ #include "hw/virtio/virtio-gpu-bswap.h"
+ #include "hw/virtio/virtio-gpu-pixman.h"
+ #include "system/hvf.h"
++#include "ui/omacvm-vsync.h"
+ 
+ #include "ui/egl-helpers.h"
+ 
+@@ -556,6 +557,55 @@ static void virtio_gpu_rect_update(VirtIOGPU *g, int idx, int x, int y,
+     qemu_console_gl_update(g->parent_obj.scanout[idx].con, x, y, width, height);
+ }
+ 
++/*
++ * OmacVM: the Mac display's refresh for the guest's vblank timer (OmacVM's
++ * virtio-gpu driver with vsync_lock=1, ui/omacvm-vsync.h). The ask says
++ * whether the guest's timer is on the last grid and its mode's frame time
++ * (version 1); the answer has the guest counter of the next vblank the
++ * guest should have and the period. No grid (the main window's display
++ * link has not run lately, another scanout): VALID clear, and the guest's
++ * timer runs on its own.
++ */
++struct omacvm_virtio_gpu_vsync {
++    struct virtio_gpu_ctrl_hdr hdr;
++    uint32_t scanout_id;
++    uint32_t flags;
++    uint32_t version;
++    uint32_t mode_period_ns;
++};
++
++struct omacvm_virtio_gpu_resp_vsync {
++    struct virtio_gpu_ctrl_hdr hdr;
++    uint64_t vblank;
++    uint64_t period_ps;
++    uint32_t flags;
++    uint32_t padding;
++};
++
++static void virgl_cmd_omacvm_vsync(VirtIOGPU *g,
++                                   struct virtio_gpu_ctrl_command *cmd)
++{
++    struct omacvm_virtio_gpu_vsync req = { 0 };
++    struct omacvm_virtio_gpu_resp_vsync resp = { 0 };
++    uint64_t counter, period_ps;
++    size_t n = iov_to_buf(cmd->elem.out_sg, cmd->elem.out_num, 0, &req, sizeof(req));
++
++    /* An ask without the version-1 fields (none shipped) counts as not on the grid. */
++    if (n < offsetof(struct omacvm_virtio_gpu_vsync, flags)) {
++        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
++        return;
++    }
++    resp.hdr.type = OMACVM_VIRTIO_GPU_RESP_OK_VSYNC;   /* swapped with the header */
++    if (le32_to_cpu(req.scanout_id) == 0 &&
++        omacvm_vsync_for_guest(le32_to_cpu(req.flags), le32_to_cpu(req.version),
++                               le32_to_cpu(req.mode_period_ns), &counter, &period_ps)) {
++        resp.vblank = cpu_to_le64(counter);
++        resp.period_ps = cpu_to_le64(period_ps);
++        resp.flags = cpu_to_le32(OMACVM_VSYNC_VALID);
++    }
++    virtio_gpu_ctrl_response(g, cmd, &resp.hdr, sizeof(resp));
++}
++
+ static void virgl_cmd_resource_flush(VirtIOGPU *g,
+                                      struct virtio_gpu_ctrl_command *cmd)
+ {
+@@ -1229,6 +1279,9 @@ void virtio_gpu_virgl_process_cmd(VirtIOGPU *g,
+     case VIRTIO_GPU_CMD_GET_EDID:
+         virtio_gpu_get_edid(g, cmd);
+         break;
++    case OMACVM_VIRTIO_GPU_CMD_VSYNC:
++        virgl_cmd_omacvm_vsync(g, cmd);
++        break;
+ #if VIRGL_VERSION_MAJOR >= 1
+     case VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB:
+         virgl_cmd_resource_create_blob(g, cmd);
+--- a/target/arm/hvf/hvf.c
++++ b/target/arm/hvf/hvf.c
+@@ -16,6 +16,7 @@
+ #include "system/runstate.h"
+ #include "system/hvf.h"
+ #include "system/hvf_int.h"
++#include "ui/omacvm-vsync.h"
+ #include "system/hw_accel.h"
+ #include "hvf_arm.h"
+ #include "cpregs.h"
+@@ -2643,6 +2644,7 @@ static void hvf_vm_state_change(void *opaque, bool running, RunState state)
+     if (running) {
+         /* Update vtimer offset on all CPUs */
+         hvf_state->vtimer_offset = mach_absolute_time() - s->vtimer_val;
++        omacvm_vsync_set_counter_offset(hvf_state->vtimer_offset);
+         cpu_synchronize_all_states();
+ 
+         /*
+@@ -2693,6 +2695,8 @@ static void hvf_vm_state_change(void *opaque, bool running, RunState state)
+ int hvf_arch_init(void)
+ {
+     hvf_state->vtimer_offset = mach_absolute_time();
++    /* OmacVM: the guest's counter for its vblanks (ui/omacvm-vsync.h). */
++    omacvm_vsync_set_counter_offset(hvf_state->vtimer_offset);
+     vmstate_register(NULL, 0, &vmstate_hvf_vtimer, &vtimer);
+     qemu_add_vm_change_state_handler(hvf_vm_state_change, &vtimer);
+ 
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -57,6 +57,7 @@
+ #include "ui/omacvm-edr.h"
+ #include "ui/omacvm-bright.h"
+ #include "ui/omacvm-present-damage.h"
++#include "ui/omacvm-vsync.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -7662,6 +7663,21 @@ the one before (slowed link) */
+     bool merge;                         /* the guest draws faster than the link */
+     unsigned ticks, shown, direct, repeats, merged, dropped, busy; /* trace */
+     double wait_sum;
++    /*
++     * OmacVM: a guest that follows the refresh (ui/omacvm-vsync.h): it asked
++     * for the grid lately; the grid's vblank and period (seconds), the run
++     * of ticks its period is measured over, and the lead.
++     */
++    bool asked;                         /* a guest asked in the last 2 s: it gets the grid */
++    bool follow;                        /* and said its frames are on it */
++    bool follow_buffered;               /* late frames wait (omacvm_follow_buffered) */
++    double grid_vblank, grid_period;
++    double ans_vblank, ans_period, ans_moved;  /* the grid the guest got last */
++    double grid_t0, grid_last;
++    int grid_hz;
++    double follow_lead;
++    OmacVMLead lead;
++    unsigned follow_late, follow_frames;  /* trace */
+ } present_sync = {
+     .win_min = INT_MAX, .win_gap = INFINITY, .win_gap2 = INFINITY,
+ };
+@@ -7670,6 +7686,7 @@ the one before (slowed link) */
+ static bool present_fixed;              /* OMACVM_GL_REFRESH=fixed */
+ static bool present_input_first;        /* OMACVM_GL_INPUT_FIRST=1 */
+ static bool present_trim_quarter;       /* OMACVM_GL_TRIM=quarter */
++static double present_follow_fixed;     /* OMACVM_GL_FOLLOW_LEAD_MS: a fixed lead (s) */
+ static QEMUBH *present_bh;
+ 
+ /* Main thread: the window is in sight again: its newest frame now, not at the guest's next flush. */
+@@ -7883,6 +7900,9 @@ static bool cocoa_gl_present_init(void)
+     present_input_first = present_vsync && in && !strcmp(in, "1");
+     const char *tr = getenv("OMACVM_GL_TRIM");
+     present_trim_quarter = present_vsync && tr && !strcmp(tr, "quarter");
++    /* A fixed lead for a guest that follows the refresh (tests); else it adapts. */
++    const char *fl = getenv("OMACVM_GL_FOLLOW_LEAD_MS");
++    present_follow_fixed = fl ? atof(fl) / 1000 : 0;
+     present_nsurf = present_vsync ? PRESENT_SURFACES : 3;
+     if (present_vsync) {
+         /*
+@@ -8557,7 +8577,11 @@ static void cocoa_gl_present_screen_changed(void)
+     present_sync.min_hz = min_hz;
+     present_sync.hz = max_hz;
+     present_sync.slower = 0;
++    /* Another screen: another refresh; the guest gets the new grid at the next tick. */
++    present_sync.grid_t0 = 0;
++    present_sync.grid_period = 0;
+     os_unfair_lock_unlock(&present_lock);
++    omacvm_vsync_withdraw();
+     cocoa_gl_present_link_rate();
+     if (changed) {
+         if (min_hz < max_hz) {
+@@ -8633,6 +8657,17 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+     double gap = present_sync.last_ready > 0 ?
+                  now - present_sync.last_ready : INFINITY;
+     present_sync.last_ready = now;
++    /*
++     * A following guest's frame: how long after its vblank it was ready, on
++     * the grid the guest got last (a newer one reaches it at its next ask),
++     * not while its timer is still coming after a moved grid (6 vblanks).
++     */
++    if (present_sync.linked && present_sync.follow && present_sync.ans_period > 0 &&
++        now - present_sync.ans_moved > 6 * present_sync.ans_period) {
++        omacvm_lead_frame(&present_sync.lead, now, present_sync.ans_vblank,
++                          present_sync.ans_period);
++        present_sync.follow_frames++;
++    }
+     if (!present_sync.linked) {
+         present_sync.close_frames =
+             gap < PRESENT_CLOSE_S ? present_sync.close_frames + 1 : 0;
+@@ -8769,7 +8804,7 @@ static double present_wanted_hz(void)
+  * queued frame on the layer. Returns false once no frame has come for
+  * PRESENT_IDLE_S (the link may pause).
+  */
+-static bool cocoa_gl_present_vsync(double T)
++static bool cocoa_gl_present_vsync(double T, double deadline)
+ {
+     PresentFrame show = { 0 }, drop = { 0 }, stale[PRESENT_QUEUE] = { { 0 } };
+     PresentFrame trimmed[PRESENT_QUEUE] = { { 0 } };
+@@ -8780,18 +8815,72 @@ static bool cocoa_gl_present_vsync(double T)
+     double now = CACurrentMediaTime();
+     bool rate = false, idle = false;
+ 
++    /*
++     * A guest that asked in the last 2 s gets the grid; its frames count as
++     * on it (newest shown, lead measured) only while its asks say so.
++     */
++    bool asked = omacvm_vsync_now_ns() - omacvm_vsync_asked_ns() < 2000000000LL;
++    bool follow = asked && omacvm_vsync_locked();
++
+     os_unfair_lock_lock(&present_lock);
+     if (T > 0 && T < 0.1) {
+         present_sync.period = T;
+     }
++    if (asked && !present_sync.asked) {
++        omacvm_lead_reset(&present_sync.lead);
++        present_sync.follow_buffered = false;
++        present_sync.follow_lead = present_follow_fixed > 0 ? present_follow_fixed :
++                                   OMACVM_LEAD_START_S;
++    }
++    present_sync.asked = asked;
++    present_sync.follow = follow;
++    if (asked && present_sync.max_hz > 0) {
++        /*
++         * The grid: a vblank the lead before this refresh's commit, at the
++         * full rate's period measured over this run of ticks (a pause of
++         * the link starts a new run).
++         */
++        if (!present_sync.grid_t0 || deadline - present_sync.grid_last > 0.5 ||
++            present_sync.grid_hz != present_sync.max_hz) {
++            present_sync.grid_t0 = deadline;
++            present_sync.grid_hz = present_sync.max_hz;
++        }
++        present_sync.grid_last = deadline;
++        uint64_t ps = omacvm_vsync_period_ps(deadline - present_sync.grid_t0,
++                                             present_sync.max_hz);
++        if (!ps) {
++            ps = present_sync.grid_period > 0 &&
++                 fabs(present_sync.grid_period * present_sync.max_hz - 1) < 0.02 ?
++                 (uint64_t)llround(present_sync.grid_period * 1e12) :
++                 (uint64_t)llround(1e12 / present_sync.max_hz);
++        }
++        present_sync.grid_period = ps / 1e12;
++        present_sync.grid_vblank = deadline -
++            omacvm_lead_clamp(present_sync.follow_lead, present_sync.grid_period);
++        omacvm_vsync_publish((int64_t)llround(present_sync.grid_vblank * 1e9), ps);
++        int64_t av, am;
++        uint64_t ap;
++        if (omacvm_vsync_answered(&av, &ap, &am)) {
++            present_sync.ans_vblank = av / 1e9;
++            present_sync.ans_period = ap / 1e12;
++            present_sync.ans_moved = am / 1e9;
++        } else {
++            present_sync.ans_period = 0;
++        }
++    }
+     present_sync.win_ticks++;
+     present_sync.ticks++;
+     if (present_sync.queued) {
++        /* While the guest follows, a frame behind a newer one came late for its refresh. */
++        present_sync.follow_late += present_sync.follow ? present_sync.queued - 1 : 0;
+         /*
+          * Input is coming: frames that wait behind a newer one are old news
+-         * (the newer answers the input). Show the newest at this refresh.
++         * (the newer answers the input). Show the newest at this refresh. So
++         * while the guest follows the refresh, unless its frames are too slow
++         * for it (follow_buffered).
+          */
+-        if (input && present_sync.queued > 1) {
++        if ((input || (present_sync.follow && !present_sync.follow_buffered)) &&
++            present_sync.queued > 1) {
+             nstale = present_sync.queued - 1;
+             memcpy(stale, present_sync.queue, sizeof(PresentFrame) * nstale);
+             memmove(&present_sync.queue[0], &present_sync.queue[nstale],
+@@ -8903,6 +8992,22 @@ static bool cocoa_gl_present_vsync(double T)
+             (int)(present_sync.wait_sum * 1e6 / present_sync.shown) : 0);
+         trace_cocoa_present_skips(present_sync.repeats, present_sync.merged,
+                                   present_sync.dropped, present_sync.busy);
++        if (present_sync.follow) {
++            /* The lead follows when the guest's frames are ready (the latest + 1 ms). */
++            if (present_follow_fixed <= 0) {
++                present_sync.follow_lead = omacvm_lead_value(&present_sync.lead,
++                    present_sync.grid_period, present_sync.follow_lead);
++            }
++            present_sync.follow_buffered = omacvm_follow_buffered(&present_sync.lead,
++                present_sync.grid_period, present_sync.follow_frames,
++                present_sync.follow_late);
++            trace_cocoa_present_follow((int)lround(present_sync.follow_lead * 1e6),
++                (int)lround(omacvm_lead_quantile(&present_sync.lead, 0.5) * 1e6),
++                (int)lround(omacvm_lead_quantile(&present_sync.lead, 1.0) * 1e6),
++                present_sync.follow_frames, present_sync.follow_late,
++                present_sync.follow_buffered);
++        }
++        present_sync.follow_frames = present_sync.follow_late = 0;
+         present_sync.ticks = present_sync.shown = present_sync.direct = 0;
+         present_sync.repeats = 0;
+         present_sync.merged = present_sync.dropped = present_sync.busy = 0;
+@@ -8974,10 +9079,11 @@ - (void)tick:(CADisplayLink *)link
+         const char *e = getenv("OMACVM_GL_LEAD_MS");
+         lead = (e ? atof(e) : 3.0) / 1000;
+     }
+-    double wait = MAX(0, target - MIN(lead, T * 0.75) - CACurrentMediaTime());
++    double deadline = target - MIN(lead, T * 0.75);
++    double wait = MAX(0, deadline - CACurrentMediaTime());
+     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * 1e9)),
+                    commit_queue, ^{
+-        if (!cocoa_gl_present_vsync(T)) {
++        if (!cocoa_gl_present_vsync(T, deadline)) {
+             qatomic_set(&idle, true);
+         }
+     });
+--- a/ui/meson.build
++++ b/ui/meson.build
+@@ -71,6 +71,8 @@ if host_os == 'linux'
+   system_ss.add(files('input-linux.c', 'udmabuf.c'))
+ endif
+ system_ss.add(when: cocoa, if_true: files('cocoa.m'))
++# OmacVM: the display's refresh grid for the guest's vblanks (virtio-gpu, hvf).
++system_ss.add(files('omacvm-vsync.c'))
+ 
+ vnc_ss = ss.source_set()
+ vnc_ss.add(files(
+--- /dev/null
++++ b/ui/omacvm-vsync.c
+@@ -0,0 +1,171 @@
++/*
++ * OmacVM: the Mac display's refresh grid for the guest's vblanks
++ * (ui/omacvm-vsync.h). The present's display link publishes it, virtio-gpu
++ * hands it to a guest that asks, in the guest's counter.
++ */
++#include "qemu/osdep.h"
++#include "qemu/atomic.h"
++#include "qemu/thread.h"
++#include "ui/omacvm-vsync.h"
++
++#ifdef __APPLE__
++#include <mach/mach_time.h>
++#include <os/lock.h>
++/*
++ * os_unfair_lock, not a spin lock: the commit queue runs at a high QoS and
++ * the holder may be a lower one (the main loop, hvf); this lock lends its
++ * priority to the holder.
++ */
++static os_unfair_lock vsync_lock = OS_UNFAIR_LOCK_INIT;
++#define vsync_take() os_unfair_lock_lock(&vsync_lock)
++#define vsync_give() os_unfair_lock_unlock(&vsync_lock)
++#else
++static QemuSpin vsync_lock;         /* zero: unlocked */
++#define vsync_take() qemu_spin_lock(&vsync_lock)
++#define vsync_give() qemu_spin_unlock(&vsync_lock)
++#endif
++
++static bool vsync_ready;
++static int64_t vsync_vblank_ns;     /* a vblank the guest should have */
++static uint64_t vsync_period_ps;
++static int64_t vsync_published_ns;  /* when the link last published it */
++static bool vsync_offset_known;
++static uint64_t vsync_offset;       /* guest counter = mach time - this */
++static int64_t vsync_asked;
++static bool vsync_locked;           /* the last ask: the guest's frames are on the grid */
++/* The grid the guest got last: its timer follows that one, not a newer. */
++static bool ans_valid;
++static int64_t ans_vblank_ns, ans_moved_ns;
++static uint64_t ans_period_ps;
++
++#ifdef __APPLE__
++static mach_timebase_info_data_t timebase(void)
++{
++    static mach_timebase_info_data_t tb;
++
++    if (!qatomic_read(&tb.denom)) {
++        mach_timebase_info_data_t t;
++        mach_timebase_info(&t);
++        qatomic_set(&tb.numer, t.numer);
++        qatomic_set(&tb.denom, t.denom);
++    }
++    return tb;
++}
++#endif
++
++int64_t omacvm_vsync_now_ns(void)
++{
++#ifdef __APPLE__
++    mach_timebase_info_data_t tb = timebase();
++    return (int64_t)((__int128)mach_absolute_time() * tb.numer / tb.denom);
++#else
++    return 0;
++#endif
++}
++
++void omacvm_vsync_publish(int64_t vblank_ns, uint64_t period_ps)
++{
++    int64_t now = omacvm_vsync_now_ns();
++
++    vsync_take();
++    vsync_vblank_ns = vblank_ns;
++    vsync_period_ps = period_ps;
++    vsync_published_ns = now;
++    vsync_ready = period_ps != 0;
++    vsync_give();
++}
++
++void omacvm_vsync_withdraw(void)
++{
++    vsync_take();
++    vsync_ready = false;
++    vsync_locked = false;
++    ans_valid = false;
++    vsync_give();
++}
++
++void omacvm_vsync_set_counter_offset(uint64_t mach_offset)
++{
++    vsync_take();
++    vsync_offset = mach_offset;
++    vsync_offset_known = true;
++    vsync_give();
++}
++
++bool omacvm_vsync_for_guest(uint32_t flags, uint32_t version, uint32_t mode_period_ns,
++                            uint64_t *counter, uint64_t *period_ps)
++{
++#ifdef __APPLE__
++    int64_t now = omacvm_vsync_now_ns();
++    mach_timebase_info_data_t tb = timebase();
++    bool ok;
++    int64_t at = 0;
++    uint64_t offset = 0;
++
++    vsync_take();
++    vsync_asked = now;
++    /* An old grid (the link paused) is no grid: the guest asks again soon. */
++    ok = vsync_ready && vsync_offset_known &&
++         omacvm_vsync_grid_fresh(now, vsync_published_ns);
++    /* Its frames count as on the grid only when it says so, at the grid's rate. */
++    vsync_locked = ok && ans_valid &&
++                   omacvm_vsync_guest_locked(flags, version, mode_period_ns, vsync_period_ps);
++    if (ok) {
++        at = omacvm_vsync_next(vsync_vblank_ns, vsync_period_ps, now);
++        *period_ps = vsync_period_ps;
++        offset = vsync_offset;
++        /* A grid that moved (by more than 0.2 ms): the guest's timer comes after it over a few vblanks. */
++        int64_t d = ans_valid && ans_period_ps ?
++                    omacvm_vsync_next(ans_vblank_ns, ans_period_ps, at) - at : 0;
++        int64_t p = (int64_t)(ans_period_ps / 1000);
++        if (!ans_valid || ans_period_ps != vsync_period_ps || MIN(d, p - d) > 200000) {
++            ans_moved_ns = now;
++        }
++        ans_valid = true;
++        ans_vblank_ns = at;
++        ans_period_ps = vsync_period_ps;
++    } else {
++        ans_valid = false;
++    }
++    vsync_give();
++    if (ok) {
++        *counter = (uint64_t)((__int128)at * tb.denom / tb.numer) - offset;
++    }
++    return ok;
++#else
++    return false;
++#endif
++}
++
++bool omacvm_vsync_locked(void)
++{
++    bool l;
++
++    vsync_take();
++    l = vsync_locked;
++    vsync_give();
++    return l;
++}
++
++bool omacvm_vsync_answered(int64_t *vblank_ns, uint64_t *period_ps, int64_t *moved_ns)
++{
++    bool ok;
++
++    vsync_take();
++    ok = ans_valid;
++    *vblank_ns = ans_vblank_ns;
++    *period_ps = ans_period_ps;
++    *moved_ns = ans_moved_ns;
++    vsync_give();
++    return ok;
++}
++
++int64_t omacvm_vsync_asked_ns(void)
++{
++    int64_t t;
++
++    vsync_take();
++    t = vsync_asked;
++    vsync_give();
++    return t;
++}
+--- a/ui/trace-events
++++ b/ui/trace-events
+@@ -214,6 +214,7 @@ cocoa_present_second(int hz, int tick_hz, int ticks, int frames, unsigned shown,
+ cocoa_present_frame(int gap_us, int queued, bool linked) "frame ready %d us after the last, %d queued, linked %d"
+ cocoa_present_direct(int gap_ms) "frame shown when ready, %d ms after the last"
+ cocoa_present_skips(unsigned repeats, unsigned merged, unsigned dropped, unsigned busy) "%u repeats, %u merged, %u dropped, %u no free surface"
++cocoa_present_follow(int lead_us, int median_us, int latest_us, unsigned frames, unsigned late, bool buffered) "guest follows the refresh: vblank %d us before the commit; its frames ready %d us after it (median), %d (latest of the last 64); %u frames, %u late; late frames wait next second %d"
+ 
+ # egl-helpers.c
+ egl_init_d3d11_device(void *p) "d3d device: %p"

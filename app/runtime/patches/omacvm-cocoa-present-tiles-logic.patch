@@ -1,0 +1,184 @@
+From: OmacVM
+Subject: [PATCH] cocoa: the tiled present's rules (ui/omacvm-present-tiles.h)
+
+What: the grid of tile layers over the window's last whole frame, which
+tiles a changed box touches (at most OMACVM_PT_FRAME_MAX, else a whole
+frame), and how a frame skipped in the present queue hands its tile
+updates to the frame after it. Plain C, no AppKit or OpenGL.
+
+Why: omacvm-cocoa-present-tiles.patch draws and shows only the changed
+tiles of a frame; these rules are tested on their own.
+
+Upstream: OmacVM only.
+Test: app/runtime/Tests/display/test-present-tiles.sh (test-present-tiles.c:
+the grid, boxes, 2000 random frame streams with skipped frames show what
+showing every frame shows, and every surface is shown or freed once).
+diff --git a/ui/omacvm-present-tiles.h b/ui/omacvm-present-tiles.h
+new file mode 100644
+index 0000000..5070593
+--- /dev/null
++++ b/ui/omacvm-present-tiles.h
+@@ -0,0 +1,163 @@
++/*
++ * OmacVM: tiled present (only the changed part of the window goes to
++ * WindowServer).
++ *
++ * No AppKit or OpenGL in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-present-tiles.c); ui/cocoa.m feeds it.
++ *
++ * QEMU's present shows each guest frame as a whole new surface, so
++ * WindowServer composites the whole window again for every frame, also when
++ * only a caret blinked. With tiles the window's picture is a grid of tile
++ * layers over the last whole frame: a frame whose changed box covers few
++ * tiles gets new surfaces for those tiles only, and WindowServer composites
++ * only them. A frame that changes much is a whole frame again, which hides
++ * the tiles.
++ *
++ * Frames wait in the present queue and some are skipped there (the guest
++ * drew faster than the display, or to catch up). A skipped frame's tiles
++ * are not lost: its updates go into the next frame (omacvm_pt_absorb),
++ * since that frame's changed box only covers what changed after it.
++ */
++#ifndef OMACVM_PRESENT_TILES_H
++#define OMACVM_PRESENT_TILES_H
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <string.h>
++
++#define OMACVM_PT_SIZE 256          /* tile edge in frame pixels */
++#define OMACVM_PT_MAX_COLS 24       /* up to 6144 x 4096 pixels */
++#define OMACVM_PT_MAX_ROWS 16
++#define OMACVM_PT_MAX (OMACVM_PT_MAX_COLS * OMACVM_PT_MAX_ROWS)
++/* At most this many tiles drawn for one frame; more is one whole frame. */
++#define OMACVM_PT_FRAME_MAX 12
++
++typedef struct OmacvmPTGrid {
++    uint32_t fw, fh;                /* frame size */
++    unsigned cols, rows;            /* 0: no grid (frame too big or empty) */
++} OmacvmPTGrid;
++
++/* The grid for a FW x FH frame (cols = rows = 0 when it does not fit). */
++static inline OmacvmPTGrid omacvm_pt_grid(uint32_t fw, uint32_t fh)
++{
++    OmacvmPTGrid g = { fw, fh, 0, 0 };
++    if (fw == 0 || fh == 0) {
++        return g;
++    }
++    uint64_t c = ((uint64_t)fw + OMACVM_PT_SIZE - 1) / OMACVM_PT_SIZE;
++    uint64_t r = ((uint64_t)fh + OMACVM_PT_SIZE - 1) / OMACVM_PT_SIZE;
++    if (c > OMACVM_PT_MAX_COLS || r > OMACVM_PT_MAX_ROWS) {
++        return g;
++    }
++    g.cols = (unsigned)c;
++    g.rows = (unsigned)r;
++    return g;
++}
++
++/* Tile T's box in frame pixels (top-left origin): x, y, w, h. */
++static inline void omacvm_pt_rect(const OmacvmPTGrid *g, unsigned t,
++                                  uint32_t *x, uint32_t *y, uint32_t *w, uint32_t *h)
++{
++    unsigned c = t % g->cols, r = t / g->cols;
++    *x = c * OMACVM_PT_SIZE;
++    *y = r * OMACVM_PT_SIZE;
++    *w = g->fw - *x < OMACVM_PT_SIZE ? g->fw - *x : OMACVM_PT_SIZE;
++    *h = g->fh - *y < OMACVM_PT_SIZE ? g->fh - *y : OMACVM_PT_SIZE;
++}
++
++/*
++ * The tiles a changed box X, Y, W, H (frame pixels, already clipped to the
++ * frame) touches, into OUT (room for MAX). Returns how many, or -1 when they
++ * are more than MAX (draw a whole frame), 0 for an empty box.
++ */
++static inline int omacvm_pt_tiles(const OmacvmPTGrid *g, uint32_t x, uint32_t y,
++                                  uint32_t w, uint32_t h, unsigned *out, int max)
++{
++    if (!g->cols || w == 0 || h == 0 || x >= g->fw || y >= g->fh) {
++        return 0;
++    }
++    uint64_t x1 = (uint64_t)x + w, y1 = (uint64_t)y + h;
++    if (x1 > g->fw) {
++        x1 = g->fw;
++    }
++    if (y1 > g->fh) {
++        y1 = g->fh;
++    }
++    unsigned c0 = x / OMACVM_PT_SIZE, c1 = (unsigned)((x1 - 1) / OMACVM_PT_SIZE);
++    unsigned r0 = y / OMACVM_PT_SIZE, r1 = (unsigned)((y1 - 1) / OMACVM_PT_SIZE);
++    uint64_t n = (uint64_t)(c1 - c0 + 1) * (r1 - r0 + 1);
++    if (n > (uint64_t)max) {
++        return -1;
++    }
++    int k = 0;
++    for (unsigned r = r0; r <= r1; r++) {
++        for (unsigned c = c0; c <= c1; c++) {
++            out[k++] = r * g->cols + c;
++        }
++    }
++    return k;
++}
++
++/*
++ * One frame's change to the layers: optionally a whole frame (BASE, which
++ * also hides every tile), then new surfaces for some tiles. BUF is the
++ * caller's handle (an IOSurface); the caller releases what absorb hands
++ * back.
++ */
++typedef struct OmacvmPTUpdate {
++    unsigned tile;
++    void *buf;
++} OmacvmPTUpdate;
++
++typedef struct OmacvmPTFrame {
++    OmacvmPTGrid grid;              /* the tiles' grid */
++    void *base;                     /* a whole frame, or NULL */
++    unsigned n;                     /* tile updates */
++    OmacvmPTUpdate up[OMACVM_PT_MAX];
++} OmacvmPTFrame;
++
++/*
++ * NEWER takes over OLDER's updates (OLDER was skipped, NEWER comes right
++ * after it). What OLDER had that nothing will show any more goes into
++ * FREED (room for OMACVM_PT_MAX + 1), and the count is returned. A whole
++ * frame in NEWER covers everything; else OLDER's whole frame stays (the
++ * tiles NEWER changes sit over it) and its tiles stay but where NEWER has
++ * the same tile.
++ */
++static inline unsigned omacvm_pt_absorb(OmacvmPTFrame *newer, OmacvmPTFrame *older,
++                                        void **freed)
++{
++    unsigned nf = 0;
++    if (newer->base) {
++        if (older->base) {
++            freed[nf++] = older->base;
++        }
++        for (unsigned i = 0; i < older->n; i++) {
++            freed[nf++] = older->up[i].buf;
++        }
++    } else {
++        newer->base = older->base;
++        for (unsigned i = 0; i < older->n; i++) {
++            bool kept = true;
++            for (unsigned j = 0; j < newer->n; j++) {
++                if (newer->up[j].tile == older->up[i].tile) {
++                    kept = false;
++                    break;
++                }
++            }
++            if (!kept) {
++                freed[nf++] = older->up[i].buf;
++            } else if (newer->n < OMACVM_PT_MAX) {
++                /* older first: the order the layers get them does not matter */
++                newer->up[newer->n++] = older->up[i];
++            } else {
++                freed[nf++] = older->up[i].buf;   /* cannot happen: one per tile */
++            }
++        }
++    }
++    older->base = NULL;
++    older->n = 0;
++    return nf;
++}
++
++#endif

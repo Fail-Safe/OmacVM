@@ -1,7 +1,7 @@
 #!/bin/bash
 # OmacVM's guest driver patches against real kernel sources: the files they
 # change, as kernel.org has them (src/tests/virtio-gpu-src/v*/), patched in
-# the builder's order (deep colour, the cursor plane, the damage fix) with
+# the builder's order (deep colour, the cursor plane, the vsync lock, the damage fix) with
 # patch --dry-run first and no fuzz. A patch that stops fitting a kernel shows
 # here, not first in a VM (where the builder leaves it out of that kernel's
 # build). The order is checked against omacvm-virtio-gpu-build.
@@ -13,11 +13,11 @@ S=$R/src/tests/virtio-gpu-src
 T=$(mktemp -d "${TMPDIR:-/tmp}/virtio-gpu-patches.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 fail=0
-order=(linux-virtio-gpu-deep-color.patch linux-virtio-gpu-cursor-plane.patch linux-virtio-gpu-damage-clips.patch)
+order=(linux-virtio-gpu-deep-color.patch linux-virtio-gpu-cursor-plane.patch linux-virtio-gpu-vsync-lock.patch linux-virtio-gpu-damage-clips.patch)
 
 # The builder's order: deep colour first, then the others in its loop.
 loop=$(grep -m1 -E '^  for p in "\$cursor_file"' "$G/omacvm-virtio-gpu-build")
-if [[ $loop == '  for p in "$cursor_file" "$damage_file"; do' ]]; then echo "ok   the builder's order: deep colour, cursor plane, damage fix"
+if [[ $loop == '  for p in "$cursor_file" "$vsync_file" "$damage_file"; do' ]]; then echo "ok   the builder's order: deep colour, cursor plane, vsync lock, damage fix"
 else echo "FAIL the builder's order changed: '$loop' (update this test's order)"; fail=1; fi
 
 n=0
@@ -34,7 +34,7 @@ for d in "$S"/v*/; do
   if grep -q 'old_plane_state->fb != new_plane_state->fb && bo->dumb;' "$T/$v/drivers/gpu/drm/virtio/virtgpu_plane.c" &&
      grep -rq 'module_param_named(deep_color' "$T/$v/drivers/gpu/drm/virtio/" &&
      grep -rq 'module_param_named(cursor_plane' "$T/$v/drivers/gpu/drm/virtio/"; then
-    echo "ok   $v: all three apply in order, no fuzz"
+    echo "ok   $v: all four apply in order, no fuzz"
   else
     echo "FAIL $v: applied, but a patch's change is missing"; fail=1
   fi

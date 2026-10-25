@@ -275,6 +275,25 @@ struct PointerPlaneRow: View {
     }
 }
 
+/// Frames in step with the Mac (Settings.vsyncLock, experimental, off by
+/// default): read by each start of the VM.
+struct VsyncLockRow: View {
+    var tick = 0
+    @State private var on = Settings.vsyncLock
+
+    static let info = "Typing and the pointer show a little sooner while the screen is moving (an animation, scrolling, a video, the pointer itself): on a 60 Hz display about 1.5 to 7 ms, at 120 Hz up to about 2.5 ms. Linux's display clock runs in step with the Mac display's refresh, so a frame the VM draws is ready just before the Mac shows the next one, instead of waiting for it. The same pixels at the same rate (tested at 60 and 120 Hz). When a frame comes too late for its refresh, the VM shows the newer one at the next refresh and skips the late one: in the tests that was a few more skipped frames at 120 Hz (8 instead of 2 in about 3 minutes of moving frames) and fewer at 60 Hz (143 repeats and skips instead of 170). On a still screen there is no gain. Counts from the next start of the VM; the VM gets the driver for it with Update VM (needs internet once). Experimental."
+
+    var body: some View {
+        SettingRow(title: "Frames in step with the Mac", badge: "experimental",
+                   subtitle: "Input shows sooner while the screen moves. From the next start of the VM.",
+                   info: Self.info, probe: "vsync-lock") {
+            RowSwitch(title: "Frames in step with the Mac", isOn: $on)
+        }
+        .onChange(of: on) { _, v in if v != Settings.vsyncLock { Settings.vsyncLock = v } }
+        .onChange(of: tick) { _, _ in on = Settings.vsyncLock }
+    }
+}
+
 /// The sound on its own thread (Settings.audioThread, on by default from
 /// 3.1.17): read by each start of the VM, so a change counts from the next one.
 struct SoundThreadRow: View {
