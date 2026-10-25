@@ -122,12 +122,27 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   of it. The copy fills the rows and columns past the picture with its last
   row and column (`virgl-video-plane-edge.patch`); before 3.1.32 they stayed
   zero and showed as a green bar at the bottom or right of VP9 and AV1
-  videos at 1080p, 540p, 360p, 480p and 240p. The app still shows the
-  rounded size, so the picture is squeezed by those rows (1080p: 8 of 1088,
-  invisible; a 320x180 call tile: 12 of 192) and the strip is its stretched
-  edge. Planes more than 64 bigger than the picture are surfaces the guest
-  crops itself and are left alone. `OMACVM_VIDEO_EDGE_FILL=0` turns the fill
-  off. Test: `Tests/virgl/test-video-padding.c`.
+  videos at 1080p, 540p, 360p, 480p and 240p. Apps that show the planes
+  themselves (mpv, Firefox) still show the rounded size, so the picture is
+  squeezed by those rows (1080p: 8 of 1088, invisible; a 320x180 call tile:
+  12 of 192) and the strip is its stretched edge. Planes more than 64 bigger
+  than the picture are surfaces the guest crops itself and are left alone.
+  `OMACVM_VIDEO_EDGE_FILL=0` turns the fill off. Test:
+  `Tests/virgl/test-video-padding.c`.
+- Chrome's hardware frames (3.2.1): Chrome converts each picture into an
+  ARGB frame of its own and shows that frame by its own size, but Mesa
+  rounds that frame's planes up to 16 too, and its conversion read the
+  picture's planes by the surface's size while they are rounded. A 320x180
+  call tile showed its picture squeezed into the top 168 rows with 12
+  transparent rows below it (8 at 360p and 1080p, a column strip at 854
+  wide). The VM's VA-API shim now, in Chromium's processes only, imports
+  such a frame at its rounded size when its buffer holds it, has the
+  conversion fill the whole frame, and scales the conversion's source
+  region to the picture's part of the rounded planes: the tile shows every
+  row where Chrome's CPU decoders put it (WebRTC loopback, VP9, AV1 and
+  H.264 at 320x180, 480x270, 640x360, 854x480 and 1920x1080: off by 0.4 to
+  2 rows on average, as on the CPU). `OMACVM_VA_FILL=0` in Chrome's
+  environment turns it off. Test: `src/app/guest/tests/va-shim-vpp-fill.sh`.
 - In the VM, `src/app/guest/install.sh` adds `vainfo` and a small VA-API driver
   shim (`omacvm_drv_video.c`, used through `LIBVA_DRIVER_NAME=omacvm`): Mesa's
   driver unchanged, but it offers only NV12 surfaces (Firefox cannot show the
@@ -152,7 +167,8 @@ put the shim in: the VM folder's `video-decode` file). In the VM:
 exportable surfaces on or off for it; `OMACVM_VA_MAX=N` sets the largest
 size Chromium decodes in hardware (default 1920, 0: no limit; only in
 Chromium's processes and only for decoding: VA-API encoders and video
-processing keep Mesa's sizes).
+processing keep Mesa's sizes); `OMACVM_VA_FILL=0` keeps Chromium's
+converted frames as Mesa makes them (above).
 
 ## Chrome's converted frames
 
