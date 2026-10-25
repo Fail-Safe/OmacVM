@@ -20,7 +20,7 @@
 # does nothing (macOS 15, tried): they get Accessibility's press; switches, the sidebar and the pointer
 # get real events.
 # On screen only while nobody uses the Mac (no input for 300 s but ours, no
-# Jump Desktop session, the screen unlocked); it stops when someone comes back.
+# Jump Desktop or Screen Sharing session, the screen unlocked); it stops when someone comes back.
 # Without that (or with --headless) the on-screen rows are BLOCKED, and
 # update-vm (update-vm.sh, as the window runs it) and leftovers (a start
 # without a window) run headless.
@@ -70,7 +70,13 @@ want() { [[ -z $ONLY || $ONLY == *" $1 "* ]]; }
 
 # --- the Mac and its user
 hid_idle() { ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'; }
-jump() { pgrep -f 'JumpConnect.*(rtcproxy|desktopproxy)' | wc -l | tr -d ' '; }
+# Remote sessions: Jump Desktop, and a macOS Screen Sharing session unless nobody used it for 30 min (left open).
+jump() {
+  local j s; j=$(pgrep -f 'JumpConnect.*(rtcproxy|desktopproxy)' | wc -l | tr -d ' ')
+  s=$(pmset -g assertions 2>/dev/null | grep -c 'screensharingd.*Remote user is connected')
+  (( s > 0 && $(hid_idle) >= 1800 )) && s=0
+  echo $(( j + s ))
+}
 # No `ioreg | grep -q`: grep ends ioreg early, and under pipefail its SIGPIPE always made it No.
 locked() { [[ $(ioreg -n Root -d1 -k IOConsoleUsers 2>/dev/null) == *'"CGSSessionScreenIsLocked"=Yes'* ]] && echo Yes || echo No; }
 away() { os_away "$(hid_idle)" "$(jump)" "$(locked)" "$LAST" "$(date +%s)"; }

@@ -1298,6 +1298,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-view-swizzle-share
 # OmacVM: only the decoded picture of an AV1 or VP9 frame is copied (VideoToolbox's AV1 frame is as
 # large as Mesa's surface: its extra rows showed as a green bar in Chrome's hardware decoding).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-video-picture-size.patch"
+# OmacVM: decoded pictures finish beside QEMU's GPU thread (it waited for the media engine on every
+# picture: Chrome's 4K hardware decoding dropped frames); planes and fences wait for their pictures.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-decode-async.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
