@@ -67,6 +67,8 @@ checks() {
   chk "a new view size is measured again" has "$hide" 'qatomic_set(&present_tiles_fit, 0);'
   chk "the pointer hand-off hears only of tiles that were shown" has "$showt" \
     'if (fits && qatomic_read(&omacvm_park_hold_on)) {'
+  chk "tile surfaces go back after a while without tile frames" has "$tiles" \
+    'timer_mod(present_tile_idle_timer, present_tile_last_ns + PRESENT_TILE_IDLE_NS);'
   chk "a frame skipped while none was queued comes along" has "$queue" 'present_frame_absorb(&f, &present_pend);'
   chk "a merged frame passes its tiles on" has "$queue" 'present_frame_skip(last, &f);'
   chk "a frame pushed out of a full queue passes its tiles on" has "$queue" \

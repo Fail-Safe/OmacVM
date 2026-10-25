@@ -44,7 +44,7 @@ guest's flush rects since the last frame drawn, one box) touches at most 12
 tiles is drawn into those tiles' own surfaces (up to five per tile, as the
 whole frames, made when needed, in the whole surfaces' format and colour
 space; at most 32 tiles keep theirs, the least recently drawn give theirs back
-first, and none after 10 s of whole frames) and only those tile
+first, and none 10 s after the last frame in tiles) and only those tile
 layers change; else a whole frame, which hides the tiles. Nothing changed:
 nothing is presented. Whole frames for everything 0051 draws in full (boot
 logo, extra brightness, another size or colour path, a buffer not seen lately
@@ -70,6 +70,7 @@ mode never found a differing tile.
 - Up to 12 small GL passes a frame instead of one large one: more than 12
   changed tiles is one whole frame.
 - Up to five surfaces for each of at most 32 tiles (3024x1896: 42 MB of 10-bit
-  or 8-bit tiles, 84 MB half float), given back after 10 s of whole frames.
+  or 8-bit tiles, 84 MB half float), given back 10 s after the last frame in
+  tiles.
 - No gain without the guest's damage: Linux before 7.4 flushes the whole
   plane on every page flip (then every frame is whole, as with the switch off).
