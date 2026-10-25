@@ -17,6 +17,7 @@ cc -shared -fPIC -O2 -Wall -DMESA_DRIVER="\"$T/stub.so\"" -o "$T/shim.so" "$shim
 cc -O2 -Wall -o "$T/va-shim-surfaces" "$here/va-shim-surfaces.c" -ldl || exit 1
 printf 'OMACVM_VKWINDOWS=1\nOMACVM_VAEXPORT=1\n' > "$T/host-new.env"
 printf 'OMACVM_VKWINDOWS=1\n' > "$T/host-old.env"
+printf 'OMACVM_VKWINDOWS=1\nOMACVM_VAEXPORT=1\nOMACVM_VADECASYNC=1\n' > "$T/host-async.env"
 
 # run WHAT EXPECT [ARG]: the program in a clean environment plus WHAT (VAR=VALUE ...).
 run() {
@@ -49,7 +50,11 @@ run "OMACVM_HOST_ENV=$T/host-new.env OMACVM_VA_MAX=3840" yes --type=gpu-process
 run "OMACVM_HOST_ENV=$T/host-new.env OMACVM_VA_MAX=abc" yes --type=gpu-process
 run "OMACVM_HOST_ENV=$T/host-new.env OMACVM_VA_MAX=4294967295" yes --type=gpu-process
 # The export hint forced in Chromium: the limit too (forced elsewhere, as above: none).
-run "OMACVM_VA_EXPORT=1" yes --type=gpu-process
+run "OMACVM_VA_EXPORT=1 OMACVM_HOST_ENV=$T/none.env" yes --type=gpu-process
+# A runtime that decodes beside its GPU thread: no limit unless OMACVM_VA_MAX says one.
+run "OMACVM_HOST_ENV=$T/host-async.env WANT_DEFAULT_MAX=0" yes --type=gpu-process
+run "OMACVM_HOST_ENV=$T/host-async.env WANT_DEFAULT_MAX=0 OMACVM_VA_MAX=abc" yes --type=gpu-process
+run "OMACVM_HOST_ENV=$T/host-async.env OMACVM_VA_MAX=1920" yes --type=gpu-process
 
 # The app says so at every start (Runner.swift), as host.env's reader expects.
 if grep -q '^        a += \["-smbios", "type=11,value=omacvm.vaexport=1"\]$' "$repo/app/app/Sources/OmacVM/Runner.swift"; then
