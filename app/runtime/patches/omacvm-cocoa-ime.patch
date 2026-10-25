@@ -91,7 +91,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      }
      return bool_with_bql(^{
          return [self handleEventLocked:event];
-@@ -8465,8 +8480,914 @@
+@@ -8465,8 +8480,926 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -130,8 +130,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +static NSPoint omacvm_ime_click;        /* where (screen points) */
 +static NSString *omacvm_ime_source;     /* the Mac's input source now ... */
 +static NSString *omacvm_ime_source_before;   /* ... and the one before */
-+static bool omacvm_ime_was_active;
-+static unsigned omacvm_ime_off_gen;   /* a later deactivate counts only for this one */
++static OmacVMImeOffState omacvm_ime_off;   /* when the input method's context goes off */
 +static int omacvm_ime_said;
 +/* OMACVM_IME_DEBUG=1: every line both ways in qemu.log (with what is typed: tests only). */
 +static bool omacvm_ime_debug;
@@ -312,21 +311,34 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        [omacvm_ime_ctx discardMarkedText];
 +        omacvm_ime_write(@{ @"t": @"cancel" });
 +    }
-+    if (active != omacvm_ime_was_active) {
-+        omacvm_ime_was_active = active;
-+        omacvm_ime_off_gen++;
-+        if (!active && omacvm_ime_off_later(&omacvm_ime)) {
-+            /* Only the guest's field went, and it often comes back at once. */
-+            unsigned gen = omacvm_ime_off_gen;
-+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(OMACVM_IME_OFF_DELAY * NSEC_PER_SEC)),
-+                           dispatch_get_main_queue(), ^{
-+                if (gen == omacvm_ime_off_gen) {
-+                    [omacvm_ime_ctx deactivate];
++    bool changed = active != omacvm_ime_off.was_active;
++    switch (omacvm_ime_off_step(&omacvm_ime_off, &omacvm_ime)) {
++    case OMACVM_IME_OFF_NOW:
++        [omacvm_ime_ctx deactivate];
++        break;
++    case OMACVM_IME_OFF_LATER: {
++        /* Only the guest's field went, and it often comes back at once. */
++        unsigned gen = omacvm_ime_off.gen;
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(OMACVM_IME_OFF_DELAY * NSEC_PER_SEC)),
++                       dispatch_get_main_queue(), ^{
++            if (omacvm_ime_off_due(&omacvm_ime_off, gen)) {
++                [omacvm_ime_ctx deactivate];
++                if (omacvm_ime_debug) {
++                    fprintf(stderr, "omacvm-ime: input method off (no field came back)\n");
 +                }
-+            });
-+        } else if (!active) {
-+            [omacvm_ime_ctx deactivate];
++            }
++        });
++        break;
++    }
++    case OMACVM_IME_OFF_KEPT:
++        if (omacvm_ime_debug) {
++            fprintf(stderr, "omacvm-ime: input method kept on (a field came back)\n");
 +        }
++        break;
++    case OMACVM_IME_OFF_NONE:
++        break;
++    }
++    if (changed) {
 +        if (omacvm_ime_debug) {
 +            NSWindow *k = [NSApp keyWindow];
 +            fprintf(stderr, "omacvm-ime: %s (active app %d, key window %s level %ld, main ours %d, source im %d, focus %d)\n",
@@ -604,7 +616,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +         * Modifiers go to the VM; the input method sees them too: a Shift
 +         * press and release with no key between switches some to Latin.
 +         */
-+        bool active = omacvm_ime_active(&omacvm_ime);
++        bool active = omacvm_ime_active(&omacvm_ime) || omacvm_ime_off.waiting;   /* its context is still on */
 +        BOOL used = NO;
 +        if (active) {
 +            omacvm_ime_activate();
@@ -865,7 +877,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +@implementation QemuCocoaView (OmacVMIme)
 +- (NSTextInputContext *)inputContext
 +{
-+    return omacvm_ime_on && omacvm_ime_active(&omacvm_ime) ? omacvm_ime_ctx : nil;
++    return omacvm_ime_on && (omacvm_ime_active(&omacvm_ime) || omacvm_ime_off.waiting) ? omacvm_ime_ctx : nil;
 +}
 +
 +- (void)insertText:(id)string replacementRange:(NSRange)replacementRange
@@ -1006,7 +1018,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9711,7 @@
+@@ -8790,6 +9723,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
