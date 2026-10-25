@@ -23,9 +23,15 @@ moves its next expiry toward the nearest grid point, at most an eighth of
 a period, never to within a quarter period of now: from any phase it is
 on the grid in at most six vblanks, and no frame is more than an eighth
 shorter or longer than the others. No answer, a grid older than 2 s, or a
-period more than 2 % off the mode's: the timer runs as before. A host that
-does not know the command answers with an error once and is not asked
-again. The option is readable by every user (0444).
+period more than 2 % off the mode's: the timer runs as before. Each ask
+(version 1) says whether the timer was on the last grid at its last vblank
+(LOCKED) and the mode's frame time, so the host counts the guest's frames
+as in step only while they are (not while the rates differ or no grid came).
+A host that does not know the command answers with an error once and is not
+asked again. The kernel log says once "vsync_lock: in step with the host's
+refresh", "the host's refresh (...) is not the mode's" or "the host does not
+know it" (omacvm check reads them). The option is readable by every user
+(0444).
 
 Applies after linux-virtio-gpu-cursor-plane.patch. Upstream: not for
 sending (the command is OmacVM's). Test: src/tests/virtio-gpu-vsync.sh
@@ -33,7 +39,6 @@ sending (the command is OmacVM's). Test: src/tests/virtio-gpu-vsync.sh
 /sys/module/virtio_gpu/parameters/vsync_lock reads Y and QEMU's trace
 cocoa_present_follow shows the guest's frames arriving after their
 vblank.
-
 --- a/drivers/gpu/drm/virtio/virtgpu_display.c
 +++ b/drivers/gpu/drm/virtio/virtgpu_display.c
 @@ -35,6 +35,8 @@
@@ -45,7 +50,7 @@ vblank.
  
  #include "virtgpu_drv.h"
  
-@@ -50,6 +52,226 @@
+@@ -50,6 +52,271 @@
  #define drm_connector_to_virtio_gpu_output(x) \
  	container_of(x, struct virtio_gpu_output, conn)
  
@@ -60,8 +65,11 @@ vblank.
 + * right after a vblank is shown at the next refresh) and at its exact
 + * period. Each vblank moves the timer at most an eighth of a period toward
 + * the grid, so no frame is much shorter or longer than the others. Without
-+ * an answer, or an old one, the timer runs as before. A host that does not
-+ * know the command (another QEMU) is asked once.
++ * an answer, or an old one, or a period that is not the mode's, the timer
++ * runs as before. Each ask says whether the timer was on the last grid
++ * (LOCKED) and the mode's frame time: the host counts the guest's frames as
++ * in step only then. A host that does not know the command (another QEMU)
++ * is asked once.
 + */
 +bool virtio_gpu_vsync_lock;
 +module_param_named(vsync_lock, virtio_gpu_vsync_lock, bool, 0444);
@@ -99,8 +107,22 @@ vblank.
 +		step = 0;
 +	return step;
 +}
++
++/* The host's period fits the mode's frame time (within 2 %). */
++static bool vsync_rate_ok(u64 period_ps, s64 framedur_ns)
++{
++	s64 period_ns = div64_s64((s64)period_ps + 500, 1000);
++	s64 d = period_ns - framedur_ns;
++
++	return framedur_ns > 0 && (d < 0 ? -d : d) <= framedur_ns / 50;
++}
 +/* end of the vsync math */
 +
++/*
++ * Process context: ask the host. The ask says whether the timer is on the
++ * last grid (LOCKED) and the mode's frame time, so the host treats the
++ * guest's frames as in step only when they are.
++ */
 +static void virtio_gpu_vsync_ask(struct work_struct *work)
 +{
 +	struct virtio_gpu_vsync *vs =
@@ -108,8 +130,29 @@ vblank.
 +	struct virtio_gpu_output *output =
 +		container_of(vs, struct virtio_gpu_output, vsync);
 +	struct virtio_gpu_device *vgdev = output->crtc.dev->dev_private;
++	s64 framedur = drm_crtc_vblank_crtc(&output->crtc)->framedur_ns;
++	bool locked, tell_lock, tell_rate;
++	u64 period_ps;
++	unsigned long flags;
 +
-+	virtio_gpu_cmd_omacvm_vsync(vgdev, output->index);
++	spin_lock_irqsave(&vs->lock, flags);
++	locked = vs->locked;
++	period_ps = vs->period_ps;
++	tell_lock = locked && !vs->told_lock;
++	tell_rate = vs->rate_off && !vs->told_rate;
++	vs->told_lock |= tell_lock;
++	vs->told_rate |= tell_rate;
++	spin_unlock_irqrestore(&vs->lock, flags);
++	/* Once per load each: omacvm check reads these. */
++	if (tell_lock)
++		drm_info(output->crtc.dev, "vsync_lock: in step with the host's refresh\n");
++	if (tell_rate)
++		drm_info(output->crtc.dev, "vsync_lock: the host's refresh (%llu us) is not the mode's (%lld us), the vblank timer runs on its own\n",
++			 div64_u64(period_ps, 1000000), div64_s64(framedur, 1000));
++
++	virtio_gpu_cmd_omacvm_vsync(vgdev, output->index,
++				    locked ? VIRTIO_GPU_OMACVM_VSYNC_LOCKED : 0,
++				    framedur > 0 && framedur < U32_MAX ? (u32)framedur : 0);
 +	virtio_gpu_notify(vgdev);
 +}
 +
@@ -200,21 +243,27 @@ vblank.
 +	bool valid, ask;
 +
 +	spin_lock(&vs->lock);
-+	ask = vsync_due(vs, now);
 +	valid = vs->valid &&
 +		ktime_to_ns(ktime_sub(now, vs->got)) < VSYNC_OLD_NS;
 +	anchor = vs->anchor;
 +	period_ps = vs->period_ps;
++	/* The mode's rate and the host's must agree (within 2 %), else no follow. */
++	vs->rate_off = valid && framedur > 0 && !vsync_rate_ok(period_ps, framedur);
++	valid = valid && vsync_rate_ok(period_ps, framedur);
++	vs->locked = valid;
++	ask = vsync_due(vs, now);
 +	spin_unlock(&vs->lock);
 +	if (ask)
 +		schedule_work(&vs->work);
-+	if (!valid || framedur <= 0)
++	if (!valid)
 +		return;
 +	period_ns = div64_u64(period_ps + 500, 1000);
-+	/* The mode's rate and the host's must agree (within 2 %). */
-+	if (abs(period_ns - framedur) > framedur / 50)
-+		return;
 +
++	/*
++	 * The vblank timestamps (and drm_crtc_vblank_get_vblank_timeout) count
++	 * from the interval, so for a vblank after a step they are off by up to
++	 * an eighth of a period; on the grid the step is zero.
++	 */
 +	spin_lock(&vtimer->interval_lock);
 +	if (vtimer->interval)	/* zero: the timer is being stopped */
 +		vtimer->interval = ns_to_ktime(period_ns);
@@ -253,6 +302,7 @@ vblank.
 +	spin_lock_irqsave(&vs->lock, flags);
 +	vs->enabled = ktime_get();
 +	vs->asked = 0;
++	vs->locked = false;	/* the timer starts at a phase of its own */
 +	ask = vsync_due(vs, vs->enabled);
 +	spin_unlock_irqrestore(&vs->lock, flags);
 +	if (ask)
@@ -272,7 +322,7 @@ vblank.
  static const struct drm_crtc_funcs virtio_gpu_crtc_funcs = {
  	.set_config             = drm_atomic_helper_set_config,
  	.destroy                = drm_crtc_cleanup,
-@@ -58,7 +280,10 @@ static const struct drm_crtc_funcs virtio_gpu_crtc_funcs = {
+@@ -58,7 +325,10 @@
  	.reset                  = drm_atomic_helper_crtc_reset,
  	.atomic_duplicate_state = drm_atomic_helper_crtc_duplicate_state,
  	.atomic_destroy_state   = drm_atomic_helper_crtc_destroy_state,
@@ -284,7 +334,7 @@ vblank.
  };
  
  static const struct drm_framebuffer_funcs virtio_gpu_fb_funcs = {
-@@ -163,6 +388,7 @@ static const struct drm_crtc_helper_funcs virtio_gpu_crtc_helper_funcs = {
+@@ -163,6 +433,7 @@
  	.atomic_flush  = virtio_gpu_crtc_atomic_flush,
  	.atomic_enable = virtio_gpu_crtc_atomic_enable,
  	.atomic_disable = virtio_gpu_crtc_atomic_disable,
@@ -292,7 +342,7 @@ vblank.
  };
  
  static void virtio_gpu_enc_mode_set(struct drm_encoder *encoder,
-@@ -282,6 +508,8 @@ static int vgdev_output_init(struct virtio_gpu_device *vgdev, int index)
+@@ -282,6 +553,8 @@
  	int ret;
  
  	output->index = index;
@@ -303,24 +353,32 @@ vblank.
  		output->info.r.width = cpu_to_le32(XRES_DEF);
 --- a/drivers/gpu/drm/virtio/virtgpu_drv.h
 +++ b/drivers/gpu/drm/virtio/virtgpu_drv.h
-@@ -199,6 +199,43 @@ struct virtio_gpu_vbuffer {
- 	bool sync_for_cpu;
- };
+@@ -197,6 +197,52 @@
  
+ 	/* guest-bound transfer whose shmem backing needs a CPU sync */
+ 	bool sync_for_cpu;
++};
++
 +/*
 + * OmacVM (vsync_lock=1): the host's display refresh, for the vblank timer.
 + * The host answers VIRTIO_GPU_CMD_OMACVM_VSYNC with the guest counter
 + * value of a vblank it wants and the period; the timer follows that grid.
++ * The ask (version 1) says whether the timer is on the last grid and the
++ * mode's frame time: the host counts the frames as in step only then.
 + * lock guards the grid (taken in the timer's interrupt and in the reply).
 + */
 +#define VIRTIO_GPU_CMD_OMACVM_VSYNC 0x0f00
 +#define VIRTIO_GPU_RESP_OK_OMACVM_VSYNC 0x11f0
 +#define VIRTIO_GPU_OMACVM_VSYNC_VALID (1 << 0)
++#define VIRTIO_GPU_OMACVM_VSYNC_LOCKED (1 << 0)
++#define VIRTIO_GPU_OMACVM_VSYNC_VERSION 1
 +
 +struct virtio_gpu_omacvm_vsync {
 +	struct virtio_gpu_ctrl_hdr hdr;
 +	__le32 scanout_id;
-+	__le32 padding;
++	__le32 flags;		/* VIRTIO_GPU_OMACVM_VSYNC_LOCKED: on the last grid */
++	__le32 version;		/* VIRTIO_GPU_OMACVM_VSYNC_VERSION */
++	__le32 mode_period_ns;	/* the mode's frame time; 0: none */
 +};
 +
 +struct virtio_gpu_resp_omacvm_vsync {
@@ -342,12 +400,13 @@ vblank.
 +	bool valid;
 +	bool pending;		/* an ask is out */
 +	bool unsupported;	/* the host does not know the command */
-+};
-+
++	bool locked;		/* the timer followed the grid at its last vblank */
++	bool rate_off;		/* the host's period is not the mode's */
++	bool told_lock, told_rate;	/* said once in the kernel log */
+ };
+ 
  struct virtio_gpu_output {
- 	int index;
- 	struct drm_crtc crtc;
-@@ -210,6 +247,7 @@ struct virtio_gpu_output {
+@@ -210,6 +256,7 @@
  	int cur_x;
  	int cur_y;
  	bool needs_modeset;
@@ -355,16 +414,17 @@ vblank.
  };
  #define drm_crtc_to_virtio_gpu_output(x) \
  	container_of(x, struct virtio_gpu_output, crtc)
-@@ -405,6 +443,8 @@ int virtio_gpu_cmd_get_capset(struct virtio_gpu_device *vgdev,
+@@ -405,6 +452,9 @@
  			      int idx, int version,
  			      struct virtio_gpu_drv_cap_cache **cache_p);
  int virtio_gpu_cmd_get_edids(struct virtio_gpu_device *vgdev);
 +void virtio_gpu_cmd_omacvm_vsync(struct virtio_gpu_device *vgdev,
-+				 uint32_t scanout_id);
++				 uint32_t scanout_id, uint32_t flags,
++				 uint32_t mode_period_ns);
  void virtio_gpu_cmd_context_create(struct virtio_gpu_device *vgdev, uint32_t id,
  				   uint32_t context_init, uint32_t nlen,
  				   const char *name);
-@@ -477,6 +517,10 @@ virtio_gpu_cmd_set_scanout_blob(struct virtio_gpu_device *vgdev,
+@@ -477,6 +527,10 @@
  /* virtgpu_display.c */
  int virtio_gpu_modeset_init(struct virtio_gpu_device *vgdev);
  void virtio_gpu_modeset_fini(struct virtio_gpu_device *vgdev);
@@ -377,7 +437,7 @@ vblank.
  
 --- a/drivers/gpu/drm/virtio/virtgpu_kms.c
 +++ b/drivers/gpu/drm/virtio/virtgpu_kms.c
-@@ -294,6 +294,7 @@ void virtio_gpu_deinit(struct drm_device *dev)
+@@ -294,6 +294,7 @@
  	struct virtio_gpu_device *vgdev = dev->dev_private;
  
  	flush_work(&vgdev->obj_free_work);
@@ -387,10 +447,12 @@ vblank.
  	flush_work(&vgdev->config_changed_work);
 --- a/drivers/gpu/drm/virtio/virtgpu_vq.c
 +++ b/drivers/gpu/drm/virtio/virtgpu_vq.c
-@@ -955,6 +955,47 @@ static void virtio_gpu_cmd_get_edid_cb(struct virtio_gpu_device *vgdev,
- 	wake_up(&vgdev->resp_wq);
- }
+@@ -953,8 +953,53 @@
  
+ 	drm_edid_free(old_edid);
+ 	wake_up(&vgdev->resp_wq);
++}
++
 +static void virtio_gpu_cmd_omacvm_vsync_cb(struct virtio_gpu_device *vgdev,
 +					   struct virtio_gpu_vbuffer *vbuf)
 +{
@@ -403,17 +465,18 @@ vblank.
 +	if (scanout >= vgdev->num_scanouts)
 +		return;
 +	virtio_gpu_vsync_reply(vgdev->outputs + scanout, resp);
-+}
-+
+ }
+ 
 +/* OmacVM: ask the host for its display's refresh (vsync_lock=1). */
 +void virtio_gpu_cmd_omacvm_vsync(struct virtio_gpu_device *vgdev,
-+				 uint32_t scanout_id)
++				 uint32_t scanout_id, uint32_t flags,
++				 uint32_t mode_period_ns)
 +{
 +	struct virtio_gpu_omacvm_vsync *cmd_p;
 +	struct virtio_gpu_vbuffer *vbuf;
 +	void *resp_buf;
 +
-+	resp_buf = kzalloc_obj(struct virtio_gpu_resp_omacvm_vsync);
++	resp_buf = kzalloc(sizeof(struct virtio_gpu_resp_omacvm_vsync), GFP_KERNEL);
 +	if (!resp_buf) {
 +		struct virtio_gpu_resp_omacvm_vsync none = {};
 +
@@ -429,6 +492,9 @@ vblank.
 +
 +	cmd_p->hdr.type = cpu_to_le32(VIRTIO_GPU_CMD_OMACVM_VSYNC);
 +	cmd_p->scanout_id = cpu_to_le32(scanout_id);
++	cmd_p->flags = cpu_to_le32(flags);
++	cmd_p->version = cpu_to_le32(VIRTIO_GPU_OMACVM_VSYNC_VERSION);
++	cmd_p->mode_period_ns = cpu_to_le32(mode_period_ns);
 +	virtio_gpu_queue_ctrl_buffer(vgdev, vbuf);
 +}
 +

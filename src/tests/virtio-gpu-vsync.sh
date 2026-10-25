@@ -6,7 +6,7 @@
 # in a few vblanks, no frame is more than an eighth of a period shorter or
 # longer than the period, no vblank comes within a quarter period of the one
 # before, and once on the grid it stays there (the host's period, not the
-# mode's). No kernel, no VM.
+# mode's), and it follows only when the host's period is the mode's (within 2 %). No kernel, no VM.
 #   src/tests/virtio-gpu-vsync.sh
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -16,6 +16,7 @@ trap 'rm -rf "$T"' EXIT
 math=$(sed -n '/vsync math: plain integers/,/end of the vsync math/p' "$P" | sed 's/^+//')
 [[ $math == *vsync_step_ns* && $math == *vsync_nearest_ns* ]] || { echo "FAIL: no vsync math in $P"; exit 1; }
 cat > "$T/t.c" <<EOF
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,7 +108,15 @@ int main(void)
 	CHECK(vsync_step_ns(16666000, 10000000, 16666667000ull) == 667);
 	/* Never earlier than a quarter period from now. */
 	CHECK(vsync_step_ns(3000000, 4000000, 16666667000ull) == 0);
-	puts("ok   vsync lock: on the grid within 6 vblanks from any phase, frames within an eighth of a period");
+	/* Follow (and say LOCKED) only when the host's period is the mode's, within 2 %. */
+	CHECK(vsync_rate_ok(16666666667ull, 16666667));
+	CHECK(vsync_rate_ok(8333333333ull, 8333000));
+	CHECK(!vsync_rate_ok(8333333333ull, 16666667));     /* a 120 Hz host, a 60 Hz mode */
+	CHECK(!vsync_rate_ok(16666666667ull, 8333333));
+	CHECK(vsync_rate_ok(17000000000ull, 16666667));     /* 2 %: still */
+	CHECK(!vsync_rate_ok(17000001000ull, 16666667));
+	CHECK(!vsync_rate_ok(16666666667ull, 0));           /* no mode yet */
+	puts("ok   vsync lock: on the grid within 6 vblanks from any phase, frames within an eighth of a period, only at the mode's rate");
 	return 0;
 }
 EOF
