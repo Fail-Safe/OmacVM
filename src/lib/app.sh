@@ -164,14 +164,16 @@ app_env() {   # DIR KEY: one value from vm.env (single quotes stripped)
 app_pid_dir() {   # DIR -> the PID of its QEMU (the disk is on its command line, commas
   # doubled); this user's processes only: another account could fake the line.
   # The app writes the folder as it is on disk, which can differ in case from
-  # DIR (~/Library/Application Support/omacvm/VMs): any case matches, then the
-  # disk on the line must be DIR's disk itself. The pattern goes to awk in its
-  # environment, not its arguments: awk's own line in ps would match.
+  # DIR (~/Library/Application Support/omacvm/VMs): any case of A-Z matches,
+  # then the disk on the line must be DIR's disk itself. The pattern goes to awk
+  # in its environment, not its arguments: awk's own line in ps would match.
+  # awk reads the lines as bytes (LC_ALL=C): in a UTF-8 locale it stops at the
+  # first line that is not UTF-8 (any program's arguments) and missed the VM (#545).
   local pid f
   while IFS=$'\t' read -r pid f; do
     f=${f//,,/,}
     [[ $f == "$1/disk.img" || ( -e $f && $f -ef $1/disk.img ) ]] && { echo "$pid"; break; }
-  done < <(ps -x -U "$(id -u)" -o pid=,args= 2>/dev/null | OMA_PAT="file=${1//,/,,}/disk.img," awk '
+  done < <(ps -x -U "$(id -u)" -o pid=,args= 2>/dev/null | OMA_PAT="file=${1//,/,,}/disk.img," LC_ALL=C awk '
     { i = index(tolower($0), tolower(ENVIRON["OMA_PAT"]))
       if (i) print $1 "\t" substr($0, i + 5, length(ENVIRON["OMA_PAT"]) - 6) }')
   return 0

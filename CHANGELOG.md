@@ -5,6 +5,16 @@ in more words.
 
 ## 3.2.2 (unreleased)
 
+- **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has
+  odd characters in its command line.** omacvm reads the Mac's process list to find the VM's
+  QEMU. One line that is not UTF-8 (a file name in an old encoding, binary arguments) made
+  macOS's awk stop there, so omacvm missed the VM after it: a control centre switch then tried to
+  start the running VM and ended with "did not get an address" (#545; found in the 3.2.1 test on
+  a MacBook Air). The same line made `pgrep -f` fail, so `omacvm check` could miss a running
+  Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
+  download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
+  Mac.
+
 - **Control centre switches right after another one are not turned away.** When a switch's job
   ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
   switch was refused with "unknown VM" at once and the control centre asked again, so that switch
