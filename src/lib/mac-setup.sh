@@ -92,7 +92,7 @@ mac_helper_state() {
     *) MH_STATE=missing MH_DETAIL="unknown helper"; return 0 ;;
   esac
   if [[ $key == omanotch ]]; then
-    pid=$(pgrep -a -o -u "$(id -u)" -f "Omanotch\.app/Contents/MacOS/omanotch") || pid=""
+    pid=$(LC_ALL=C pgrep -a -o -u "$(id -u)" -f "Omanotch\.app/Contents/MacOS/omanotch") || pid=""
     omanotch_serves_app || rc=$?
     if (( rc == 1 )); then MH_STATE=old MH_DETAIL="too old for OmacVM.app's VMs"; return 0; fi
   else

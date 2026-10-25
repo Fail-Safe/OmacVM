@@ -230,7 +230,8 @@ others_building() {
   while [[ -n $p && $p -gt 1 ]]; do mine+="$p "; p=$(ps -o ppid= -p "$p" | tr -d ' '); done
   # bash running one of the build scripts (not a shell line or an editor that names one)
   local build='^[^ ]*bash ([^-].*/)?((create-vm|prebuilt-vm|build-live|make-image)[.]sh|omacvm build)( |$)'
-  ps -x -ww -U "$(id -u)" -o pid=,ppid=,args= | awk -v me=$$ -v mine="$mine" -v build="$build" '
+  # awk reads the lines as bytes: in UTF-8 it stops at one that is not (#545).
+  ps -x -ww -U "$(id -u)" -o pid=,ppid=,args= | LC_ALL=C awk -v me=$$ -v mine="$mine" -v build="$build" '
     { pid[NR] = $1; pp[$1] = $2; a = $0; sub(/^ *[0-9]+ +[0-9]+ /, "", a); args[NR] = a }
     END {
       for (i = 1; i <= NR; i++) {
