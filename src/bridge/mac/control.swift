@@ -222,12 +222,12 @@ final class Control {
     // Graphics memory is asked every 2 s while the control centre is open:
     // its answers are not logged (refusals still are).
     var quiet = false
-    func answer(_ code: Int, _ obj: [String: Any], _ note: String = "", reason: String? = nil) {
+    func answer(_ code: Int, _ obj: [String: Any], _ note: String = "") {
       let line = "control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))"
       // Refusals once a minute per address, VM and reason: a guest that
       // floods (or any guest, from addresses of its own) must not fill the
       // log the report reads.
-      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(reason ?? note)", line) } else if !quiet { log(line) }
+      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(note)", line) } else if !quiet { log(line) }
       guard let s = signer else { return respond(fd, code, obj) }
       let data = jsonData(obj) + Data("\n".utf8)
       let sig = answerMAC(key: s.key, nonce: s.nonce, status: code, body: data)
@@ -235,8 +235,8 @@ final class Control {
       close(fd)
     }
     func refuse(_ e: PolicyError, _ extra: [String: Any] = [:]) {
-      // Logged once a minute per code (reason), with why the first time.
-      answer(e.status, ["error": e.message, "code": e.code].merging(extra) { a, _ in a }, refusalNote(e), reason: e.code)
+      // Logged once a minute per VM, code and reason.
+      answer(e.status, ["error": e.message, "code": e.code].merging(extra) { a, _ in a }, refusalNote(e))
     }
 
     let cli: String
@@ -475,7 +475,7 @@ final class Control {
                       known: ([VMEntry]) -> Bool) -> [VMEntry] {
     let (list, start, waitFor) = q.sync { () -> ([VMEntry], Bool, Int?) in
       if known(vms.list) {
-        vms.reached(key: key)
+        if vmReady(key: key, vms.list) { vms.reached(key: key) }
         return (vms.list, fresh && vms.shouldRefresh(known: true, now: Date()), nil)
       }
       if listed(vms.list) { let r = vms.refused(key: key, now: Date()); return (vms.list, r.start, r.waitFor) }

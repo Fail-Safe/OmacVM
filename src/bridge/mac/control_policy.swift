@@ -386,6 +386,20 @@ func peerListed(_ peer: String, _ vms: [VMEntry]) -> Bool {
   vms.contains { $0.state == "running" && !$0.ip.isEmpty && $0.ip == peer }
 }
 
+/// The list has the VM of this cache key ("app/<name>", "address <ip>") as a
+/// request that needs SSH would take it: running, set up and reachable. Only
+/// then does a request start the VM's back-off over (VMListCache.reached):
+/// graphics memory, a job's state and the other requests without SSH are
+/// answered for an unreachable VM too, and must not (#528 review).
+func vmReady(key: String, _ vms: [VMEntry]) -> Bool {
+  if key.hasPrefix("app/") {
+    if case .success = vmForApp(String(key.dropFirst(4)), vms) { return true }
+  } else if key.hasPrefix("address ") {
+    if case .success = vmForPeer(String(key.dropFirst(8)), vms) { return true }
+  }
+  return false
+}
+
 /// Requests about an OmacVM.app VM that the Bridge answers without SSH to
 /// it: a job's state, graphics memory (a file), the Mac's own settings, the
 /// Touch ID panel's colours. A VM the Mac cannot reach just now (busy, its
@@ -411,9 +425,11 @@ func unreachableText(_ why: String) -> String {
 }
 
 /// What the log says after a refusal's status: its code, and for a VM that
-/// was not taken also why (not running, not set up, the Mac cannot reach it).
+/// was not taken also why (not running, not set up, the Mac cannot reach it,
+/// two VMs at one address, a key that does not match).
+let refusalWhyCodes: Set<String> = ["unknown-vm", "ambiguous-vm", "vm-key", "no-vm-key"]
 func refusalNote(_ e: PolicyError) -> String {
-  e.code == "unknown-vm" ? "\(e.code) (\(e.message))" : e.code
+  refusalWhyCodes.contains(e.code) ? "\(e.code) (\(e.message))" : e.code
 }
 
 /// The file name of a VM's control key (lib/mac.sh vm_key_file): the first
@@ -1059,19 +1075,21 @@ struct VMListCache {
 
   /// A request about a VM the list has as running, but refused (the Mac
   /// cannot reach it, or OmacVM did not set it up; a VM that just started
-  /// again is one until a run sees it). `start`: the caller starts a run now,
-  /// at most every `refusedEvery` seconds however often a guest asks (each
-  /// run probes every VM over SSH). `waitFor`: the run the request waits for
-  /// (VMListCache.unknownWait at most): the one it started or the one going;
-  /// nil: answered from the list at once (no run due).
+  /// again is one until a run sees it). `start`: the caller starts a run now
+  /// (each run probes every VM over SSH). `waitFor`: the run the request
+  /// waits for (VMListCache.unknownWait at most): the one it started, the one
+  /// going, or the one after it; nil: answered from the list at once.
   /// The first look for a VM refused this way starts at once, also when the
   /// list is only a moment old: a run right after a job may catch the VM
-  /// busy for a second (#528). The second comes `refusedEvery` after it (one
-  /// that just started again is found by it); when that look still could not
-  /// reach it, the next ones wait 30, 60, then 120 s (`backOff`): each look
-  /// probes the VM over SSH, and while its sshd turns the Mac away
-  /// (PerSourcePenalties) more tries keep it that way. Per VM (`key`); a
-  /// request that finds it again (`reached`) starts over.
+  /// busy for a second (#528). While a run goes, that run may have started
+  /// before the VM was back: the first look is the run after it. The second
+  /// look comes `refusedEvery` after the first (one that just started again
+  /// is found by it); when that one still could not reach it, the next ones
+  /// wait 30, 60, then 120 s (`backOff`): while its sshd turns the Mac away
+  /// (PerSourcePenalties) more tries keep it that way. Per VM (`key`); only
+  /// a request that finds it reachable again (`reached`, Control.vmList with
+  /// vmReady) starts over, so however often a guest asks, a VM it cannot
+  /// reach gets at most these looks.
   static let refusedEvery: Double = 5
   static let backOff: [Double] = [30, 60, 120]
   private var refusedAt: [String: Date] = [:]
@@ -1081,14 +1099,26 @@ struct VMListCache {
     let n = refusedRuns[key] ?? 0
     let every = n == 0 ? 0 : n == 1 ? Self.refusedEvery : Self.backOff[min(n - 2, Self.backOff.count - 1)]
     let last = refusedAt[key] ?? .distantPast
-    // Only a run this VM's refusal started (or its first one) is waited for.
-    if running { return (false, n == 0 || now.timeIntervalSince(last) < Self.unknownWait ? started : nil) }
+    if running {
+      // The first look: the run after the one going. Later ones: only the
+      // run this VM's look started is waited for.
+      if n == 0 {
+        count(key, now: now, looks: 1)
+        again = true
+        return (false, started + 1)
+      }
+      return (false, now.timeIntervalSince(last) < Self.unknownWait ? started : nil)
+    }
     guard now.timeIntervalSince(last) >= every else { return (false, nil) }
-    if refusedAt.count > 64 { refusedAt.removeAll(); refusedRuns.removeAll() }   // a guest cannot grow these
-    refusedAt[key] = now
-    refusedRuns[key] = n + 1
+    count(key, now: now, looks: n + 1)
     start()
     return (true, started)
+  }
+
+  private mutating func count(_ key: String, now: Date, looks: Int) {
+    if refusedAt.count > 64 { refusedAt.removeAll(); refusedRuns.removeAll() }   // a guest cannot grow these
+    refusedAt[key] = now
+    refusedRuns[key] = looks
   }
 
   /// A request found this VM in the list as it should be again: its back-off starts over.
