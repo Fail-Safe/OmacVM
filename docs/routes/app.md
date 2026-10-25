@@ -549,6 +549,38 @@ The Mac's input methods type in Omarchy (feature `mac-ime`; what it does:
   step), `app/runtime/Tests/keys/test-ime.sh` (the window code's rules and
   hooks), `swift run features-tests` (the port only with the record's on).
 
+## Pause drawing while hidden (experimental, off by default)
+
+The VM window's settings have **Pause drawing while hidden** (Display). With
+it on, a VM whose window nobody can see stops drawing, as a macOS app does:
+
+- "Cannot be seen" is macOS's own word for the window (its occlusion): the
+  window minimised, wholly covered by other windows, on a Space that is not
+  shown (the VM full screen and you in macOS), closed with **Keep running**;
+  or the screen locked, the displays asleep, another user on the screen.
+  After 2 seconds of that, QEMU tells the VM's display agent
+  (`omacvm-displays`), which turns that display off in Hyprland (DPMS, as
+  Omarchy's own screen blanking does). No frames and no vblank then, so
+  Hyprland and the Linux apps stop drawing; sound, a video's sound,
+  downloads, timers and everything else in the VM keep running.
+- As soon as any part of the window shows again, the display is turned on
+  at once and the VM draws again; until its first new picture (a few frames
+  later) the window shows the last one. A window that can be seen is never
+  touched: every frame, at the display's full rate.
+- A screen share or a recording of that display from inside the VM keeps it
+  drawing (any window share keeps every display drawing). A display the VM
+  turned off itself (Omarchy's idle) is left off.
+- It works at once in a running VM (QEMU watches the setting). The Mac side
+  is in QEMU (`omacvm-cocoa-guest-pause*.patch`), the VM side in the display
+  agent (Update VM brings it). `defaults write org.omacvm.app
+  pauseWhileHidden -bool true` does the same as the row.
+- QEMU's log: "OmacVM: pause drawing while hidden: on|off" at the start and
+  on a change, and after each pause "guest drawing: paused for N s ...;
+  frames again A and B ms after it was seen". The VM's journal:
+  "omacvm-displays: drawing paused on Virtual-1" / "drawing again".
+- Only the main window (Virtual-1); the windows on other displays in full
+  screen keep drawing.
+
 ## HDR and 10-bit colour (experimental, off by default)
 
 On a Mac with an HDR display (a MacBook Pro's XDR panel, an HDR monitor),

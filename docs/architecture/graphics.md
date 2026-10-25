@@ -961,7 +961,15 @@ bench lock and are indications only):
   A frame kept for a window out of sight (`omacvm-cocoa-present-unseen.patch`)
   is no tick work: it is drawn when the window shows again
   (`omacvm-cocoa-idle-refresh-unseen.patch`; before, any frame that came while
-  the window was away kept the tick at the display's rate). In the guest,
+  the window was away kept the tick at the display's rate). The guest still
+  drew every frame then (its vblank is its own timer); with "Pause drawing
+  while hidden" (experimental, `pauseWhileHidden`,
+  `omacvm-cocoa-guest-pause*.patch`) QEMU tells the display agent after 2 s
+  out of sight (or locked, asleep) and it turns that output off with
+  Hyprland's DPMS: no vblank, no frame callbacks, no virgl work; seen again,
+  on at once, the window keeping its last picture until the first new
+  frame (QEMU would draw the console's "display not active" one while the
+  scanout is off). In the guest,
   virtio-gpu's vblank (a kernel timer at the mode's rate) stops 100 ms after
   the last frame instead of DRM's 5 s (`drm.vblankoffdelay`, app VMs:
   `src/app/guest/90-omacvm-vblank.tmpfiles`).
