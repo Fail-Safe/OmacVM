@@ -71,6 +71,18 @@ int main(void)
     CHECK(slow.n == 0 && omacvm_lead_value(&slow, 1 / 120.0, 0.004) == 0.004);
     CHECK(omacvm_lead_quantile(&slow, 0.5) < 0);
 
+    /* Late frames wait in the queue when the frames need more than the lead can give, or > 1 % came late. */
+    OmacVMLead ok = { 0 };
+    for (int i = 0; i < 64; i++) {
+        omacvm_lead_add(&ok, 0.003 + (i % 4) * 0.0005);   /* 3.0 .. 4.5 ms */
+    }
+    CHECK(!omacvm_follow_buffered(&ok, 1 / 120.0, 120, 1));    /* 4.5 + 1 < 7.33: follow, 1 late in 120 */
+    CHECK(omacvm_follow_buffered(&ok, 1 / 120.0, 120, 2));     /* 2 in 120: more than 1 in 100 */
+    omacvm_lead_add(&ok, 0.0071);                               /* 7.1 + 1 > 7.33 */
+    CHECK(omacvm_follow_buffered(&ok, 1 / 120.0, 120, 0));
+    CHECK(!omacvm_follow_buffered(&ok, 1 / 60.0, 60, 0));       /* at 60 Hz it fits */
+    CHECK(omacvm_follow_buffered(&ok, 0, 60, 0));
+
     /* Since the grid's last vblank: wraps by the period, never negative. */
     CHECK(fabs(omacvm_vsync_since(10.004, 10.0, 0.01) - 0.004) < 1e-9);
     CHECK(fabs(omacvm_vsync_since(10.014, 10.0, 0.01) - 0.004) < 1e-9);

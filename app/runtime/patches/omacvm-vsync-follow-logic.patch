@@ -8,7 +8,9 @@ a run of the display link's ticks (a link slowed to 60 or 24 Hz on a
 120 Hz panel still ticks on that grid), and the lead: when the guest's
 frames are ready after their vblank, the latest of the last 64 plus 1
 ms, up at once, down by at most 0.5 ms a second, at least 2 ms, at most
-a period less 1 ms. Also OmacVM's
+a period less 1 ms; and when late frames should wait in the queue
+instead (the frames need more than that, or more than 1 in 100 came
+late). Also OmacVM's
 virtio-gpu command and answer numbers, and the shared state's calls.
 
 Why its own file: so the rules are tested without QEMU or a window
@@ -20,7 +22,7 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 
 --- /dev/null
 +++ b/ui/omacvm-vsync.h
-@@ -0,0 +1,176 @@
+@@ -0,0 +1,197 @@
 +/*
 + * OmacVM: the guest's vblanks in step with the Mac display's refresh.
 + *
@@ -171,6 +173,27 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +        now = hi;
 +    }
 +    return now;
++}
++
++/*
++ * Whether late frames wait in the queue (as without following) instead of
++ * the newer frame being shown: when the guest's frames need more than the
++ * lead can give (the latest + margin past a period less the spare) or more
++ * than 1 in 100 came late in the last second. A late frame then costs a
++ * refresh of delay until the queue's trim, not a dropped frame; the next
++ * second without either goes back.
++ */
++static inline bool omacvm_follow_buffered(const OmacVMLead *l, double period,
++                                          unsigned frames, unsigned late)
++{
++    if (!(period > 0)) {
++        return true;
++    }
++    if (l->n >= 16 &&
++        omacvm_lead_quantile(l, 1.0) + OMACVM_LEAD_MARGIN_S > period - OMACVM_LEAD_SPARE_S) {
++        return true;
++    }
++    return late * 100 > frames;
 +}
 +
 +/* Seconds from the latest vblank of the grid (vblank, period) before t. */

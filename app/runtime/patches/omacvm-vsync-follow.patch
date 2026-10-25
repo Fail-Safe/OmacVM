@@ -23,7 +23,11 @@ and raised it again. While a
 guest follows, a tick that finds more than one frame shows the newest:
 the older one came late for its own refresh (as OMACVM_GL_INPUT_FIRST
 does while input comes), so a late frame costs one repeat, not a
-refresh of delay until the quarter-second trim. hvf gives the guest
+refresh of delay until the quarter-second trim. Not while the guest's
+frames are too slow to follow (the latest + 1 ms past a period less 1
+ms, or more than 1 in 100 late in the last second: a busy 120 Hz guest
+on the mini had 5 % late, each a dropped frame): then late frames wait in
+the queue as without following, until a second without either. hvf gives the guest
 counter's offset (CNTVCT = mach time less hvf's vtimer offset, set at
 start and after each pause); ui/omacvm-vsync.c keeps the grid between the
 threads (a spin lock). Another scanout, no grid yet (the link has not
@@ -155,7 +159,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  #include "hw/core/boards.h"
  #include "system/system.h"
  #include "system/runstate.h"
-@@ -7662,6 +7663,19 @@ the one before (slowed link) */
+@@ -7662,6 +7663,20 @@ the one before (slowed link) */
      bool merge;                         /* the guest draws faster than the link */
      unsigned ticks, shown, direct, repeats, merged, dropped, busy; /* trace */
      double wait_sum;
@@ -165,6 +169,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
 +     * of ticks its period is measured over, and the lead.
 +     */
 +    bool follow;
++    bool follow_buffered;               /* late frames wait (omacvm_follow_buffered) */
 +    double grid_vblank, grid_period;
 +    double ans_vblank, ans_period, ans_moved;  /* the grid the guest got last */
 +    double grid_t0, grid_last;
@@ -175,7 +180,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  } present_sync = {
      .win_min = INT_MAX, .win_gap = INFINITY, .win_gap2 = INFINITY,
  };
-@@ -7670,6 +7684,7 @@ the one before (slowed link) */
+@@ -7670,6 +7685,7 @@ the one before (slowed link) */
  static bool present_fixed;              /* OMACVM_GL_REFRESH=fixed */
  static bool present_input_first;        /* OMACVM_GL_INPUT_FIRST=1 */
  static bool present_trim_quarter;       /* OMACVM_GL_TRIM=quarter */
@@ -183,7 +188,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  static QEMUBH *present_bh;
  
  /* Main thread: the window is in sight again: its newest frame now, not at the guest's next flush. */
-@@ -7883,6 +7898,9 @@ static bool cocoa_gl_present_init(void)
+@@ -7883,6 +7899,9 @@ static bool cocoa_gl_present_init(void)
      present_input_first = present_vsync && in && !strcmp(in, "1");
      const char *tr = getenv("OMACVM_GL_TRIM");
      present_trim_quarter = present_vsync && tr && !strcmp(tr, "quarter");
@@ -193,7 +198,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
      present_nsurf = present_vsync ? PRESENT_SURFACES : 3;
      if (present_vsync) {
          /*
-@@ -8557,7 +8575,11 @@ static void cocoa_gl_present_screen_changed(void)
+@@ -8557,7 +8576,11 @@ static void cocoa_gl_present_screen_changed(void)
      present_sync.min_hz = min_hz;
      present_sync.hz = max_hz;
      present_sync.slower = 0;
@@ -205,7 +210,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
      cocoa_gl_present_link_rate();
      if (changed) {
          if (min_hz < max_hz) {
-@@ -8633,6 +8655,18 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+@@ -8633,6 +8656,18 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
      double gap = present_sync.last_ready > 0 ?
                   now - present_sync.last_ready : INFINITY;
      present_sync.last_ready = now;
@@ -224,7 +229,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
      if (!present_sync.linked) {
          present_sync.close_frames =
              gap < PRESENT_CLOSE_S ? present_sync.close_frames + 1 : 0;
-@@ -8769,7 +8803,7 @@ static double present_wanted_hz(void)
+@@ -8769,7 +8804,7 @@ static double present_wanted_hz(void)
   * queued frame on the layer. Returns false once no frame has come for
   * PRESENT_IDLE_S (the link may pause).
   */
@@ -233,7 +238,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  {
      PresentFrame show = { 0 }, drop = { 0 }, stale[PRESENT_QUEUE] = { { 0 } };
      PresentFrame trimmed[PRESENT_QUEUE] = { { 0 } };
-@@ -8780,10 +8814,51 @@ static bool cocoa_gl_present_vsync(double T)
+@@ -8780,18 +8815,65 @@ static bool cocoa_gl_present_vsync(double T)
      double now = CACurrentMediaTime();
      bool rate = false, idle = false;
  
@@ -245,6 +250,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
      }
 +    if (follow && !present_sync.follow) {
 +        omacvm_lead_reset(&present_sync.lead);
++        present_sync.follow_buffered = false;
 +        present_sync.follow_lead = present_follow_fixed > 0 ? present_follow_fixed :
 +                                   OMACVM_LEAD_START_S;
 +    }
@@ -285,43 +291,45 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
      present_sync.win_ticks++;
      present_sync.ticks++;
      if (present_sync.queued) {
-@@ -8791,13 +8866,15 @@ static bool cocoa_gl_present_vsync(double T)
++        /* While the guest follows, a frame behind a newer one came late for its refresh. */
++        present_sync.follow_late += present_sync.follow ? present_sync.queued - 1 : 0;
+         /*
           * Input is coming: frames that wait behind a newer one are old news
-          * (the newer answers the input). Show the newest at this refresh.
+-         * (the newer answers the input). Show the newest at this refresh.
++         * (the newer answers the input). Show the newest at this refresh. So
++         * while the guest follows the refresh, unless its frames are too slow
++         * for it (follow_buffered).
           */
 -        if (input && present_sync.queued > 1) {
-+        if ((input || present_sync.follow) && present_sync.queued > 1) {
++        if ((input || (present_sync.follow && !present_sync.follow_buffered)) &&
++            present_sync.queued > 1) {
              nstale = present_sync.queued - 1;
              memcpy(stale, present_sync.queue, sizeof(PresentFrame) * nstale);
              memmove(&present_sync.queue[0], &present_sync.queue[nstale],
-                     sizeof(PresentFrame));
-             present_sync.queued = 1;
-             present_sync.dropped += nstale;
-+            /* While the guest follows: the older one was late for its refresh. */
-+            present_sync.follow_late += present_sync.follow ? nstale : 0;
-         }
-         show = present_sync.queue[0];
-         present_sync.queued--;
-@@ -8903,6 +8980,18 @@ static bool cocoa_gl_present_vsync(double T)
+@@ -8903,6 +8985,22 @@ static bool cocoa_gl_present_vsync(double T)
              (int)(present_sync.wait_sum * 1e6 / present_sync.shown) : 0);
          trace_cocoa_present_skips(present_sync.repeats, present_sync.merged,
                                    present_sync.dropped, present_sync.busy);
 +        if (present_sync.follow) {
-+            /* The lead follows when the guest's frames are ready (95th percentile). */
++            /* The lead follows when the guest's frames are ready (the latest + 1 ms). */
 +            if (present_follow_fixed <= 0) {
 +                present_sync.follow_lead = omacvm_lead_value(&present_sync.lead,
 +                    present_sync.grid_period, present_sync.follow_lead);
 +            }
++            present_sync.follow_buffered = omacvm_follow_buffered(&present_sync.lead,
++                present_sync.grid_period, present_sync.follow_frames,
++                present_sync.follow_late);
 +            trace_cocoa_present_follow((int)lround(present_sync.follow_lead * 1e6),
 +                (int)lround(omacvm_lead_quantile(&present_sync.lead, 0.5) * 1e6),
 +                (int)lround(omacvm_lead_quantile(&present_sync.lead, 1.0) * 1e6),
-+                present_sync.follow_frames, present_sync.follow_late);
++                present_sync.follow_frames, present_sync.follow_late,
++                present_sync.follow_buffered);
 +        }
 +        present_sync.follow_frames = present_sync.follow_late = 0;
          present_sync.ticks = present_sync.shown = present_sync.direct = 0;
          present_sync.repeats = 0;
          present_sync.merged = present_sync.dropped = present_sync.busy = 0;
-@@ -8974,10 +9063,11 @@ - (void)tick:(CADisplayLink *)link
+@@ -8974,10 +9072,11 @@ - (void)tick:(CADisplayLink *)link
          const char *e = getenv("OMACVM_GL_LEAD_MS");
          lead = (e ? atof(e) : 3.0) / 1000;
      }
@@ -490,7 +498,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  cocoa_present_frame(int gap_us, int queued, bool linked) "frame ready %d us after the last, %d queued, linked %d"
  cocoa_present_direct(int gap_ms) "frame shown when ready, %d ms after the last"
  cocoa_present_skips(unsigned repeats, unsigned merged, unsigned dropped, unsigned busy) "%u repeats, %u merged, %u dropped, %u no free surface"
-+cocoa_present_follow(int lead_us, int median_us, int latest_us, unsigned frames, unsigned late) "guest follows the refresh: vblank %d us before the commit; its frames ready %d us after it (median), %d (latest of the last 64); %u frames, %u late"
++cocoa_present_follow(int lead_us, int median_us, int latest_us, unsigned frames, unsigned late, bool buffered) "guest follows the refresh: vblank %d us before the commit; its frames ready %d us after it (median), %d (latest of the last 64); %u frames, %u late; late frames wait next second %d"
  
  # egl-helpers.c
  egl_init_d3d11_device(void *p) "d3d device: %p"

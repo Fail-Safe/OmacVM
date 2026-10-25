@@ -24,8 +24,10 @@ problems() {   # QEMU source folder
     echo "the guest's vblank is not the lead before the commit"
   grep -q 'omacvm_lead_add(&present_sync.lead,$' "$m" 2>/dev/null && grep -q 'omacvm_vsync_since(now, present_sync.ans_vblank,' "$m" 2>/dev/null ||
     echo "the lead does not follow when the guest's frames are ready"
-  grep -q '(input || present_sync.follow) && present_sync.queued > 1' "$m" 2>/dev/null ||
+  grep -q '(input || (present_sync.follow && !present_sync.follow_buffered))' "$m" 2>/dev/null ||
     echo "a late frame waits a refresh while the guest follows"
+  grep -q 'present_sync.follow_buffered = omacvm_follow_buffered(&present_sync.lead,' "$m" 2>/dev/null ||
+    echo "late frames are dropped even when the guest's frames are too slow to follow"
   grep -q 'case OMACVM_VIRTIO_GPU_CMD_VSYNC:' "$g" 2>/dev/null || echo "virtio-gpu does not answer the guest"
   [[ $(grep -c 'omacvm_vsync_set_counter_offset(hvf_state->vtimer_offset);' "$h" 2>/dev/null) == 2 ]] ||
     echo "hvf does not give the guest counter's offset (start and resume)"
@@ -36,7 +38,7 @@ mkdir -p "$work/old/ui" "$work/old/hw/display" "$work/old/target/arm/hvf"
 echo 'static bool cocoa_gl_present_vsync(double T)' > "$work/old/ui/cocoa.m"
 : > "$work/old/hw/display/virtio-gpu-virgl.c"
 : > "$work/old/target/arm/hvf/hvf.c"
-[[ $(problems "$work/old" | wc -l) -ge 7 ]] || { echo "FAIL: the wiring checks pass without the patch"; exit 1; }
+[[ $(problems "$work/old" | wc -l) -ge 8 ]] || { echo "FAIL: the wiring checks pass without the patch"; exit 1; }
 
 if (( $# )); then
   p=$(problems "$1")
