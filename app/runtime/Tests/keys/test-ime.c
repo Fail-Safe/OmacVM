@@ -204,6 +204,57 @@ int main(void)
         EXPECT(u0 == 0 && u1 == 1 && v1 == 1, "a box past the output's edges is cut to it");
     }
 
+    /* ---------- the input method's context off later when only the guest's field went (#357) ---------- */
+    {
+        OmacVMImeOffState o = { 0 };
+        OmacVMImeState s = on_state();
+        EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_NONE && o.was_active, "a text field: active, nothing to switch off");
+        s.focus = false;   /* the terminal after Enter: its field off ... */
+        EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_LATER && o.waiting, "only the guest's field went: off later");
+        unsigned first = o.gen;
+        s.focus = true;    /* ... and on again at once */
+        EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_KEPT && !o.waiting, "the field back within the delay: kept on");
+        EXPECT(!omacvm_ime_off_due(&o, first), "that later off is dropped");
+        s.focus = false;
+        EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_LATER, "off again: later again");
+        EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_NONE && o.waiting, "nothing changed meanwhile: it still waits");
+        EXPECT(omacvm_ime_off_due(&o, o.gen) && !o.waiting && !omacvm_ime_off_due(&o, o.gen), "no field came back: off when due, once");
+        /* A password field after a text field: the guest says off (text), then on (password). */
+        o = (OmacVMImeOffState){ 0 }; s = on_state();
+        (void)omacvm_ime_off_step(&o, &s);
+        s.focus = false;
+        EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_LATER, "text field off: later");
+        s.focus = true; s.password = true;
+        EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_NOW && !o.waiting, "then a password field: off at once (#540 review)");
+        /* While an off waits: another window, a plain layout, the module gone: off at once. */
+        for (int k = 0; k < 3; k++) {
+            o = (OmacVMImeOffState){ 0 }; s = on_state();
+            (void)omacvm_ime_off_step(&o, &s);
+            s.focus = false;
+            (void)omacvm_ime_off_step(&o, &s);
+            if (k == 0) s.window_key = false;
+            if (k == 1) s.source_im = false;
+            if (k == 2) s.hello = false;
+            EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_NOW && !o.waiting,
+                   k == 0 ? "off waits, then another window has the keyboard: off at once" :
+                   k == 1 ? "off waits, then a plain layout: off at once" : "off waits, then the module is gone: off at once");
+        }
+        /* Not only the field: off at once, as before. */
+        o = (OmacVMImeOffState){ 0 }; s = on_state();
+        (void)omacvm_ime_off_step(&o, &s);
+        s.window_key = false;
+        EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_NOW, "another window or app has the keyboard: off at once");
+        o = (OmacVMImeOffState){ 0 }; s = on_state();
+        (void)omacvm_ime_off_step(&o, &s);
+        s.source_im = false;
+        EXPECT(omacvm_ime_off_step(&o, &s) == OMACVM_IME_OFF_NOW, "a plain layout chosen on the Mac: off at once");
+        o = (OmacVMImeOffState){ 0 }; s = on_state();
+        EXPECT(omacvm_ime_off_later(&s) == true, "off later: the state with a field would be active");
+        s.focus = false; s.password = true;
+        EXPECT(!omacvm_ime_off_later(&s), "... not for a password field");
+        EXPECT(OMACVM_IME_OFF_DELAY >= 0.1 && OMACVM_IME_OFF_DELAY <= 0.3, "the delay is short (0.1-0.3 s)");
+    }
+
     /* ---------- code points ---------- */
     {
         const uint16_t s[] = { 'a', 0xD83D, 0xDE00, 0x65E5, 'b' };   /* a 😀 日 b */

@@ -404,6 +404,9 @@ jobs:
       - name: An app VM's address comes from its running QEMU (fast network turned off while it runs)
         run: src/tests/app-vm-address.sh
 
+      - name: Another program's arguments that are not UTF-8 do not hide a running VM, helper or build (#545)
+        run: src/tests/ps-not-utf8.sh
+
       - name: The Bridge runs omacvm for the app's VMs through the app (only the Bridge, only the app's omacvm)
         run: src/tests/app-control-run.sh
 
@@ -734,6 +737,9 @@ jobs:
           /tmp/lua-5.5.0/src/luac -p src/app/guest/omacvm_app.lua src/omanotch/guest/hypr/notchbar.lua
           d=$(mktemp -d)
           XDG_RUNTIME_DIR=$d XDG_CONFIG_HOME=$d /tmp/lua-5.5.0/src/lua src/app/guest/tests/omacvm_app_test.lua src/app/guest/omacvm_app.lua
+
+      - name: omacvm check's HDR line says what Hyprland's SDR copy does (the check catches code without it)
+        run: src/tests/hdr-copy-check.sh
 
       - name: Chromium's video decoder builds, and waits for a GPU that is not usable (no render node here)
         run: |
