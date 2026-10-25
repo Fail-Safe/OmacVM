@@ -107,6 +107,8 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
 - Amended 2026-10-25 (hdr-pass): with Virtual-1 in PQ and SDR white at
   203 nits, Hyprland 0.56 keeps an unmodified SDR copy of every frame for
   screen sharing by default (`render:keep_unmodified_copy` auto): each
-  window is drawn twice. `omacvm_app.lua` sets it to 0, so the copy is made
-  only while something captures the output. The screen and screenshots
-  are the same; an HDR frame costs the GPU 10-19 % less (mini, QEMU GPU ms/s).
+  window is drawn twice. `omacvm_app.lua` sets it to 0 (unless the user
+  set it in their own Hyprland files), so the copy is made only while
+  something captures the output. The screen, screenshots and screen
+  shares are the same; an HDR frame costs the GPU 10-19 % less (mini,
+  QEMU GPU ms/s; M1 Max at 120 Hz -17 %).

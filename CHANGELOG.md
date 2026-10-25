@@ -9,7 +9,7 @@ in more words.
   window twice per frame: once for the screen and once into an SDR copy it keeps for screen sharing. The
   copy is now made only while a screenshot or a screen share runs. The screen shows the same pixels and
   screenshots look the same; the Mac's GPU does 10-19 % less work per frame with HDR on (scrolling, video,
-  a terminal). Needs Update VM.
+  a terminal). A `keep_unmodified_copy` you set in your own Hyprland config still wins. Needs Update VM.
 
 ## 3.2.1
 
