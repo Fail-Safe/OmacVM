@@ -995,6 +995,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-extra-brightn
 # draw is drawn into it again (the guest's flush rects; Linux 7.4 or OmacVM's
 # virtio-gpu driver sends them). Its rules' test, then the wiring.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damage-logic.patch"
+"$native_dir/Tests/display/test-present-damage.sh" --self-test "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a partial present wiring check passes without the patch (test-present-damage.sh)"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damage.patch"
 "$native_dir/Tests/display/test-present-damage.sh" || \
   die "the partial present's rules fail their test (test-present-damage.sh)"

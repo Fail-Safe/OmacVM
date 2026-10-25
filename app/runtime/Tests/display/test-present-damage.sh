@@ -5,47 +5,74 @@
 #   - with a patched ui/cocoa.m: the wiring (the guest's flush rects go in, the
 #     present draws a surface's box scissored and without the clear, full
 #     draws on the listed changes, OMACVM_GL_PRESENT_DAMAGE=0 and =check);
-#   - with --self-test (CI): the wiring checks fail on the code without it.
-#   test-present-damage.sh [<patched ui/cocoa.m> | --self-test]
+#   - with --self-test [<ui/cocoa.m without the patch>]: every wiring check
+#     fails on that code (CI: a stub; the runtime build: the real cocoa.m
+#     before the patch).
+#   test-present-damage.sh [<patched ui/cocoa.m> | --self-test [<old ui/cocoa.m>]]
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
 patches=$(cd "$here/../../patches" && pwd -P)
 body() { awk -v h="$2" 'index($0, h) == 1 {on=1} on {print} on && /^}$/ {exit}' "$1"; }
-problems() {
-  local m=$1 present flush alloc
+# One line per check: "ok WHAT" or "FAIL WHAT".
+chk() { local what=$1; shift; if "$@"; then echo "ok $what"; else echo "FAIL $what"; fi; }
+has() { grep -qF -- "$2" <<<"$1"; }
+# A before B before C (fixed strings), in that order in the text.
+order() {
+  awk -v a="$2" -v b="$3" -v c="${4:-}" '
+    !x && index($0, a) {x=NR; next}
+    x && !y && index($0, b) {y=NR; if (c == "") exit; next}
+    y && c != "" && !z && index($0, c) {z=NR; exit}
+    END {exit !(x && y && (c == "" || z))}' <<<"$1"
+}
+checks() {
+  local m=$1 present flush alloc tex pdcheck part
   present=$(body "$m" 'static bool cocoa_gl_present(void)')
   flush=$(body "$m" 'static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,')
-  alloc=$(body "$m" 'static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear)')
-  [[ -n $present && -n $flush && -n $alloc ]] || { echo "no cocoa_gl_present, scanout_flush or present_alloc"; return; }
-  grep -q '#include "ui/omacvm-present-damage.h"' "$m" || echo "the rules are not included"
-  grep -q 'omacvm_pd_add(&present_pd, x, y, w, h);' <<<"$flush" || echo "the guest's flush rects are not collected"
-  grep -q 'omacvm_pd_reset(&present_pd, present_nsurf,' <<<"$alloc" || echo "new surfaces are not drawn in full"
-  grep -q 'omacvm_pd_take(&present_pd, n, &pd)' <<<"$present" || echo "the present does not ask what surface n needs"
-  grep -q 'omacvm_pd_frame(&present_pd, w, h);' <<<"$present" || echo "another frame size does not draw in full"
-  grep -q 'omacvm_pd_all_full(&present_pd);' <<<"$present" || echo "a change of path or buffer does not draw in full"
-  grep -q 'glScissor(pd.x, pd.y, pd.w, pd.h);' <<<"$present" || echo "the box is not scissored"
-  # The clear only on full draws: it sits in the else branch of the partial one.
-  awk '/glScissor\(pd.x, pd.y, pd.w, pd.h\);/{s=NR} /} else {/{if (s && !e) e=NR} /glClear\(GL_COLOR_BUFFER_BIT\);/{if (e && !c) c=NR}
-       END{exit !(s && e && c && s < e && e < c)}' <<<"$present" || echo "a partial draw clears the surface"
-  for want in '!splash' '!boost' 'gl_scanout_borrow &&' 'w == present_w && h == present_h' 'gl_scanout_x == 0 && gl_scanout_y == 0'; do
-    grep -qF "$want" <<<"$present" || echo "partial draws are not limited by: $want"
+  alloc=$(body "$m" 'static bool cocoa_gl_present_alloc(')
+  tex=$(body "$m" 'static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,')
+  pdcheck=$(body "$m" 'static void cocoa_gl_present_pd_check(')
+  # The statement that decides a partial draw, on one line, spaces squeezed.
+  part=$(awk '/bool part = /{on=1} on {printf "%s ", $0} on && /;/ {exit}' <<<"$present" | tr -s ' \t' ' ')
+  chk "the rules are included" grep -q '#include "ui/omacvm-present-damage.h"' "$m"
+  chk "the guest's flush rects are collected" has "$flush" 'omacvm_pd_add(&present_pd, x, y, w, h);'
+  chk "new surfaces are drawn in full" has "$alloc" 'omacvm_pd_reset(&present_pd, present_nsurf,'
+  chk "the present asks what surface n needs" has "$present" 'omacvm_pd_take(&present_pd, n, &pd)'
+  chk "another frame size draws in full" has "$present" 'omacvm_pd_frame(&present_pd, w, h);'
+  chk "a change of path or buffer draws in full" has "$present" 'omacvm_pd_all_full(&present_pd);'
+  for want in 'omacvm_pd_take(&present_pd, n, &pd)' 'present_damage_on' 'gl_scanout_borrow' \
+              '!splash' '!boost' 'w == present_w' 'h == present_h' \
+              'gl_scanout_x == 0' 'gl_scanout_y == 0' 'gl_scanout_w == w' 'gl_scanout_h == h'; do
+    chk "a partial draw needs: $want" has "$part" "$want"
   done
-  grep -q 'getenv("OMACVM_GL_PRESENT_DAMAGE")' <<<"$present" || echo "OMACVM_GL_PRESENT_DAMAGE is not read"
-  grep -q 'cocoa_gl_present_pd_check(src, flip, n, pd);' <<<"$present" || echo "the check mode is not wired"
-  grep -q 'glDisable(GL_SCISSOR_TEST);' <<<"$present" || echo "the scissor is left on"
+  chk "the box is scissored" has "$present" 'glScissor(pd.x, pd.y, pd.w, pd.h);'
+  # The clear only on full draws: it sits in the else branch of the partial one.
+  chk "a partial draw does not clear the surface" order "$present" \
+    'glScissor(pd.x, pd.y, pd.w, pd.h);' '} else {' 'glClear(GL_COLOR_BUFFER_BIT);'
+  chk "the scissor goes off after the draw" order "$present" \
+    'glScissor(pd.x, pd.y, pd.w, pd.h);' 'qemu_gl_run_texture_blit(present_gls, flip);' 'glDisable(GL_SCISSOR_TEST);'
+  chk "OMACVM_GL_PRESENT_DAMAGE is read" has "$present" 'getenv("OMACVM_GL_PRESENT_DAMAGE")'
+  chk "the check mode is wired" has "$present" 'cocoa_gl_present_pd_check(src, flip, n, pd);'
 }
 if [[ ${1:-} == --self-test ]]; then
-  T=$(mktemp -d "${TMPDIR:-/tmp}/omacvm-present-damage.XXXXXX")
-  trap 'rm -rf "$T"' EXIT
-  { printf 'static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear)\n{\n}\n'
-    printf 'static bool cocoa_gl_present(void)\n{\n    glClear(GL_COLOR_BUFFER_BIT);\n}\n'
-    printf 'static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,\n{\n    gl_dirty = true;\n}\n'; } > "$T/old.m"
-  if [[ -n $(problems "$T/old.m") ]]; then echo "ok   the wiring checks fail on the code without the patch"; exit 0; fi
-  echo "FAIL the wiring checks pass on the code without the patch" >&2; exit 1
+  old=${2:-}
+  if [[ -z $old ]]; then
+    T=$(mktemp -d "${TMPDIR:-/tmp}/omacvm-present-damage.XXXXXX")
+    trap 'rm -rf "$T"' EXIT
+    { printf 'static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear)\n{\n}\n'
+      printf 'static bool cocoa_gl_present(void)\n{\n    glDisable(GL_SCISSOR_TEST);\n    glClear(GL_COLOR_BUFFER_BIT);\n}\n'
+      printf 'static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,\n{\n    gl_scanout_id = backing_id;\n}\n'
+      printf 'static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,\n{\n    gl_dirty = true;\n}\n'; } > "$T/old.m"
+    old=$T/old.m
+  fi
+  passed=$(checks "$old" | grep '^ok ')
+  if [[ -z $passed ]]; then echo "ok   every wiring check fails on the code without the patch ($old)"; exit 0; fi
+  echo "FAIL these wiring checks pass on the code without the patch ($old):" >&2
+  echo "$passed" >&2
+  exit 1
 fi
 if [[ $# -ge 1 ]]; then
-  out=$(problems "$1")
-  if [[ -n $out ]]; then echo "test-present-damage: $1: $out" >&2; exit 1; fi
+  out=$(checks "$1" | grep '^FAIL ')
+  if [[ -n $out ]]; then echo "test-present-damage: $1:" >&2; echo "$out" >&2; exit 1; fi
   echo "test-present-damage: $1: wiring ok"
   exit 0
 fi
