@@ -48,41 +48,41 @@ public enum USBQMP {
         return .failed(String(qemuError.prefix(160)))
     }
 
-    /// An error QEMU itself answered ("QMP command X failed: ..."), not a
-    /// command that got no answer (timed out, socket closed).
-    public static func answeredByQEMU(_ error: String) -> Bool { error.contains(" failed: ") }
-
     /// Adds the device; it counts as given only once "info usb" lists it
-    /// (checked every 0.3 s for up to 3 s). Else it is removed again.
-    /// A device_add that got no answer in time (a slow device: QEMU is
-    /// still opening it) may still land (#526): then the same check, and
-    /// longer while QEMU does not answer at all (it answers info usb only once
-    /// the add is done or dropped); one it never lists is removed again, so
-    /// the VM never keeps a device the app says is not connected.
+    /// (checked every 0.3 s, 10 times). Else it is removed again.
+    /// A device_add that got no answer (USBQMPNoAnswer: sent, but the
+    /// transport gave up waiting) may still land (#526): QEMU often finishes
+    /// the add after all. Then the same check; while QEMU does not answer
+    /// "info usb" at all (it answers once the add is done or dropped) it is
+    /// asked for up to `lateWait` seconds, then 10 times from its first
+    /// answer. Listed: connected. Never listed: removed again, so the VM does
+    /// not keep a device the app says is not connected.
+    public static let lateWait = 6.0
     public static func attach(_ d: USBDevice, over qmp: USBQMPTransport,
-                              wait: (Double) -> Void = { Thread.sleep(forTimeInterval: $0) }) -> USBAttachResult {
+                              wait: (Double) -> Void = { Thread.sleep(forTimeInterval: $0) },
+                              now: () -> Double = { ProcessInfo.processInfo.systemUptime }) -> USBAttachResult {
         let id = qemuID(location: d.location)
         var late = false
         do {
             _ = try qmp.execute("device_add", attachArguments(d))
-        } catch {
-            let e = "\(error)"
-            if answeredByQEMU(e) { return reason(qemuError: e) }
+        } catch is USBQMPNoAnswer {
             late = true
+        } catch {
+            return reason(qemuError: "\(error)")
         }
+        let start = now()
         var answered = false
+        var counted = 0   // looks that count toward the 10: all of them, or after a late add those from QEMU's first answer
         var i = 0
-        // 10 looks after an answered add; after one without an answer up to
-        // 20 until QEMU answers, then the usual 10 from there.
-        var looks = late ? 20 : 10
-        while i < looks {
+        while true {
             if i > 0 { wait(0.3) }
             i += 1
             if let ids = try? attached(over: qmp) {
-                if !answered && late { looks = min(looks, i + 9) }
                 answered = true
                 if ids.contains(id) { return .attached }
             }
+            if answered || !late { counted += 1 }
+            if counted >= 10 || (late && !answered && now() - start >= lateWait) { break }
         }
         _ = try? qmp.execute("device_del", ["id": id])
         // QEMU never answered "info usb": not a Mac app's doing.
@@ -120,4 +120,14 @@ public enum USBAttachResult: Equatable, Sendable {
     case full
     /// QEMU did not answer, or said something else.
     case failed(String)
+}
+
+/// A command was sent, but its answer did not come in time (or the socket
+/// closed first): QEMU may still carry it out. Transports throw this, and
+/// only this, for that case; QEMU's own errors and a command that never
+/// reached QEMU are other errors.
+public struct USBQMPNoAnswer: Error, CustomStringConvertible {
+    public let message: String
+    public init(_ message: String) { self.message = message }
+    public var description: String { message }
 }

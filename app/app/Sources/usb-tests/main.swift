@@ -270,13 +270,15 @@ final class LateQMP: USBQMPTransport {
     var attached = Set<String>()
     var lands = true          // QEMU finishes the add after the app gave up waiting
     var busyChecks = 0        // info usb calls that get no answer first (QEMU still busy adding)
+    var notSent = false       // the connection failed before device_add went out
     func execute(_ command: String, _ arguments: [String: Any]?) throws -> [String: Any] {
         sent.append(command)
         let id = arguments?["id"] as? String ?? ""
         switch command {
         case "device_add":
+            if notSent { throw NSError(domain: "qmp", code: 3, userInfo: [NSLocalizedDescriptionKey: "cannot connect to QMP socket"]) }
             if lands { attached.insert(id) }
-            throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "QMP command device_add timed out"])
+            throw USBQMPNoAnswer("QMP command device_add timed out")
         case "device_del":
             guard attached.remove(id) != nil else {
                 throw NSError(domain: "qmp", code: 1, userInfo: [NSLocalizedDescriptionKey: "QMP command device_del failed: Device '\(id)' not found"])
@@ -285,35 +287,49 @@ final class LateQMP: USBQMPTransport {
         default:
             if busyChecks > 0 {
                 busyChecks -= 1
-                throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "QMP command human-monitor-command timed out"])
+                throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "QMP socket did not send a valid greeting"])
             }
             return ["text": attached.map { "  Device 0.1, Port 1, Speed 12 Mb/s, Product X, ID: \($0)" }.joined(separator: "\n")]
         }
     }
 }
+// A clock the waits move on (each look against a busy QEMU also takes time).
+final class TestClock { var t = 0.0 }
+func lateAttach(_ q: LateQMP, lookTakes: Double = 0) -> USBAttachResult {
+    let c = TestClock()
+    return USBQMP.attach(boardA, over: q, wait: { c.t += $0 + lookTakes }, now: { c.t })
+}
 let lq = LateQMP()
-let lateResult = USBQMP.attach(boardA, over: lq, wait: { _ in })
+let lateResult = lateAttach(lq)
 expect(lateResult == .attached && lq.attached == ["usbh-01100000"],
-       "#526: device_add timed out but QEMU added it: info usb lists it, so it is connected (\(lateResult))")
+       "#526: device_add got no answer but QEMU added it: info usb lists it, so it is connected (\(lateResult))")
 let lq2 = LateQMP()
 lq2.busyChecks = 6
-let busyResult = USBQMP.attach(boardA, over: lq2, wait: { _ in })
+let busyResult = lateAttach(lq2)
 expect(busyResult == .attached && lq2.attached == ["usbh-01100000"],
        "#526: QEMU busy with the add for a while (info usb no answer 6 times), then lists it: connected (\(busyResult))")
 let lq3 = LateQMP()
 lq3.lands = false
-let lostResult = USBQMP.attach(boardA, over: lq3, wait: { _ in })
-expect(lostResult == .failed("QEMU did not answer in time") && lq3.attached.isEmpty && lq3.sent.last == "device_del",
-       "#526: device_add timed out and info usb never lists it: removed again in case it lands, failed (\(lostResult))")
+let lostResult = lateAttach(lq3)
+expect(lostResult == .failed("QEMU did not answer in time") && lq3.attached.isEmpty && lq3.sent.last == "device_del"
+       && lq3.sent.filter { $0 == "human-monitor-command" }.count == 10,
+       "#526: device_add without an answer, info usb never lists it: 10 looks, removed again in case it lands, failed (\(lostResult))")
 let lq4 = LateQMP()
 lq4.busyChecks = 1000
-let deadResult = USBQMP.attach(boardA, over: lq4, wait: { _ in })
-expect(deadResult == .failed("QEMU did not answer") && lq4.sent.last == "device_del"
-       && lq4.sent.filter { $0 == "human-monitor-command" }.count <= 20,
-       "#526: QEMU answers nothing at all: removed again, a bounded number of looks (\(deadResult), \(lq4.sent.count) calls)")
-expect(!USBQMP.answeredByQEMU("QMP command device_add timed out") && !USBQMP.answeredByQEMU("QEMU closed the socket")
-       && USBQMP.answeredByQEMU("QMP command device_add failed: failed to open host usb device 1:0"),
-       "#526: an error QEMU answered vs. no answer")
+let deadResult = lateAttach(lq4, lookTakes: 2)
+let deadLooks = lq4.sent.filter { $0 == "human-monitor-command" }.count
+expect(deadResult == .failed("QEMU did not answer") && lq4.sent.last == "device_del" && deadLooks <= 4,
+       "#526: QEMU answers nothing, each look takes 2 s: given up after \(USBQMP.lateWait) s (\(deadLooks) looks), removed again")
+let lq5 = LateQMP()
+lq5.notSent = true
+let notSentResult = lateAttach(lq5)
+expect(notSentResult == .failed("Error Domain=qmp Code=3 \"cannot connect to QMP socket\" UserInfo={NSLocalizedDescription=cannot connect to QMP socket}")
+       && lq5.sent == ["device_add"],
+       "#526: a device_add that never reached QEMU: its own error at once, no looks (\(notSentResult))")
+let lq6 = LateQMP()
+lq6.busyChecks = 15
+let slowResult = lateAttach(lq6, lookTakes: 0.1)
+expect(slowResult == .attached, "#526: QEMU answers info usb only after 5.6 s, then lists it: still within the wait, connected (\(slowResult))")
 
 // MARK: The session, on fakes (no device, no VM, no window)
 final class FakeMachine: USBMachine {

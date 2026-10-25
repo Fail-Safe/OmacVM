@@ -184,7 +184,7 @@ func qmpIntegration(qemu: String, expect: (Bool, String) -> Void) {
             Thread.sleep(forTimeInterval: 0.2)
             c.close()
             if stopped { kill(qemu, SIGCONT) }
-            throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "QMP command device_add timed out"])
+            throw USBQMPNoAnswer("QMP command device_add timed out")
         }
     }
     let id = USBQMP.qemuID(location: d.location)
@@ -200,7 +200,7 @@ func qmpIntegration(qemu: String, expect: (Bool, String) -> Void) {
         let has = ((try? USBQMP.attached(over: running)) ?? []).contains(id)
         if has { landed += 1 }
         expect((rb == .attached) == has, "qmp #526: given up while QEMU was stopped (\(n)): the app said \(rb), info usb has it: \(has)")
-        _ = USBQMP.detach(location: d.location, over: running)
+        expect(USBQMP.detach(location: d.location, over: running), "qmp #526: removed again after try \(n) (else the next add finds the old one)")
     }
     print("qmp #526: of 5 adds given up on while QEMU was stopped, QEMU made \(landed)")
 }
