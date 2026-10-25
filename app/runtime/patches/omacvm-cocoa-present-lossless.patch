@@ -1,18 +1,20 @@
 From: OmacVM
-Subject: [PATCH] cocoa: the window's 8-bit surfaces lossless-compressed (fewer bytes per frame)
+Subject: [PATCH] cocoa: the window's surfaces lossless-compressed (fewer bytes per frame)
 
-What: the IOSurface present makes its 8-bit surfaces in Apple's
-lossless-compressed BGRA ('&BGA', kCVPixelFormatType_Lossless_32BGRA,
-through CoreVideo) instead of plain 'BGRA'. The GPU writes and reads them
+What: the IOSurface present makes its surfaces in Apple's lossless-
+compressed forms through CoreVideo: 8-bit ones as '&BGA'
+(kCVPixelFormatType_Lossless_32BGRA) instead of plain 'BGRA', half-float
+ones (HDR, Extra brightness) as '&RhA'
+(kCVPixelFormatType_Lossless_64RGBAHalf) instead of 'RGhA'; the layer
+takes both half-float kinds for EDR. The GPU writes and reads them
 compressed: QEMU's draw of each frame into the surface and WindowServer's
 composite of the window move fewer bytes. Nothing may read these surfaces
 back, on the CPU or with glReadPixels (it crashes on them): the boot logo's
 readback reads the guest's texture, and the partial present's check mode
 (OMACVM_GL_PRESENT_DAMAGE=check, omacvm-cocoa-present-damage.patch), which
-reads the shown surface, keeps them plain. Half-float
-surfaces (HDR, Extra brightness) stay as they are. If one cannot be made
-or bound to GL, every surface is plain 'BGRA' for the rest of the run (one
-warning in qemu.log); OMACVM_GL_LOSSLESS=0 keeps them plain. Shown as a layer's contents they
+reads the shown surface, keeps them plain. If one cannot
+be made or bound to GL, surfaces of that kind (8-bit or half float) are
+plain for the rest of the run (one warning in qemu.log); OMACVM_GL_LOSSLESS=0 keeps them plain. Shown as a layer's contents they
 are checked on macOS 27 only (captured: an M1 Max at 120 Hz, an M2, an M4
 on an external display; work/window-path/oncheck.m): older systems keep plain
 surfaces. qemu.log says "cocoa: 8-bit surfaces lossless-compressed" (or
@@ -33,10 +35,10 @@ Test: app/runtime/Tests/display/test-present-lossless.sh (the patched
 ui/cocoa.m is wired as tested; the checks catch code without it).
 Applies after omacvm-cocoa-extra-brightness.patch (before omacvm-cocoa-no-app-nap.patch).
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index 9a06add..510ab9a 100644
+index 9a06add..77af768 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -7407,6 +7407,25 @@ static void cocoa_gl_render(void)
+@@ -7407,6 +7407,27 @@ static void cocoa_gl_render(void)
  static uint32_t present_w, present_h;
  static bool present_deep;              /* half-float surfaces (10-bit scanout) */
  static bool present_linear;            /* half-float, extended linear sRGB: extra brightness */
@@ -45,35 +47,49 @@ index 9a06add..510ab9a 100644
 +static bool present_packed_logged;     /* the kind was logged once */
 +
 +/*
-+ * OmacVM, lossless surfaces: the 8-bit surfaces in Apple's lossless-
-+ * compressed BGRA ('&BGA', made through CoreVideo). The GPU writes and
++ * OmacVM, lossless surfaces: the surfaces in Apple's lossless-compressed
++ * forms ('&BGA' for 8-bit, '&RhA' for half float: HDR and extra
++ * brightness; made through CoreVideo). The GPU writes and
 + * reads them compressed, so QEMU's draw into them and WindowServer's
 + * composite of the window move fewer bytes. Nothing may read them back: not
 + * on the CPU, not with glReadPixels (it crashes on them). The boot logo's
 + * readback reads the guest's texture; the partial present's check mode
 + * (OMACVM_GL_PRESENT_DAMAGE=check) reads the surfaces, so it keeps them
 + * plain. If one cannot be
-+ * made or bound, every surface is plain 'BGRA' for the rest of the run;
-+ * OMACVM_GL_LOSSLESS=0 keeps them plain. Shown as a layer's contents they
++ * made or bound, surfaces of that kind are plain for the rest of the run;
++ * OMACVM_GL_LOSSLESS=0 keeps them all plain. Shown as a layer's contents they
 + * are checked on macOS 27 only (M1 Max, M2, M4): older systems keep plain
 + * surfaces.
 + */
 +static int present_lossless = -1;      /* -1 not read yet, 0 plain, 1 lossless */
++static int present_lossless_half = 1;  /* half-float surfaces too ('&RhA'); 0 after they failed */
  
  /*
   * Colour. The guest renders sRGB unless it says otherwise, so the surfaces
-@@ -7888,6 +7907,24 @@ static void omacvm_present_gravity(CALayer *layer, IOSurfaceRef surf)
+@@ -7825,7 +7846,8 @@ static CGColorSpaceRef cocoa_gl_present_colorspace(bool deep, bool linear)
+  */
+ static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf, bool linear)
+ {
+-    BOOL hdr = IOSurfaceGetPixelFormat(surf) == 'RGhA' &&
++    OSType fmt = IOSurfaceGetPixelFormat(surf);
++    BOOL hdr = (fmt == 'RGhA' || fmt == '&RhA') &&
+                present_color == 1 && (cocoa_gl_present_hdr_wanted() || linear);
+     if ([layer wantsExtendedDynamicRangeContent] != hdr) {
+         [layer setWantsExtendedDynamicRangeContent:hdr];
+@@ -7888,6 +7910,26 @@ static void omacvm_present_gravity(CALayer *layer, IOSurfaceRef surf)
      }
  }
  
-+/* A w x h lossless-compressed BGRA surface, or NULL. */
-+static IOSurfaceRef cocoa_gl_present_packed(uint32_t w, uint32_t h)
++/* A w x h lossless-compressed surface (half: RGBA half float, else BGRA), or NULL. */
++static IOSurfaceRef cocoa_gl_present_packed(uint32_t w, uint32_t h, bool half)
 +{
 +    CVPixelBufferRef pb = NULL;
 +    IOSurfaceRef surf = NULL;
 +    NSDictionary *attrs = @{ (id)kCVPixelBufferIOSurfacePropertiesKey: @{} };
 +
-+    if (CVPixelBufferCreate(kCFAllocatorDefault, w, h, kCVPixelFormatType_Lossless_32BGRA,
++    if (CVPixelBufferCreate(kCFAllocatorDefault, w, h,
++                            half ? kCVPixelFormatType_Lossless_64RGBAHalf :
++                                   kCVPixelFormatType_Lossless_32BGRA,
 +                            (CFDictionaryRef)attrs, &pb) == kCVReturnSuccess && pb) {
 +        surf = CVPixelBufferGetIOSurface(pb);
 +        if (surf) {
@@ -87,7 +103,7 @@ index 9a06add..510ab9a 100644
  /*
   * present_ctx is current. Surfaces for a w x h frame, capped at the
   * largest display. Made again at most every PRESENT_REALLOC_NS: until
-@@ -7939,6 +7976,28 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+@@ -7939,6 +7981,28 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
      present_alloc_ns = now;
      present_realloc_due = false;
  
@@ -112,28 +128,33 @@ index 9a06add..510ab9a 100644
 +        }
 +    }
 +again:;
-+    bool packed = !half && present_lossless == 1;
++    bool packed = present_lossless == 1 && (!half || present_lossless_half == 1);
      NSDictionary *props = @{
          (id)kIOSurfaceWidth: @(w),
          (id)kIOSurfaceHeight: @(h),
-@@ -7949,7 +8008,8 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+@@ -7949,7 +8013,8 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
      CFPropertyListRef cs_plist = cs ? CGColorSpaceCopyPropertyList(cs) : NULL;
      bool ok = true;
      for (int i = 0; i < present_nsurf && ok; i++) {
 -        present_surf[i] = IOSurfaceCreate((CFDictionaryRef)props);
-+        present_surf[i] = packed ? cocoa_gl_present_packed(w, h) :
++        present_surf[i] = packed ? cocoa_gl_present_packed(w, h, half) :
 +                                   IOSurfaceCreate((CFDictionaryRef)props);
          if (!present_surf[i]) {
              ok = false;
              break;
-@@ -7979,10 +8039,23 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+@@ -7979,10 +8044,28 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
      }
      CGColorSpaceRelease(cs);
      glBindTexture(GL_TEXTURE_RECTANGLE, 0);
 +    if (!ok && packed) {
 +        cocoa_gl_present_free();
-+        present_lossless = 0;
-+        warn_report("cocoa: lossless surfaces failed, plain 8-bit surfaces from now on");
++        if (half) {
++            present_lossless_half = 0;
++            warn_report("cocoa: lossless half-float surfaces failed, plain ones from now on");
++        } else {
++            present_lossless = 0;
++            warn_report("cocoa: lossless surfaces failed, plain 8-bit surfaces from now on");
++        }
 +        goto again;
 +    }
      if (!ok) {
