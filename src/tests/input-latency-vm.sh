@@ -11,7 +11,9 @@
 #        [--app] [--venus MB] [--cpus N] [--memory-mb N] [--smbios omacvm.KEY=VALUE]...
 #        [--display virtual|builtin] [--no-breakdown]     |  --parse OUT
 # MODES (default all; spaces or commas): key pointer keymove (AppKit), qmpkey qmppointer (QMP:
-# no AppKit), qmpkeymove (keys AppKit, the moving pointer QMP).
+# no AppKit), qmpkeymove (keys AppKit, the moving pointer QMP); keybusy and qmpbusypointer: a key
+# or a pointer jump while the terminal's lower right corner changes 125 times a second (frames
+# come steadily without the pointer moving; the change there is not counted). Not in the default.
 # DIR (vm): a COPY of an OmacVM.app VM made by omacvm apply (disk.img,
 # efi-vars.fd); the test writes to it. --runtime: a built runtime or an
 # app's Contents/Resources/runtime (with --firmware: its firmware's
@@ -436,8 +438,23 @@ sleep 2
 # --pause: S seconds with the VM up before the runs (to look at it by hand).
 [[ $PAUSE =~ ^[0-9]+$ ]] && (( PAUSE > 0 )) && { echo "paused $PAUSE s (ssh port $PORT)"; sleep "$PAUSE"; }
 
+# keybusy, qmpbusypointer: a counter in the terminal's lower right corner, written to its tty
+# 125 times a second (the shell's cursor saved and put back), for the mode's run only.
+busy() {   # start|stop
+  if [[ $1 == start ]]; then
+    gssh 'p=$(pgrep -f "^bash --norc --noprofile\$" | head -1); t=$(readlink /proc/$p/fd/0)
+          [ -c "$t" ] || exit 1
+          nohup bash -c "i=0; while :; do printf \"\\0337\\033[999;999H\\033[2D%02d\\0338\" \$((i++ % 100)) > $t; sleep 0.008; done" >/dev/null 2>&1 &
+          echo $! > /tmp/inputlat-busy.pid' || echo "input-latency-vm: no terminal tty for the busy corner" >&2
+    sleep 1
+  else
+    gssh 'kill $(cat /tmp/inputlat-busy.pid) 2>/dev/null; rm -f /tmp/inputlat-busy.pid' || true
+  fi
+}
 for m in $MODES; do
   case $m in
+    keybusy) busy start; REGION=0,0,0.7,0.7 "$W/inputlat" "$QPID" key "$COUNT" "$OUT/$m.jsonl" | tee "$OUT/$m.summary"; busy stop ;;
+    qmpbusypointer) busy start; REGION=0,0,0.7,0.7 QMP=$RUN/qmp "$W/inputlat" "$QPID" pointer "$COUNT" "$OUT/$m.jsonl" | tee "$OUT/$m.summary"; busy stop ;;
     qmpkey) QMP=$RUN/qmp "$W/inputlat" "$QPID" key "$COUNT" "$OUT/$m.jsonl" | tee "$OUT/$m.summary" ;;
     qmppointer) QMP=$RUN/qmp "$W/inputlat" "$QPID" pointer "$COUNT" "$OUT/$m.jsonl" | tee "$OUT/$m.summary" ;;
     qmpkeymove) QMP=$RUN/qmp "$W/inputlat" "$QPID" keymove "$COUNT" "$OUT/$m.jsonl" | tee "$OUT/$m.summary" ;;
