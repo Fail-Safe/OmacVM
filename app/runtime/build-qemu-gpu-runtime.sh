@@ -991,11 +991,6 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-extra-brightn
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-extra-brightness.patch"
 "$native_dir/Tests/display/test-extra-brightness.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: extra brightness is not wired as tested (test-extra-brightness.sh)"
-# OmacVM: no App Nap while the VM runs: with its window out of sight (screen
-# locked, another Space) macOS slowed the whole VM to a few percent.
-patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
-grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
-  die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
 # OmacVM, display colour: the guest's 8-bit frames converted to the window's
 # display's colour space in the present pass and tagged with it, so
 # WindowServer does not colour-match the window on every composite. The
@@ -1004,6 +999,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-display-color
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-display-color.patch"
 "$native_dir/Tests/display/test-display-color.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: display colour is not wired as tested (test-display-color.sh)"
+# OmacVM: no App Nap while the VM runs: with its window out of sight (screen
+# locked, another Space) macOS slowed the whole VM to a few percent.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
+grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
