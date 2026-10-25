@@ -6,7 +6,10 @@ after review: the first version gave the thread a 50 us budget while it
 spun for 100 us, and never looked at a long GPU job. Corrected again the
 same evening: the 100 us were counted per fence, so fences finishing back
 to back could chain spins without a sleep; they now count from the
-thread's last sleep.
+thread's last sleep. Amended 2026-10-25 (3.2.1): past the first millisecond
+the thread also wakes an eighth of the time waited after each test, beside
+the doubled naps (`virgl-darwin-fence-wait-proportional.patch`, see the
+end).
 
 ## Context
 
@@ -67,3 +70,19 @@ list as before.
   thread for a while (nothing breaks). Between wakes it sleeps.
 - Going back is a rebuild without the patch; the app's `gpuSafeMode`
   ([0018](0018-gpu-safe-mode.md)) does not use the sync thread at all.
+
+## Amendment 2026-10-25: naps that grow with the wait
+
+The doubled naps woke at 1.05, 1.1, 1.2, 1.4, 1.8, 2.6 and 3.6 ms into a
+wait, and most of the VM's GPU work per frame (Hyprland's, a browser's)
+takes 1-3 ms: QEMU's trace of fence asked -> answered bunched on exactly
+those times, and a fence done after 1.85 ms was answered at 2.6 ms. The
+doubled naps stay; past the first millisecond the thread also wakes an
+eighth of the time waited after each test (at least 50 us), so a fence is
+answered at most an eighth of its time late and never later than before.
+From 8 ms on the 1 ms naps come first again (long or stuck jobs: about
+1000 wake-ups a second). Cost: 29 wake-ups instead of 26 for a 2 ms fence,
+34 instead of 27 for 3 ms; 5-9 % more on a typing and pointer session's
+real fences. Gain: a frame loop that waits for each frame draws 13-27 %
+more frames at 1.7-4 ms a frame; key and pointer latency on the desktop
+did not move beyond the noise. Test: `Tests/virgl/test-fence-nap.c`.
