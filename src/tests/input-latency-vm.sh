@@ -245,6 +245,7 @@ done
 cat /tmp/inputlat-term.log 2>/dev/null | head -5
 echo "guest: $(hc -j clients | python3 -c 'import json,sys; print([c["class"] for c in json.load(sys.stdin)])')"
 echo "guest: no_hardware_cursors $(hc getoption cursor:no_hardware_cursors 2>/dev/null | head -1)"
+echo "guest: virtio-gpu driver: $(cat /run/omacvm/virtio-gpu 2>/dev/null || echo stock), vsync_lock $(cat /sys/module/virtio_gpu/parameters/vsync_lock 2>/dev/null || echo -)"
 GUEST
 sleep 2
 # --pause: S seconds with the VM up before the runs (to look at it by hand).
