@@ -1176,14 +1176,14 @@ window on the same display (`nativelat.swift`), the floor macOS itself sets.
 
 ### Input latency, stage by stage (3.2.0, lane `input-latency`)
 
-The same probe on the 3.2.0 runtime, with QEMU started as the app starts it
-(`input-latency-vm.sh --app --venus 4096`: GPU work without the BQL, the
-present's trim, Vulkan on), Mac mini M4, macOS 27, a virtual display, a
-clone of a 3.1.30 Omarchy VM (`foot`), 80 events per row, 40 s after the
-desktop came up, several runs interleaved; median ms (run to run the
-medians move by 2-3 ms). Stages from QEMU's trace: the key in QEMU's input
-layer, Hyprland's first GPU submit, the answer to its fence, the frame's
-RESOURCE_FLUSH, QEMU's present done, on screen.
+The same probe on the 3.2.0 runtime, with QEMU's GPU settings as the app
+gives them (`input-latency-vm.sh --app --venus 4096`: GPU work without the
+BQL, the present's trim, Vulkan on; no sound card), Mac mini M4, macOS 27,
+a virtual display, a clone of a 3.1.30 Omarchy VM (`foot`), 80 events per
+row, 40 s after the desktop came up, several runs interleaved; median ms
+(run to run the medians move by 2-3 ms). Stages from QEMU's trace: the key
+in QEMU's input layer, Hyprland's first GPU submit, the answer to its fence,
+the frame's RESOURCE_FLUSH, QEMU's present done, on screen.
 
 | 60 Hz | to screen | Mac -> QEMU | -> Hyprland's GPU work | -> its fence answered | -> flush | -> present done | -> screen |
 |---|---|---|---|---|---|---|---|

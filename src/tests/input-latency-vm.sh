@@ -18,9 +18,10 @@
 # (e.g. OMACVM_GL_VSYNC=0). OMACVM_GUEST_KEY: the VM's SSH key (default
 # ~/.ssh/omacvm). --hw-cursor: the guest's pointer on
 # virtio-gpu's cursor plane (OMACVM_HW_CURSOR=1, omacvm.hwcursor=1).
-# --app: QEMU as OmacVM.app starts it by default (GPU work without the BQL and
-# the present's trim, sound on its own thread, Vulkan windows as IOSurfaces,
-# the app's SMBIOS strings); --venus MB adds Venus with that host memory window
+# --app: QEMU's GPU and display settings as OmacVM.app gives them by default
+# (GPU work without the BQL and the present's trim, Vulkan windows as
+# IOSurfaces, the app's SMBIOS strings); still no sound card, balloon or
+# vmnet, and one output; --venus MB adds Venus with that host memory window
 # (a VM whose Graphics is Vulkan). Each mode prints a JSON summary; --out keeps
 # the raw rows, QEMU's log and the breakdown (breakdown.json): per event the
 # stages Mac -> QEMU input, input -> the guest app's first GPU work, -> the
@@ -152,9 +153,10 @@ TRACE=(-trace 'input_event_key_qcode' -trace 'input_event_abs' -trace 'virtio_gp
        -trace 'virtio_gpu_fence_ctrl' -trace 'virtio_gpu_fence_resp')
 SMB=()
 ((HWC)) && { QENV+=(OMACVM_HW_CURSOR=1); SMB=(-smbios type=11,value=omacvm.hwcursor=1); }
-# --app: what Runner.swift gives QEMU by default (gpuOffMainLoop, audioThread, vkWindowsNoCopy).
+# --app: the GPU and display part of what Runner.swift gives QEMU by default (gpuOffMainLoop,
+# vkWindowsNoCopy); no sound card here, so not its audio thread.
 if ((APP)); then
-  QENV=(OMACVM_GPU_UNLOCKED=1 OMACVM_GL_TRIM=quarter OMACVM_AUDIO_THREAD=1 OMACVM_VK_WINDOWS=iosurface
+  QENV=(OMACVM_GPU_UNLOCKED=1 OMACVM_GL_TRIM=quarter OMACVM_VK_WINDOWS=iosurface
         ${QENV[@]+"${QENV[@]}"})
   SMB+=(-smbios type=11,value=omacvm.vkwindows=1 -smbios type=11,value=omacvm.notchpointer=1
         -smbios type=11,value=omacvm.vaexport=1)
