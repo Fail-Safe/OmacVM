@@ -222,13 +222,13 @@ final class Control {
     // Graphics memory is asked every 2 s while the control centre is open:
     // its answers are not logged (refusals still are).
     var quiet = false
-    func answer(_ code: Int, _ obj: [String: Any], _ note: String = "") {
+    func answer(_ code: Int, _ obj: [String: Any], _ note: String = "", key: String? = nil) {
       let line = "control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))"
       // Refusals once a minute per address, VM and reason: a guest that
       // floods (or any guest, from addresses of its own) must not fill the
       // log the report reads.
-      // (One key with and without "looking again".)
-      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(note.replacingOccurrences(of: lookingText, with: ""))", line) } else if !quiet { log(line) }
+      // (One key with and without "looking again", and for any SSH error text.)
+      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(key ?? note.replacingOccurrences(of: lookingText, with: ""))", line) } else if !quiet { log(line) }
       guard let s = signer else { return respond(fd, code, obj) }
       let data = jsonData(obj) + Data("\n".utf8)
       let sig = answerMAC(key: s.key, nonce: s.nonce, status: code, body: data)
@@ -237,7 +237,7 @@ final class Control {
     }
     func refuse(_ e: PolicyError, _ extra: [String: Any] = [:]) {
       // Logged once a minute per VM, code and reason.
-      answer(e.status, ["error": e.message, "code": e.code].merging(extra) { a, _ in a }, refusalNote(e))
+      answer(e.status, ["error": e.message, "code": e.code].merging(extra) { a, _ in a }, refusalNote(e), key: refusalLogKey(e))
     }
 
     let cli: String

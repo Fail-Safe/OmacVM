@@ -675,6 +675,17 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(refusalNote(PolicyError(429, "busy", "too many requests")) == "busy", "log: other refusals: the code only")
     expect(refusalNote(PolicyError(409, "ambiguous-vm", "more than one VM has this address: nothing runs")) == "ambiguous-vm (more than one VM has this address: nothing runs)",
            "log: two VMs at one address: says so too")
+    // The log limiter's key: code and kind of reason, not SSH's own text
+    // (it can change from one try to the next and let more lines through).
+    let lost2 = PolicyError(409, "unknown-vm", unreachableText("ssh: connect to host 10.0.0.2 port 22: Operation timed out"))
+    let lost3 = PolicyError(409, "unknown-vm", unreachableText("ssh: connect to host 10.0.0.2 port 22: Connection refused"))
+    expect(refusalLogKey(lost2) == refusalLogKey(lost3) && refusalLogKey(lost2) == "unknown-vm the Mac cannot reach this VM",
+           "log key: two SSH reasons, one key (\(refusalLogKey(lost2)))")
+    expect(refusalLogKey(PolicyError(409, "unknown-vm", notRunningText)) != refusalLogKey(lost2), "log key: not running and unreachable stay apart")
+    let none = PolicyError(409, "unknown-vm", "no running VM that OmacVM set up has this address")
+    let noneLooking = PolicyError(409, "unknown-vm", none.message + " (the Mac is looking at its VMs again: try in a moment)")
+    expect(refusalLogKey(none) == refusalLogKey(noneLooking), "log key: the same with and without looking again")
+    expect(refusalLogKey(PolicyError(429, "busy", "too many requests")) == "busy", "log key: other refusals: the code only")
     // Touch ID needs no SSH: the app vouches for the VM, its key signs the request.
     if case .success(let v) = vmForApp("Omarchy", [lost], ssh: false) { expect(v == lost, "Touch ID: an unreachable app VM still found") }
     else { expect(false, "Touch ID without SSH") }

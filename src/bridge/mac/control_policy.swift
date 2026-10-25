@@ -432,6 +432,16 @@ func refusalNote(_ e: PolicyError) -> String {
   refusalWhyCodes.contains(e.code) ? "\(e.code) (\(e.message))" : e.code
 }
 
+/// The log limiter's key for a refusal: its code and the kind of reason,
+/// cut at the first ": " or " (". The rest (SSH's own error, "looking
+/// again") can change from one try to the next and would let more lines through.
+func refusalLogKey(_ e: PolicyError) -> String {
+  guard refusalWhyCodes.contains(e.code) else { return e.code }
+  var m = e.message
+  for cut in [": ", " ("] { if let r = m.range(of: cut) { m = String(m[..<r.lowerBound]) } }
+  return "\(e.code) \(m)"
+}
+
 /// The file name of a VM's control key (lib/mac.sh vm_key_file): the first
 /// 32 hex digits of SHA-256("<type>/<name>").
 func vmKeyName(type: String, name: String) -> String {
