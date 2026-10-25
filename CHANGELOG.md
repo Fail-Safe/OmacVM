@@ -50,13 +50,13 @@ in more words.
   section. The VM's display clock had its own beat: a frame it drew right after one refresh of
   the Mac's display waited for the next one, anywhere up to a whole refresh, while the screen was
   moving. With the switch, the VM's clock follows the Mac display's refresh, so its frames are
-  ready just before the Mac shows them. Mac mini, 60 Hz, while the screen moves: keys 1.5 ms
-  sooner, the pointer 6.3 ms, keys while the terminal itself scrolls 4 ms (medians of 60 per
-  mode, 4-5 runs a side), with fewer skipped frames than before (104 instead of 134 repeats and
-  drops). At 120 Hz: keys 2.6 ms, the pointer 1.3 ms, keys while the terminal scrolls 1.8 ms
-  sooner; when the VM's frames need more than a refresh, late frames wait as before rather than
-  being skipped. When a frame is too late for its refresh, the newer one is shown and the late
-  one skipped: at 120 Hz that was a few more skipped frames (6 instead of 1 in about 2 minutes of
+  ready just before the Mac shows them. Mac mini, while the screen moves (medians of 60 per mode,
+  two rounds of tests, 6-7 runs a side): at 60 Hz keys 1.5 to 7 ms sooner, the pointer about 6 ms,
+  keys while the terminal itself scrolls 3.5 to 4 ms, with fewer repeated and skipped frames (143
+  instead of 170); at 120 Hz up to 2.6 ms sooner (keys while the pointer moves 0 to 2.6 ms, the
+  terminal 1.7 to 1.8 ms). When the VM's frames need more than a refresh, late frames wait as
+  before. When a frame is too late for its refresh, the newer one is shown and the late one
+  skipped: at 120 Hz that was a few more skipped frames (8 instead of 2 in about 3 minutes of
   moving frames). On a still screen there is no gain. The same pixels (checked on a MacBook Air)
   at the same rate (60 or 120 Hz); MacBook Air M2 power within 1 % (pointer moving, scrolling).
   The VM's driver follows only when its display rate is the Mac's, and if its patch does not fit

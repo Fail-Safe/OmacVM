@@ -1003,6 +1003,8 @@ bench lock and are indications only):
   after their vblank (median) and up to a whole refresh, so the lead often
   sits at its cap and the late frames wait (the fallback). Not ~8 ms as the model says: the lead
   must cover the slowest of 64 frames (8-10 ms after the vblank at 60 Hz).
+  After the review fixes (2 runs a side, CI busy): 60 Hz -6.9 / -6.0 / -3.4
+  ms, 120 Hz 0 / -0.4 / -1.7 ms; the same frames a second both ways.
 - **Locks**: `present_lock` (an `os_unfair_lock`) guards the queue and the
   counters; nothing on the display link thread or the commit queue takes the
   BQL. The link pauses 0.25 s after the last frame, or after a second of

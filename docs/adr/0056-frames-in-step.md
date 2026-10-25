@@ -98,7 +98,12 @@ because the wait is in the phase, not in the queue.
 
 ## Consequences
 
-- Mac mini M4, final version, 4-5 runs a side: at 60 Hz while the screen
+- Mac mini M4, after the review fixes (the LOCKED ask, late frames counted
+  late; 2 runs a side, CI jobs running): at 60 Hz keys while the pointer
+  moves 6.9 ms sooner, the pointer while the screen moves 6.0 ms, the
+  scrolling terminal 3.4 ms; at 120 Hz 0, 0.4 and 1.7 ms; frames a second
+  the same (60.4-60.6 and 112.0-112.5 came both ways). Before the fixes,
+  4-5 runs a side: at 60 Hz while the screen
   moves keys 1.5 ms sooner, the pointer 6.3 ms, keys while the terminal
   scrolls 4.0 ms; repeats + drops 104 instead of 134 (off, the free phase
   drifts and the trims drop frames). At 120 Hz keys 2.6 ms, the pointer
@@ -115,8 +120,9 @@ because the wait is in the phase, not in the queue.
   the display's rate (tested at 60 and 120 Hz; a ProMotion panel is not
   measured yet: rows queued for the M1 Max); only when it draws moves. A
   frame too late for its refresh is skipped for the newer one while the
-  guest follows: at 120 Hz 6 instead of 1 in about 2 minutes of moving
-  frames, at 60 Hz fewer repeats and skips than without (104 vs 134). No
+  guest follows: at 120 Hz 8 instead of 2 in about 3 minutes of moving
+  frames (both rounds), at 60 Hz fewer repeats and skips than without
+  (143 vs 170). No
   gain on a still screen or for frames that come one at a time (typing on
   an idle screen): those are shown when ready, as before.
 - The guest timer's own timestamps move with it (by at most an eighth of a
