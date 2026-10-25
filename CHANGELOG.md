@@ -23,6 +23,12 @@ in more words.
   Its log also says why it did not take a VM (not running, not set up, the SSH error) and which
   VM the app named. Needs `omacvm update` (or the app's update) on the Mac.
 
+- **USB devices** (experimental): a device that QEMU took longer than 3 s to add was reported as
+  not connected, but the VM often got it anyway: QEMU finished the add after the app had stopped
+  waiting (#526; 6 of 6 times against a real QEMU). The app now waits up to 15 s for QEMU's
+  answer, and without one asks QEMU which devices the VM has: one QEMU added late counts as
+  connected, one it does not have is removed again. Needs the app update.
+
 ## 3.2.1
 
 Google Chrome plays 1440p and 4K video on the Mac's media engine, call tiles show the whole picture,

@@ -214,10 +214,25 @@ struct USBQMPSocket: USBQMPTransport {
         if emulated, command == "device_add", args?["driver"] as? String == "usb-host" {
             args = ["driver": "usb-tablet", "id": args?["id"] ?? "", "bus": args?["bus"] ?? ""]
         }
+        // A connection that fails throws as it is: the command never reached QEMU.
         let q = try QMPConnection(socketPath: path, identifierPrefix: "omacvm-usb")
         defer { q.close() }
-        return try q.execute(command, arguments: args, timeoutMilliseconds: 3_000)
+        // device_add opens the device: a slow one takes QEMU a while, and its
+        // answer is read here, on this connection (#526). The rest: 3 s.
+        let ms: Int32 = command == "device_add" ? 15_000 : 3_000
+        do {
+            return try q.execute(command, arguments: args, timeoutMilliseconds: ms)
+        } catch HelperError.io(let m) where m.contains(" failed: ") || Self.notSent.contains(m) {
+            throw HelperError.io(m)   // QEMU's own answer, or the command never went out
+        } catch {
+            // Sent, but no answer of QEMU's (timed out, the socket closed, a
+            // broken answer): it may still do it.
+            throw USBQMPNoAnswer(error.localizedDescription)
+        }
     }
+
+    /// QMPConnection.execute's errors before anything was written.
+    static let notSent: Set<String> = ["QMP control is unavailable", "cannot write QMP command"]
 }
 
 /// The VM over QMP: one call at a time, in order, off the main thread;
