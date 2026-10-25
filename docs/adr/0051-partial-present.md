@@ -41,8 +41,8 @@ Option 2. Per surface one box (the union of every flush rect since that
 surface was drawn: merged and skipped frames count). Full draws for new
 surfaces, another frame size, a scaled frame, the boot logo, the 2D console,
 extra brightness, another colour path, a scanout that is part of its
-resource, a box of three quarters of the frame or more, and a scanout buffer
-not among the last four seen: a compositor's own buffers rotate, while a new
+resource, a box of three quarters of the frame or more, a new scanout buffer
+until its first flush, and a scanout buffer not among the last four seen: a compositor's own buffers rotate, while a new
 one (a client's buffer scanned out directly, a new swapchain) may come with
 damage that is not relative to what was shown. The rules are a header without
 AppKit or GL, tested on their own; the wiring is checked in the patched
@@ -52,15 +52,24 @@ every 30th partial frame in full beside it and compares them pixel for pixel
 
 ## Consequences
 
-- Guests before Linux 7.4 send whole-plane rects: their frames stay full
-  draws, so nothing changes for them until their kernel (or OmacVM's driver)
-  sends real damage.
-- Where only small parts change (the pointer, typing, a caret, clocks, chat
-  apps' spinners) the present's share of power goes from up to +0.47 W (120
-  frames a second) to a few tens of mW. Scrolling and video change most of the
-  frame: no gain there.
+- Guests before Linux 7.4 send whole-plane rects for a compositor's frames
+  (page flips): those stay full draws until their kernel (or OmacVM's
+  driver) sends real damage. A buffer flushed again (the boot console, a
+  TTY) carries real rects on any kernel, so once on, partial draws happen
+  there on today's 7.2 guests too.
+- The watt numbers are an offscreen bench (no VM); there is no A/B in a VM
+  yet. The 120/s scissored row (+0.02 W) below the 60/s one (+0.06 W) puts
+  the noise at about 0.04 W. Where only small parts change, the present's
+  share goes from up to +0.19 W (60 frames a second) or +0.47 W (120) to a
+  few hundredths, but only at that frame rate: typing is about 9 flushes a
+  second (about 0.02 W saved); a moving pointer or a spinner flushes at the
+  display's rate. Scrolling and video change most of the frame: no gain
+  there.
 - A wrong rect from the guest shows as stale pixels until the next full draw.
   The rules only trust rects for buffers already seen; the check mode exists
-  to find such guests.
+  to find such guests. The guest kernel reuses resource ids (lowest free),
+  so a new buffer can count as one already seen: that is safe while the
+  compositor's damage is relative to what the plane showed, as the DRM
+  damage contract says.
 - WindowServer still composites the whole layer each frame: that part of a
   frame's cost does not change.
