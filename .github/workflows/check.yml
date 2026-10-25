@@ -484,6 +484,11 @@ jobs:
           app/runtime/Tests/display/test-present-damage.sh
           app/runtime/Tests/display/test-present-damage.sh --self-test
 
+      - name: The pointer's layer as bright as the boosted frames (ADR 0054; the checks catch code without it)
+        run: |
+          app/runtime/Tests/display/test-pointer-bright.sh
+          app/runtime/Tests/display/test-pointer-bright.sh --self-test
+
       - name: Extra brightness's gain, shader and omacvm check line (ADR 0050; the checks catch code without it)
         run: |
           app/runtime/Tests/display/test-extra-brightness.sh

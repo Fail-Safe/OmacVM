@@ -256,6 +256,25 @@ struct ExtraBrightnessRow: View {
     }
 }
 
+/// Pointer on its own layer (Settings.pointerPlane, experimental, off by
+/// default): read by each start of the VM.
+struct PointerPlaneRow: View {
+    var tick = 0
+    @State private var on = Settings.pointerPlane
+
+    static let info = "Moving the pointer no longer redraws the VM's screen. Linux puts the pointer on a layer of its own, and the Mac shows that layer over the VM's window: the same pointer in the same place (with Extra brightness as bright as the picture), but the VM's picture is not drawn again for each move. Less GPU work and battery while you move the pointer. The pointer moves on its own, like the Mac's own pointer: while you drag something it can be a frame ahead of it. Only in the VM's main window; on other displays the VM draws the pointer as before. Counts from the next start of the VM; the VM gets the driver for it with Update VM (needs internet once). Experimental."
+
+    var body: some View {
+        SettingRow(title: "Pointer on its own layer", badge: "experimental",
+                   subtitle: Settings.macPointer ? "Off while macPointer is set (defaults)." : "Moving the pointer no longer redraws the VM's screen. From the next start of the VM.",
+                   info: Self.info, probe: "pointer-plane") {
+            RowSwitch(title: "Pointer on its own layer", isOn: $on, enabled: !Settings.macPointer)
+        }
+        .onChange(of: on) { _, v in if v != Settings.pointerPlane { Settings.pointerPlane = v } }
+        .onChange(of: tick) { _, _ in on = Settings.pointerPlane }
+    }
+}
+
 /// The sound on its own thread (Settings.audioThread, on by default from
 /// 3.1.17): read by each start of the VM, so a change counts from the next one.
 struct SoundThreadRow: View {

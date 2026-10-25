@@ -1192,6 +1192,19 @@ window on the same display (`nativelat.swift`), the floor macOS itself sets.
   plane on virtio-gpu yet (Linux hides a virtual GPU's cursor plane from
   atomic clients without DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, and
   aquamarine does not ask for it), so it waits for the guest side.
+- The pointer on its own layer (`pointerPlane`, experimental, ADR 0054):
+  OmacVM's virtio-gpu build shows the cursor plane anyway (module option
+  `cursor_plane=1` clears `DRIVER_CURSOR_HOTSPOT`; first output only), so
+  Hyprland puts the pointer there and QEMU's cursor layer shows it at the
+  plane's top left (no hotspot needed for that). A pointer move then renders
+  nothing in the guest; Hyprland still commits a frame per move (aquamarine's
+  atomic `moveCursor` schedules one), so QEMU still presents the unchanged
+  frame. Mini, 3024x1896@60, pointer circles 60/s: QEMU GPU 84-94 -> 23-38
+  ms/s. The Mac pointer setting still needs the hotspot (aquamarine with
+  hotspots, or its legacy path) and stays as it was. On an 8-bit start the
+  driver offers the stock formats (10-bit only with `deep_color=1`, HDR).
+  With Extra brightness the layer's image gets the frames' gain (half
+  floats, extended linear sRGB, EDR: `omacvm-cocoa-pointer-bright*.patch`).
 - Posted mouse moves (`CGEventPostToPid`) reach no app's view, so pointer
   rows go in through QMP (no AppKit; AppKit's part for keys is under 1 ms).
 
