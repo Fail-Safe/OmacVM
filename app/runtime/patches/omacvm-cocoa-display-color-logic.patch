@@ -1,0 +1,320 @@
+From: OmacVM
+Subject: [PATCH] ui: display colour: the table, its check and the shader, tested without AppKit
+
+What: a header with no AppKit in it for the display colour present
+(omacvm-cocoa-display-color.patch, which explains the why): a 33x33x33
+table that maps the guest's sRGB to the window's display's colour space,
+filled by macOS's own colour management (CoreGraphics drawing the grid
+1:1 into a 16-bit bitmap in that space, relative colorimetric, as
+WindowServer matches a tagged surface); a check of the table against
+macOS converting the same 8-bit pixels itself, read as the GPU reads it
+(linear between grid points), over all greys, the corners and 2040 more
+colours; when the present converts (8-bit SDR frames only, tagged at all,
+the display not sRGB itself, the check at most 2 codes off, not the boot
+logo, not switched off with OMACVM_GL_DISPLAY_COLOR=0); and the GLSL that
+reads the table.
+
+Measured (the check, Display P3 and the panel profiles of a MacBook Air M2
+and an LG UltraFine): 1, 1 and 2 codes off macOS's own conversion. A plain
+gamma 2.2 profile is 4-5 codes off near black (the table cannot follow
+that curve there): such a display keeps the sRGB tag.
+
+Why its own file: so the rules, the table and the shader are tested
+without QEMU or a window (app/runtime/Tests/display/test-display-color.sh
+applies this patch to an empty folder, at build time and in CI).
+
+Upstream: OmacVM only.
+Test: app/runtime/Tests/display/test-display-color.c,
+app/runtime/Tests/display/test-display-color-shader.m.
+
+diff --git a/ui/omacvm-dispcolor.h b/ui/omacvm-dispcolor.h
+new file mode 100644
+--- /dev/null
++++ b/ui/omacvm-dispcolor.h
+@@ -0,0 +1,286 @@
++/*
++ * OmacVM: the guest's frames in the display's own colour space.
++ *
++ * The guest draws sRGB. Tagged sRGB, WindowServer converts every frame of
++ * the VM's window to the display's colour space while it composites it:
++ * on a MacBook Air M2 that is a third of its GPU time for our window (a
++ * 30 fps video: 80 GPU ms/s tagged sRGB, 56 in the display's space; 60
++ * fps: 154 vs 109). Native apps such as Chrome render in the display's
++ * space and tag their surfaces with it, so WindowServer only copies them.
++ * QEMU's present pass does the conversion instead: one more texture read
++ * per pixel in a pass that runs anyway.
++ *
++ * The conversion is a 3D table (OMACVM_DC_N^3 entries, 16 bits each)
++ * filled by macOS's own colour conversion (vImage, the display's ICC
++ * profile) and read with linear filtering, so every display profile works
++ * (P3 panels, sRGB externals, a profile the person picked). Only 8-bit SDR
++ * frames: HDR (PQ) and Extra brightness (extended linear sRGB) stay as
++ * they are; so do frames while the boot logo shows (it draws sRGB).
++ *
++ * Pure rules here (tested in app/runtime/Tests/display), the wiring in
++ * ui/cocoa.m (omacvm-cocoa-display-color.patch).
++ */
++#ifndef OMACVM_DISPCOLOR_H
++#define OMACVM_DISPCOLOR_H
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <math.h>
++#include <CoreGraphics/CoreGraphics.h>
++
++/* Grid points per channel: 33 keeps the table's error under 1/1000. */
++#define OMACVM_DC_N 33
++
++/* Grid point i of n as a 16-bit sample (0 and 65535 exact at the ends). */
++static inline uint16_t omacvm_dc_grid16(int i, int n)
++{
++    return (uint16_t)(((uint32_t)i * 65535u + (uint32_t)(n - 1) / 2) / (uint32_t)(n - 1));
++}
++
++/*
++ * The table's texel for grid (r, g, b): index into an n^3 array stored
++ * red fastest, then green, then blue (GL_TEXTURE_3D's x, y, z).
++ */
++static inline uint32_t omacvm_dc_index(int r, int g, int b, int n)
++{
++    return ((uint32_t)b * n + (uint32_t)g) * n + (uint32_t)r;
++}
++
++/* Scale and offset that put a value in [0, 1] on the texel centres. */
++static inline float omacvm_dc_scale(int n)
++{
++    return (float)(n - 1) / (float)n;
++}
++
++static inline float omacvm_dc_offset(int n)
++{
++    return 0.5f / (float)n;
++}
++
++/*
++ * The table: every grid colour (sRGB) converted to dst by macOS's colour
++ * management (relative colorimetric, as WindowServer matches a tagged
++ * surface), drawn 1:1 into a 16-bit bitmap in dst. n^3 RGBA entries of 16
++ * bits, red fastest (omacvm_dc_index), alpha 65535. False if CoreGraphics
++ * could not do it (a colour space that is not RGB, no memory).
++ */
++static inline bool omacvm_dc_fill(CGColorSpaceRef dst, int n, uint16_t *table)
++{
++    size_t w = (size_t)n * n, h = (size_t)n, bpr = w * 8;
++    uint16_t *src;
++    CGColorSpaceRef srgb;
++    CGDataProviderRef prov;
++    CGImageRef img;
++    CGContextRef ctx;
++    bool ok = false;
++
++    if (!dst || CGColorSpaceGetModel(dst) != kCGColorSpaceModelRGB) {
++        return false;
++    }
++    src = malloc(bpr * h);
++    if (!src) {
++        return false;
++    }
++    for (int b = 0; b < n; b++) {
++        for (int g = 0; g < n; g++) {
++            for (int r = 0; r < n; r++) {
++                uint16_t *p = src + 4 * omacvm_dc_index(r, g, b, n);
++                p[0] = omacvm_dc_grid16(r, n);
++                p[1] = omacvm_dc_grid16(g, n);
++                p[2] = omacvm_dc_grid16(b, n);
++                p[3] = 65535;
++            }
++        }
++    }
++    srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
++    prov = CGDataProviderCreateWithData(NULL, src, bpr * h, NULL);
++    img = CGImageCreate(w, h, 16, 64, bpr, srgb,
++                        kCGImageAlphaNoneSkipLast | kCGBitmapByteOrder16Host,
++                        prov, NULL, false, kCGRenderingIntentRelativeColorimetric);
++    ctx = CGBitmapContextCreate(table, w, h, 16, bpr, dst,
++                                kCGImageAlphaNoneSkipLast | kCGBitmapByteOrder16Host);
++    if (img && ctx) {
++        CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);
++        CGContextSetRenderingIntent(ctx, kCGRenderingIntentRelativeColorimetric);
++        CGContextSetBlendMode(ctx, kCGBlendModeCopy);
++        CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), img);
++        for (size_t i = 0; i < w * h; i++) {
++            table[4 * i + 3] = 65535;
++        }
++        ok = true;
++    }
++    if (ctx) {
++        CGContextRelease(ctx);
++    }
++    if (img) {
++        CGImageRelease(img);
++    }
++    CGDataProviderRelease(prov);
++    CGColorSpaceRelease(srgb);
++    free(src);
++    return ok;
++}
++
++/*
++ * How far the table is from macOS converting the same pixels itself, in
++ * 8-bit codes (the present's surfaces), read as the GPU reads it (linear
++ * between grid points): all 256 greys, the 8 corners and 2040 colours
++ * more. The present converts only while this is at most OMACVM_DC_MAX_ERR;
++ * else that display keeps the sRGB tag (WindowServer converts, as before):
++ * a profile whose curve the table cannot follow near black, such as a
++ * plain gamma 2.2 one (4-5 codes off). Display P3 and MacBook panels: 1,
++ * an LG UltraFine's profile: 2. -1 when it could not be measured.
++ */
++#define OMACVM_DC_MAX_ERR 2
++#define OMACVM_DC_CHECK 2304
++
++static inline void omacvm_dc_check_colour(int i, uint8_t *p)
++{
++    if (i < 256) {
++        p[0] = p[1] = p[2] = (uint8_t)i;
++    } else if (i < 264) {
++        p[0] = (i & 1) ? 255 : 0;
++        p[1] = (i & 2) ? 255 : 0;
++        p[2] = (i & 4) ? 255 : 0;
++    } else {
++        uint32_t x = (uint32_t)i * 2654435761u;     /* fixed, spread out */
++        p[0] = (uint8_t)(x >> 8);
++        p[1] = (uint8_t)(x >> 16);
++        p[2] = (uint8_t)(x >> 24);
++    }
++    p[3] = 255;
++}
++
++static inline float omacvm_dc_lerp_table(const uint16_t *t, int n, const float x[3], int c)
++{
++    int i0[3], i1[3];
++    float f[3], v = 0;
++
++    for (int k = 0; k < 3; k++) {
++        float g = x[k] * (n - 1);
++        i0[k] = (int)g;
++        if (i0[k] > n - 2) {
++            i0[k] = n - 2;
++        }
++        f[k] = g - i0[k];
++        i1[k] = i0[k] + 1;
++    }
++    for (int corner = 0; corner < 8; corner++) {
++        int r = corner & 1 ? i1[0] : i0[0];
++        int g = corner & 2 ? i1[1] : i0[1];
++        int b = corner & 4 ? i1[2] : i0[2];
++        float w = (corner & 1 ? f[0] : 1 - f[0]) * (corner & 2 ? f[1] : 1 - f[1]) *
++                  (corner & 4 ? f[2] : 1 - f[2]);
++        v += w * t[4 * omacvm_dc_index(r, g, b, n) + c] / 65535.0f;
++    }
++    return v;
++}
++
++static inline int omacvm_dc_error(CGColorSpaceRef dst, int n, const uint16_t *table)
++{
++    enum { COUNT = OMACVM_DC_CHECK };
++    uint8_t *in = malloc(COUNT * 4), *ref = calloc(COUNT, 4);
++    CGColorSpaceRef srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
++    CGDataProviderRef prov = NULL;
++    CGImageRef img = NULL;
++    CGContextRef ctx = NULL;
++    int worst = -1;
++
++    if (in && ref && dst && CGColorSpaceGetModel(dst) == kCGColorSpaceModelRGB) {
++        for (int i = 0; i < COUNT; i++) {
++            omacvm_dc_check_colour(i, in + 4 * i);
++        }
++        prov = CGDataProviderCreateWithData(NULL, in, COUNT * 4, NULL);
++        img = CGImageCreate(COUNT, 1, 8, 32, COUNT * 4, srgb,
++                            kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault, prov,
++                            NULL, false, kCGRenderingIntentRelativeColorimetric);
++        ctx = CGBitmapContextCreate(ref, COUNT, 1, 8, COUNT * 4, dst,
++                                    kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault);
++    }
++    if (img && ctx) {
++        CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);
++        CGContextSetRenderingIntent(ctx, kCGRenderingIntentRelativeColorimetric);
++        CGContextSetBlendMode(ctx, kCGBlendModeCopy);
++        CGContextDrawImage(ctx, CGRectMake(0, 0, COUNT, 1), img);
++        worst = 0;
++        for (int i = 0; i < COUNT; i++) {
++            float x[3] = { in[4 * i] / 255.0f, in[4 * i + 1] / 255.0f, in[4 * i + 2] / 255.0f };
++            for (int c = 0; c < 3; c++) {
++                int got = (int)lroundf(omacvm_dc_lerp_table(table, n, x, c) * 255.0f);
++                int d = abs(got - (int)ref[4 * i + c]);
++                worst = d > worst ? d : worst;
++            }
++        }
++    }
++    if (ctx) {
++        CGContextRelease(ctx);
++    }
++    if (img) {
++        CGImageRelease(img);
++    }
++    if (prov) {
++        CGDataProviderRelease(prov);
++    }
++    CGColorSpaceRelease(srgb);
++    free(in);
++    free(ref);
++    return worst;
++}
++
++/*
++ * Whether the present converts to the display's space: frames tagged at
++ * all (not OMACVM_GL_COLOR=native), 8-bit SDR (not deep, not extra
++ * brightness), not switched off (OMACVM_GL_DISPLAY_COLOR=0), the display's
++ * space known and not sRGB itself (then the sRGB tag costs nothing), the
++ * table and shader made, and not the boot logo.
++ */
++typedef struct OmacvmDcState {
++    bool tagged;        /* present_color == 1 */
++    bool deep;          /* half-float surfaces (10-bit scanout, HDR) */
++    bool linear;        /* extra brightness */
++    bool off;           /* OMACVM_GL_DISPLAY_COLOR=0 */
++    bool known;         /* the window's display has a colour space */
++    bool display_srgb;  /* ... and it is sRGB */
++    bool failed;        /* table or shader failed: sRGB tag this run */
++    bool splash;        /* the boot logo draws this frame */
++} OmacvmDcState;
++
++static inline bool omacvm_dc_wanted(const OmacvmDcState *s)
++{
++    return s->tagged && !s->deep && !s->linear && !s->off && s->known &&
++           !s->display_srgb && !s->failed && !s->splash;
++}
++
++/* The env switch: "0", "off" or "no" turns the conversion off. */
++static inline bool omacvm_dc_env_off(const char *e)
++{
++    return e && (!e[0] || e[0] == '0' || e[0] == 'n' || e[0] == 'N' ||
++                 ((e[0] == 'o' || e[0] == 'O') && (e[1] == 'f' || e[1] == 'F')));
++}
++
++#define OMACVM_DC_VERT \
++    "#version 140\n" \
++    "in vec2 in_position;\n" \
++    "uniform float yflip;\n" \
++    "out vec2 ex_tex_coord;\n" \
++    "void main(void) {\n" \
++    "    gl_Position = vec4(in_position, 0.0, 1.0);\n" \
++    "    ex_tex_coord = vec2(1.0 + in_position.x, 1.0 + yflip * in_position.y) * 0.5;\n" \
++    "}\n"
++
++#define OMACVM_DC_FRAG \
++    "#version 140\n" \
++    "uniform sampler2D image;\n" \
++    "uniform sampler3D table;\n" \
++    "uniform float scale;\n" \
++    "uniform float offset;\n" \
++    "in vec2 ex_tex_coord;\n" \
++    "out vec4 out_frag_color;\n" \
++    "void main(void) {\n" \
++    "    vec4 c = texture(image, ex_tex_coord);\n" \
++    "    vec3 s = clamp(c.rgb, 0.0, 1.0);\n" \
++    "    out_frag_color = vec4(texture(table, s * scale + offset).rgb, c.a);\n" \
++    "}\n"
++
++#endif

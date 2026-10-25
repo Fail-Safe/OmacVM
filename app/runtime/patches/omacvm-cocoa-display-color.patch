@@ -1,0 +1,436 @@
+From: OmacVM
+Subject: [PATCH] cocoa: frames in the display's own colour space (WindowServer does not convert them)
+
+What: the IOSurface present draws the guest's 8-bit SDR frames through a
+table (ui/omacvm-dispcolor.h) into the window's display's colour space and
+tags the surfaces with that space instead of sRGB. The main thread follows
+the window's display (a move to another display, a new display profile,
+displays changing) and counts each new space; the QEMU thread makes the
+table for it in present_ctx (once per space, a few ms), checks it against
+macOS's own conversion and makes the surfaces again (at once, at most once
+a second, like a new depth). HDR (PQ), 10-bit, Extra brightness and the
+boot logo stay as they were; so does a display that is sRGB itself, or
+one whose profile the table cannot follow closely enough (the check: more
+than 2 codes off), and everything after a failure (sRGB tag, as before).
+OMACVM_GL_DISPLAY_COLOR=0 keeps the sRGB tag. qemu.log says once per
+display what it does: "cocoa: display colour: frames converted to <name>
+here (table N codes from macOS's own conversion), tagged with it", or why
+not.
+
+Why: tagged sRGB, WindowServer colour-matches the whole window on every
+composite. Measured with a window like the VM's without a VM (MacBook Air
+M2, full screen 2940x1840, work/window-path wsbench): WindowServer's GPU
+time for it 79.6 ms/s at 30 frames a second tagged sRGB, 56.5 tagged with
+the display's own space (= untagged); 154 vs 109 at 60. The VM showed the
+same (vm-power: 77 ms/s, 53 untagged, for a 1080p video). Native apps
+(Chrome) render in the display's space and tag their surfaces with it.
+The surfaces actually there decide how a frame is drawn (the hold-off),
+so no frame shows in the wrong colours.
+
+Upstream: OmacVM only (QEMU's IOSurface present is OmacVM's).
+Test: app/runtime/Tests/display/test-display-color.sh (rules, table, the
+shader on Apple's software renderer against macOS's own conversion; with
+the patched ui/cocoa.m: the wiring).
+Applies after omacvm-cocoa-display-color-logic.patch and
+omacvm-cocoa-no-app-nap.patch.
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+index 1ecf9d4..e92c5b0 100644
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -56,6 +56,7 @@
+ #include "ui/omacvm-display-settle.h"
+ #include "ui/omacvm-edr.h"
+ #include "ui/omacvm-bright.h"
++#include "ui/omacvm-dispcolor.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -197,6 +198,8 @@ @interface QemuCGLLayer : CAOpenGLLayer
+ static void omacvm_bright_reread(void);
+ static void omacvm_bright_look(void);
+ static bool omacvm_bright_blit(bool flip, int gain, bool pq);
++static void omacvm_dc_look(void);
++static bool cocoa_gl_present_tagged(void);
+ static uint32_t gl_scanout_id;
+ static DisplayGLTextureBorrower gl_scanout_borrow;
+ static QEMUGLContext gl_view_ctx;
+@@ -4962,6 +4965,7 @@ - (void)windowDidChangeScreen:(NSNotification *)notification
+     omacvm_displays_update();
+ #ifdef CONFIG_OPENGL
+     omacvm_bright_look();       /* extra brightness: the new display's headroom */
++    omacvm_dc_look();           /* display colour: the new display's space */
+ #endif
+ }
+ 
+@@ -7432,6 +7436,28 @@ static void cocoa_gl_render(void)
+ static uint32_t present_w, present_h;
+ static bool present_deep;              /* half-float surfaces (10-bit scanout) */
+ static bool present_linear;            /* half-float, extended linear sRGB: extra brightness */
++static bool present_dc;                /* 8-bit, in the display's colour space (converted here) */
++static unsigned present_surf_gen;      /* ... the space's dc_gen */
++
++/*
++ * OmacVM, display colour (ui/omacvm-dispcolor.h): 8-bit SDR frames are
++ * converted to the window's display's colour space in the present pass
++ * and tagged with it, so WindowServer does not colour-match the window on
++ * every composite (a third of its GPU time for it on a MacBook Air).
++ * Main thread: dc_space follows the window's screen (and its profile),
++ * dc_gen counts the changes. QEMU thread: the table and its program for
++ * dc_gen, in present_ctx. OMACVM_GL_DISPLAY_COLOR=0 keeps the sRGB tag.
++ */
++static os_unfair_lock dc_lock = OS_UNFAIR_LOCK_INIT;
++static CGColorSpaceRef dc_space;       /* dc_lock: the window's display's space */
++static unsigned dc_gen;                /* qatomic: dc_space changed */
++static unsigned present_dc_gen;        /* QEMU thread: dc_gen the table was made for */
++static CGColorSpaceRef present_dc_cs;  /* QEMU thread: the table's space; NULL: none */
++static bool present_dc_srgb;           /* QEMU thread: the display is sRGB itself */
++static GLuint dc_table, dc_prog, dc_vao, dc_vbo;
++static GLint dc_u_flip;
++static int dc_made;                    /* QEMU thread: program 1 made, -1 failed */
++static int dc_off = -1;                /* OMACVM_GL_DISPLAY_COLOR=0 */
+ 
+ /*
+  * Colour. The guest renders sRGB unless it says otherwise, so the surfaces
+@@ -7686,6 +7712,168 @@ static bool omacvm_bright_blit(bool flip, int gain, bool pq)
+     return true;
+ }
+ 
++/*
++ * QEMU thread, present_ctx current: the table for the display's space
++ * now (dc_gen), and the program once. present_dc_cs stays NULL (no
++ * conversion, the sRGB tag) for an sRGB display, a space the table cannot
++ * follow (omacvm_dc_error) or any failure; qemu.log says which once per
++ * display.
++ */
++static void omacvm_dc_update(void)
++{
++    static const GLfloat quad[] = { -1, -1, 1, -1, -1, 1, 1, 1 };
++    unsigned gen = qatomic_read(&dc_gen);
++
++    if (gen == present_dc_gen) {
++        return;
++    }
++    present_dc_gen = gen;
++    os_unfair_lock_lock(&dc_lock);
++    CGColorSpaceRef cs = dc_space ? CGColorSpaceRetain(dc_space) : NULL;
++    os_unfair_lock_unlock(&dc_lock);
++    CGColorSpaceRelease(present_dc_cs);
++    present_dc_cs = NULL;
++    present_dc_srgb = false;
++    if (!cs) {
++        return;
++    }
++    CFStringRef cname = CGColorSpaceCopyName(cs);
++    char name[128] = "an unnamed profile";
++    if (cname) {
++        CFStringGetCString(cname, name, sizeof(name), kCFStringEncodingUTF8);
++        CFRelease(cname);
++    }
++    CGColorSpaceRef srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
++    present_dc_srgb = CFEqual(cs, srgb);
++    CGColorSpaceRelease(srgb);
++    if (present_dc_srgb) {
++        info_report("cocoa: display colour: the display is sRGB, frames tagged sRGB");
++        CGColorSpaceRelease(cs);
++        return;
++    }
++    if (!dc_made) {
++        GLuint vs = omacvm_bright_shader(GL_VERTEX_SHADER, OMACVM_DC_VERT);
++        GLuint fs = omacvm_bright_shader(GL_FRAGMENT_SHADER, OMACVM_DC_FRAG);
++        GLint ok = 0;
++        if (vs && fs) {
++            dc_prog = glCreateProgram();
++            glAttachShader(dc_prog, vs);
++            glAttachShader(dc_prog, fs);
++            glBindAttribLocation(dc_prog, 0, "in_position");
++            glLinkProgram(dc_prog);
++            glGetProgramiv(dc_prog, GL_LINK_STATUS, &ok);
++        }
++        glDeleteShader(vs);
++        glDeleteShader(fs);
++        if (!ok) {
++            if (dc_prog) {
++                glDeleteProgram(dc_prog);
++                dc_prog = 0;
++            }
++            dc_made = -1;
++            warn_report("cocoa: display colour: no shader, frames tagged sRGB this run");
++        } else {
++            glUseProgram(dc_prog);
++            glUniform1i(glGetUniformLocation(dc_prog, "image"), 0);
++            glUniform1i(glGetUniformLocation(dc_prog, "table"), 1);
++            glUniform1f(glGetUniformLocation(dc_prog, "scale"), omacvm_dc_scale(OMACVM_DC_N));
++            glUniform1f(glGetUniformLocation(dc_prog, "offset"), omacvm_dc_offset(OMACVM_DC_N));
++            dc_u_flip = glGetUniformLocation(dc_prog, "yflip");
++            glUseProgram(0);
++            glGenVertexArrays(1, &dc_vao);
++            glBindVertexArray(dc_vao);
++            glGenBuffers(1, &dc_vbo);
++            glBindBuffer(GL_ARRAY_BUFFER, dc_vbo);
++            glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
++            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
++            glEnableVertexAttribArray(0);
++            glBindBuffer(GL_ARRAY_BUFFER, 0);
++            glBindVertexArray(0);
++            glGenTextures(1, &dc_table);
++            dc_made = 1;
++        }
++    }
++    if (dc_made < 0) {
++        CGColorSpaceRelease(cs);
++        return;
++    }
++    size_t entries = (size_t)OMACVM_DC_N * OMACVM_DC_N * OMACVM_DC_N;
++    uint16_t *table = g_new0(uint16_t, entries * 4);
++    int err = omacvm_dc_fill(cs, OMACVM_DC_N, table) ?
++              omacvm_dc_error(cs, OMACVM_DC_N, table) : -1;
++    if (err < 0 || err > OMACVM_DC_MAX_ERR) {
++        info_report("cocoa: display colour: %s %s, frames tagged sRGB", name,
++                    err < 0 ? "is no RGB profile" :
++                    "is not followed closely enough by the table");
++        g_free(table);
++        CGColorSpaceRelease(cs);
++        return;
++    }
++    glBindTexture(GL_TEXTURE_3D, dc_table);
++    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA16, OMACVM_DC_N, OMACVM_DC_N, OMACVM_DC_N, 0,
++                 GL_RGBA, GL_UNSIGNED_SHORT, table);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
++    glBindTexture(GL_TEXTURE_3D, 0);
++    g_free(table);
++    present_dc_cs = cs;
++    info_report("cocoa: display colour: frames converted to %s here (table %d codes "
++                "from macOS's own conversion), tagged with it", name, err);
++}
++
++/* QEMU thread, BQL held: whether this frame goes into display-space surfaces. */
++static bool omacvm_dc_wanted_now(bool deep, bool linear, bool splash)
++{
++    if (dc_off < 0) {
++        dc_off = omacvm_dc_env_off(getenv("OMACVM_GL_DISPLAY_COLOR"));
++        if (dc_off) {
++            info_report("cocoa: display colour: off (OMACVM_GL_DISPLAY_COLOR), frames tagged sRGB");
++        }
++    }
++    if (!dc_off) {
++        omacvm_dc_update();
++    }
++    OmacvmDcState st = {
++        .tagged = cocoa_gl_present_tagged(),
++        .deep = deep,
++        .linear = linear,
++        .off = dc_off,
++        .known = present_dc_cs != NULL,
++        .display_srgb = present_dc_srgb,
++        .failed = dc_made < 0,
++        .splash = splash,
++    };
++    return omacvm_dc_wanted(&st);
++}
++
++/*
++ * QEMU thread, present_ctx current: the bound texture into the bound
++ * framebuffer as QEMU's blit (flip as its texture_blit_flip), converted to
++ * the display's space through the table. False without it.
++ */
++static bool omacvm_dc_blit(bool flip)
++{
++    if (dc_made <= 0 || !present_dc_cs) {
++        return false;
++    }
++    glUseProgram(dc_prog);
++    glUniform1f(dc_u_flip, flip ? 1.0f : -1.0f);
++    glActiveTexture(GL_TEXTURE1);
++    glBindTexture(GL_TEXTURE_3D, dc_table);
++    glActiveTexture(GL_TEXTURE0);
++    glBindVertexArray(dc_vao);
++    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++    glBindVertexArray(0);
++    glActiveTexture(GL_TEXTURE1);
++    glBindTexture(GL_TEXTURE_3D, 0);
++    glActiveTexture(GL_TEXTURE0);
++    glUseProgram(0);
++    return true;
++}
++
+ /* QEMU thread, BQL held: the switch or the gain changed: the newest frame again. */
+ static void omacvm_bright_redraw(void *opaque)
+ {
+@@ -7813,6 +8001,7 @@ static void cocoa_gl_present_free(void)
+     present_w = present_h = 0;
+     present_deep = false;
+     present_linear = false;
++    present_dc = false;
+ }
+ 
+ static bool cocoa_gl_present_hdr_wanted(void)
+@@ -7825,16 +8014,28 @@ static bool cocoa_gl_present_hdr_wanted(void)
+     return present_hdr == 1;
+ }
+ 
+-/* The colour space of frames in a surface of this depth (or linear), or NULL. */
+-static CGColorSpaceRef cocoa_gl_present_colorspace(bool deep, bool linear)
++/* Frames tagged at all (not OMACVM_GL_COLOR=native). */
++static bool cocoa_gl_present_tagged(void)
+ {
+     if (present_color < 0) {
+         const char *e = getenv("OMACVM_GL_COLOR");
+         present_color = !(e && !strcmp(e, "native"));
+     }
+-    if (!present_color) {
++    return present_color == 1;
++}
++
++/*
++ * The colour space of frames in a surface of this depth (or linear, or
++ * converted to the display: dc), or NULL.
++ */
++static CGColorSpaceRef cocoa_gl_present_colorspace(bool deep, bool linear, bool dc)
++{
++    if (!cocoa_gl_present_tagged()) {
+         return NULL;
+     }
++    if (dc && present_dc_cs && !deep && !linear) {
++        return CGColorSpaceRetain(present_dc_cs);
++    }
+     if (linear) {
+         return CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearSRGB);
+     }
+@@ -7919,7 +8120,8 @@ static void omacvm_present_gravity(CALayer *layer, IOSurfaceRef surf)
+  * then the frame is drawn scaled into the surfaces there are, and the
+  * timer comes back to make the right ones.
+  */
+-static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear)
++static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear,
++                                   bool dc)
+ {
+     bool half = deep || linear;
+ 
+@@ -7937,7 +8139,8 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+     }
+     if (present_surf[0]) {
+         if (w == present_w && h == present_h && deep == present_deep &&
+-            linear == present_linear) {
++            linear == present_linear && dc == present_dc &&
++            (!dc || present_surf_gen == present_dc_gen)) {
+             return true;
+         }
+         /*
+@@ -7946,10 +8149,12 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+          * colours until the hold-off ends. It comes with a modeset, not in
+          * a stream of window sizes; a guest that flips it all the time
+          * still gets one remake a second at most. So does extra brightness
+-         * turning on or off (linear light).
++         * turning on or off (linear light), and the display's colour space
++         * (another display, the boot logo going).
+          */
+         static int64_t depth_ns;
+-        bool depth_now = (deep != present_deep || linear != present_linear) &&
++        bool depth_now = (deep != present_deep || linear != present_linear ||
++                          dc != present_dc || (dc && present_surf_gen != present_dc_gen)) &&
+                          now - depth_ns >= NANOSECONDS_PER_SECOND;
+         if (now - present_alloc_ns < PRESENT_REALLOC_NS && !depth_now) {
+             present_realloc_due = true;
+@@ -7970,7 +8175,7 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+         (id)kIOSurfaceBytesPerElement: half ? @8 : @4,
+         (id)kIOSurfacePixelFormat: @(half ? (uint32_t)'RGhA' : (uint32_t)'BGRA'),
+     };
+-    CGColorSpaceRef cs = cocoa_gl_present_colorspace(deep, linear);
++    CGColorSpaceRef cs = cocoa_gl_present_colorspace(deep, linear, dc);
+     CFPropertyListRef cs_plist = cs ? CGColorSpaceCopyPropertyList(cs) : NULL;
+     bool ok = true;
+     for (int i = 0; i < present_nsurf && ok; i++) {
+@@ -8012,6 +8217,8 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+     present_h = h;
+     present_deep = deep;
+     present_linear = linear;
++    present_dc = dc && present_dc_cs && !half && cocoa_gl_present_tagged();
++    present_surf_gen = present_dc_gen;
+     present_next = 0;
+     return true;
+ }
+@@ -8105,8 +8312,9 @@ static bool cocoa_gl_present(void)
+                     pq ? ", HDR (PQ)" : linear ? ", extra brightness" : "");
+         deep_logged = deep + 2 * linear;
+     }
+-    if (!cocoa_gl_present_alloc(w, h, deep, linear)) {
+-        if (!(deep || linear) || !cocoa_gl_present_alloc(w, h, false, false)) {
++    bool dc = omacvm_dc_wanted_now(deep, linear, splash);
++    if (!cocoa_gl_present_alloc(w, h, deep, linear, dc)) {
++        if (!(deep || linear || dc) || !cocoa_gl_present_alloc(w, h, false, false, false)) {
+             CGLSetCurrentContext(prev);
+             return false;
+         }
+@@ -8171,7 +8379,13 @@ static bool cocoa_gl_present(void)
+                                                                : GL_LINEAR;
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, blit_filter);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, blit_filter);
+-        if (!boost || !omacvm_bright_blit(flip, linear ? gain : OMACVM_BRIGHT_ONE, pq)) {
++        /*
++         * As the surfaces there are (the hold-off), not as wanted: linear
++         * light, the display's space (display colour), or as drawn.
++         */
++        bool drawn = boost ? omacvm_bright_blit(flip, linear ? gain : OMACVM_BRIGHT_ONE, pq) :
++                     present_dc && omacvm_dc_blit(flip);
++        if (!drawn) {
+             qemu_gl_run_texture_blit(present_gls, flip);
+         }
+     }
+@@ -11005,6 +11219,35 @@ - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
+ }
+ @end
+ 
++/*
++ * Main thread: the window's display's colour space for the present; a
++ * change redraws the newest frame in it (omacvm_bright_bh: the same
++ * context and redraw).
++ */
++static void omacvm_dc_look(void)
++{
++    if (!present_ctx) {
++        return;
++    }
++    NSScreen *screen = [[cocoaView window] screen] ?: [NSScreen mainScreen];
++    CGColorSpaceRef cs = [[screen colorSpace] CGColorSpace];
++    bool changed;
++
++    os_unfair_lock_lock(&dc_lock);
++    changed = !(cs == dc_space || (cs && dc_space && CFEqual(cs, dc_space)));
++    if (changed) {
++        CGColorSpaceRelease(dc_space);
++        dc_space = cs ? CGColorSpaceRetain(cs) : NULL;
++    }
++    os_unfair_lock_unlock(&dc_lock);
++    if (changed) {
++        qatomic_inc(&dc_gen);
++        if (omacvm_bright_bh) {
++            qemu_bh_schedule(omacvm_bright_bh);
++        }
++    }
++}
++
+ /* Main thread, once the GL present is chosen. */
+ static void omacvm_bright_init(void)
+ {
+@@ -11028,8 +11271,17 @@ static void omacvm_bright_init(void)
+                      queue:[NSOperationQueue mainQueue]
+                 usingBlock:^(NSNotification *note) {
+         omacvm_bright_look();
++        omacvm_dc_look();
++    }];
++    /* Display colour: the window's display, its profile (another one picked). */
++    [nc addObserverForName:NSWindowDidChangeScreenProfileNotification
++                    object:nil
++                     queue:[NSOperationQueue mainQueue]
++                usingBlock:^(NSNotification *note) {
++        omacvm_dc_look();
+     }];
+     omacvm_bright_look();
++    omacvm_dc_look();
+ }
+ 
+ static void omacvm_send_layout(void)

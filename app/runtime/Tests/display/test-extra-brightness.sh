@@ -25,7 +25,7 @@ bodyx() { awk -v h="$2" '$0 == h {on=1} on {print} on && /^}$/ {exit}' "$1"; }
 problems() {
   local m=$1 present alloc follow look splash seen init edrnow
   present=$(bodyx "$m" 'static bool cocoa_gl_present(void)')
-  alloc=$(bodyx "$m" 'static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear)')
+  alloc=$(awk 'index($0, "static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear") == 1 {on=1} on {print} on && /^}$/ {exit}' "$m")
   follow=$(bodyx "$m" 'static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf, bool linear)')
   look=$(bodyx "$m" 'static void omacvm_bright_look(void)')
   splash=$(awk '/^static void omacvm_splash_draw_with\(/ {on=1} on {print} on && /^}$/ {exit}' "$m")

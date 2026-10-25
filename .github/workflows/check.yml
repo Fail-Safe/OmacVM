@@ -478,6 +478,9 @@ jobs:
           app/runtime/Tests/display/test-extra-brightness.sh
           src/tests/extra-brightness-check.sh
 
+      - name: Frames in the display's colour space (table vs macOS's own conversion, shader, check; the checks catch code without it)
+        run: app/runtime/Tests/display/test-display-color.sh
+
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 
