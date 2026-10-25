@@ -8,6 +8,8 @@
  * - more pictures sent at once than the decoder keeps in flight all land, in order;
  * - another guest context copying the planes right after END_FRAME (no poll, no
  *   read in between) copies the picture, not what was there before;
+ * - another guest context clearing a plane right after END_FRAME (a draw-type
+ *   command: the planes as its render target) clears after the picture went in;
  * - a fence made after END_FRAME signals only once the picture is in the planes:
  *   read straight from the GL texture once it signalled (no vrend in between);
  * - a buffer and a decoder destroyed with pictures in flight: the other pictures land.
@@ -466,6 +468,27 @@ static int wait_fence(void)
    return -1;
 }
 
+/* the share of the luma plane of RES (read in context CTX) that is V */
+static double share_of(uint32_t res, uint32_t ctx, uint8_t v)
+{
+   struct virgl_box box = { 0, 0, 0, W, H, 1 };
+   struct iovec out = { got, sizeof(got) };
+   long n = 0;
+   memset(got, 0, sizeof(got));
+   if (virgl_renderer_transfer_read_iov(res, ctx, 0, W, 0, &box, 0, &out, 1))
+      return 0;
+   for (int i = 0; i < W * H; i++)
+      n += got[i] == v;
+   return (double)n / (W * H);
+}
+
+static uint32_t fbits(float f)
+{
+   uint32_t u;
+   memcpy(&u, &f, sizeof(u));
+   return u;
+}
+
 int main(void)
 {
    char line[300];
@@ -583,6 +606,41 @@ int main(void)
    snprintf(line, sizeof(line), "another context copies the plane right after END_FRAME: "
             "the picture (luma PSNR %.1f dB)", p);
    check(p > 30, line);
+
+   /* 3b: another context clears the plane (its render target) right after END_FRAME:
+    * the picture goes in first, the clear wins */
+   emit(VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_SURFACE, VIRGL_OBJ_SURFACE_SIZE));
+   emit(50);
+   emit(R_Y(1));
+   emit(VIRGL_FORMAT_R8_UNORM);
+   emit(0);
+   emit(0);
+   emit(VIRGL_CMD0(VIRGL_CCMD_SET_FRAMEBUFFER_STATE, 0, VIRGL_SET_FRAMEBUFFER_STATE_SIZE(1)));
+   emit(1);
+   emit(0);
+   emit(50);
+   submit(2);
+   send_picture(10, 1, 7);
+   emit(VIRGL_CMD0(VIRGL_CCMD_CLEAR, 0, VIRGL_OBJ_CLEAR_SIZE));
+   emit(1u << 2);                       /* PIPE_CLEAR_COLOR0 */
+   emit(fbits(1.0f));
+   emit(fbits(0.0f));
+   emit(fbits(0.0f));
+   emit(fbits(1.0f));
+   emit(0);
+   emit(0);
+   emit(0);
+   submit(2);
+   double sh = share_of(R_Y(1), 2, 255);
+   snprintf(line, sizeof(line), "another context clears the plane right after END_FRAME: "
+            "the clear wins (%.1f %% of the plane cleared)", sh * 100);
+   check(sh > 0.999, line);
+   emit(VIRGL_CMD0(VIRGL_CCMD_SET_FRAMEBUFFER_STATE, 0, VIRGL_SET_FRAMEBUFFER_STATE_SIZE(0)));
+   emit(0);
+   emit(0);
+   emit(VIRGL_CMD0(VIRGL_CCMD_DESTROY_OBJECT, VIRGL_OBJECT_SURFACE, 1));
+   emit(50);
+   submit(2);
 
    /* 4: a fence after END_FRAME, then the GL texture itself */
    low = 99;

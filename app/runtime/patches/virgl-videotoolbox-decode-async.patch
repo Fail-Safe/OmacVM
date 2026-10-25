@@ -44,9 +44,11 @@ Tests: Tests/virgl/test-video-decode-async.c (4K H.264 from VTCompressionSession
 END_FRAME returns in less than half the time VideoToolbox takes when waited for
 (without the patch: 8.3 ms against 2.5 ms on the mini M4), pictures read right
 after END_FRAME, six at once, another context's copy region right after
-END_FRAME, a fence after END_FRAME then the GL texture read past vrend (fails
-without the fence hook), a buffer and the decoder destroyed with pictures in
-flight; polled fences, sync-thread fences and OMACVM_VIDEO_DECODE_SYNC=1.
+END_FRAME, another context's clear of a plane right after END_FRAME (the draw
+path's check), a fence after END_FRAME then the GL texture read past vrend
+(fails without the fence hook), a buffer and the decoder destroyed with
+pictures in flight; polled fences, sync-thread fences and
+OMACVM_VIDEO_DECODE_SYNC=1.
 test-video-decode.c and test-video-padding.c (they read through transfers)
 pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 --- a/src/vrend/virgl_video.h
@@ -100,10 +102,12 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  #include <time.h>
  #include <pthread.h>
  
-@@ -217,6 +218,20 @@
+@@ -215,6 +216,20 @@
+     OSStatus status;
+     VTEncodeInfoFlags info;
      struct vt_bytes coded;      /* Annex B access unit */
- };
- 
++};
++
 +/* One picture in the media engine (see "Decoding beside vrend's thread"). The
 + * fields after `sent_ns` are written by VideoToolbox's output thread, under dec_lock. */
 +#define VT_DEC_MAX_JOBS 4
@@ -116,11 +120,9 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +    OSStatus status;
 +    CVPixelBufferRef pix;
 +    uint64_t out_ns;
-+};
-+
+ };
+ 
  struct virgl_video_codec {
-     uint32_t guest_profile;
-     enum pipe_video_profile profile;
 @@ -250,7 +265,15 @@
      uint64_t ns_decode_max;
      uint64_t ns_gap_max;                /* longest wait between two frames */
@@ -619,10 +621,13 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
      bytes_free(&sample);
      return 0;
  }
-@@ -3241,6 +3572,76 @@
-     return done;
- }
- 
+@@ -3238,9 +3569,79 @@
+             break;
+     done = enc_seq_open > seq;
+     pthread_mutex_unlock(&enc_wait_lock);
++    return done;
++}
++
 +/* Decoders: pictures that are in go into the guest's planes (vrend's thread,
 + * with a GL context of its share group current). */
 +void virgl_video_decode_poll(void)
@@ -665,9 +670,9 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +    pthread_mutex_lock(&dec_lock);
 +    done = dec_open > seq;
 +    pthread_mutex_unlock(&dec_lock);
-+    return done;
-+}
-+
+     return done;
+ }
+ 
 +/* Waits up to TIMEOUT_MS until every picture sent up to SEQ was given back
 + * (the sync thread); false on time out. */
 +bool virgl_video_decode_wait(uint64_t seq, uint32_t timeout_ms)
@@ -804,15 +809,15 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
     if (info->instance_count && !has_feature(feat_draw_instance))
        return EINVAL;
  
-@@ -8354,6 +8374,8 @@
+@@ -8353,6 +8373,8 @@
+       return;
  
      struct vrend_sub_context *sub_ctx = ctx->sub;
- 
-+   vrend_video_ready_sub(sub_ctx);
 +
++   vrend_video_ready_sub(sub_ctx);
+ 
     if (sub_ctx->cs_shader_dirty) {
        struct vrend_linked_shader_program *prog;
-       bool cs_dirty;
 @@ -9534,7 +9556,8 @@
   * QEMU's main loop. A fence made after a frame closed waits for its result. */
  static bool fence_video_ready(const struct vrend_fence *fence)
@@ -823,16 +828,16 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  }
  
  /* Sync thread: hold the fence until its encoder frames are given back
-@@ -9550,6 +9573,9 @@
+@@ -9549,6 +9572,9 @@
+       perror("failed to write to eventfd\n");
     if (!vrend_video_encode_wait(fence->video_seq, 2000) && late++ < 5)
        virgl_warn("video: encoder frame not back after 2 s; fence %" PRIu64 " signalled anyway\n",
-                  fence->fence_id);
++                 fence->fence_id);
 +   if (!vrend_video_decode_wait(fence->video_dec_seq, 2000) && late++ < 5)
 +      virgl_warn("video: decoded picture not in after 2 s; fence %" PRIu64 " signalled anyway\n",
-+                 fence->fence_id);
+                  fence->fence_id);
  }
  #else
- static bool fence_video_ready(UNUSED const struct vrend_fence *fence) { return true; }
 @@ -13644,6 +13670,7 @@
  
     if (!vrend_hw_switch_context(ctx, true))
@@ -886,7 +891,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
  #endif
  
  #ifdef HAVE_EPOXY_EGL_H
-@@ -15836,6 +15871,35 @@
+@@ -15836,8 +15871,37 @@
  void vrend_renderer_pause_render_condition(struct vrend_context *ctx, bool pause)
  {
     vrend_pause_render_condition(ctx, pause);
@@ -896,8 +901,8 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +{
 +   if (vrend_state.current_hw_ctx && vrend_state.current_hw_ctx->sub)
 +      vrend_pause_render_condition(vrend_state.current_hw_ctx, pause);
-+}
-+
+ }
+ 
 +static void vrend_video_ready_sub(const struct vrend_sub_context *sub_ctx)
 +{
 +#ifdef ENABLE_VIDEO
@@ -919,9 +924,11 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +#else
 +   (void)sub_ctx;
 +#endif
- }
- 
++}
++
  void vrend_render_condition(struct vrend_context *ctx,
+                             uint32_t handle,
+                             bool condition,
 --- a/src/vrend/vrend_renderer.h
 +++ b/src/vrend/vrend_renderer.h
 @@ -124,6 +124,10 @@
@@ -946,7 +953,7 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
                                           uint32_t *height);
 --- a/src/vrend/vrend_video.c
 +++ b/src/vrend/vrend_video.c
-@@ -130,8 +130,15 @@
+@@ -130,7 +130,14 @@
  
      uint32_t num_planes;
      struct vrend_video_plane planes[3];
@@ -955,13 +962,12 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +    unsigned pending;
 +    struct vrend_resource *pending_res[3];
  };
- 
++
 +/* Planes some picture is still on its way into, in all contexts. */
 +unsigned vrend_video_pending_total;
-+
+ 
  static struct vrend_video_codec *vrend_video_codec(
          struct virgl_video_codec *codec)
- {
 @@ -306,7 +313,9 @@
       * on some drivers rasterizer discard) can drop a blit without a GL error,
       * and the guest would show its old picture. Both are off for the copy, as
@@ -991,10 +997,13 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
      dmabuf->gpu_fence = NULL;
      if (!getenv("OMACVM_VIDEO_COPY") && blit_video_buffer_to_pixbuf(buf, pix, &dmabuf->gpu_fence))
          return 0;
-@@ -815,6 +826,52 @@
- }
- 
- 
+@@ -812,8 +823,54 @@
+ #else
+     sync_dmabuf_to_video_buffer(buf, dmabuf);
+ #endif
++}
++
++
 +#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
 +/* A picture is on its way into TARGET (PENDING), or no longer: its planes'
 + * resources say so while any is (vrend_video_ready in vrend_renderer.c). */
@@ -1029,8 +1038,8 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +        vrend_resource_reference(&buf->pending_res[i], NULL);
 +    }
 +    vrend_video_pending_total--;
-+}
-+
+ }
+ 
 +/* The guest reads or writes planes a picture is on its way into: every picture
 + * in flight goes in first (vrend's thread, any context current). */
 +void vrend_video_finish_pending(void)
@@ -1040,10 +1049,9 @@ pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
 +#else
 +void vrend_video_finish_pending(void) { }
 +#endif
-+
+ 
  static int vrend_video_enocde_upload_picture(
                                  struct virgl_video_codec *codec,
-                                 struct virgl_video_dma_buf *dmabuf)
 @@ -946,21 +1003,42 @@
      .gpu_fence_wait             = vrend_video_gpu_fence_wait,
      .gpu_fence_destroy          = vrend_video_gpu_fence_destroy,
