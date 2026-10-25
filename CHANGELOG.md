@@ -5,6 +5,30 @@ in more words.
 
 ## 3.2.2 (unreleased)
 
+- **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has
+  odd characters in its command line.** omacvm reads the Mac's process list to find the VM's
+  QEMU. One line that is not UTF-8 (a file name in an old encoding, binary arguments) made
+  macOS's awk stop there, so omacvm missed the VM after it: a control centre switch then tried to
+  start the running VM and ended with "did not get an address" (#545; found in the 3.2.1 test on
+  a MacBook Air). The same line made `pgrep -f` fail, so `omacvm check` could miss a running
+  Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
+  download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
+  Mac.
+
+- **Control centre switches right after another one are not turned away.** When a switch's job
+  ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
+  switch was refused with "unknown VM" at once and the control centre asked again, so that switch
+  took about 12 s instead of 7-9 s (#528; reproduced in a test VM 3 of 3 times). The Bridge now looks again
+  at once and waits for it (about 1 s), then backs off as before when the VM stays out of reach.
+  Its log also says why it did not take a VM (not running, not set up, the SSH error) and which
+  VM the app named. Needs `omacvm update` (or the app's update) on the Mac.
+
+- **USB devices** (experimental): a device that QEMU took longer than 3 s to add was reported as
+  not connected, but the VM often got it anyway: QEMU finished the add after the app had stopped
+  waiting (#526; 6 of 6 times against a real QEMU). The app now waits up to 15 s for QEMU's
+  answer, and without one asks QEMU which devices the VM has: one QEMU added late counts as
+  connected, one it does not have is removed again. Needs the app update.
+
 - **Mac input methods** (experimental): the Mac's input method stays on while the VM moves the
   keyboard focus for a moment. Each time a text field in the VM lost the focus, the Mac switched
   its input method off at once, and on again with the next key; in the debug capture from

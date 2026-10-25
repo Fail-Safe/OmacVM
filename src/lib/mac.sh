@@ -76,7 +76,7 @@ helper_pid() {
     gestures-) exe="OmacVMGestures\.app/Contents/MacOS/omacvm-gestures" ;;
     *) return 1 ;;
   esac
-  pgrep -a -o -u "$(id -u)" -f "$exe"
+  LC_ALL=C pgrep -a -o -u "$(id -u)" -f "$exe"   # bytes: in UTF-8, pgrep -f fails on any line that is not UTF-8 (#545)
 }
 
 # proc_started PID: when it started (seconds since 1970), from ps's elapsed time.
