@@ -626,6 +626,8 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(ug.running && ug.started == 2, "a job ended: a run goes")
     rr = ug.refused(key: k, now: t0 + 1.5)
     expect(!rr.start && rr.waitFor == 3, "refused while it goes: waits for the run after it")
+    rr = ug.refused(key: k, now: t0 + 1.8)
+    expect(!rr.start && rr.waitFor == 3, "a second request meanwhile: also the run after it, not the one going (#528 review)")
     let ra = ug.finished([unreach], now: t0 + 2)
     expect(ra.again && ug.running && ug.started == 3, "that run starts as the first one ends")
     _ = ug.finished([unreach], now: t0 + 3)
@@ -634,18 +636,18 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     // The control centre open on a VM the Mac cannot reach: graphics memory
     // (no SSH) every 2 s does not start its back-off over (#528 review), so
     // status every 5 s for 10 minutes makes the looks of one episode only.
-    expect(!vmReady(key: k, [unreach]) && vmReady(key: k, [appVM]), "ready: the app VM reachable, not only listed")
+    expect(!appVMReady("Omarchy", [unreach]) && appVMReady("Omarchy", [appVM]), "ready: the app VM reachable, not only listed")
     let reachA = VMEntry(name: "a", type: "parallels", state: "running", ip: "10.211.55.5", omacvm: "3.0.3", setup: true, reachable: true)
     var unreachA = reachA; unreachA.reachable = false
-    expect(vmReady(key: "address 10.211.55.5", [reachA]) && !vmReady(key: "address 10.211.55.5", [unreachA])
-           && !vmReady(key: "address 10.211.55.9", [reachA]) && !vmReady(key: "other", [appVM]), "ready: by address too")
+    expect(peerReady("10.211.55.5", [reachA]) && !peerReady("10.211.55.5", [unreachA])
+           && !peerReady("10.211.55.9", [reachA]), "ready: by address too")
     var uc = VMListCache()
     _ = uc.unknown(now: t0, every: 1)
     _ = uc.finished([unreach], now: t0 + 1)
     var ccRuns = 0
     for s in stride(from: 0, to: 600, by: 1) {
       let now = t0 + 2 + Double(s)
-      if s % 2 == 0, vmReady(key: k, uc.list) { uc.reached(key: k) }   // graphics memory: answered, no reset
+      if s % 2 == 0, appVMReady("Omarchy", uc.list) { uc.reached(key: k) }   // graphics memory: answered, no reset
       if s % 5 == 0, uc.refused(key: k, now: now).start { ccRuns += 1; _ = uc.finished([unreach], now: now + 0.5) }
     }
     expect(ccRuns <= 8, "control centre open on an unreachable VM for 10 minutes: at most 8 looks (got \(ccRuns))")

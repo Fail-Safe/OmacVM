@@ -386,17 +386,17 @@ func peerListed(_ peer: String, _ vms: [VMEntry]) -> Bool {
   vms.contains { $0.state == "running" && !$0.ip.isEmpty && $0.ip == peer }
 }
 
-/// The list has the VM of this cache key ("app/<name>", "address <ip>") as a
-/// request that needs SSH would take it: running, set up and reachable. Only
-/// then does a request start the VM's back-off over (VMListCache.reached):
-/// graphics memory, a job's state and the other requests without SSH are
-/// answered for an unreachable VM too, and must not (#528 review).
-func vmReady(key: String, _ vms: [VMEntry]) -> Bool {
-  if key.hasPrefix("app/") {
-    if case .success = vmForApp(String(key.dropFirst(4)), vms) { return true }
-  } else if key.hasPrefix("address ") {
-    if case .success = vmForPeer(String(key.dropFirst(8)), vms) { return true }
-  }
+/// The list has this VM as a request that needs SSH would take it: running,
+/// set up and reachable. Only then does a request start the VM's back-off
+/// over (VMListCache.reached): graphics memory, a job's state and the other
+/// requests without SSH are answered for an unreachable VM too, and must not
+/// (#528 review).
+func appVMReady(_ name: String, _ vms: [VMEntry]) -> Bool {
+  if case .success = vmForApp(name, vms) { return true }
+  return false
+}
+func peerReady(_ peer: String, _ vms: [VMEntry]) -> Bool {
+  if case .success = vmForPeer(peer, vms) { return true }
   return false
 }
 
@@ -1094,6 +1094,7 @@ struct VMListCache {
   static let backOff: [Double] = [30, 60, 120]
   private var refusedAt: [String: Date] = [:]
   private var refusedRuns: [String: Int] = [:]
+  private var lookRun: [String: Int] = [:]   // the run of the VM's last look
   mutating func refused(key: String, now: Date) -> (start: Bool, waitFor: Int?) {
     guard now.timeIntervalSince(failedAt) >= Self.afterFailure else { return (false, nil) }
     let n = refusedRuns[key] ?? 0
@@ -1103,28 +1104,33 @@ struct VMListCache {
       // The first look: the run after the one going. Later ones: only the
       // run this VM's look started is waited for.
       if n == 0 {
-        count(key, now: now, looks: 1)
+        count(key, now: now, looks: 1, run: started + 1)
         again = true
         return (false, started + 1)
       }
-      return (false, now.timeIntervalSince(last) < Self.unknownWait ? started : nil)
+      // Its look's run, while it has not ended (not the one going, which may have
+      // started before the VM was back).
+      if now.timeIntervalSince(last) < Self.unknownWait, let r = lookRun[key], r > ended { return (false, r) }
+      return (false, nil)
     }
     guard now.timeIntervalSince(last) >= every else { return (false, nil) }
-    count(key, now: now, looks: n + 1)
     start()
+    count(key, now: now, looks: n + 1, run: started)
     return (true, started)
   }
 
-  private mutating func count(_ key: String, now: Date, looks: Int) {
-    if refusedAt.count > 64 { refusedAt.removeAll(); refusedRuns.removeAll() }   // a guest cannot grow these
+  private mutating func count(_ key: String, now: Date, looks: Int, run: Int) {
+    if refusedAt.count > 64 { refusedAt.removeAll(); refusedRuns.removeAll(); lookRun.removeAll() }   // a guest cannot grow these
     refusedAt[key] = now
     refusedRuns[key] = looks
+    lookRun[key] = run
   }
 
   /// A request found this VM in the list as it should be again: its back-off starts over.
   mutating func reached(key: String) {
     refusedAt[key] = nil
     refusedRuns[key] = nil
+    lookRun[key] = nil
   }
 
   /// A request from a VM the list has at this address did not prove with
