@@ -43,11 +43,10 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
  #include "hw/core/boards.h"
  #include "system/system.h"
  #include "system/runstate.h"
-@@ -180,6 +181,17 @@
- #ifdef CONFIG_OPENGL
+@@ -181,6 +182,37 @@
  static void omacvm_present_seen_again(void);
  #endif
-+
+ 
 +/*
 + * OmacVM: the guest stops drawing while the window cannot be seen
 + * (omacvm-cocoa-guest-pause.patch, ui/omacvm-guest-pause.h). Fed on the
@@ -58,18 +57,54 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +static bool omacvm_gp_dark;     /* the guest's display went off while told (BQL) */
 +static void omacvm_gp_update(void);
 +static void omacvm_gp_hello(NSDictionary *hello);
- 
++
++/*
++ * QEMU thread, BQL: the guest drew a frame, from a GL scanout's flush or a
++ * plain surface's update (GPU safe mode). The first one after "seen" ends
++ * the hold; the second goes into qemu.log after a pause.
++ */
++static void omacvm_gp_guest_frame(void)
++{
++    static double first_ms;
++    unsigned n = omacvm_gp_frame(&omacvm_gp);
++
++    if (n == 1) {
++        first_ms = 1000 * (CACurrentMediaTime() - omacvm_gp.seen_at);
++    } else if (n == 2 && omacvm_gp_dark) {
++        omacvm_gp_dark = false;
++        fprintf(stderr, "omacvm: guest drawing: paused for %.0f s while the window was out of sight; "
++                "frames again %.0f and %.0f ms after it was seen\n", omacvm_gp.paused_s, first_ms,
++                1000 * (CACurrentMediaTime() - omacvm_gp.seen_at));
++    }
++}
++
  static NSInteger cbchangecount = -1;
  static QemuClipboardInfo *cbinfo;
-@@ -4841,6 +4853,7 @@
+ static QemuEvent cbevent;
+@@ -4837,6 +4869,11 @@
+     static double since;
+     NSWindow *w = [note object];
+     bool seen = ([w occlusionState] & NSWindowOcclusionStateVisible) != 0;
++    /*
++     * Before the check below: a window hidden from the start sent no
++     * notice, so omacvm_window_seen still says seen when it first shows.
++     */
++    omacvm_gp_update();
+     if (seen == qatomic_read(&omacvm_window_seen)) {
          return;
      }
-     qatomic_set(&omacvm_window_seen, seen);
-+    omacvm_gp_update();
-     if (!seen) {
-         since = CACurrentMediaTime();
- #ifdef CONFIG_OPENGL
-@@ -8205,6 +8218,15 @@
+@@ -7263,6 +7300,10 @@
+     });
+     cocoa_refresh_activity();
+     omacvm_hold_dirty = true;
++    /* OmacVM: a plain surface's frame (GPU safe mode) after a pause; QEMU's "not active" one is none. */
++    if (surface && !surface_is_placeholder(surface)) {
++        omacvm_gp_guest_frame();
++    }
+ }
+ 
+ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+@@ -8205,6 +8246,15 @@
      if (!qatomic_read(&omacvm_window_seen) && !always) {
          gl_dirty = true;
          omacvm_frames_unseen++;
@@ -85,7 +120,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
          return true;
      }
  
-@@ -9092,6 +9114,9 @@
+@@ -9092,6 +9142,9 @@
  
  static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
  {
@@ -95,38 +130,29 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
      gl_scanout_borrow = NULL;
      gl_dirty = true;
      cocoa_refresh_activity();
-@@ -9126,6 +9151,18 @@
+@@ -9126,6 +9179,7 @@
                                     uint32_t x, uint32_t y,
                                     uint32_t w, uint32_t h)
  {
-+    /* OmacVM: the guest's first frames after a pause, for qemu.log (guest-pause patch). */
-+    static double first_ms;
-+    unsigned n = omacvm_gp_frame(&omacvm_gp);
-+
-+    if (n == 1) {
-+        first_ms = 1000 * (CACurrentMediaTime() - omacvm_gp.seen_at);
-+    } else if (n == 2 && omacvm_gp_dark) {
-+        omacvm_gp_dark = false;
-+        fprintf(stderr, "omacvm: guest drawing: paused for %.0f s while the window was out of sight; "
-+                "frames again %.0f and %.0f ms after it was seen\n", omacvm_gp.paused_s, first_ms,
-+                1000 * (CACurrentMediaTime() - omacvm_gp.seen_at));
-+    }
++    omacvm_gp_guest_frame();    /* the guest's first frames after a pause (guest-pause patch) */
      gl_dirty = true;
      omacvm_hold_dirty = true;
      /* What changed, for the surfaces' next draws (partial present). */
-@@ -10762,6 +10799,8 @@
-     bool locked = omacvm_ds_screen_locked || omacvm_ds_asleep || omacvm_ds_away ||
+@@ -10763,6 +10817,8 @@
                    omacvm_ds_test_locked;
      double at;
-+
-+    omacvm_gp_update();     /* locked or asleep: nobody sees the window */
  
++    omacvm_gp_update();     /* locked or asleep: nobody sees the window */
++
      if (locked != omacvm_ds_timer.locked) {
          omacvm_ds_locked_at = omacvm_ds_clock();
-@@ -11263,6 +11302,191 @@
+         fprintf(stderr, "omacvm: displays: %s (%s)\n", locked ?
+@@ -11261,8 +11317,193 @@
+         omacvm_bright_look();
+     }];
      omacvm_bright_look();
- }
- 
++}
++
 +/*
 + * OmacVM: the guest stops drawing while the VM's window cannot be seen
 + * (OmacVM.app's "Pause drawing while hidden", experimental; rules in
@@ -203,8 +229,8 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 +        omacvm_gp_send(again);
 +        omacvm_gp_again_arm();
 +    });
-+}
-+
+ }
+ 
 +static void omacvm_gp_tell(OmacVMGpTell tell)
 +{
 +    if (tell == OMACVM_GP_NONE) {
@@ -315,7 +341,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
  static void omacvm_send_layout(void)
  {
      NSMutableArray *outputs = [NSMutableArray array];
-@@ -11482,6 +11706,7 @@
+@@ -11482,6 +11723,7 @@
              omacvm_last_layout = nil;
              omacvm_edr_set(omacvm_edr_now());
              omacvm_edr_watch();
@@ -323,7 +349,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
              update = true;
          }
          if ([d[@"external"] isKindOfClass:[NSNumber class]] &&
-@@ -11511,6 +11736,7 @@
+@@ -11511,6 +11753,7 @@
      }
      omacvm_chan_fd = -1;
      omacvm_guest_ready = false;
@@ -331,7 +357,7 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
      omacvm_chan_tries = 0;
      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC),
                     dispatch_get_main_queue(), ^{ omacvm_chan_connect(); });
-@@ -12572,6 +12798,7 @@
+@@ -12572,6 +12815,7 @@
  #endif
      omacvm_head_delegate = [[OmacVMHeadDelegate alloc] init];
      omacvm_ds_watch_lock();

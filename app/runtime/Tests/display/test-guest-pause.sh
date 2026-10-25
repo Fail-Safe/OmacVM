@@ -31,14 +31,19 @@ sw=$(body 'static void omacvm_gp_read_switch(void)')
 present=$(body 'static bool cocoa_gl_present(void)')
 off=$(body 'static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)')
 flush=$(body 'static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,')
+gfx=$(body 'static void cocoa_gl_update(DisplayChangeListener *dcl,')
+frame=$(body 'static void omacvm_gp_guest_frame(void)')
 hello=$(body 'static void omacvm_chan_line(NSData *data)')
 init=$(body 'static void omacvm_displays_init(void)')
 [[ -n $seen && -n $lock && -n $update && -n $tell && -n $send && -n $again && -n $ghello && -n $close && -n $fire &&
-   -n $sw && -n $present && -n $off && -n $flush && -n $hello && -n $init ]] || fail "a piece of the wiring is missing"
+   -n $sw && -n $present && -n $off && -n $flush && -n $gfx && -n $frame && -n $hello && -n $init ]] || fail "a piece of the wiring is missing"
 grep -q '#include "ui/omacvm-guest-pause.h"' "$m" || fail "the rules are not included"
 # What feeds it: the occlusion, the lock and sleep, the start.
 grep -q 'omacvm_gp_update();' <<<"$seen" && grep -q 'omacvm_gp_update();' <<<"$lock" &&
   grep -q 'omacvm_gp_update();' <<<"$init" || fail "the window's state does not reach the rules"
+# A window hidden from the start sent no notice: its first one may match the old flag, so the rules are fed first.
+awk '/omacvm_gp_update\(\);/ && !u {u = NR} /return;/ && !r {r = NR} END {exit !(u && r && u < r)}' <<<"$seen" ||
+  fail "a window that first shows after a hidden start does not reach the rules"
 # Seen = some of the window on screen and nobody locked out; OMACVM_PRESENT_HIDDEN draws anyway.
 grep -q '\[w isVisible\] && (\[w occlusionState\] & NSWindowOcclusionStateVisible)' <<<"$update" &&
   grep -q 'bool seen = always || (on_screen && !omacvm_ds_screen_locked &&' <<<"$update" &&
@@ -64,6 +69,10 @@ grep -q 'at = omacvm_gp_again_at(&omacvm_gp);' <<<"$again" && grep -q 'again = o
 awk '/omacvm_frames_unseen\+\+;/ {a = NR} /if \(omacvm_gp_keep\(&omacvm_gp, gl_scanout_borrow != NULL, CACurrentMediaTime\(\)\)\) \{/ {b = NR}
      /if \(gl_scanout_borrow\) \{/ && !c {c = NR} END {exit !(a && b && c && a < b && b < c)}' <<<"$present" ||
   fail "the present does not keep the last picture before drawing without a scanout"
-grep -q 'omacvm_gp_dark = true;' <<<"$off" && grep -q 'unsigned n = omacvm_gp_frame(&omacvm_gp);' <<<"$flush" &&
-  grep -q 'omacvm: guest drawing: paused for' <<<"$flush" || fail "the guest's pause is not logged"
+grep -q 'omacvm_gp_dark = true;' <<<"$off" && grep -q 'unsigned n = omacvm_gp_frame(&omacvm_gp);' <<<"$frame" &&
+  grep -q 'omacvm: guest drawing: paused for' <<<"$frame" || fail "the guest's pause is not logged"
+# Both kinds of guest frame end the hold: a GL scanout's flush, and a plain surface's update (GPU safe mode),
+# not QEMU's own "display not active" surface.
+grep -q 'omacvm_gp_guest_frame();' <<<"$flush" && grep -q '!surface_is_placeholder(surface)' <<<"$gfx" &&
+  grep -q 'omacvm_gp_guest_frame();' <<<"$gfx" || fail "a guest frame does not end the hold on every path"
 echo "test-guest-pause: $m: wiring ok"
