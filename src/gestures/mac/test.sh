@@ -26,8 +26,11 @@
 #    with "all"), toward the Space it came from; in macOS back in; not moved
 #    or the shortcut off -> a Dock swipe; still not moved, or no Spaces
 #    information -> a notice in Omarchy, nothing else (never Mission
-#    Control); never out of full screen, never hidden; the keyboard follows the pointer's display; pressed in
-#    Mission Control (after the double press) it closes it and goes back into the VM; the posted key's
+#    Control); never out of full screen, never hidden; the keyboard follows the display that moved; pressed in
+#    Mission Control (after the double press) it closes it and goes back into the VM; with the VM on
+#    two displays "Focused monitor" is the display with the VM's own focus (the guest answers "Q"
+#    with "D", test-focus.py), else the pointer's, and back in also on a display that shows a
+#    second VM window; a second press before the move out drops it; the posted key's
 #    shape and marker (test-escape.c, a made-up world of displays and Spaces:
 #    nothing posted, swiped or activated). The marker is the same in
 #    Gestures, the Bridge and QEMU's patch. The guest names the combo pressed,
@@ -71,6 +74,10 @@
 #    is not; beside a Magic Trackpad touched last, the built-in one's new device
 #    does not take over, so the guest hears its size when it is touched next
 #    (test-trackpads.c, made-up devices).
+# 12. macOS's Three Finger Drag on (read live): three fingers stay macOS's drag
+#    (nothing to the guest, macOS's gesture events pass, no swipe out with
+#    three), four still go to the VM; off (the default): three and four go to
+#    the VM as before (test-three-drag.c, made-up frames).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
@@ -79,7 +86,8 @@ killtree() { local p; for p in "$@"; do pkill -P "$p" 2>/dev/null || true; kill 
 # Its own settings domain per run: two runs at once on one Mac (CI) keep apart.
 MOUSE_DOMAIN=org.omacvm.test.mouse-fingers.$$
 SHARE_DOMAIN=org.omacvm.test.share-keyboard.$$
-trap 'killtree ${PIDS:-}; rm -rf "$T"; defaults delete "$MOUSE_DOMAIN" >/dev/null 2>&1 || true; defaults delete "$SHARE_DOMAIN" >/dev/null 2>&1 || true; rm -f "$HOME/Library/Preferences/$SHARE_DOMAIN.plist"' EXIT
+DRAG_DOMAIN=org.omacvm.test.three-drag.$$
+trap 'killtree ${PIDS:-}; rm -rf "$T"; for d in "$MOUSE_DOMAIN" "$SHARE_DOMAIN" "$DRAG_DOMAIN"; do defaults delete "$d" >/dev/null 2>&1 || true; rm -f "$HOME/Library/Preferences/$d.plist"; done' EXIT
 trap 'exit 130' INT TERM
 clang -O1 -Wall -Wno-unused-function -o "$T/test-gestures" "$HERE/test-gestures.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
@@ -334,6 +342,9 @@ grep -E '^(ok|FAIL|skip) ' "$T/notice"
 # Swipe out to macOS in the guest, against a made-up Hyprland (#342).
 python3 "$HERE/../guest/test-swipe-out.py" "$HERE/../guest/omacvm-gestures" > "$T/swipe-out" 2>&1 || fail=1
 grep -E '^(ok|FAIL|skip) ' "$T/swipe-out"
+# The escape combo's question: Hyprland's focused output, where it sits on the Mac.
+python3 "$HERE/../guest/test-focus.py" "$HERE/../guest/omacvm-gestures" > "$T/focus" 2>&1 || fail=1
+grep -E '^(ok|FAIL|skip) ' "$T/focus"
 # The guest's reconnects without the Mac's helper: 2 s, then 10 s, one log line per outage.
 python3 "$HERE/../guest/test-retry.py" "$HERE/../guest/omacvm-gestures" > "$T/retry" 2>&1 || fail=1
 grep -E '^(ok|FAIL|skip) ' "$T/retry"
@@ -374,6 +385,14 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-wait" "$HERE/test-wait.c" "$HER
   -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-wait" > "$T/wait" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/wait"
+# 12. macOS's Three Finger Drag (its setting in a throwaway domain, deleted after).
+clang -O1 -Wall -Wno-unused-function "-DTHREE_DRAG_DOMAIN=\"$DRAG_DOMAIN\"" -o "$T/test-three-drag" "$HERE/test-three-drag.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit -framework IOKit
+"$T/test-three-drag" > "$T/three-drag" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/three-drag"
+n=$(grep -c "three finger drag (macOS) on: three fingers stay macOS's drag" "$T/three-drag" || true)
+if [[ $n == 1 ]]; then echo "ok   Three Finger Drag turned on is logged once"; else echo "FAIL logged $n times, want 1" >&2; fail=1; fi
 # 11. Devices macOS made anew: a wake from deep sleep makes the built-in trackpad's.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-trackpads" "$HERE/test-trackpads.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \

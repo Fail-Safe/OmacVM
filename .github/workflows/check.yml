@@ -285,11 +285,17 @@ jobs:
       - name: Battery watts and time left (Mac snapshot, VM agent, module on a kernel stand-in)
         run: src/tests/battery.sh
 
+      - name: The VM's time zone follows the Mac's (agent on a stand-in for /, a zone set by hand kept)
+        run: src/tests/timezone.sh
+
       - name: Gestures offline test (which VM gets them)
         run: src/gestures/mac/test.sh
 
       - name: Bridge offline tests (media-key tap, where each media key goes, Wi-Fi state)
         run: src/bridge/mac/test-models.sh
+
+      - name: Camera picked again after the lid closed, an unplug or no picture (a camera stand-in)
+        run: src/bridge/mac/test-camera.sh
 
       - name: Bridge wallpaper store (embedded image URLs, no desktop changes)
         run: src/bridge/mac/test-wallpaper.sh
@@ -467,6 +473,11 @@ jobs:
       - name: HDR's headroom for the guest (ADR 0049; the checks catch code without it)
         run: app/runtime/Tests/display/test-hdr-headroom.sh
 
+      - name: Partial present, only what the guest changed (ADR 0051; the checks catch code without it)
+        run: |
+          app/runtime/Tests/display/test-present-damage.sh
+          app/runtime/Tests/display/test-present-damage.sh --self-test
+
       - name: Extra brightness's gain, shader and omacvm check line (ADR 0050; the checks catch code without it)
         run: |
           app/runtime/Tests/display/test-extra-brightness.sh
@@ -526,6 +537,9 @@ jobs:
 
       - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
         run: src/tests/audio-timing.sh
+
+      - name: Disk flushes as write barriers (patch pinned and tested, log lines, check)
+        run: src/tests/disk-flush.sh
 
       - name: The VM's GPU work without QEMU's big lock (patches pinned and ordered, switch, log lines, check, what runs unlocked)
         run: src/tests/gpu-unlocked.sh
@@ -717,7 +731,9 @@ jobs:
             libgles-dev libdrm-dev libavcodec-dev libavutil-dev libsystemd-dev
           OMACVM_VDECD_SYSTEMD=1 src/tests/vdecd-down.sh
 
-      - name: The VA driver shim gives Chromium surfaces of their real size (a stand-in for Mesa's driver)
+      - name: The VA driver shim gives Chromium surfaces of their real size and waits for its pictures (a stand-in for Mesa's driver)
         run: |
           sudo apt-get install -yq --no-install-recommends gcc libva-dev
           src/app/guest/tests/va-shim-surfaces.sh
+          src/app/guest/tests/va-shim-decode-wait.sh
+          src/app/guest/tests/va-shim-vpp-fill.sh

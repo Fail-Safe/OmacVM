@@ -100,6 +100,7 @@ on CGL, not on ANGLE.
 | GPU safe mode (the old fence and frame path) | built: `gpu-native`, hidden | `gpuSafeMode` default |
 | Present on each flush | built: `gpu-native` | `qemu-cocoa-gl-present-on-flush.patch` |
 | IOSurface present | built: `gpu-native` | `qemu-cocoa-gl-present-iosurface.patch` |
+| Partial present (only the box the guest changed; needs Linux 7.4 or OmacVM's driver for real rects) | built: `frame-path`, off by default (`OMACVM_GL_PRESENT_DAMAGE=1`) | `omacvm-cocoa-present-damage*.patch`, ADR 0051 |
 | Blob alignment for 16 KiB pages | built: `gpu-native`, `gpu-venus` | `qemu-virtio-gpu-blob-alignment.patch` |
 | Venus on MoltenVK | built: `gpu-venus`, merged into `gpu-native`, hidden switch | see section 6 |
 | KosmicKrisp on macOS 26 | built, in release builds (3.0.0, ADR 0035) | `virgl-darwin-vulkan-beside.patch` + `virgl-darwin-kosmickrisp-fallback.patch` |
@@ -404,8 +405,11 @@ uniforms or a vertex shader's window each draw reads it back
 (`glGetBufferSubData`).
 Test: `test-const-ubo` (all three modes; case 22 for the guest buffer).
 
-Context switches: on CGL, every handover between GL contexts flushes the
-context it leaves. A `glWaitSync` in another context waits only for a fence
+Context switches: on CGL, every handover through `vrend_sync_make_current`
+flushes the context it leaves. Plain `make_current` calls (switching,
+creating and destroying guest contexts) do not; work across guest contexts
+is ordered by the guest's fences, which are flushed when they are made.
+A `glWaitSync` in another context waits only for a fence
 that was flushed (ARB_sync); `eglMakeCurrent` and `glXMakeCurrent` flush the
 context they leave, and upstream relies on that, but `CGLSetCurrentContext`
 (QEMU's Cocoa make-current) does not, and Apple's `glWaitSync` on an
@@ -787,6 +791,7 @@ falls back and logs once.
 | `OMACVM_VIDEO_COPY` | off | CPU copy instead of IOSurface blit | built |
 | `OMACVM_VIDEO_EDGE_FILL=0` | on | rows and columns of the guest's video planes past the picture stay unwritten (the green bar before 3.1.32) | built (`green-bar`) |
 | `OMACVM_VIDEO_NO_REALTIME` | off | no real-time VT session | built |
+| `OMACVM_VIDEO_DECODE_SYNC=1` | off | END_FRAME waits for each picture on QEMU's GPU thread (before 3.2.1); default: the pictures finish beside it and planes and fences wait for theirs | built (`chrome-4k`) |
 | `OMACVM_VIRGL_VIDEO_ABI=legacy` | Mesa 26 numbers | profile numbers of older guests | built |
 | `OMACVM_VIDEO_DEBUG=1` | off | log decode details | built |
 | "Use external displays" (Omarchy display panel, stored in the VM) | toggle in the VM | one output per Mac display | built (`app-displays`) |

@@ -1,0 +1,159 @@
+From: OmacVM
+Subject: [PATCH] ui: which part of a present surface needs drawing, tested without AppKit
+
+What: a header with no AppKit or GL in it: per present surface, the union
+(one box) of the guest's flush rects since that surface's last draw;
+clipped to the frame (overflow-safe: the rects come from the guest); full
+draws after a reset, another frame size, a request (all full), for a
+surface past the count, and when the box covers three quarters of the
+frame or more. Used by omacvm-cocoa-present-damage.patch (which explains
+the why).
+
+Why its own file: so the rules are tested without QEMU or a window
+(app/runtime/Tests/display/test-present-damage.sh applies this patch to an
+empty folder; at build time and in CI).
+
+Upstream: with omacvm-cocoa-present-damage.patch; not sent.
+Test: app/runtime/Tests/display/test-present-damage.c.
+
+diff --git a/ui/omacvm-present-damage.h b/ui/omacvm-present-damage.h
+new file mode 100644
+--- /dev/null
++++ b/ui/omacvm-present-damage.h
+@@ -0,0 +1,136 @@
++/*
++ * OmacVM: which part of a present surface needs drawing (partial present).
++ *
++ * No AppKit or OpenGL in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-present-damage.c); ui/cocoa.m feeds it.
++ *
++ * QEMU's present copies the guest's scanout into one of a few IOSurfaces and
++ * shows that surface. A surface keeps what it showed last time, so only what
++ * changed since then has to be drawn into it again. The guest says what
++ * changed in each RESOURCE_FLUSH rect (with the Linux 7.4 damage fix; older
++ * kernels flush the whole plane on every page flip, and then every present
++ * is a full one, as before).
++ *
++ * Each surface collects the union (one bounding box) of every rect flushed
++ * since it was last drawn: frames merged or skipped by the present, and the
++ * other surfaces' frames, all count. Anything that is not a plain copy of
++ * the same-sized frame (a new surface, another frame size, scaling, another
++ * colour path, the boot logo) makes the next draw of every surface a full
++ * one. Rects come from the guest: they are clipped to the frame, overflow
++ * included.
++ */
++#ifndef OMACVM_PRESENT_DAMAGE_H
++#define OMACVM_PRESENT_DAMAGE_H
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#define OMACVM_PD_SURFACES 8
++
++typedef struct OmacvmPDRect {
++    uint32_t x, y, w, h;            /* w == 0 or h == 0: nothing */
++} OmacvmPDRect;
++
++typedef struct OmacvmPresentDamage {
++    unsigned n;                     /* surfaces in use */
++    uint32_t fw, fh;                /* the frame size the rects are for */
++    bool full[OMACVM_PD_SURFACES];  /* the next draw of surface i is a full one */
++    OmacvmPDRect box[OMACVM_PD_SURFACES]; /* else: what changed since its last draw */
++} OmacvmPresentDamage;
++
++static inline bool omacvm_pd_empty(OmacvmPDRect r)
++{
++    return r.w == 0 || r.h == 0;
++}
++
++/* Every surface's next draw is a full one. */
++static inline void omacvm_pd_all_full(OmacvmPresentDamage *d)
++{
++    for (unsigned i = 0; i < OMACVM_PD_SURFACES; i++) {
++        d->full[i] = true;
++        d->box[i] = (OmacvmPDRect){ 0, 0, 0, 0 };
++    }
++}
++
++/* N surfaces for frames of FW x FH: all of them drawn in full next. */
++static inline void omacvm_pd_reset(OmacvmPresentDamage *d, unsigned n,
++                                   uint32_t fw, uint32_t fh)
++{
++    d->n = n > OMACVM_PD_SURFACES ? OMACVM_PD_SURFACES : n;
++    d->fw = fw;
++    d->fh = fh;
++    omacvm_pd_all_full(d);
++}
++
++/* The frame size changed: rects for the old one say nothing about the new. */
++static inline void omacvm_pd_frame(OmacvmPresentDamage *d, uint32_t fw, uint32_t fh)
++{
++    if (fw != d->fw || fh != d->fh) {
++        omacvm_pd_reset(d, d->n, fw, fh);
++    }
++}
++
++static inline OmacvmPDRect omacvm_pd_union(OmacvmPDRect a, OmacvmPDRect b)
++{
++    if (omacvm_pd_empty(a)) {
++        return b;
++    }
++    if (omacvm_pd_empty(b)) {
++        return a;
++    }
++    uint64_t x0 = a.x < b.x ? a.x : b.x;
++    uint64_t y0 = a.y < b.y ? a.y : b.y;
++    uint64_t ax1 = (uint64_t)a.x + a.w, bx1 = (uint64_t)b.x + b.w;
++    uint64_t ay1 = (uint64_t)a.y + a.h, by1 = (uint64_t)b.y + b.h;
++    uint64_t x1 = ax1 > bx1 ? ax1 : bx1;
++    uint64_t y1 = ay1 > by1 ? ay1 : by1;
++    return (OmacvmPDRect){ (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0) };
++}
++
++/* The guest flushed X, Y, W, H of the frame (frame pixels, top-left origin). */
++static inline void omacvm_pd_add(OmacvmPresentDamage *d, uint32_t x, uint32_t y,
++                                 uint32_t w, uint32_t h)
++{
++    if (x >= d->fw || y >= d->fh || w == 0 || h == 0) {
++        return;
++    }
++    if (w > d->fw - x) {
++        w = d->fw - x;
++    }
++    if (h > d->fh - y) {
++        h = d->fh - y;
++    }
++    OmacvmPDRect r = { x, y, w, h };
++    for (unsigned i = 0; i < d->n; i++) {
++        if (!d->full[i]) {
++            d->box[i] = omacvm_pd_union(d->box[i], r);
++        }
++    }
++}
++
++/*
++ * Surface I is drawn now. True: draw only *OUT (empty: nothing changed since
++ * its last draw, nothing to draw). False: draw it in full. Either way the
++ * surface is up to date afterwards.
++ */
++static inline bool omacvm_pd_take(OmacvmPresentDamage *d, unsigned i, OmacvmPDRect *out)
++{
++    *out = (OmacvmPDRect){ 0, 0, d->fw, d->fh };
++    if (i >= d->n) {
++        return false;
++    }
++    bool partial = !d->full[i];
++    if (partial) {
++        *out = d->box[i];
++        /* Most of the frame changed: a full draw costs the same. */
++        if ((uint64_t)out->w * out->h * 4 >= (uint64_t)d->fw * d->fh * 3) {
++            partial = false;
++            *out = (OmacvmPDRect){ 0, 0, d->fw, d->fh };
++        }
++    }
++    d->full[i] = false;
++    d->box[i] = (OmacvmPDRect){ 0, 0, 0, 0 };
++    return partial;
++}
++
++#endif

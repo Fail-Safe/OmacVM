@@ -113,7 +113,11 @@ public struct USBDevice: Equatable, Sendable {
         if deviceClass == 0x11 || interfaces.contains(where: { $0.interfaceClass == 0x11 }) {
             return .notOffered("a USB-C adapter's info device")
         }
-        let users = drivers + interfaces.flatMap(\.users)
+        // A device's own driver names it best (an iPhone), but the CDC composite
+        // driver is there for serial ports and network adapters alike: there the
+        // interfaces' drivers say what it is.
+        let generic = drivers.filter { $0 == "AppleUSBCDCCompositeDevice" }
+        let users = drivers.filter { !generic.contains($0) } + interfaces.flatMap(\.users) + generic
         if let u = users.first { return .usedByMac(USBDevice.reason(u)) }
         return .free
     }
@@ -127,9 +131,11 @@ public struct USBDevice: Equatable, Sendable {
         if has("hid") { return "macOS uses it as a keyboard, mouse or security key" }
         if has("audio") { return "macOS uses it for sound" }
         if has("massstorage", "scsi", "uas", "storage") { return "macOS uses it as a disk" }
+        // Network before serial: ECM drivers are CDC drivers too (AppleUSBCDCECMData). Whole
+        // driver words, so an app named SyncMate is not a network adapter.
+        if has("usbncm", "cdcecm", "ethernet", "network") { return "macOS uses it as a network adapter" }
         if has("cdc", "serial", "ftdi", "slcom", "chcom", "plcom", "acm") { return "macOS uses it as a serial port" }
         if has("uvc", "video", "camera") { return "macOS uses it as a camera" }
-        if has("ncm", "ecm", "ethernet", "network") { return "macOS uses it as a network adapter" }
         if has("bluetooth") { return "macOS uses it for Bluetooth" }
         if has("smartcard", "ccid") { return "macOS uses it as a smart card reader" }
         return "in use on the Mac (\(user))"
