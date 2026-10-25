@@ -361,7 +361,7 @@ log "built $APP ($(du -sh "$APP" | cut -f1))"
 # The test identity lives at one path; a running copy is never replaced.
 if (( INSTALL )); then
   DEST=$HOME/Applications/"OmacVM Test.app"
-  if pgrep -f "$DEST/Contents/" >/dev/null; then
+  if LC_ALL=C pgrep -f "$DEST/Contents/" >/dev/null; then
     echo "$DEST is running: quit it (and its helpers) first" >&2; exit 1
   fi
   mkdir -p "$HOME/Applications"
