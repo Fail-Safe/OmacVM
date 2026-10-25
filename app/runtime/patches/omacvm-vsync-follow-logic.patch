@@ -1,0 +1,181 @@
+From: OmacVM
+Subject: [PATCH] ui: the guest's vblanks on the Mac's refresh, tested without AppKit
+
+What: a header with no AppKit in it, for omacvm-vsync-follow.patch: the
+next point of a refresh grid (host ns, period in ps, so an hour of
+60 Hz adds up no rounded ns), the period of the display's full rate from
+a run of the display link's ticks (a link slowed to 60 or 24 Hz on a
+120 Hz panel still ticks on that grid), and the lead: when the guest's
+frames are ready after their vblank, the 95th percentile of the last 64
+plus 1 ms, at least 2 ms, at most a period less 1 ms. Also OmacVM's
+virtio-gpu command and answer numbers, and the shared state's calls.
+
+Why its own file: so the rules are tested without QEMU or a window
+(app/runtime/Tests/display/test-vsync-follow.sh applies this patch to an
+empty folder; at build time and in CI).
+
+Upstream: OmacVM only (OmacVM's present and its own virtio-gpu command).
+Test: app/runtime/Tests/display/test-vsync-follow.c.
+
+--- /dev/null
++++ b/ui/omacvm-vsync.h
+@@ -0,0 +1,159 @@
++/*
++ * OmacVM: the guest's vblanks in step with the Mac display's refresh.
++ *
++ * The guest's vblank is a timer at the display's rate but at a phase of its
++ * own. QEMU shows a frame at the Mac's next refresh, so a frame that comes
++ * just after the commit for one waits almost a refresh. A guest driver that
++ * asks (OmacVM's virtio-gpu, vsync_lock=1) gets a grid instead: vblanks
++ * `lead` before the commit for each refresh, at the display's own period.
++ * Hyprland draws right after a vblank, so its frame is there in time for the
++ * next refresh and waits for nothing else.
++ *
++ * The grid comes from the present's display link (ui/cocoa.m), the guest's
++ * counter offset from hvf (target/arm/hvf/hvf.c), and the guest asks through
++ * virtio-gpu (VIRTIO_GPU_CMD_OMACVM_VSYNC, hw/display/virtio-gpu-virgl.c).
++ * The math is here without AppKit, tested on its own
++ * (app/runtime/Tests/display/test-vsync-follow.c).
++ */
++#ifndef OMACVM_VSYNC_H
++#define OMACVM_VSYNC_H
++
++#include <math.h>
++#include <stdbool.h>
++#include <stdint.h>
++
++/* virtio-gpu: OmacVM's own command and answer (not in the virtio spec). */
++#define OMACVM_VIRTIO_GPU_CMD_VSYNC 0x0f00
++#define OMACVM_VIRTIO_GPU_RESP_OK_VSYNC 0x11f0
++#define OMACVM_VSYNC_VALID (1u << 0)
++
++/*
++ * Host times are ns of mach_absolute_time (CACurrentMediaTime() x 1e9);
++ * periods are in ps so a 120 Hz grid does not drift by a rounded ns per
++ * refresh.
++ */
++
++/* Grid: the first grid point at or after now. */
++static inline int64_t omacvm_vsync_next(int64_t vblank_ns, uint64_t period_ps,
++                                        int64_t now_ns)
++{
++    if (!period_ps) {
++        return vblank_ns;
++    }
++    /* Long gaps (an idle hour) stay exact: whole periods in integers. */
++    __int128 d = (__int128)(now_ns - vblank_ns) * 1000;
++    __int128 n = d / (__int128)period_ps;   /* toward zero: up for d < 0 */
++    if (n * (__int128)period_ps < d) {
++        n++;
++    }
++    return vblank_ns + (int64_t)(n * (__int128)period_ps / 1000);
++}
++
++/*
++ * The period of the display's full rate from two link timestamps seconds
++ * apart: the span over the whole number of full-rate refreshes in it (a link
++ * slowed to 60 or 24 Hz on a 120 Hz panel still ticks on that grid). 0 when
++ * the span is too short or does not fit the rate (within 2 %).
++ */
++static inline uint64_t omacvm_vsync_period_ps(double span_s, double max_hz)
++{
++    if (!(span_s >= 0.5) || !(max_hz >= 20 && max_hz <= 500)) {
++        return 0;
++    }
++    double n = round(span_s * max_hz);
++    double p = span_s / n;
++    if (fabs(p * max_hz - 1.0) > 0.02) {
++        return 0;
++    }
++    return (uint64_t)llround(p * 1e12);
++}
++
++/*
++ * The lead: how long before the commit the guest's vblank comes. Frames that
++ * arrive later than the lead miss their refresh; the lead follows when the
++ * guest's frames arrive after their vblank: the 95th percentile of the last
++ * OMACVM_LEAD_N plus a margin, at least OMACVM_LEAD_MIN_S, at most a period
++ * less OMACVM_LEAD_SPARE_S.
++ */
++#define OMACVM_LEAD_N 64
++#define OMACVM_LEAD_MIN_S 0.002
++#define OMACVM_LEAD_MARGIN_S 0.001
++#define OMACVM_LEAD_SPARE_S 0.001
++#define OMACVM_LEAD_START_S 0.005
++
++typedef struct OmacVMLead {
++    double after[OMACVM_LEAD_N];   /* frame ready, seconds after its vblank */
++    int n, next;
++} OmacVMLead;
++
++static inline void omacvm_lead_reset(OmacVMLead *l)
++{
++    l->n = l->next = 0;
++}
++
++/* A frame was ready `after` seconds after the grid's vblank before it. */
++static inline void omacvm_lead_add(OmacVMLead *l, double after)
++{
++    if (!isfinite(after) || after < 0) {
++        return;
++    }
++    l->after[l->next] = after;
++    l->next = (l->next + 1) % OMACVM_LEAD_N;
++    if (l->n < OMACVM_LEAD_N) {
++        l->n++;
++    }
++}
++
++/* The lead for a period (seconds); `now` is the current one, kept with too few frames. */
++static inline double omacvm_lead_value(const OmacVMLead *l, double period, double now)
++{
++    double s[OMACVM_LEAD_N];
++    double hi = period - OMACVM_LEAD_SPARE_S;
++    int n = l->n;
++
++    if (!(period > 0)) {
++        return now;
++    }
++    if (n >= 16) {
++        for (int i = 0; i < n; i++) {
++            double v = l->after[i];
++            int j = i;
++            while (j > 0 && s[j - 1] > v) {
++                s[j] = s[j - 1];
++                j--;
++            }
++            s[j] = v;
++        }
++        now = s[(n * 95) / 100] + OMACVM_LEAD_MARGIN_S;
++    }
++    if (now < OMACVM_LEAD_MIN_S) {
++        now = OMACVM_LEAD_MIN_S;
++    }
++    if (now > hi) {
++        now = hi;
++    }
++    return now;
++}
++
++/* Seconds from the latest vblank of the grid (vblank, period) before t. */
++static inline double omacvm_vsync_since(double t, double vblank, double period)
++{
++    if (!(period > 0)) {
++        return -1;
++    }
++    double d = fmod(t - vblank, period);
++    return d < 0 ? d + period : d;
++}
++
++/* The shared state (ui/omacvm-vsync.c); any thread. */
++void omacvm_vsync_publish(int64_t vblank_ns, uint64_t period_ps);
++void omacvm_vsync_withdraw(void);
++void omacvm_vsync_set_counter_offset(uint64_t mach_offset);
++/* For the guest: its counter at the next vblank it should have, and the period. */
++bool omacvm_vsync_for_guest(uint64_t *counter, uint64_t *period_ps);
++/* When a guest last asked (host ns; 0: never). */
++int64_t omacvm_vsync_asked_ns(void);
++/* mach_absolute_time() in ns. */
++int64_t omacvm_vsync_now_ns(void);
++
++#endif
