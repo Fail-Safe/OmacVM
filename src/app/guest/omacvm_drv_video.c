@@ -25,11 +25,24 @@
  * /run/omacvm/host.env); an older one shows them black, and then the CPU is
  * better. Other apps keep Mesa's one page. OMACVM_VA_EXPORT=1 or 0 overrides.
  * Chromium's decoders see a largest size of 1920 x 1920 (OMACVM_VA_MAX, 0:
- * none; encoders and video processing keep Mesa's): above that its hardware
- * path dropped far more frames than its CPU decoders in our test VMs (4K VP9
- * on an M2: 31 % against 0.1 %), so 1440p and 4K stay on the CPU; calls and
- * 1080p get the media engine. Only in Chromium's processes, also when
+ * none; encoders and video processing keep Mesa's) unless the Mac's runtime
+ * decodes beside its GPU thread (omacvm.vadecasync=1, below): an older one
+ * waited for every picture on that thread, and above 1080p Chrome's hardware
+ * path then dropped far more frames than its CPU decoders (4K VP9 on an M2: 38 %
+ * against 7 %). With the newer one there is no limit (4K: 6-7 % on the M2 and
+ * on an M4 Max, the CPU 7-8 %). Only in Chromium's processes, also when
  * OMACVM_VA_EXPORT=1 forces the export hint elsewhere.
+ *
+ * Waiting for the picture (Chromium): the Mac's runtime decodes beside its GPU
+ * thread (it says omacvm.vadecasync=1 at start): vaEndPicture returns at once
+ * and the picture comes into the surface when the media engine is done. Chromium
+ * converts each picture to ARGB right after decoding it; that conversion would
+ * wait on the Mac's GPU thread for the picture, and every app's drawing with it.
+ * So in Chromium's processes the shim waits after vaEndPicture on a decoding
+ * context: an empty command with a fence on the display's DRM file, which the
+ * Mac signals once every picture sent before it is in its planes. Chromium's
+ * decoder thread waits instead of the Mac's GPU thread; at most 100 ms.
+ * OMACVM_VA_DECODE_WAIT=1 or 0 overrides.
  *
  * Chromium's RGB frames fill their planes: Mesa rounds a surface's planes up
  * to 16 (a 320x180 surface has 192 rows), and Chrome shows the ARGB frames it
@@ -84,6 +97,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -107,20 +121,23 @@ static VAStatus (*mesa_query_surface_attributes)(VADriverContextP, VAConfigID,
                                                  VASurfaceAttrib *, unsigned int *);
 static int export_sized(void);
 static int chromium(void);
+static int host_decodes_async(void);
 
 /* Chromium's hardware decoding up to this many pixels wide and high (see the top);
- * OMACVM_VA_MAX=0: no limit; not a number: 1920. */
+ * OMACVM_VA_MAX=0: no limit; not set or not a number: none on a runtime that
+ * decodes beside its GPU thread, else 1920. */
 static int chromium_max(void)
 {
     const char *env = getenv("OMACVM_VA_MAX");
+    int dflt = host_decodes_async() ? 0 : 1920;
     char *end;
     unsigned long v;
 
     if (!env || !*env)
-        return 1920;
+        return dflt;
     v = strtoul(env, &end, 10);
     if (*end)
-        return 1920;
+        return dflt;
     return v > INT_MAX ? INT_MAX : (int)v;
 }
 
@@ -238,8 +255,8 @@ static int chromium_process(void)
     return 0;
 }
 
-/* The Mac's runtime draws VA-API's converted frames (see the top). */
-static int host_draws_export(void)
+/* The Mac's runtime says WHAT (a host.env line: "OMACVM_VAEXPORT=1\n"). */
+static int host_says(const char *what)
 {
     char line[256];
     const char *path = getenv("OMACVM_HOST_ENV");   /* tests */
@@ -249,9 +266,15 @@ static int host_draws_export(void)
     if (!f)
         return 0;
     while (!yes && fgets(line, sizeof(line), f))
-        yes = !strcmp(line, "OMACVM_VAEXPORT=1\n");
+        yes = !strcmp(line, what);
     fclose(f);
     return yes;
+}
+
+/* The Mac's runtime draws VA-API's converted frames (see the top). */
+static int host_draws_export(void)
+{
+    return host_says("OMACVM_VAEXPORT=1\n");
 }
 
 /* Decided once, at the driver's start: Chromium loads it before its sandbox
@@ -277,6 +300,108 @@ static int export_sized(void)
         on = env && *env ? *env == '1' : c && host_draws_export();
     }
     return on;
+}
+
+/* ---- Waiting for the picture (see the top) ---- */
+
+/* The Mac's runtime decodes beside its GPU thread (read once, at the driver's start). */
+static int host_decodes_async(void)
+{
+    static int on = -1;
+
+    if (on < 0)
+        on = host_says("OMACVM_VADECASYNC=1\n");
+    return on;
+}
+
+static int decode_wait_on(void)
+{
+    static int on = -1;
+    const char *env;
+
+    if (on < 0) {
+        int c = chromium();
+
+        env = getenv("OMACVM_VA_DECODE_WAIT");
+        on = env && *env ? *env == '1' : c && host_decodes_async();
+    }
+    return on;
+}
+
+/* Decoding contexts of this process (their vaEndPicture waits). */
+static pthread_mutex_t dec_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct decoding {
+    VADriverContextP drv;
+    VAContextID id;
+} decoding[64];
+static unsigned ndecoding;
+
+static void decoding_add(VADriverContextP ctx, VAContextID id)
+{
+    pthread_mutex_lock(&dec_lock);
+    if (ndecoding < sizeof(decoding) / sizeof(decoding[0]))
+        decoding[ndecoding++] = (struct decoding){ ctx, id };
+    pthread_mutex_unlock(&dec_lock);
+}
+
+static int decoding_has(VADriverContextP ctx, VAContextID id)
+{
+    int found = 0;
+
+    pthread_mutex_lock(&dec_lock);
+    for (unsigned i = 0; i < ndecoding && !found; i++)
+        found = decoding[i].drv == ctx && decoding[i].id == id;
+    pthread_mutex_unlock(&dec_lock);
+    return found;
+}
+
+/* ID's entry gone (ALL: every context of CTX). */
+static void decoding_forget(VADriverContextP ctx, VAContextID id, int all)
+{
+    unsigned i = 0;
+
+    pthread_mutex_lock(&dec_lock);
+    while (i < ndecoding) {
+        if (decoding[i].drv == ctx && (all || decoding[i].id == id)) {
+            decoding[i] = decoding[--ndecoding];
+            if (!all)
+                break;
+        } else {
+            i++;
+        }
+    }
+    pthread_mutex_unlock(&dec_lock);
+}
+
+/* An empty command (one VIRGL_CCMD_NOP) with a fence; waits for the fence. */
+static void wait_for_host(VADriverContextP ctx)
+{
+    struct drm_state *drm = ctx->drm_state;
+    uint32_t nop = 0;
+    struct drm_virtgpu_execbuffer eb = {
+        .flags = VIRTGPU_EXECBUF_FENCE_FD_OUT, .size = sizeof(nop),
+        .command = (uintptr_t)&nop, .fence_fd = -1,
+    };
+    struct pollfd p;
+
+    if (!drm || drm->fd < 0 || ioctl(drm->fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &eb) ||
+        eb.fence_fd < 0)
+        return;
+    p = (struct pollfd){ .fd = eb.fence_fd, .events = POLLIN };
+    while (poll(&p, 1, 100) < 0 && errno == EINTR)
+        ;
+    close(eb.fence_fd);
+}
+
+static VAStatus (*mesa_end_picture)(VADriverContextP, VAContextID);
+
+static VAStatus end_picture(VADriverContextP ctx, VAContextID context)
+{
+    VAStatus st = mesa_end_picture(ctx, context);
+
+    if (st == VA_STATUS_SUCCESS && decoding_has(ctx, context))
+        wait_for_host(ctx);
+    return st;
 }
 
 static VAStatus (*mesa_create_surfaces2)(VADriverContextP, unsigned int, unsigned int,
@@ -1254,9 +1379,9 @@ static void say_refused(int k, int shared)
     since[k] = 0;
 }
 
-static VAStatus create_context(VADriverContextP ctx, VAConfigID config, int width, int height,
-                               int flag, VASurfaceID *targets, int num_targets,
-                               VAContextID *context)
+static VAStatus create_context_limited(VADriverContextP ctx, VAConfigID config, int width,
+                                       int height, int flag, VASurfaceID *targets,
+                                       int num_targets, VAContextID *context)
 {
     int k = config_kind(ctx, config), slot = -1;
     VAStatus st;
@@ -1304,6 +1429,19 @@ static VAStatus create_context(VADriverContextP ctx, VAConfigID config, int widt
     return st;
 }
 
+static VAStatus create_context(VADriverContextP ctx, VAConfigID config, int width, int height,
+                               int flag, VASurfaceID *targets, int num_targets,
+                               VAContextID *context)
+{
+    VAStatus st = create_context_limited(ctx, config, width, height, flag, targets,
+                                         num_targets, context);
+
+    if (st == VA_STATUS_SUCCESS && mesa_end_picture && decode_wait_on() &&
+        config_entrypoint(ctx, config) == VAEntrypointVLD)
+        decoding_add(ctx, *context);
+    return st;
+}
+
 static void release(VADriverContextP ctx, VAContextID id, int all)
 {
     unsigned i = 0;
@@ -1327,6 +1465,7 @@ static void release(VADriverContextP ctx, VAContextID id, int all)
 static VAStatus destroy_context(VADriverContextP ctx, VAContextID context)
 {
     release(ctx, context, 0);
+    decoding_forget(ctx, context, 0);
     target_forget(ctx, context, 0);
     return mesa_destroy_context(ctx, context);
 }
@@ -1335,6 +1474,7 @@ static VAStatus destroy_context(VADriverContextP ctx, VAContextID context)
 static VAStatus terminate(VADriverContextP ctx)
 {
     release(ctx, 0, 1);
+    decoding_forget(ctx, 0, 1);
     target_forget(ctx, 0, 1);
     bumped_forget(ctx, NULL, -1);
     forget_surfaces(ctx, NULL, -1);
@@ -1375,6 +1515,7 @@ static VAStatus shim_init(VADriverContextP ctx)
     }
     if (st == VA_STATUS_SUCCESS && ctx->vtable && ctx->vtable->vaCreateSurfaces2) {
         export_sized();
+        host_decodes_async();
         mesa_create_surfaces2 = ctx->vtable->vaCreateSurfaces2;
         ctx->vtable->vaCreateSurfaces2 = create_surfaces2;
     }
@@ -1386,6 +1527,11 @@ static VAStatus shim_init(VADriverContextP ctx)
         ctx->vtable->vaCreateContext = create_context;
         ctx->vtable->vaDestroyContext = destroy_context;
         ctx->vtable->vaTerminate = terminate;
+        /* read now: Chromium's sandbox closes later */
+        if (ctx->vtable->vaEndPicture && decode_wait_on()) {
+            mesa_end_picture = ctx->vtable->vaEndPicture;
+            ctx->vtable->vaEndPicture = end_picture;
+        }
         pthread_mutex_lock(&lim_lock);
         if (!lim_read)
             read_limits(ctx);

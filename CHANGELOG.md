@@ -5,6 +5,21 @@ in more words.
 
 ## 3.2.1 (unreleased)
 
+- **Google Chrome plays 1440p and 4K video on the Mac's media engine.** The Mac's graphics
+  thread for the VM, which runs every app's drawing in it, waited for the media engine on each
+  picture (about 5 ms for a 4K one on a MacBook Air M2, 3 ms on an M4 Max). Above 1080p Chrome's
+  own drawing and the desktop's waited behind it, so the media engine dropped many more frames
+  than Chrome's CPU decoders (YouTube 4K: 38 % against 7 % on the Air, 13-20 % against 8 % on a
+  MacBook Pro M4 Max), and 3.2.0 kept 1440p and 4K on the CPU. Pictures now finish beside that
+  thread, and Chrome's decoder waits for each one instead of the thread. A 60 fps video in
+  Chrome now drops about as many frames on the media engine as on the CPU at 4K, 1440p and
+  1080p (Air: 0.1-1.2 % against 0.1-1.9 %, M4 Max: 2.3-2.7 % against 1.5-4.1 %), with the VM at
+  0.4 cores instead of 1.0-1.3 on the Air (0.6-0.8 on the M4 Max). 1080p, already on the media
+  engine in 3.2.0, drops fewer frames than before: 0.2-1.2 % against 7-18 % on the Air, 2.3-2.7 %
+  against 5.0-5.6 % on the M4 Max. Needs the app update and Update VM; restart Chrome after it.
+  `OMACVM_VA_MAX=1920` in Chrome's environment keeps 1440p and 4K on the CPU;
+  `OMACVM_VIDEO_DECODE_SYNC=1` in the app's environment brings back 3.2.0's way (the thread
+  waits for each picture, Chrome up to 1080p).
 - **Video call tiles in Google Chrome show the whole picture.** With hardware decoding (3.2.0)
   a 320x180 tile showed its picture squeezed into the top 168 rows and 12 rows of nothing below
   it (8 rows at 360p and on 1080p video, a strip on the right of 854-wide video): the VM's
