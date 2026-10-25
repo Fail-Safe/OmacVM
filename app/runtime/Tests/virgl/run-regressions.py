@@ -222,6 +222,13 @@ run_test("test-multisample-formats", "vrend_formats.c")
 run_test("test-native-shader-inputs", "vrend_renderer.c")
 run_test("test-integer-sampler-shader", "vrend_shader.c")
 run_api_test("test-video-decode", ("VideoToolbox", "CoreMedia", "CoreVideo", "CoreFoundation"))
+# Decoding beside vrend's thread (virgl-videotoolbox-decode-async.patch): polled fences, QEMU's
+# sync-thread fences, and END_FRAME waiting for each picture as before (the way back).
+for video_env in (None, {"OMACVM_TEST_THREAD_SYNC": "1"}, {"OMACVM_VIDEO_DECODE_SYNC": "1"}):
+    run_api_test("test-video-decode-async", ("VideoToolbox", "CoreMedia", "CoreVideo", "CoreFoundation"),
+                 env=video_env)
+run_api_test("test-video-decode", ("VideoToolbox", "CoreMedia", "CoreVideo", "CoreFoundation"),
+             env={"OMACVM_VIDEO_DECODE_SYNC": "1"})
 # The rows and columns past a decoded picture (virgl-video-plane-edge.patch): both copy paths,
 # and without the fill the test must see the bar.
 for video_env in (None, {"OMACVM_VIDEO_COPY": "1"}, {"OMACVM_VIDEO_EDGE_FILL": "0"}):

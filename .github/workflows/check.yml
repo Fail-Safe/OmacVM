@@ -533,6 +533,9 @@ jobs:
       - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
         run: src/tests/audio-timing.sh
 
+      - name: Disk flushes as write barriers (patch pinned and tested, log lines, check)
+        run: src/tests/disk-flush.sh
+
       - name: The VM's GPU work without QEMU's big lock (patches pinned and ordered, switch, log lines, check, what runs unlocked)
         run: src/tests/gpu-unlocked.sh
 
@@ -723,7 +726,9 @@ jobs:
             libgles-dev libdrm-dev libavcodec-dev libavutil-dev libsystemd-dev
           OMACVM_VDECD_SYSTEMD=1 src/tests/vdecd-down.sh
 
-      - name: The VA driver shim gives Chromium surfaces of their real size (a stand-in for Mesa's driver)
+      - name: The VA driver shim gives Chromium surfaces of their real size and waits for its pictures (a stand-in for Mesa's driver)
         run: |
           sudo apt-get install -yq --no-install-recommends gcc libva-dev
           src/app/guest/tests/va-shim-surfaces.sh
+          src/app/guest/tests/va-shim-decode-wait.sh
+          src/app/guest/tests/va-shim-vpp-fill.sh
