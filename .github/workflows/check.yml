@@ -580,7 +580,7 @@ jobs:
       - name: OmacVM's virtio-gpu patches apply in the builder's order to real kernel sources (7.2.11, 7.3; no fuzz)
         run: src/tests/virtio-gpu-patches.sh
 
-      - name: OmacVM's virtio-gpu driver loads when it adds the damage fix or a start asks, else the stock one (loader, modprobe rule, builder; offline)
+      - name: OmacVM's virtio-gpu driver loads only when a start asks (a switch), else the stock one (loader, modprobe rule, builder; offline)
         run: src/tests/virtio-gpu-load.sh
 
       - name: OmacVM's virtio-gpu vblank timer comes onto the Mac's refresh grid (vsync_lock's math, simulated)
