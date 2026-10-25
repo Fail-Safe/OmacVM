@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.2 (unreleased)
+## 3.2.2
 
 A running VM is no longer taken as stopped when another program has odd characters in its command
 line, control centre switches in a row are not turned away, HDR costs the Mac's graphics less, and a
