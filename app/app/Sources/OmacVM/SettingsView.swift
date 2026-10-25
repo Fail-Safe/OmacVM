@@ -195,6 +195,7 @@ struct SettingsSections: View {
                     ExtraBrightnessRow(tick: state.tick)
                 }
                 PointerPlaneRow(tick: state.tick)
+                VsyncLockRow(tick: state.tick)
                 EscapeRow(tick: state.tick)
                 if preview?.magicMouse ?? mouse.connected {
                     MagicMouseRow(tick: state.tick, gesturesOff: VMRecord.isOff("gestures", folder: state.config.folder))
