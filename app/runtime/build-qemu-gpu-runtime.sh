@@ -1012,6 +1012,16 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damag
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-lossless.patch"
 "$native_dir/Tests/display/test-present-lossless.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the lossless surfaces are not wired as tested (test-present-lossless.sh)"
+# OmacVM: tiled present: a frame that changed little goes to WindowServer as
+# a few tile layers over the last whole frame (OMACVM_GL_PRESENT_TILES=1).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-tiles-logic.patch"
+"$native_dir/Tests/display/test-present-tiles.sh" --self-test "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a tiled present wiring check passes without the patch (test-present-tiles.sh)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-tiles.patch"
+"$native_dir/Tests/display/test-present-tiles.sh" || \
+  die "the tiled present's rules fail their test (test-present-tiles.sh)"
+"$native_dir/Tests/display/test-present-tiles.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the tiled present is not wired as tested (test-present-tiles.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"

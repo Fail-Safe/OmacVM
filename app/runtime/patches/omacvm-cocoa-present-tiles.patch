@@ -1,0 +1,936 @@
+From: OmacVM
+Subject: [PATCH] cocoa: tiled present: only the changed part of the window goes to WindowServer
+
+What: with OMACVM_GL_PRESENT_TILES=1 (for tests: the app gets a switch once
+the VM side sends its damage, #520) the view's layer keeps the last whole
+frame and a grid of 256x256 tile layers
+lies over it (ui/omacvm-present-tiles.h). A guest frame whose changed box
+(the guest's flush rects since the last frame) covers at most 12 tiles is
+drawn into those tiles' own small surfaces only and put on their layers;
+WindowServer then composites only them. A frame with nothing changed is not
+presented. Any other frame is whole, as before, and hides the tiles: the
+boot logo, extra brightness, another size or colour path, a scanout buffer
+not seen lately or not flushed yet, a frame the window does not show pixel
+for pixel (the tiles hide and the next frame is whole), and more than 12
+tiles. Frames skipped in the present queue hand their tiles to the frame
+after them. Only with the vsync present. Each tile keeps five surfaces
+while it is used (at most 32 tiles; none after 10 s of whole frames).
+=check also compares every 30th tile frame's tiles with the same frame
+drawn whole at their own precision (qemu.log "tiles check"); qemu.log says
+once a minute how many frames went in tiles.
+
+Why: WindowServer composites the whole window again for every new whole
+surface, also when only the pointer moved. MacBook Air M2, the VM full
+screen at 60 Hz with a guest that sends its damage (#520's driver), the
+pointer moving: 3.13 W instead of 3.75 W for the whole Mac, WindowServer
+43 instead of 154 GPU ms/s, the same frame rate, pictures identical. No VM:
+M1 Max, a window like the VM's at 120 frames a second costs ~4 W over idle.
+
+The guest must say what changed: Linux before 7.4 flushes the whole plane
+on every page flip (the frame-path work, #520, backports the fix), and then
+every frame is whole, as without it.
+
+Upstream: QEMU's cocoa display has no IOSurface present; not sent.
+Test: Tests/display/test-present-tiles.sh (the rules; the wiring in the
+patched ui/cocoa.m; --self-test: every check fails on the code without it,
+the runtime build runs it on the real cocoa.m before this patch).
+Applies after omacvm-cocoa-present-lossless.patch (it uses the partial
+present's rects, rules and checks), before omacvm-cocoa-no-app-nap.patch.
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+index 4b51959..e79b406 100644
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -57,6 +57,7 @@
+ #include "ui/omacvm-edr.h"
+ #include "ui/omacvm-bright.h"
+ #include "ui/omacvm-present-damage.h"
++#include "ui/omacvm-present-tiles.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -256,6 +257,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+ static void cocoa_gl_render(void);
+ /* OmacVM boot splash: the main view's size in pixels (BQL). */
+ static void omacvm_splash_view_size(uint32_t w, uint32_t h);
++static void present_tiles_hide(void);
+ /* GL frames are shown as IOSurfaces (the view's layer is a plain CALayer). */
+ static bool cocoa_gl_present_on(void);
+ 
+@@ -6481,6 +6483,8 @@ static void omacvm_splash_view_size(uint32_t w, uint32_t h)
+     }
+     omacvm_view_w = w;
+     omacvm_view_h = h;
++    /* OmacVM, tiled present: tiles sit pixel for pixel; a new view size hides them. */
++    present_tiles_hide();
+     gl_dirty = true;
+     cocoa_refresh_activity();
+ }
+@@ -7652,6 +7656,7 @@ - (void)tick:(CADisplayLink *)link;
+     GLint filter;
+     double flushed;                     /* reached QEMU's present */
+     bool linear;                        /* drawn in linear light (extra brightness) */
++    OmacvmPTFrame *pt;                  /* tiled present: tile updates (surf NULL) */
+ } PresentFrame;
+ 
+ static struct {
+@@ -7702,8 +7707,7 @@ static void omacvm_present_seen_again(void)
+ static QemuPresentLink *present_link_target;
+ 
+ static void cocoa_gl_present_bh(void *opaque);
+-static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+-                                         double flushed, bool linear);
++static void cocoa_gl_present_queue_frame(PresentFrame f);
+ static void cocoa_gl_present_request(void);
+ 
+ /*
+@@ -7936,6 +7940,201 @@ static bool cocoa_gl_present_on(void)
+     return present_ctx != NULL;
+ }
+ 
++/*
++ * OmacVM, tiled present (OMACVM_GL_PRESENT_TILES=1, the app's experimental
++ * switch; =check for tests). QEMU's present shows each guest frame as a new
++ * whole surface, so WindowServer composites the whole window for every
++ * frame, also when only a caret blinked: at 120 frames a second that is
++ * most of what showing the window costs. With tiles, the view's layer
++ * keeps the last whole frame and a grid of tile layers lies over it
++ * (ui/omacvm-present-tiles.h): a frame whose changed box (the guest's flush
++ * rects since the last frame) covers at most OMACVM_PT_FRAME_MAX tiles is
++ * drawn into those tiles' own small surfaces only, and WindowServer
++ * composites only them. A frame with nothing changed is not presented. Any
++ * other frame is a whole one, as before, and hides the tiles. Only with the
++ * vsync present, the guest's GL scanout at the surfaces' size, and the
++ * window showing it pixel for pixel (else the tiles hide and the next
++ * frame is whole). The guest must say what changed: Linux before 7.4 flushes
++ * the whole plane on every page flip (frame-path, #520), and then every
++ * frame is a whole one, as without the switch.
++ *
++ * Threads: the tile surfaces are drawn on QEMU's thread (BQL); the tile
++ * layers are changed by whoever shows a frame, under present_tile_lock.
++ */
++static int present_tiles_on = -1;       /* -1 not read, 0 off, 1 on, 2 check */
++static unsigned present_alloc_gen;      /* surfaces made again: a new grid */
++static unsigned present_tile_gen;       /* the grid's generation */
++static unsigned present_base_gen;       /* a whole frame of this generation was drawn */
++static OmacvmPTGrid present_tg;
++#define PRESENT_TILE_BUFS 5      /* as the whole surfaces: one shown, three queued, one drawn */
++static IOSurfaceRef present_tsurf[OMACVM_PT_MAX][PRESENT_TILE_BUFS];
++static GLuint present_ttex[OMACVM_PT_MAX][PRESENT_TILE_BUFS];
++/*
++ * Tiles keep their surfaces while they are used: at most PRESENT_TILE_KEEP
++ * tiles (the least recently drawn give theirs back first), and none once
++ * frames have been whole for PRESENT_TILE_IDLE_NS. A surface Core Animation
++ * still shows or that waits in the queue keeps its own reference.
++ */
++#define PRESENT_TILE_KEEP 32
++#define PRESENT_TILE_IDLE_NS (10 * NANOSECONDS_PER_SECOND)
++static uint64_t present_tile_used[OMACVM_PT_MAX];   /* tile frame it was last drawn in */
++static int64_t present_tile_last_ns;                 /* the last frame in tiles */
++static OmacvmPDRect present_td;         /* changed since the last frame drawn */
++static bool present_tiles_full;         /* the tiles were hidden: next frame whole */
++static uint64_t present_tile_frames, present_tile_skips, present_tile_whole;
++static os_unfair_lock present_tile_lock = OS_UNFAIR_LOCK_INIT;
++static CALayer *present_tile_layer[OMACVM_PT_MAX];  /* present_tile_lock */
++static int present_tiles_shown;         /* present_tile_lock: tiles not hidden */
++
++static bool present_tiles_wanted(void)
++{
++    if (present_tiles_on < 0) {
++        const char *e = getenv("OMACVM_GL_PRESENT_TILES");
++        present_tiles_on = e && !strcmp(e, "1") ? 1 : e && !strcmp(e, "check") ? 2 : 0;
++        if (present_tiles_on && !present_vsync) {
++            present_tiles_on = 0;
++            info_report("cocoa: tiled present: off (needs the vsync present)");
++        } else {
++            info_report("cocoa: tiled present: %s", present_tiles_on == 2 ?
++                        "on, checked against whole frames (OMACVM_GL_PRESENT_TILES=check)" :
++                        present_tiles_on ? "on (OMACVM_GL_PRESENT_TILES=1)" : "off");
++        }
++    }
++    return present_tiles_on > 0;
++}
++
++/* QEMU thread: once a minute in qemu.log, how the frames went (tiles on only). */
++static void present_tiles_stats(void)
++{
++    static int64_t since;
++    static uint64_t frames0, skips0, whole0;
++    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
++
++    if (present_tiles_on <= 0) {
++        return;
++    }
++    if (!since) {
++        since = now;
++    } else if (now - since >= 60 * NANOSECONDS_PER_SECOND) {
++        info_report("cocoa: tiled present, last minute: %" PRIu64 " frames in tiles, %" PRIu64
++                    " whole, %" PRIu64 " not presented (nothing changed)",
++                    present_tile_frames - frames0, present_tile_whole - whole0,
++                    present_tile_skips - skips0);
++        frames0 = present_tile_frames;
++        skips0 = present_tile_skips;
++        whole0 = present_tile_whole;
++        since = now;
++    }
++}
++
++/* QEMU thread, present_ctx current: tile T's surfaces go. */
++static void cocoa_gl_present_tile_free(unsigned t)
++{
++    for (unsigned b = 0; b < PRESENT_TILE_BUFS; b++) {
++        if (present_ttex[t][b]) {
++            glDeleteTextures(1, &present_ttex[t][b]);
++            present_ttex[t][b] = 0;
++        }
++        if (present_tsurf[t][b]) {
++            CFRelease(present_tsurf[t][b]);
++            present_tsurf[t][b] = NULL;
++        }
++    }
++}
++
++/* QEMU thread, present_ctx current: the tile surfaces go (another size or format). */
++static void cocoa_gl_present_tiles_free(void)
++{
++    for (unsigned t = 0; t < OMACVM_PT_MAX; t++) {
++        for (unsigned b = 0; b < PRESENT_TILE_BUFS; b++) {
++            if (present_ttex[t][b]) {
++                glDeleteTextures(1, &present_ttex[t][b]);
++                present_ttex[t][b] = 0;
++            }
++            if (present_tsurf[t][b]) {
++                /* Core Animation keeps its own reference while it shows one. */
++                CFRelease(present_tsurf[t][b]);
++                present_tsurf[t][b] = NULL;
++            }
++        }
++    }
++}
++
++/*
++ * QEMU thread, present_ctx current: a surface of tile T Core Animation is
++ * not showing or waiting to show, made when first needed in the format and
++ * colour space of the whole-frame surfaces. -1 when there is none.
++ */
++static int cocoa_gl_present_tile_buf(unsigned t)
++{
++    for (unsigned b = 0; b < PRESENT_TILE_BUFS; b++) {
++        if (present_tsurf[t][b] && !IOSurfaceIsInUse(present_tsurf[t][b])) {
++            return b;
++        }
++    }
++    if (!present_tsurf[t][0]) {
++        /* a tile without surfaces yet: the least recently drawn one gives its back past the cap */
++        unsigned held = 0, lru = OMACVM_PT_MAX;
++        for (unsigned u = 0; u < OMACVM_PT_MAX; u++) {
++            if (present_tsurf[u][0]) {
++                held++;
++                if (lru == OMACVM_PT_MAX || present_tile_used[u] < present_tile_used[lru]) {
++                    lru = u;
++                }
++            }
++        }
++        if (held >= PRESENT_TILE_KEEP && lru < OMACVM_PT_MAX) {
++            cocoa_gl_present_tile_free(lru);
++        }
++    }
++    for (unsigned b = 0; b < PRESENT_TILE_BUFS; b++) {
++        if (present_tsurf[t][b]) {
++            continue;
++        }
++        uint32_t x, y, w, h;
++        omacvm_pt_rect(&present_tg, t, &x, &y, &w, &h);
++        OSType f = IOSurfaceGetPixelFormat(present_surf[0]);
++        /* Lossless-compressed whole frames: their plain kind for the tiles. */
++        f = f == '&BGA' ? 'BGRA' : f == '&RhA' ? 'RGhA' : f;
++        bool half = f == 'RGhA', ten = f == 'l10r';
++        NSDictionary *props = @{
++            (id)kIOSurfaceWidth: @(w),
++            (id)kIOSurfaceHeight: @(h),
++            (id)kIOSurfaceBytesPerElement: half ? @8 : @4,
++            (id)kIOSurfacePixelFormat: @(f),
++        };
++        IOSurfaceRef s = IOSurfaceCreate((CFDictionaryRef)props);
++        if (!s) {
++            return -1;
++        }
++        CFTypeRef cs = IOSurfaceCopyValue(present_surf[0], kIOSurfaceColorSpace);
++        if (cs) {
++            IOSurfaceSetValue(s, kIOSurfaceColorSpace, cs);
++            CFRelease(cs);
++        }
++        GLuint tex;
++        glGenTextures(1, &tex);
++        glBindTexture(GL_TEXTURE_RECTANGLE, tex);
++        bool ok = CGLTexImageIOSurface2D(present_ctx, GL_TEXTURE_RECTANGLE,
++                                         half ? GL_RGBA16F : ten ? GL_RGB10_A2 : GL_RGBA,
++                                         w, h, half ? GL_RGBA : GL_BGRA,
++                                         half ? GL_HALF_FLOAT :
++                                         ten ? GL_UNSIGNED_INT_2_10_10_10_REV :
++                                               GL_UNSIGNED_INT_8_8_8_8_REV,
++                                         s, 0) == kCGLNoError;
++        glBindTexture(GL_TEXTURE_RECTANGLE, 0);
++        if (!ok) {
++            glDeleteTextures(1, &tex);
++            CFRelease(s);
++            return -1;
++        }
++        present_tsurf[t][b] = s;
++        present_ttex[t][b] = tex;
++        return b;
++    }
++    return -1;
++}
++
+ static void cocoa_gl_present_free(void)
+ {
+     for (int i = 0; i < present_nsurf; i++) {
+@@ -8202,6 +8401,7 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+     present_packed_half = half;
+     present_w = w;
+     present_h = h;
++    present_alloc_gen++;
+     present_deep = deep;
+     present_linear = linear;
+     present_next = 0;
+@@ -8209,6 +8409,202 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+     return true;
+ }
+ 
++/*
++ * OMACVM_GL_PRESENT_TILES=check (tests): the frame's tiles against the
++ * same frame drawn whole, pixel for pixel at the tiles' own precision,
++ * every 30th tile frame. QEMU thread, present_ctx current.
++ */
++static void cocoa_gl_present_tiles_check(GLuint src, bool flip, const unsigned *tl,
++                                         const int *bi, int nt)
++{
++    static GLuint ref_tex, ref_fbo;
++    static uint32_t ref_w, ref_h;
++    static GLenum ref_fmt;
++    OSType f = IOSurfaceGetPixelFormat(present_tsurf[tl[0]][bi[0]]);
++    GLenum fmt = f == 'RGhA' ? GL_RGBA16F : f == 'l10r' ? GL_RGB10_A2 : GL_RGBA8;
++    uint32_t w = present_w, h = present_h;
++
++    if (!ref_fbo) {
++        glGenFramebuffers(1, &ref_fbo);
++    }
++    if (ref_w != w || ref_h != h || ref_fmt != fmt) {
++        if (ref_tex) {
++            glDeleteTextures(1, &ref_tex);
++        }
++        glGenTextures(1, &ref_tex);
++        glBindTexture(GL_TEXTURE_RECTANGLE, ref_tex);
++        glTexImage2D(GL_TEXTURE_RECTANGLE, 0, fmt, w, h, 0, GL_RGBA,
++                     fmt == GL_RGBA16F ? GL_HALF_FLOAT :
++                     fmt == GL_RGB10_A2 ? GL_UNSIGNED_INT_2_10_10_10_REV : GL_UNSIGNED_BYTE,
++                     NULL);
++        glBindTexture(GL_TEXTURE_RECTANGLE, 0);
++        ref_w = w;
++        ref_h = h;
++        ref_fmt = fmt;
++    }
++    glBindFramebuffer(GL_FRAMEBUFFER, ref_fbo);
++    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                           GL_TEXTURE_RECTANGLE, ref_tex, 0);
++    glViewport(0, 0, w, h);
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    glClearColor(0, 0, 0, 1);
++    glClear(GL_COLOR_BUFFER_BIT);
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
++    glBindTexture(GL_TEXTURE_2D, src);
++    qemu_gl_run_texture_blit(present_gls, flip);
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    glPixelStorei(GL_PACK_ALIGNMENT, 4);
++    /* read back at the tiles' own precision: half float 8 bytes, 10-bit and 8-bit 4 */
++    GLenum rf = fmt == GL_RGBA16F ? GL_RGBA : GL_BGRA;
++    GLenum rt = fmt == GL_RGBA16F ? GL_HALF_FLOAT :
++                fmt == GL_RGB10_A2 ? GL_UNSIGNED_INT_2_10_10_10_REV : GL_UNSIGNED_INT_8_8_8_8_REV;
++    size_t px = fmt == GL_RGBA16F ? 8 : 4;
++    uint64_t bad = 0;
++    uint8_t *a = g_malloc((size_t)OMACVM_PT_SIZE * OMACVM_PT_SIZE * px);
++    uint8_t *b = g_malloc((size_t)OMACVM_PT_SIZE * OMACVM_PT_SIZE * px);
++    for (int k = 0; k < nt; k++) {
++        uint32_t x, y, tw, th;
++        omacvm_pt_rect(&present_tg, tl[k], &x, &y, &tw, &th);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                               GL_TEXTURE_RECTANGLE, ref_tex, 0);
++        glReadPixels(x, y, tw, th, rf, rt, b);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                               GL_TEXTURE_RECTANGLE, present_ttex[tl[k]][bi[k]], 0);
++        glReadPixels(0, 0, tw, th, rf, rt, a);
++        for (size_t i = 0; i < (size_t)tw * th; i++) {
++            /* colour only: the window ignores alpha */
++            if (px == 8) {
++                bad += memcmp(a + i * 8, b + i * 8, 6) != 0;
++            } else if (fmt == GL_RGB10_A2) {
++                uint32_t va, vb;
++                memcpy(&va, a + i * 4, 4);
++                memcpy(&vb, b + i * 4, 4);
++                bad += (va & 0x3fffffff) != (vb & 0x3fffffff);
++            } else {
++                bad += memcmp(a + i * 4, b + i * 4, 3) != 0;
++            }
++        }
++    }
++    g_free(a);
++    g_free(b);
++    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                           GL_TEXTURE_RECTANGLE, 0, 0);
++    static uint64_t checks, bad_checks;
++    checks++;
++    bad_checks += bad != 0;
++    if (bad || checks % 100 == 1) {
++        info_report("cocoa: tiles check %" PRIu64 ": %d tiles, %" PRIu64 " pixels differ "
++                    "(%" PRIu64 " of %" PRIu64 " checks differed)",
++                    checks, nt, bad, bad_checks, checks);
++    }
++}
++
++/*
++ * QEMU thread, BQL held, present_ctx current: the frame as tiles. Returns
++ * how many tiles were drawn (0: nothing changed, nothing to show), or -1:
++ * draw a whole frame (too many tiles, no free tile surface).
++ */
++static int cocoa_gl_present_tiles(GLuint src, bool flip)
++{
++    if (present_tile_gen != present_alloc_gen) {
++        cocoa_gl_present_tiles_free();
++        present_tg = omacvm_pt_grid(present_w, present_h);
++        present_tile_gen = present_alloc_gen;
++    }
++    if (omacvm_pd_empty(present_td)) {
++        present_tile_skips++;
++        return 0;
++    }
++    unsigned tl[OMACVM_PT_FRAME_MAX];
++    int bi[OMACVM_PT_FRAME_MAX];
++    int nt = omacvm_pt_tiles(&present_tg, present_td.x, present_td.y,
++                             present_td.w, present_td.h, tl, OMACVM_PT_FRAME_MAX);
++    if (nt <= 0) {
++        return -1;
++    }
++    for (int k = 0; k < nt; k++) {
++        bi[k] = cocoa_gl_present_tile_buf(tl[k]);
++        if (bi[k] < 0) {
++            return -1;
++        }
++        present_tile_used[tl[k]] = present_tile_frames + 1;
++    }
++    present_tile_last_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
++
++    glBindFramebuffer(GL_FRAMEBUFFER, present_fbo);
++    glDisable(GL_BLEND);
++    glDisable(GL_SCISSOR_TEST);
++    glActiveTexture(GL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_2D, src);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    for (int k = 0; k < nt; k++) {
++        uint32_t x, y, tw, th;
++        omacvm_pt_rect(&present_tg, tl[k], &x, &y, &tw, &th);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                               GL_TEXTURE_RECTANGLE, present_ttex[tl[k]][bi[k]], 0);
++        /*
++         * The whole frame's quad, moved so that the tile's part lands on
++         * the tile's surface: the same pixels as in a whole frame (its
++         * first row is the frame's row y, as in the whole surfaces).
++         */
++        glViewport(-(GLint)x, -(GLint)y, present_w, present_h);
++        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++        glClearColor(0, 0, 0, 1);
++        glClear(GL_COLOR_BUFFER_BIT);
++        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
++        qemu_gl_run_texture_blit(present_gls, flip);
++    }
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    if (present_tiles_on == 2 && ++present_tile_frames % 30 == 1) {
++        cocoa_gl_present_tiles_check(src, flip, tl, bi, nt);
++    } else if (present_tiles_on != 2) {
++        ++present_tile_frames;
++    }
++    glBindTexture(GL_TEXTURE_2D, 0);
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++    glFlush();
++    if (present_tile_frames == 1) {
++        info_report("cocoa: tiled present: first frame in tiles (%d of %u, box %ux%u)",
++                    nt, present_tg.cols * present_tg.rows, present_td.w, present_td.h);
++    }
++    present_td = (OmacvmPDRect){ 0, 0, 0, 0 };
++
++    OmacvmPTFrame *pt = g_new0(OmacvmPTFrame, 1);
++    pt->grid = present_tg;
++    for (int k = 0; k < nt; k++) {
++        IOSurfaceRef s = present_tsurf[tl[k]][bi[k]];
++        CFRetain(s);
++        /* Core Animation must not see the surface before the GPU wrote it. */
++        IOSurfaceIncrementUseCount(s);
++        pt->up[pt->n++] = (OmacvmPTUpdate){ tl[k], (void *)s };
++    }
++    double flushed = CACurrentMediaTime();
++    os_unfair_lock_lock(&present_lock);
++    present_sync.inflight++;
++    os_unfair_lock_unlock(&present_lock);
++    dispatch_async(present_queue, ^{
++        CGLSetCurrentContext(present_wait_ctx);
++        if (sync) {
++            for (int t = 0; t < 10000; t++) {
++                if (glClientWaitSync(sync, 0, 0) != GL_TIMEOUT_EXPIRED) {
++                    break;
++                }
++                g_usleep(100);
++            }
++            glDeleteSync(sync);
++        }
++        CGLSetCurrentContext(NULL);
++        cocoa_gl_present_queue_frame((PresentFrame){
++            .surf = NULL, .filter = GL_NEAREST, .flushed = flushed,
++            .linear = false, .pt = pt,
++        });
++    });
++    present_last_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
++    return nt;
++}
++
+ /* QEMU thread, BQL held. Returns false when nothing could be shown. */
+ static bool cocoa_gl_present(void)
+ {
+@@ -8357,6 +8753,7 @@ static bool cocoa_gl_present(void)
+                       (uint64_t)splash << 5 | (uint64_t)!gl_scanout_borrow << 6 |
+                       (uint64_t)(w != present_w || h != present_h) << 7 |
+                       (uint64_t)(uint32_t)(boost ? gain : 0) << 32;
++    uint64_t pd_sig_was = present_pd_sig;
+     omacvm_pd_frame(&present_pd, w, h);
+     if (pd_sig != present_pd_sig) {
+         omacvm_pd_all_full(&present_pd);
+@@ -8374,6 +8771,34 @@ static bool cocoa_gl_present(void)
+             present_pd_ids[0] = gl_scanout_id;
+         }
+     }
++    /*
++     * OmacVM: the tiled present (present_tiles_on). Before surface n is
++     * taken: a frame in tiles leaves it untouched for the next whole frame.
++     */
++    if (present_tiles_wanted() && pd_sig == pd_sig_was && pd_known &&
++        !present_pd_unflushed && !splash && !boost && gl_scanout_borrow &&
++        w == present_w && h == present_h &&
++        gl_scanout_x == 0 && gl_scanout_y == 0 &&
++        gl_scanout_w == w && gl_scanout_h == h &&
++        present_base_gen == present_alloc_gen &&
++        !qatomic_read(&present_tiles_full)) {
++        if (cocoa_gl_present_tiles(src, flip) >= 0) {
++            present_tiles_stats();
++            present_next = n;
++            CGLSetCurrentContext(prev);
++            gl_dirty = false;
++            return true;
++        }
++    }
++    present_tile_whole++;
++    present_tiles_stats();
++    if (present_tile_last_ns && qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - present_tile_last_ns >
++                                PRESENT_TILE_IDLE_NS) {
++        /* whole frames for a while: the tiles give their surfaces back */
++        cocoa_gl_present_tiles_free();
++        present_tile_last_ns = 0;
++    }
++
+     OmacvmPDRect pd;
+     bool part = omacvm_pd_take(&present_pd, n, &pd) && present_damage_on &&
+                 gl_scanout_borrow && !present_pd_unflushed && !splash && !boost &&
+@@ -8436,6 +8861,10 @@ static bool cocoa_gl_present(void)
+ 
+     IOSurfaceRef surf = present_surf[n];
+     double flushed = CACurrentMediaTime();
++    /* OmacVM, tiles: this whole frame is what the tiles lie over now. */
++    present_base_gen = present_alloc_gen;
++    present_td = (OmacvmPDRect){ 0, 0, 0, 0 };
++    qatomic_set(&present_tiles_full, false);
+     CFRetain(surf);
+     if (present_vsync) {
+         os_unfair_lock_lock(&present_lock);
+@@ -8463,7 +8892,9 @@ static bool cocoa_gl_present(void)
+         }
+         CGLSetCurrentContext(NULL);
+         if (present_vsync) {
+-            cocoa_gl_present_queue_frame(surf, filter, flushed, boost);
++            cocoa_gl_present_queue_frame((PresentFrame){
++                .surf = surf, .filter = filter, .flushed = flushed, .linear = boost,
++            });
+             return;
+         }
+         dispatch_async(dispatch_get_main_queue(), ^{
+@@ -8557,6 +8988,9 @@ static void cocoa_gl_present_timer(void *opaque)
+ /* QEMU thread, BQL held: a tick took a frame off the queue. */
+ static void cocoa_gl_present_bh(void *opaque)
+ {
++    if (qatomic_read(&present_tiles_full)) {
++        gl_dirty = true;    /* the tiles were hidden: a whole frame */
++    }
+     if (gl_dirty) {
+         cocoa_gl_present_request();
+     }
+@@ -8568,6 +9002,191 @@ static void surface_put(IOSurfaceRef surf)
+     CFRelease(surf);
+ }
+ 
++/* A frame that will not be shown: its surfaces go back. */
++static void present_frame_put(PresentFrame *f)
++{
++    if (f->surf) {
++        surface_put(f->surf);
++    }
++    if (f->pt) {
++        if (f->pt->base) {
++            surface_put(f->pt->base);
++        }
++        for (unsigned i = 0; i < f->pt->n; i++) {
++            surface_put(f->pt->up[i].buf);
++        }
++        g_free(f->pt);
++    }
++    *f = (PresentFrame){ 0 };
++}
++
++/*
++ * OmacVM, tiled present: OLDER is skipped and NEWER comes right after it.
++ * A whole frame in NEWER covers everything; else NEWER takes over OLDER's
++ * whole frame and tiles (its own changed box only covers what changed
++ * after OLDER). Under present_lock, or with frames nobody else sees.
++ */
++static void present_frame_absorb(PresentFrame *newer, PresentFrame *older)
++{
++    if (!older->surf && !older->pt) {
++        return;
++    }
++    if (!newer->pt) {
++        present_frame_put(older);
++        return;
++    }
++    OmacvmPTFrame whole = { .base = older->surf };
++    OmacvmPTFrame *o = older->pt ? older->pt : &whole;
++    bool had_base = newer->pt->base != NULL;
++    void *freed[OMACVM_PT_MAX + 1];
++    unsigned nf = omacvm_pt_absorb(newer->pt, o, freed);
++    for (unsigned i = 0; i < nf; i++) {
++        surface_put(freed[i]);
++    }
++    if (!had_base && newer->pt->base) {
++        /* the whole frame is shown as OLDER would have shown it */
++        newer->filter = older->filter;
++        newer->linear = older->linear;
++    }
++    g_free(older->pt);
++    *older = (PresentFrame){ 0 };
++}
++
++/*
++ * present_lock held: OLDER is skipped. With the tiled present its updates
++ * go into NEXT (the frame after it), or, when none is queued yet, wait in
++ * present_pend for the next frame that comes. Else it just goes.
++ */
++static PresentFrame present_pend;
++static void present_frame_skip(PresentFrame *older, PresentFrame *next)
++{
++    if (present_tiles_on <= 0) {
++        present_frame_put(older);
++    } else if (next) {
++        present_frame_absorb(next, older);
++    } else {
++        present_frame_absorb(older, &present_pend);
++        present_pend = *older;
++        *older = (PresentFrame){ 0 };
++    }
++}
++
++/* present_tile_lock held, in a transaction: every tile hidden (the view's layer shows all). */
++static void present_tiles_hide_locked(void)
++{
++    if (!present_tiles_shown) {
++        return;
++    }
++    for (unsigned t = 0; t < OMACVM_PT_MAX; t++) {
++        CALayer *l = present_tile_layer[t];
++        if (l && ![l isHidden]) {
++            [l setHidden:YES];
++            [l setContents:nil];
++        }
++    }
++    present_tiles_shown = 0;
++}
++
++/* Any thread: hide the tiles (the view changed size); the next frame is whole. */
++static void present_tiles_hide(void)
++{
++    if (present_tiles_on <= 0) {
++        return;
++    }
++    [CATransaction begin];
++    [CATransaction setDisableActions:YES];
++    os_unfair_lock_lock(&present_tile_lock);
++    bool shown = present_tiles_shown != 0;
++    present_tiles_hide_locked();
++    os_unfair_lock_unlock(&present_tile_lock);
++    [CATransaction commit];
++    if (shown) {
++        qatomic_set(&present_tiles_full, true);
++        if (present_bh) {
++            qemu_bh_schedule(present_bh);
++        }
++    }
++}
++
++/*
++ * Any thread: a frame of tiles on the layers: its whole frame first (if
++ * it took one over), then each tile's new surface on its tile layer. The
++ * tiles sit over the view's layer pixel for pixel; if the view does not
++ * show the frame that way now, they hide and a whole frame is asked for.
++ */
++static void cocoa_gl_present_show_tiles(PresentFrame *f)
++{
++    CALayer *layer = [cocoaView layer];
++    OmacvmPTFrame *pt = f->pt;
++    bool fits;
++
++    [CATransaction begin];
++    [CATransaction setDisableActions:YES];
++    os_unfair_lock_lock(&present_tile_lock);
++    if (pt->base) {
++        NSString *fl = f->filter == GL_LINEAR ? kCAFilterLinear : kCAFilterNearest;
++        [layer setMagnificationFilter:fl];
++        [layer setMinificationFilter:fl];
++        cocoa_gl_layer_follow(layer, pt->base, f->linear);
++        omacvm_present_gravity(layer, pt->base);
++        [layer setContents:(id)pt->base];
++        present_tiles_hide_locked();
++    }
++    CGFloat s = [layer contentsScale];
++    CGSize b = [layer bounds].size;
++    long vw = lround(b.width * s), vh = lround(b.height * s);
++    NSString *g = [layer contentsGravity];
++    bool top = [g isEqualToString:kCAGravityTop] || [g isEqualToString:kCAGravityBottom];
++    fits = s > 0 && vw == pt->grid.fw &&
++           (vh == pt->grid.fh || (vh > pt->grid.fh && top));
++    if (!fits) {
++        present_tiles_hide_locked();
++    } else {
++        /* the picture's top is the view's top (gravity resize or top) */
++        bool flipped = [layer contentsAreFlipped];
++        for (unsigned i = 0; i < pt->n; i++) {
++            unsigned t = pt->up[i].tile;
++            CALayer *l = present_tile_layer[t];
++            uint32_t x, y, w, h;
++            if (!l) {
++                l = [[CALayer alloc] init];   /* kept in present_tile_layer */
++                [l setOpaque:YES];
++                [l setContentsGravity:kCAGravityResize];
++                [l setMagnificationFilter:kCAFilterNearest];
++                [l setMinificationFilter:kCAFilterNearest];
++                /* over the frame (the view's own contents), under every other
++                 * sublayer: the boot logo (-1), QEMU's labels, the cursor */
++                [l setZPosition:-2];
++                [l setHidden:YES];
++                [layer addSublayer:l];
++                present_tile_layer[t] = l;
++            }
++            omacvm_pt_rect(&pt->grid, t, &x, &y, &w, &h);
++            [l setContentsScale:s];
++            [l setFrame:CGRectMake(x / s, flipped ? y / s : b.height - (y + h) / s,
++                                   w / s, h / s)];
++            cocoa_gl_layer_follow(l, (IOSurfaceRef)pt->up[i].buf, false);
++            [l setContents:(id)pt->up[i].buf];
++            if ([l isHidden]) {
++                [l setHidden:NO];
++                present_tiles_shown++;
++            }
++        }
++    }
++    os_unfair_lock_unlock(&present_tile_lock);
++    [CATransaction commit];
++    if (!fits) {
++        qatomic_set(&present_tiles_full, true);
++        qemu_bh_schedule(present_bh);
++    }
++    if (qatomic_read(&omacvm_park_hold_on)) {
++        double flushed = f->flushed;
++        dispatch_async(dispatch_get_main_queue(), ^{
++            omacvm_park_frame_shown(flushed);
++        });
++    }
++}
++
+ /* Any thread: put a finished frame on the layer. */
+ static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushed,
+                                   bool linear)
+@@ -8582,6 +9201,12 @@ static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushe
+     cocoa_gl_layer_follow(layer, surf, linear);
+     omacvm_present_gravity(layer, surf);
+     [layer setContents:(id)surf];
++    if (present_tiles_on > 0) {
++        /* a whole frame: the tiles over it go */
++        os_unfair_lock_lock(&present_tile_lock);
++        present_tiles_hide_locked();
++        os_unfair_lock_unlock(&present_tile_lock);
++    }
+     [CATransaction commit];
+     if (qatomic_read(&omacvm_park_hold_on)) {
+         dispatch_async(dispatch_get_main_queue(), ^{
+@@ -8590,6 +9215,16 @@ static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushe
+     }
+ }
+ 
++/* Any thread: a frame on the layers. */
++static void present_frame_show(PresentFrame *f)
++{
++    if (f->pt) {
++        cocoa_gl_present_show_tiles(f);
++    } else if (f->surf) {
++        cocoa_gl_present_show(f->surf, f->filter, f->flushed, f->linear);
++    }
++}
++
+ /* Main thread: give the link the rate present_sync.hz names. */
+ static void cocoa_gl_present_link_rate(void)
+ {
+@@ -8694,15 +9329,15 @@ static void present_window_reset(double now)
+  * replaces it while the guest draws faster than the link, or while the
+  * link runs slower than the screen.
+  */
+-static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+-                                         double flushed, bool linear)
++static void cocoa_gl_present_queue_frame(PresentFrame f)
+ {
+     double now = CACurrentMediaTime();
+-    PresentFrame drop = { 0 };
+     bool show = false, wake = false, faster = false;
+ 
+     os_unfair_lock_lock(&present_lock);
+     present_sync.inflight--;
++    /* OmacVM, tiles: a frame skipped while none was queued comes along. */
++    present_frame_absorb(&f, &present_pend);
+     double gap = present_sync.last_ready > 0 ?
+                  now - present_sync.last_ready : INFINITY;
+     present_sync.last_ready = now;
+@@ -8746,7 +9381,7 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+         bool slowed = present_sync.hz < present_sync.max_hz;
+         if ((present_sync.merge || slowed) && last &&
+             gap < present_sync.period / 2) {
+-            drop = *last;
++            present_frame_skip(last, &f);
+             present_sync.queued--;
+             present_sync.merged++;
+             present_sync.extra++;
+@@ -8754,17 +9389,14 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+         } else {
+             present_sync.extra = 0;
+             if (present_sync.queued == PRESENT_QUEUE) {
+-                drop = present_sync.queue[0];
++                present_frame_skip(&present_sync.queue[0], &present_sync.queue[1]);
+                 memmove(&present_sync.queue[0], &present_sync.queue[1],
+                         sizeof(PresentFrame) * (PRESENT_QUEUE - 1));
+                 present_sync.queued--;
+                 present_sync.dropped++;
+             }
+         }
+-        present_sync.queue[present_sync.queued++] = (PresentFrame){
+-            .surf = surf, .filter = filter, .flushed = flushed,
+-            .linear = linear,
+-        };
++        present_sync.queue[present_sync.queued++] = f;
+         /*
+          * The guest draws faster than a slowed link (two extra frames in a
+          * row, or a full queue): the full rate at once.
+@@ -8781,12 +9413,9 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+                               present_sync.queued, present_sync.linked);
+     os_unfair_lock_unlock(&present_lock);
+ 
+-    if (drop.surf) {
+-        surface_put(drop.surf);
+-    }
+     if (show) {
+-        cocoa_gl_present_show(surf, filter, flushed, linear);
+-        surface_put(surf);
++        present_frame_show(&f);
++        present_frame_put(&f);
+     }
+     if (wake) {
+         dispatch_async(dispatch_get_main_queue(), ^{
+@@ -8844,9 +9473,8 @@ static double present_wanted_hz(void)
+  */
+ static bool cocoa_gl_present_vsync(double T)
+ {
+-    PresentFrame show = { 0 }, drop = { 0 }, stale[PRESENT_QUEUE] = { { 0 } };
+-    PresentFrame trimmed[PRESENT_QUEUE] = { { 0 } };
+-    int nstale = 0, ntrimmed = 0;
++    PresentFrame show = { 0 };
++    int nstale = 0;
+     bool input = present_input_first &&
+                  qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - qemu_input_last_event_ns() <
+                  PRESENT_INPUT_NS;
+@@ -8866,7 +9494,10 @@ static bool cocoa_gl_present_vsync(double T)
+          */
+         if (input && present_sync.queued > 1) {
+             nstale = present_sync.queued - 1;
+-            memcpy(stale, present_sync.queue, sizeof(PresentFrame) * nstale);
++            /* newest first: each goes into the frames after it (tiles) */
++            for (int i = nstale - 1; i >= 0; i--) {
++                present_frame_skip(&present_sync.queue[i], &present_sync.queue[nstale]);
++            }
+             memmove(&present_sync.queue[0], &present_sync.queue[nstale],
+                     sizeof(PresentFrame));
+             present_sync.queued = 1;
+@@ -8896,7 +9527,8 @@ static bool cocoa_gl_present_vsync(double T)
+             int quarter = present_sync.period > 0 ?
+                           MAX(4, (int)lround(0.25 / present_sync.period)) : 15;
+             if (++present_sync.left_run >= quarter) {
+-                trimmed[ntrimmed++] = present_sync.queue[0];
++                present_frame_skip(&present_sync.queue[0], present_sync.queued > 1 ?
++                                   &present_sync.queue[1] : NULL);
+                 present_sync.queued--;
+                 memmove(&present_sync.queue[0], &present_sync.queue[1],
+                         sizeof(PresentFrame) * present_sync.queued);
+@@ -8932,7 +9564,8 @@ static bool cocoa_gl_present_vsync(double T)
+          */
+         if (present_sync.win_min >= 1 && present_sync.win_min < INT_MAX &&
+             !present_sync.win_late && present_sync.queued) {
+-            drop = present_sync.queue[0];
++            present_frame_skip(&present_sync.queue[0], present_sync.queued > 1 ?
++                               &present_sync.queue[1] : NULL);
+             present_sync.queued--;
+             memmove(&present_sync.queue[0], &present_sync.queue[1],
+                     sizeof(PresentFrame) * present_sync.queued);
+@@ -8984,18 +9617,9 @@ static bool cocoa_gl_present_vsync(double T)
+     }
+     os_unfair_lock_unlock(&present_lock);
+ 
+-    if (drop.surf) {
+-        surface_put(drop.surf);
+-    }
+-    for (int i = 0; i < nstale; i++) {
+-        surface_put(stale[i].surf);
+-    }
+-    for (int i = 0; i < ntrimmed; i++) {
+-        surface_put(trimmed[i].surf);
+-    }
+-    if (show.surf) {
+-        cocoa_gl_present_show(show.surf, show.filter, show.flushed, show.linear);
+-        surface_put(show.surf);
++    if (show.surf || show.pt) {
++        present_frame_show(&show);
++        present_frame_put(&show);
+         /* The guest may have drawn while the queue was full. */
+         qemu_bh_schedule(present_bh);
+     }
+@@ -9156,6 +9780,11 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+     /* What changed, for the surfaces' next draws (partial present). */
+     omacvm_pd_add(&present_pd, x, y, w, h);
+     present_pd_unflushed = false;
++    /* ... and since the last frame drawn (tiled present), clipped as above. */
++    if (x < present_pd.fw && y < present_pd.fh && w && h) {
++        OmacvmPDRect r = { x, y, MIN(w, present_pd.fw - x), MIN(h, present_pd.fh - y) };
++        present_td = omacvm_pd_union(present_td, r);
++    }
+ 
+     /*
+      * Show the guest's frame now, not on the next 30 ms refresh tick:
