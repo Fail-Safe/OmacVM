@@ -20,6 +20,16 @@ in more words.
   `OMACVM_VA_MAX=1920` in Chrome's environment keeps 1440p and 4K on the CPU;
   `OMACVM_VIDEO_DECODE_SYNC=1` in the app's environment brings back 3.2.0's way (the thread
   waits for each picture, Chrome up to 1080p).
+- **Video call tiles in Google Chrome show the whole picture.** With hardware decoding (3.2.0)
+  a 320x180 tile showed its picture squeezed into the top 168 rows and 12 rows of nothing below
+  it (8 rows at 360p and on 1080p video, a strip on the right of 854-wide video): the VM's
+  video driver rounds Chrome's frames up to a multiple of 16 rows and columns, and Chrome showed
+  the rounded frame as its own size. The VM's VA-API driver now has those frames filled to their
+  rounded size and reads only the picture's part of the decoded planes, so Chrome puts every
+  row where its own CPU decoders do (checked at 320x180, 480x270, 640x360, 854x480 and 1080p in
+  VP9, AV1 and H.264). Only in Chromium-based apps and with Mesa up to 26.2 (a newer Mesa
+  turns it off until it is checked); needs Update VM, then restart Chrome. `OMACVM_VA_FILL=0`
+  in Chrome's environment turns it off.
 
 ## 3.2.0
 
