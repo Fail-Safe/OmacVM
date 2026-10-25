@@ -22,6 +22,7 @@ problems() {
   grep -q 'present_lossless = 0;' <<<"$alloc" && grep -q 'goto again;' <<<"$alloc" ||
     echo "no plain surfaces after a lossless one fails (a black window)"
   grep -q 'getenv("OMACVM_GL_LOSSLESS")' <<<"$alloc" || echo "OMACVM_GL_LOSSLESS is not read"
+  grep -q '@available(macOS 27.0, \*)' <<<"$alloc" || echo "lossless surfaces on a macOS they are not checked on"
   ! grep -q 'IOSurfaceLock(present_surf\|IOSurfaceGetBaseAddress(present_surf' "$m" ||
     echo "a present surface is read on the CPU (a compressed one cannot be)"
 }
@@ -35,7 +36,7 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
 }
 EOF2
 old=$(problems "$work/old.m")
-for want in "not made lossless-compressed" "still plain" "no plain surfaces after" "OMACVM_GL_LOSSLESS is not read"; do
+for want in "not made lossless-compressed" "still plain" "no plain surfaces after" "OMACVM_GL_LOSSLESS is not read" "not checked on"; do
   [[ $old == *"$want"* ]] || { echo "test-present-lossless: the checks miss the old code: $want" >&2; exit 1; }
 done
 echo "test-present-lossless: the checks catch the code without it"
