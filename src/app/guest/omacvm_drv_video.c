@@ -554,7 +554,7 @@ static struct bumped {
     VADriverContextP drv;
     VASurfaceID id;
     uint32_t width, height;
-} bumped[64];
+} bumped[256];
 static unsigned nbumped, next_bumped;
 
 /* 4:2:0 surfaces Mesa allocated (not imports), so with planes rounded up to 16:
@@ -765,12 +765,15 @@ static VAStatus render_picture(VADriverContextP ctx, VAContextID context, VABuff
     VAStatus st;
 
     target = target_of(ctx, context);
-    if (target != VA_INVALID_SURFACE && ctx->vtable->vaBufferInfo) {
-        fourcc = surface_info(ctx, target, &w, &h);
-        /* only an import made at the rounded size (its planes are there for the
-         * conversion to fill); the app asks for its own size */
-        fill = bumped_size(ctx, target, &w, &h) && is_rgb(fourcc) && w && h && w <= 16384 &&
-               h <= 16384 && ((w | h) & 15);
+    /* only an import made at the rounded size (its planes are there for the
+     * conversion to fill); the app asks for its own size. The table first: an
+     * export per decoding target is not needed. */
+    if (target != VA_INVALID_SURFACE && ctx->vtable->vaBufferInfo &&
+        bumped_size(ctx, target, &w, &h)) {
+        uint32_t tw, th;
+
+        fourcc = surface_info(ctx, target, &tw, &th);
+        fill = is_rgb(fourcc) && w && h && w <= 16384 && h <= 16384 && ((w | h) & 15);
     }
     full = (VARectangle){ .x = 0, .y = 0, .width = (uint16_t)((w + 15) & ~15u),
                           .height = (uint16_t)((h + 15) & ~15u) };
