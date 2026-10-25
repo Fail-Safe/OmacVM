@@ -8,12 +8,12 @@ local cfg = os.getenv("XDG_CONFIG_HOME")
 assert(modpath and rt and cfg and rt ~= "", "usage: see the top of this file")
 os.execute("mkdir -p '" .. rt .. "/omacvm/display-sync' '" .. cfg .. "/hypr'")
 
-local monitors, applied, window_rules
+local monitors, applied, window_rules, configs
 hl = {
   get_monitors = function() return monitors end,
   monitor = function(rule) applied[#applied + 1] = rule end,
   window_rule = function(rule) window_rules[#window_rules + 1] = rule end,
-  config = function() end,
+  config = function(c) configs[#configs + 1] = c end,
   on = function() end,
   timer = function() end,
   exec_cmd = function() end,
@@ -28,7 +28,7 @@ end
 local function rule_file(output, text) write(rt .. "/omacvm/display-sync/" .. output .. ".rule", text) end
 
 local function load_config(names)
-  monitors, applied, window_rules = {}, {}, {}
+  monitors, applied, window_rules, configs = {}, {}, {}, {}
   for _, n in ipairs(names) do monitors[#monitors + 1] = { name = n } end
   dofile(modpath)
   return applied
@@ -118,6 +118,32 @@ rule_file("Virtual-1", 'hl.monitor({ output = "NOTCH", mode = "' .. MODE .. '", 
 check("rule for another output: ignored", #load_config({ "Virtual-1", "NOTCH" }) == 0)
 rule_file("Virtual-1", "")
 check("empty file: ignored", #load_config({ "Virtual-1" }) == 0)
+
+-- The pointer on its own layer: what the running driver says (its module
+-- option), not the switch: a start on the stock driver stays as before.
+local sys = rt .. "/sys"
+local params = sys .. "/module/virtio_gpu/parameters"
+os.execute("mkdir -p '" .. params .. "'")
+local real_getenv = os.getenv
+os.getenv = function(k) if k == "OMACVM_APP_LUA_SYS" then return sys end return real_getenv(k) end
+local function value(key, sub)
+  local v
+  for _, c in ipairs(configs) do if c[key] and c[key][sub] ~= nil then v = c[key][sub] end end
+  return v
+end
+rule_file("Virtual-1", "")
+load_config({ "Virtual-1" })
+check("stock driver: the pointer drawn into the frames", value("cursor", "no_hardware_cursors") == 1)
+check("stock driver: no CPU buffer", value("cursor", "use_cpu_buffer") == nil)
+write(params .. "/cursor_plane", "N\n")
+load_config({ "Virtual-1" })
+check("OmacVM's driver without the option (HDR alone): as before", value("cursor", "no_hardware_cursors") == 1)
+write(params .. "/cursor_plane", "Y\n")
+load_config({ "Virtual-1" })
+check("cursor_plane: the pointer on the plane, from a CPU buffer", value("cursor", "no_hardware_cursors") == 0
+  and value("cursor", "use_cpu_buffer") == 1)
+check("cursor_plane: nothing else set", value("render", "direct_scanout") == nil)
+os.getenv = real_getenv
 
 if failed > 0 then
   print(failed .. " failed")

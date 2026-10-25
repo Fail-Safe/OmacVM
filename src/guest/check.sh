@@ -607,6 +607,22 @@ app)
       *) warn "HDR output" "the app asked for 10-bit colour, but the stock driver runs: ${st#stock }$( [[ -z $st ]] && echo "no word from omacvm-virtio-gpu-load (omacvm apply, then restart the VM)")" ;;
     esac
   fi
+  # Pointer on its own layer (the app's experimental switch): this start asked
+  # for it (omacvm.pointerplane=1); the driver's loader says whether the
+  # cursor plane shows, and Hyprland must put the pointer there.
+  if grep -qx 'OMACVM_POINTERPLANE=1' /run/omacvm/host.env 2>/dev/null; then
+    st=$(cat /run/omacvm/virtio-gpu 2>/dev/null)
+    hw=$(as_user hyprctl getoption cursor:no_hardware_cursors -j 2>/dev/null | jq -r '.int' 2>/dev/null)
+    if grep -qx 'OMACVM_HWCURSOR=1' /run/omacvm/host.env; then
+      skip "Pointer layer" "macPointer is on: the Mac's own cursor shows the pointer"
+    elif [[ $st != *cursor_plane=1* ]]; then
+      warn "Pointer layer" "the switch is on, but the stock driver runs: ${st#stock }$( [[ -z $st ]] && echo "no word from omacvm-virtio-gpu-load (omacvm apply, then restart the VM)")"
+    elif [[ $hw != 0 ]]; then
+      warn "Pointer layer" "the cursor plane is there, but Hyprland draws the pointer (cursor:no_hardware_cursors ${hw:-unknown}: an own setting in the Hyprland config?)"
+    else
+      ok "Pointer layer" "on the cursor plane (experimental): pointer moves do not redraw the screen"
+    fi
+  fi
   # Video decoding on the Mac's media engine (an app with it lists decoders).
   drv=virtio_gpu; [[ -f /usr/local/lib/dri/omacvm_drv_video.so ]] && drv=omacvm
   # The shim prints the Mac's per-VM limit (past it, players decode on the CPU).

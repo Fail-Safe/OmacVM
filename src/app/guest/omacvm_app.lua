@@ -15,10 +15,24 @@ local function mac_pointer()
   return on
 end
 local mac = mac_pointer()
-hl.config({ cursor = { no_hardware_cursors = mac and 0 or 1 } })
+-- The app's experimental "Pointer on its own layer" (omacvm.pointerplane=1):
+-- OmacVM's virtio-gpu driver then shows its cursor plane (cursor_plane=1).
+-- Read from the running driver, so a start on the stock one stays as before.
+local function driver_option(name)
+  local dir = os.getenv("OMACVM_APP_LUA_SYS") or "/sys"
+  local ok, f = pcall(function() return io.open(dir .. "/module/virtio_gpu/parameters/" .. name) end)
+  if not ok or not f then return false end
+  local v = f:read("l")
+  f:close()
+  return v == "Y"
+end
+local plane = driver_option("cursor_plane")
+-- With the plane the pointer is not drawn into the frames: a pointer move
+-- costs no new picture; QEMU shows the same image over its window.
+hl.config({ cursor = { no_hardware_cursors = (mac or plane) and 0 or 1 } })
 -- The cursor plane from a CPU buffer (a dumb buffer: virtio-gpu copies it to
 -- the Mac with the plane update); pcall: an older Hyprland lacks the option.
-if mac then pcall(hl.config, { cursor = { use_cpu_buffer = 1 } }) end
+if mac or plane then pcall(hl.config, { cursor = { use_cpu_buffer = 1 } }) end
 -- A config reload drops the rules omacvm-display-sync gave the outputs, and
 -- each output would take monitors.lua's rule ("auto" place, cached mode) until
 -- display-sync runs again after the reload. With Omanotch's NOTCH output above
