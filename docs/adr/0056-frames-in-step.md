@@ -83,10 +83,10 @@ because the wait is in the phase, not in the queue.
 
 ## Consequences
 
-- Mac mini M4, 60 Hz, while the screen moves: keys 1.5-2.4 ms sooner, the
-  pointer 2.4-4.5 ms, keys while the terminal scrolls 4-7 ms; repeats +
-  drops 21 instead of 77 in the quiet runs (the free phase drifts and the
-  trims drop frames). At 120 Hz about 1 ms: the guest's frames are ready 5
+- Mac mini M4, 60 Hz, while the screen moves: keys 1.4-2.4 ms sooner, the
+  pointer 4.8-4.9 ms, keys while the terminal scrolls 4-5 ms (3-8 runs a
+  side); repeats + drops 86 instead of 103 over the final version's runs
+  (off, the free phase drifts and the trims drop frames). At 120 Hz about 1 ms: the guest's frames are ready 5
   ms after their vblank (median) and up to a refresh, so the lead sits at its
   cap and late frames wait as before. The gain is smaller than the model's
   half refresh because the lead covers the slowest frame. Tables:
