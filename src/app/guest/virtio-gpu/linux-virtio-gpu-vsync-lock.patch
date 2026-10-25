@@ -437,14 +437,10 @@ vblank.
  
 --- a/drivers/gpu/drm/virtio/virtgpu_kms.c
 +++ b/drivers/gpu/drm/virtio/virtgpu_kms.c
-@@ -294,6 +294,7 @@
- 	struct virtio_gpu_device *vgdev = dev->dev_private;
- 
+@@ -296,2 +296,3 @@
  	flush_work(&vgdev->obj_free_work);
 +	virtio_gpu_vsync_fini(vgdev);
  	flush_work(&vgdev->ctrlq.dequeue_work);
- 	flush_work(&vgdev->cursorq.dequeue_work);
- 	flush_work(&vgdev->config_changed_work);
 --- a/drivers/gpu/drm/virtio/virtgpu_vq.c
 +++ b/drivers/gpu/drm/virtio/virtgpu_vq.c
 @@ -953,8 +953,53 @@
