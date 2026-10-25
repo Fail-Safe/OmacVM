@@ -23,6 +23,17 @@ org.omacvm.display, one JSON object per line:
                 picked): in "Full screen including notch" the Mac gives it a
                 size that scale fits, a few pixels more than the panel, shown
                 scaled onto it (#355); the Mac keeps it for the next start.
+  from the Mac  {"unseen": ["Virtual-1"]}  the outputs whose Mac window
+                nobody can see now (OmacVM.app's "Pause drawing while
+                hidden"): the agent turns their display off (DPMS), so
+                Hyprland and the apps stop drawing, as macOS apps do for a
+                window nobody sees; {"unseen": []} turns them on again. Only
+                displays the agent turned off itself are turned on, and none
+                is turned off while a screen share or recording of it runs
+                (Hyprland's screencastv2 events; any window share keeps all
+                of them on). The list of them is in
+                $XDG_RUNTIME_DIR/omacvm/paused-displays, so a restarted agent
+                turns them on first (the Mac tells it again at its hello).
 
 Hyprland's event socket has no event when an output only moves (display-sync
 and Omanotch move them with hyprctl eval, a config reload puts them back to
@@ -591,6 +602,120 @@ def write_state(message: dict) -> None:
         BUILTIN.unlink(missing_ok=True)
 
 
+PAUSED = RUNTIME / "omacvm/paused-displays"
+
+
+def screencasts(data: bytes) -> list[tuple[bool, str, str]]:
+    """Hyprland's socket2 lines "screencastv2>>STATE,TYPE,NAME" (a screen
+    share, recording or screenshot starting or ending): (on, type, name)."""
+    out = []
+    for line in data.split(b"\n"):
+        name, _, rest = line.partition(b">>")
+        if name != b"screencastv2":
+            continue
+        state, _, rest = rest.partition(b",")
+        kind, _, what = rest.partition(b",")
+        if state in (b"0", b"1"):
+            out.append((state == b"1", kind.decode(errors="replace"), what.decode(errors="replace")))
+    return out
+
+
+def dpms(name: str, on: bool) -> bool:
+    """One output's display on or off (Hyprland's own DPMS)."""
+    action = "enable" if on else "disable"
+    return hypr_request(f'dispatch hl.dsp.dpms({{ action = "{action}", monitor = "{name}" }})') == "ok"
+
+
+class Pause:
+    """The outputs whose Mac window nobody can see: their display off (DPMS).
+
+    mac(names) takes the Mac's list, cast() a screen share starting or
+    ending, apply() makes Hyprland match: off for an unseen output that is
+    on (and not shared), on again only for outputs this agent turned off.
+    An output the guest turned off itself (Omarchy's idle) is left as it is.
+    """
+
+    def __init__(self, set_dpms=dpms, monitors=lambda: hypr_json("j/monitors"), path: Path = PAUSED) -> None:
+        self.set_dpms = set_dpms
+        self.monitors = monitors
+        self.path = path
+        self.unseen: set[str] = set()
+        self.paused: set[str] = set()
+        self.casts: dict[tuple[str, str], int] = {}
+
+    def mac(self, names) -> None:
+        self.unseen = {n for n in names if isinstance(n, str) and re.fullmatch(r"Virtual-[0-9]+", n)}
+
+    def cast(self, on: bool, kind: str, name: str) -> None:
+        key = (kind, name)
+        count = self.casts.get(key, 0) + (1 if on else -1)
+        if count > 0:
+            self.casts[key] = min(count, 16)
+        else:
+            self.casts.pop(key, None)
+
+    def casts_lost(self) -> None:
+        """The event socket went away: its ends of shares are not known."""
+        self.casts = {}
+
+    def wanted_off(self) -> set[str]:
+        if any(kind != "monitor" for kind, _ in self.casts):
+            return set()   # a window shared: it may be on any output
+        return {n for n in self.unseen if ("monitor", n) not in self.casts}
+
+    def busy(self) -> bool:
+        return bool(self.unseen or self.paused)
+
+    def apply(self) -> None:
+        data = self.monitors()
+        if not isinstance(data, list):
+            return
+        state = {m.get("name"): m for m in data if isinstance(m, dict) and not m.get("disabled")}
+        off = self.wanted_off()
+        changed = False
+        for name in sorted(off):
+            m = state.get(name)
+            if m is None or m.get("dpmsStatus") is not True:
+                continue   # gone, or already off (by the guest itself)
+            if self.set_dpms(name, False):
+                if name not in self.paused:
+                    log(f"drawing paused on {name}: its Mac window is out of sight")
+                self.paused.add(name)
+                changed = True
+        for name in sorted(self.paused - off):
+            m = state.get(name)
+            if m is not None and m.get("dpmsStatus") is False and not self.set_dpms(name, True):
+                continue   # try again at the next look
+            self.paused.discard(name)
+            changed = True
+            log(f"drawing again on {name}")
+        if changed:
+            self.save()
+
+    def save(self) -> None:
+        try:
+            if self.paused:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = self.path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(sorted(self.paused)) + "\n")
+                tmp.replace(self.path)
+            else:
+                self.path.unlink(missing_ok=True)
+        except OSError as error:
+            log(f"paused displays not written: {error}")
+
+    def restore(self) -> None:
+        """At start: displays a former agent turned off, on again (the Mac
+        says at the hello which are still out of sight)."""
+        try:
+            names = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            return
+        if isinstance(names, list):
+            self.paused = {n for n in names if isinstance(n, str) and re.fullmatch(r"Virtual-[0-9]+", n)}
+            self.apply()
+
+
 REPAIRS = RUNTIME / "omacvm/shell-repairs"
 REPAIR_EVERY = 120.0   # seconds between two shell restarts
 REPAIR_MAX = 3         # per run of the agent (a session)
@@ -688,6 +813,7 @@ class Agent:
         self.said: list[str] = []
         self.config_watch = ConfigWatch(CONFIG.parent)
         self.poke = Poke(POKE)
+        self.pause = Pause()
         self.scale: float | None = None   # the scale last told to the Mac
         self.lua_scale: float | None = None   # monitors.lua's, when last looked at
 
@@ -866,6 +992,10 @@ class Agent:
             message = json.loads(line)
         except ValueError:
             return
+        if isinstance(message, dict) and isinstance(message.get("unseen"), list):
+            self.pause.mac(message["unseen"])
+            self.pause.apply()
+            return
         if not isinstance(message, dict) or not isinstance(message.get("layout"), list):
             return
         write_state(message)
@@ -890,6 +1020,7 @@ class Agent:
         return max(0.0, min(due) - now)
 
     def run(self) -> None:
+        self.pause.restore()
         self.send({"hello": 1, "external": self.external})
         self.lua_changed()
         # Started in the middle of a change (a config reload restarts it):
@@ -938,7 +1069,13 @@ class Agent:
                 if not data:
                     self.events.close()
                     self.events = None
+                    self.pause.casts_lost()
                 else:
+                    casts = screencasts(data)
+                    for on, kind, name in casts:
+                        self.pause.cast(on, kind, name)
+                    if casts and self.pause.busy():
+                        self.pause.apply()
                     if layout_event(data):
                         self.layout_changed()
                         self.soon(0.3)
@@ -962,6 +1099,9 @@ class Agent:
             self.last_check = now
             self.report()
             self.watch_shell()
+            pause = getattr(self, "pause", None)
+            if pause and pause.busy():
+                pause.apply()   # a display turned on again by a key, Hyprland restarted
         elif now - self.last_report >= self.report_every(now):
             self.report()
         self.repair_done()
