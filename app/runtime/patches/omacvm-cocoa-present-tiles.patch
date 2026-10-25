@@ -13,19 +13,19 @@ boot logo, extra brightness, another size or colour path, a scanout buffer
 not seen lately or not flushed yet, and more than 12 tiles. Each whole
 frame shown measures if the window shows that size pixel for pixel; if
 not (a window that scales the picture), frames stay whole until it does
-again, so they never go back and forth. Frames skipped in the present queue hand their tiles to the frame
-after them. Only with the vsync present. Each tile keeps five surfaces
-while it is used (at most 32 tiles; none 10 s after the last frame in tiles).
-=check also compares every 30th tile frame's tiles with the same frame
-drawn whole at their own precision (qemu.log "tiles check"); qemu.log says
-once a minute how many frames went in tiles.
+again, so they never go back and forth. Frames skipped in the present
+queue hand their tiles to the frame after them. Only with the vsync
+present. Each tile keeps five surfaces while it is used (at most 32
+tiles; none 10 s after the last frame in tiles). =check also compares
+every 30th tile frame's tiles with the same frame drawn whole at their
+own precision (qemu.log "tiles check"); qemu.log says once a minute how
+many frames went in tiles (and, with =check, how many checks differed).
 
 Why: WindowServer composites the whole window again for every new whole
 surface, also when only the pointer moved. MacBook Air M2, the VM full
 screen at 60 Hz with a guest that sends its damage (#520's driver), the
 pointer moving: 3.13 W instead of 3.75 W for the whole Mac, WindowServer
-43 instead of 154 GPU ms/s, the same frame rate, pictures identical. No VM:
-M1 Max, a window like the VM's at 120 frames a second costs ~4 W over idle.
+43 instead of 154 GPU ms/s, the same frame rate, pictures identical.
 
 The guest must say what changed: Linux before 7.4 flushes the whole plane
 on every page flip (the frame-path work, #520, backports the fix), and then
@@ -38,7 +38,7 @@ the runtime build runs it on the real cocoa.m before this patch).
 Applies after omacvm-cocoa-present-lossless.patch (it uses the partial
 present's rects, rules and checks), before omacvm-cocoa-no-app-nap.patch.
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index 4b51959..17011be 100644
+index 4b51959..22c3fb8 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -57,6 +57,7 @@
@@ -89,9 +89,9 @@ index 4b51959..17011be 100644
  }
  
 +/*
-+ * OmacVM, tiled present (OMACVM_GL_PRESENT_TILES=1, the app's experimental
-+ * switch; =check for tests). QEMU's present shows each guest frame as a new
-+ * whole surface, so WindowServer composites the whole window for every
++ * OmacVM, tiled present (OMACVM_GL_PRESENT_TILES=1, env only: the app gets
++ * a switch with the guest side, #520; =check for tests). QEMU's present
++ * shows each guest frame as a new whole surface, so WindowServer composites the whole window for every
 + * frame, also when only a caret blinked: at 120 frames a second that is
 + * most of what showing the window costs. With tiles, the view's layer
 + * keeps the last whole frame and a grid of tile layers lies over it

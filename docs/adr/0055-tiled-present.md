@@ -17,14 +17,19 @@ also when only a caret blinked or a spinner turned. 0051 makes QEMU's own draw
 into the surface partial; WindowServer's composite stays whole.
 
 What that costs, measured without a VM (work/window-draw/kit/wdbench.m, a window
-like the VM's): on a MacBook Pro M1 Max at 120 frames a second a full-screen
-HDR window (half-float PQ surfaces, 3024x1898) takes the whole Mac from 4.45 W
-to 8.49 W; WindowServer 156 GPU ms/s and 57 % of a core. The same window as a
-grid of 16x10 tile layers, only 2 of them getting a new surface per frame:
-WindowServer 51 instead of 124 GPU ms/s and the copy 65 instead of 142 (same
-round); MacBook Air M2 at 60 frames a second: 34 instead of 156 and 31 instead
-of 100. WindowServer's work follows the changed area once only those layers
-change.
+like the VM's): on a MacBook Air M2 at 60 frames a second, full screen SDR, the
+whole Mac draws 2.22 W idle and 3.09 / 3.15 W with a whole new surface per
+frame (WindowServer 155 GPU ms/s). The same window as a grid of 16x10 tile
+layers, only 2 of them getting a new surface per frame: 2.46 W (WindowServer
+35 GPU ms/s, our copy 31 instead of 98); 8 tiles: 2.75 W. WindowServer's work
+follows the changed area once only those layers change.
+
+Not counted: the MacBook Pro M1 Max rows of the same bench (120 frames a
+second, half-float HDR surfaces, 3024x1896: 4.45 W idle, 8.49 W with whole
+frames; 2 tiles: WindowServer 51 instead of 124 GPU ms/s). They were single
+rows at brightness 0, where the panel has no EDR headroom, and were taken
+before all M1 Max rows of that day were started over. They show where the
+cost is, not what tiles save there; the M1 Max is measured again.
 
 ## Options
 
