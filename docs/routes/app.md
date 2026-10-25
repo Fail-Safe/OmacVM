@@ -515,6 +515,15 @@ the VM's SSH on `127.0.0.1:<port>`.
   without). A still screen and frames that come one at a time are as
   before. `omacvm check` says "Frames in step" (ok once the driver was in
   step in this start).
+- Draw only what changed (experimental, off; the VM window's Display
+  section, `defaults write org.omacvm.app presentTiles -bool true`, from the
+  VM's next start; ADR 0055): QEMU keeps the last whole frame on the window
+  and puts a frame that changed in at most 12 squares of 256 x 256 on tile
+  layers over it, so macOS redraws only those. It needs the VM to say what
+  changed: OmacVM's virtio-gpu driver (Linux 7.4's damage fix, loaded at every
+  start once Update VM built it; `omacvm check`, "Changed parts"). MacBook
+  Air M2, full screen at 60 Hz, the pointer moving: 11-17 % less power for
+  the whole Mac, the same pictures and frame rate.
 - Mac pointer for the VM (experimental, off, no switch in the window yet:
   `defaults write org.omacvm.app macPointer -bool true`, from the VM's
   next start): Omarchy is asked to put its pointer on virtio-gpu's cursor

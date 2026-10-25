@@ -41,6 +41,7 @@ MainActor.assumeIsolated {
         case "extraBrightness": Settings.extraBrightness = value == "true"
         case "pointerPlane": Settings.pointerPlane = value == "true"
         case "vsyncLock": Settings.vsyncLock = value == "true"
+        case "presentTiles": Settings.presentTiles = value == "true"
         case "closeAction": Settings.closeAction = CloseAction.parse(value)
         case "appIconTheme": AppIcon.set(IconTheme.choice(stored: value))
         case "escapeSwipe": EscapeSetting.set(EscapeSetting.Choice(rawValue: value) ?? .pointer)

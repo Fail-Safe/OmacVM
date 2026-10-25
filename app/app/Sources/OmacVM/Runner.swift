@@ -530,6 +530,12 @@ final class Runner {
         if Settings.vkWindowsNoCopy {
             env["OMACVM_VK_WINDOWS"] = "iosurface"
         }
+        // Draw only what changed (presentTiles, experimental; ADR 0055): QEMU's
+        // tiled present; it says once a minute how many frames went in tiles.
+        // Not in GPU safe mode (its present is the plain layer).
+        if Settings.presentTiles && !Settings.gpuSafeMode {
+            env["OMACVM_GL_PRESENT_TILES"] = "1"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"
@@ -581,6 +587,10 @@ final class Runner {
         // cocoa_present_follow says when the guest follows).
         if Settings.vsyncLock {
             log.write(Data("OmacVM: frames in step: asked (omacvm check says if it runs)\n".utf8))
+        }
+        // Draw only what changed, while the switch is on (QEMU's minute lines say how often).
+        if Settings.presentTiles {
+            log.write(Data("OmacVM: tiled present: \(Settings.gpuSafeMode ? "off (GPU safe mode)" : "on (frames in tiles once the VM says what changed)")\n".utf8))
         }
         // Extra brightness for omacvm check, while the switch is on (QEMU's own lines follow it).
         if Settings.extraBrightness {

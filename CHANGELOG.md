@@ -5,22 +5,16 @@ in more words.
 
 ## 3.2.3 (unreleased)
 
-- **The VM tells the Mac which part of each frame changed.** OmacVM.app VMs now load OmacVM's own
-  build of the VM's graphics driver at every start (before, only for HDR or the pointer layer): the
-  standard driver of the VM's kernel with Linux 7.4's fix that keeps the compositor's damage, so the
-  app can redraw only what changed. Its 10-bit formats stay off unless HDR and 10-bit colour is on.
-  Update VM builds it (internet once, a few seconds); until it is built, or if it fails, the
-  standard driver loads as before. A change that does not fit a newer kernel is left out of that
-  kernel's build and the rest stays (HDR keeps working). `omacvm check` has a "Changed parts" line.
-- **Tiled present, built, off for now.** OmacVM.app shows every frame of the VM as a new whole
-  picture, so macOS redraws the whole window for each one, also when only the pointer moved. With
-  tiles, only the 256x256 squares the VM changed get a new picture. MacBook Air M2, the VM full
-  screen at 60 Hz with a driver that says what changed, the pointer moving: 3.13-3.17 W instead of
-  3.55-3.75 W for the whole Mac (-11 to -17 %, two sets), the same pixels and frame rate; scrolling
-  and typing the same.
-  It needs a VM that says what changed in its frames (Linux 7.4, or OmacVM's own driver with that
-  fix, #520), so there is no switch yet. `OMACVM_GL_PRESENT_TILES=1` in the app's environment
-  turns it on for tests.
+- **Draw only what changed (experimental, off by default).** A new switch in the VM window's Display
+  section. OmacVM.app shows every frame of the VM as a new whole picture, so macOS redraws the whole
+  window for each one, also when only the pointer moved. With the switch, only the 256x256 squares
+  the VM changed get a new picture. For that the VM needs to say what changed in each frame: with
+  the switch on, it loads OmacVM's own build of its graphics driver (the standard one with Linux
+  7.4's fix that passes this on; Update VM builds it, internet once). With the switch off, or in
+  GPU safe mode, nothing changes: the standard driver loads as before. MacBook Air M2, the VM full
+  screen at 60 Hz, the pointer moving: 3.13-3.17 W instead of 3.55-3.75 W for the whole Mac (-11 to
+  -17 %, two sets); scrolling and typing the same. The same pixels and frame rate, checked at 60 Hz
+  so far. `omacvm check` has a "Changed parts" line.
 
 ## 3.2.2
 
@@ -37,6 +31,7 @@ new experimental switch puts the pointer on its own layer.
   Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
   download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
   Mac.
+
 - **Control centre switches right after another one are not turned away.** When a switch's job
   ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
   switch was refused with "unknown VM" at once and the control centre asked again, so that switch
