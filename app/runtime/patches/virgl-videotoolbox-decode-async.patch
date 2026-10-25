@@ -1,0 +1,1185 @@
+virglrenderer: decoded pictures finish beside QEMU's GPU thread
+
+What: END_FRAME no longer waits for the Mac's media engine on vrend's thread,
+which is QEMU's GPU thread (every guest context's commands wait behind it). It
+hands the picture to the decoder's own serial queue and returns; the queue
+gives it to VideoToolbox (asynchronous decompression, at most 4 pictures per
+decoder in flight: VideoToolbox's DecodeFrame still waits on its remote
+decoder's semaphore and a synchronous message, about a third of the thread's
+time at 4K on the M4 Max, so not on vrend's thread). A session that breaks
+there is started again on vrend's thread at the next picture; a format change
+or a session's end first waits for the queue. The output callback marks the picture's job
+and wakes vrend's thread (callbacks->encode_wake, QEMU's poll fd);
+virgl_video_decode_poll(), run from vrend_renderer_poll(), copies the pictures
+that are in into the guest's planes, oldest first. Planes a picture is still
+on its way into are marked (vrend_resource.video_pending, through
+callbacks->decode_pending): before a draw, a clear or a dispatch that samples,
+writes or renders to such a plane, and before a blit, a copy region, a
+transfer or a copy transfer of one, every picture in flight goes in first,
+waiting for each (vrend_video_ready). That covers the decoding context and
+every other one (a player that imports the planes into its own GL context).
+The copy then pauses the render condition of the context whose GL context is
+current, not the decoding one's. Fences: each vrend fence also records the
+last picture sent before it and signals only once every picture up to it is
+in the guest's planes (the sync thread waits for that after the GL fence,
+2 s at most, then a warning; polled fences stay unretired). A buffer the
+guest destroys drops the pictures still on their way into it; a decoder that
+goes away first puts its last pictures in. A picture the media engine has had
+for 1 s is given up (logged), when it is waited for and in the poll. A decoder's
+queue holds at most 8 pictures not handed to VideoToolbox yet; more are refused
+(a media engine that stopped answering). The sync thread reads the fence's
+context again after its waits: the context may have gone away meanwhile.
+Known: a fence waits for the last picture sent by any decoder, so while a video
+plays every context's fences (Hyprland's too) may wait up to one picture's
+decode time (3-5 ms at 4K); before, QEMU's GPU thread itself was held that long.
+OMACVM_VIDEO_DECODE_SYNC=1: END_FRAME waits for each picture, as before. With
+OMACVM_VIDEO_DEBUG=1 the per-120-frames line says how many pictures were in
+flight at most.
+Why: in Google Chrome's hardware decoding of YouTube 4K60 (AV1, MacBook Pro M4
+Max) QEMU's GPU thread was busy 94 % of the time: 55 % of it waiting in
+DecodeFrame + WaitForAsynchronousFrames (about 8 ms a picture), 20 % copying.
+Chrome's compositor and Hyprland waited behind every picture, and Chrome
+dropped 13-20 % of the frames against 8 % decoding on the CPU (YouTube 4K60
+AV1, M4 Max; 38 % against 7 % for 4K VP9 on a MacBook Air M2, same session),
+so Chromium was held to 1080p (OMACVM_VA_MAX).
+Applies on top of virgl-videotoolbox-decode.patch,
+virgl-videotoolbox-encode-async.patch (the fence hook), virgl-video-plane-edge.patch
+and virgl-video-picture-size.patch.
+Upstream: OmacVM addition to its own backend; the fence hook would need an
+upstream API for late video results. Not sent.
+Tests: Tests/virgl/test-video-decode-async.c (4K H.264 from VTCompressionSession):
+END_FRAME returns in less than half the time VideoToolbox takes when waited for
+(without the patch: 8.3 ms against 2.5 ms on the mini M4), pictures read right
+after END_FRAME, six at once, another context's copy region right after
+END_FRAME, another context's clear of a plane right after END_FRAME (the draw
+path's check), a fence after END_FRAME then the GL texture read past vrend
+(fails without the fence hook), a buffer and the decoder destroyed with
+pictures in flight, a picture that never comes back (OMACVM_TEST_VIDEO_LOSE=N,
+a test hook: the fence after it signals after 1 s, polled too), a context
+destroyed while its fence waits for a picture (not reported); polled fences,
+sync-thread fences and OMACVM_VIDEO_DECODE_SYNC=1.
+test-video-decode.c and test-video-padding.c (they read through transfers)
+pass unchanged; test-video-decode.c also with OMACVM_VIDEO_DECODE_SYNC=1.
+--- a/src/vrend/virgl_video.h
++++ b/src/vrend/virgl_video.h
+@@ -173,11 +173,17 @@
+      * gpu_fence_wait: is the GPU work before this fence done? BLOCK: wait for it
+      * (vrend's thread, a context of its share group current);
+      * gpu_fence_destroy: frees it (vrend's thread);
+-     * encode_wake: an encoder's output is in, run virgl_video_encode_poll soon
+-     * (any thread). */
++     * encode_wake: an encoder's or a decoder's output is in, run
++     * virgl_video_encode_poll and virgl_video_decode_poll soon (any thread). */
+     bool (*gpu_fence_wait)(void *fence, bool block);
+     void (*gpu_fence_destroy)(void *fence);
+     void (*encode_wake)(void);
++
++    /* VideoToolbox decoder (pictures finish after END_FRAME): TARGET gets a
++     * picture later (PENDING true) or no longer waits for one (false, after
++     * decode_completed when there was a picture); once each (vrend's thread). */
++    void (*decode_pending)(struct virgl_video_codec *codec,
++                           struct virgl_video_buffer *target, bool pending);
+ };
+ 
+ int virgl_video_init(int drm_fd,
+@@ -220,6 +226,18 @@
+ uint64_t virgl_video_encode_seq(void);
+ bool virgl_video_encode_done(uint64_t seq);
+ bool virgl_video_encode_wait(uint64_t seq, uint32_t timeout_ms);
++/* VideoToolbox decoder: the media engine decodes beside vrend's thread. A fence
++ * made after a picture's END_FRAME (seq: virgl_video_decode_seq() when it is made)
++ * must not signal before virgl_video_decode_done(seq); virgl_video_decode_poll()
++ * copies the pictures that are in into the guest's planes, and
++ * virgl_video_decode_finish() every picture in flight, waiting for each (before
++ * the guest's planes are read or written: vrend's thread). */
++void virgl_video_decode_poll(void);
++bool virgl_video_decode_busy(void);
++void virgl_video_decode_finish(void);
++uint64_t virgl_video_decode_seq(void);
++bool virgl_video_decode_done(uint64_t seq);
++bool virgl_video_decode_wait(uint64_t seq, uint32_t timeout_ms);
+ 
+ int virgl_video_end_frame(struct virgl_video_codec *codec,
+                           struct virgl_video_buffer *target);
+--- a/src/vrend/virgl_video_vt.c
++++ b/src/vrend/virgl_video_vt.c
+@@ -64,6 +64,7 @@
+ #include <CoreMedia/CoreMedia.h>
+ #include <CoreVideo/CoreVideo.h>
+ #include <VideoToolbox/VideoToolbox.h>
++#include <dispatch/dispatch.h>
+ #include <time.h>
+ #include <pthread.h>
+ 
+@@ -217,6 +218,21 @@
+     struct vt_bytes coded;      /* Annex B access unit */
+ };
+ 
++/* One picture in the media engine (see "Decoding beside vrend's thread"). The
++ * fields after `sent_ns` are written by VideoToolbox's output thread, under dec_lock. */
++#define VT_DEC_MAX_JOBS 4
++#define VT_DEC_MAX_QUEUED 8
++struct dec_job {
++    uint64_t seq;                       /* its number; 0: slot free (or given up) */
++    struct virgl_video_buffer *target;  /* NULL: the guest destroyed it meanwhile */
++    uint32_t frame_w, frame_h;          /* VP9's/AV1's picture size (0: the frame's) */
++    uint64_t sent_ns;
++    bool out;                           /* the output callback came */
++    OSStatus status;
++    CVPixelBufferRef pix;
++    uint64_t out_ns;
++};
++
+ struct virgl_video_codec {
+     uint32_t guest_profile;
+     enum pipe_video_profile profile;
+@@ -250,7 +266,16 @@
+     uint64_t ns_decode_max;
+     uint64_t ns_gap_max;                /* longest wait between two frames */
+     uint64_t ns_last_end;
++    unsigned in_flight_max;             /* debug: most pictures in the media engine at once */
+ 
++    /* Decoding beside vrend's thread: pictures sent, oldest at dj_head */
++    struct dec_job djobs[VT_DEC_MAX_JOBS];
++    unsigned dj_head, dj_count;
++    struct virgl_video_codec *dec_next; /* the list of decoders (dec_list) */
++    dispatch_queue_t dec_q;             /* hands the pictures to VideoToolbox, in order */
++    unsigned dec_queued;                /* pictures on dec_q, not handed over yet (atomic) */
++    bool dec_broken;                    /* the queue saw the session break (atomic) */
++
+     /* H.264 */
+     uint8_t sps[2048];                  /* H.264 SPS, AV1 sequence header, HEVC VPS+SPS+PPS */
+     size_t sps_size;
+@@ -465,15 +490,24 @@
+ /* VideoToolbox session                                                      */
+ /* ------------------------------------------------------------------------ */
+ 
++static void dec_output(struct virgl_video_codec *codec, uint64_t seq, OSStatus status,
++                       CVImageBufferRef image);
++
+ static void output_callback(void *ref_con, void *frame_ref_con, OSStatus status,
+                             VTDecodeInfoFlags info_flags, CVImageBufferRef image,
+                             CMTime pts, CMTime duration)
+ {
+     struct virgl_video_codec *codec = ref_con;
+-    (void)frame_ref_con;
+     (void)pts;
+     (void)duration;
+ 
++    /* a picture sent without waiting for it: its job's number */
++    if (frame_ref_con) {
++        if (info_flags & kVTDecodeInfo_FrameDropped)
++            vt_log("frame dropped\n");
++        dec_output(codec, (uint64_t)(uintptr_t)frame_ref_con, status, image);
++        return;
++    }
+     codec->output_status = status;
+     if (info_flags & kVTDecodeInfo_FrameDropped)
+         vt_log("frame dropped\n");
+@@ -484,8 +518,33 @@
+     }
+ }
+ 
++static void dec_deliver(struct virgl_video_codec *codec, bool block);
++
++static void dec_drained(void *sem)
++{
++    dispatch_semaphore_signal(sem);
++}
++
++/* Waits until the queue has handed every picture sent to VideoToolbox (vrend's
++ * thread). Pictures that are in meanwhile go into the guest's planes: VideoToolbox
++ * may wait for its output buffers before it takes the next picture. */
++static void dec_q_drain(struct virgl_video_codec *codec)
++{
++    dispatch_semaphore_t sem;
++
++    if (!codec->dec_q)
++        return;
++    sem = dispatch_semaphore_create(0);
++    dispatch_async_f(codec->dec_q, sem, dec_drained);
++    while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_MSEC)))
++        if (codec->dj_count)
++            dec_deliver(codec, false);
++    dispatch_release(sem);
++}
++
+ static void session_destroy(struct virgl_video_codec *codec)
+ {
++    dec_q_drain(codec);
+     if (codec->session) {
+         VTDecompressionSessionWaitForAsynchronousFrames(codec->session);
+         VTDecompressionSessionInvalidate(codec->session);
+@@ -573,6 +632,7 @@
+  * when VideoToolbox can take it, else start a new one. */
+ static bool set_format(struct virgl_video_codec *codec, CMVideoFormatDescriptionRef fmt)
+ {
++    dec_q_drain(codec);
+     if (codec->format)
+         CFRelease(codec->format);
+     codec->format = fmt;
+@@ -585,8 +645,42 @@
+     return session_create(codec);
+ }
+ 
+-static bool decode_sample(struct virgl_video_codec *codec, const uint8_t *data, size_t size)
++struct dec_job;
++
++/* One picture for the decoder's queue (decode_sample). */
++struct dec_submit {
++    struct virgl_video_codec *codec;
++    CMSampleBufferRef sample;
++    uint64_t seq;
++};
++
++/* The decoder's queue: the picture to VideoToolbox. A refusal is its job's
++ * output; a broken session is started again on vrend's thread (decode_picture). */
++static void dec_submit(void *arg)
+ {
++    struct dec_submit *sub = arg;
++    struct virgl_video_codec *codec = sub->codec;
++    VTDecodeInfoFlags info = 0;
++    OSStatus st = codec->session ?
++        VTDecompressionSessionDecodeFrame(codec->session, sub->sample,
++                                          kVTDecodeFrame_EnableAsynchronousDecompression,
++                                          (void *)(uintptr_t)sub->seq, &info) :
++        kVTInvalidSessionErr;
++
++    CFRelease(sub->sample);
++    __atomic_sub_fetch(&codec->dec_queued, 1, __ATOMIC_RELEASE);
++    if (st != noErr) {
++        if (st == kVTInvalidSessionErr || st == kVTVideoDecoderMalfunctionErr)
++            __atomic_store_n(&codec->dec_broken, true, __ATOMIC_RELEASE);
++        dec_output(codec, sub->seq, st, NULL);
++    }
++    free(sub);
++}
++
++/* JOB: send the picture and return (its output comes to dec_output); else wait for it. */
++static bool decode_sample(struct virgl_video_codec *codec, const uint8_t *data, size_t size,
++                          struct dec_job *job)
++{
+     CMBlockBufferRef block = NULL;
+     CMSampleBufferRef sample = NULL;
+     VTDecodeInfoFlags info = 0;
+@@ -614,6 +708,32 @@
+ 
+     codec->output_status = noErr;
+     uint64_t t0 = now_ns();
++    if (job) {
++        /* VideoToolbox's DecodeFrame waits even when asked not to (its remote
++         * decoder's semaphore, a synchronous message): the queue does it. */
++        struct dec_submit *sub = malloc(sizeof(*sub));
++        if (!codec->dec_q)
++            codec->dec_q = dispatch_queue_create("org.omacvm.vt-decode",
++                dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
++                                                        QOS_CLASS_USER_INTERACTIVE, 0));
++        /* a media engine that stopped answering holds the queue: refuse more
++         * than a few pictures behind it (each is given up after 1 s anyway) */
++        if (!sub || !codec->dec_q ||
++            __atomic_load_n(&codec->dec_queued, __ATOMIC_ACQUIRE) >= VT_DEC_MAX_QUEUED) {
++            free(sub);
++            CFRelease(sample);
++            return false;
++        }
++        sub->codec = codec;
++        sub->sample = sample;
++        sub->seq = job->seq;
++        __atomic_add_fetch(&codec->dec_queued, 1, __ATOMIC_RELEASE);
++        dispatch_async_f(codec->dec_q, sub, dec_submit);
++        if (codec->ns_last_end && t0 - codec->ns_last_end > codec->ns_gap_max)
++            codec->ns_gap_max = t0 - codec->ns_last_end;
++        codec->ns_last_end = now_ns();
++        return true;
++    }
+     st = VTDecompressionSessionDecodeFrame(codec->session, sample, 0, NULL, &info);
+     CFRelease(sample);
+     if (st == noErr)
+@@ -646,45 +766,62 @@
+  * guest surface's size, rounded up to 16 by Chrome's coded size): the rows past the
+  * picture are not the picture's, and vrend fills the guest's planes past this size
+  * with the picture's last row and column instead (virgl-video-plane-edge.patch). */
+-static void picture_size(const struct virgl_video_codec *codec, CVPixelBufferRef pix,
+-                         uint32_t *w, uint32_t *h)
++static void frame_size(const struct virgl_video_codec *codec, uint32_t *fw, uint32_t *fh)
+ {
+-    uint32_t fw = 0, fh = 0;
+-
+-    *w = (uint32_t)CVPixelBufferGetWidth(pix);
+-    *h = (uint32_t)CVPixelBufferGetHeight(pix);
++    *fw = *fh = 0;
+     if (!codec->have_desc)
+         return;
+     if (codec->kind == VT_KIND_AV1) {
+-        fw = codec->desc.av1.picture_parameter.frame_width;
+-        fh = codec->desc.av1.picture_parameter.frame_height;
++        *fw = codec->desc.av1.picture_parameter.frame_width;
++        *fh = codec->desc.av1.picture_parameter.frame_height;
+     } else if (codec->kind == VT_KIND_VP9) {
+-        fw = codec->desc.vp9.picture_parameter.frame_width;
+-        fh = codec->desc.vp9.picture_parameter.frame_height;
++        *fw = codec->desc.vp9.picture_parameter.frame_width;
++        *fh = codec->desc.vp9.picture_parameter.frame_height;
+     }
++}
++
++static void picture_size(CVPixelBufferRef pix, uint32_t fw, uint32_t fh,
++                         uint32_t *w, uint32_t *h)
++{
++    *w = (uint32_t)CVPixelBufferGetWidth(pix);
++    *h = (uint32_t)CVPixelBufferGetHeight(pix);
+     if (fw && fw < *w)
+         *w = fw;
+     if (fh && fh < *h)
+         *h = fh;
+ }
+ 
++static void deliver_picture(struct virgl_video_codec *codec, struct virgl_video_buffer *target,
++                            CVPixelBufferRef pix, uint32_t fw, uint32_t fh);
++
+ /* Hand the decoded picture to vrend, which copies it into the plane textures. */
+ static void deliver_output(struct virgl_video_codec *codec,
+                            struct virgl_video_buffer *target)
+ {
+-    struct virgl_video_dma_buf dmabuf;
+     CVPixelBufferRef pix = codec->output;
+-    uint32_t pic_w, pic_h;
++    uint32_t fw, fh;
+ 
+     codec->output = NULL;
+     if (!pix)
+         return;
++    frame_size(codec, &fw, &fh);
++    deliver_picture(codec, target, pix, fw, fh);
++    CVPixelBufferRelease(pix);
++}
+ 
++/* The picture PIX (VP9's/AV1's frame size FW x FH, 0: none) into TARGET's planes;
++ * the caller keeps its reference. */
++static void deliver_picture(struct virgl_video_codec *codec, struct virgl_video_buffer *target,
++                            CVPixelBufferRef pix, uint32_t fw, uint32_t fh)
++{
++    struct virgl_video_dma_buf dmabuf;
++    uint32_t pic_w, pic_h;
++
+     codec->frames++;
+     if (callbacks && callbacks->decode_completed && target) {
+         memset(&dmabuf, 0, sizeof(dmabuf));
+         dmabuf.buf = target;
+-        picture_size(codec, pix, &pic_w, &pic_h);
++        picture_size(pix, fw, fh, &pic_w, &pic_h);
+         if (vt_debug && (codec->out_w != CVPixelBufferGetWidth(pix) ||
+                          codec->out_h != CVPixelBufferGetHeight(pix) ||
+                          codec->pic_w != pic_w || codec->pic_h != pic_h)) {
+@@ -709,16 +846,242 @@
+     codec->held_next = (codec->held_next + 1) % 3;
+     if (vt_debug && codec->frames % 120 == 0) {
+         uint64_t wall = now_ns() - codec->ns_wall_start;
+-        vt_log("%u frames: decode %.2f ms (max %.1f), copy %.2f ms per frame, longest gap %.1f ms, %.1f fps\n",
++        vt_log("%u frames: decode %.2f ms (max %.1f), copy %.2f ms per frame, longest gap %.1f ms, %.1f fps, %u in flight at most\n",
+                codec->frames, codec->ns_decode / 120 / 1e6, codec->ns_decode_max / 1e6,
+                codec->ns_upload / 120 / 1e6, codec->ns_gap_max / 1e6,
+-               codec->ns_wall_start ? 120 / (wall / 1e9) : 0.0);
++               codec->ns_wall_start ? 120 / (wall / 1e9) : 0.0, codec->in_flight_max);
+         codec->ns_decode = codec->ns_upload = codec->ns_decode_max = codec->ns_gap_max = 0;
++        codec->in_flight_max = 0;
+         codec->ns_wall_start = now_ns();
+     }
+-    CVPixelBufferRelease(pix);
++}
++
++/* ------------------------------------------------------------------------ */
++/* Decoding beside vrend's thread                                            */
++/* ------------------------------------------------------------------------ */
++
++/* vrend's thread is QEMU's GPU thread: every guest context's commands wait
++ * while it waits. END_FRAME sends the picture to the media engine and returns
++ * (at most VT_DEC_MAX_JOBS per decoder in flight); its output callback marks
++ * the job and wakes vrend's thread (callbacks->encode_wake), whose poll copies
++ * the pictures that are in into the guest's planes, oldest first. Before the
++ * guest's planes are read or written (a draw samples them, a blit, a copy, a
++ * transfer), vrend gives every picture in flight back first, waiting for each
++ * (virgl_video_decode_finish; callbacks->decode_pending marks the targets).
++ * A fence made after an END_FRAME signals only after that picture is in the
++ * guest's planes (the sync thread waits for it after the GL fence).
++ * A picture the media engine has had for 1 s is given up (logged).
++ * OMACVM_VIDEO_DECODE_SYNC=1: END_FRAME waits for the picture, as before.
++ * Threading: dec_lock covers the jobs' slots (number, output fields) and
++ * dec_open; dj_head, dj_count and dec_list belong to vrend's thread. */
++static pthread_mutex_t dec_lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t dec_cond = PTHREAD_COND_INITIALIZER;
++static uint64_t dec_seq_last;           /* the last picture sent (vrend's thread) */
++static uint64_t dec_open = 1;           /* the oldest picture not given back yet */
++static struct virgl_video_codec *dec_list;
++
++static bool dec_async(void)
++{
++    static int on = -1;
++
++    if (on < 0) {
++        const char *e = getenv("OMACVM_VIDEO_DECODE_SYNC");
++        on = !(e && *e == '1');
++        if (!on)
++            virgl_info("vt-video: decoding waits for each picture (OMACVM_VIDEO_DECODE_SYNC=1)\n");
++    }
++    return on;
++}
++
++/* VideoToolbox's output thread: the picture of job SEQ is in. */
++static void dec_output(struct virgl_video_codec *codec, uint64_t seq, OSStatus status,
++                       CVImageBufferRef image)
++{
++    static long long lose = -1;
++    bool found = false;
++
++    /* test hook (Tests/virgl/test-video-decode-async.c): picture number N never
++     * comes back, as when the media engine stops answering */
++    if (lose < 0) {
++        const char *e = getenv("OMACVM_TEST_VIDEO_LOSE");
++        lose = e ? atoll(e) : 0;
++    }
++    if (lose && seq == (uint64_t)lose)
++        return;
++    pthread_mutex_lock(&dec_lock);
++    for (unsigned i = 0; i < VT_DEC_MAX_JOBS; i++) {
++        struct dec_job *job = &codec->djobs[i];
++        if (job->seq == seq && !job->out) {
++            job->out = true;
++            job->status = status;
++            job->out_ns = now_ns();
++            if (status == noErr && image)
++                job->pix = CVPixelBufferRetain(image);
++            found = true;
++            break;
++        }
++    }
++    if (found)
++        pthread_cond_broadcast(&dec_cond);
++    pthread_mutex_unlock(&dec_lock);
++    /* a job given up meanwhile: nothing to do */
++    if (found && callbacks && callbacks->encode_wake)
++        callbacks->encode_wake();
++}
++
++static void dec_update_open(void)
++{
++    uint64_t open = dec_seq_last + 1;
++
++    for (struct virgl_video_codec *c = dec_list; c; c = c->dec_next)
++        if (c->dj_count && c->djobs[c->dj_head].seq < open)
++            open = c->djobs[c->dj_head].seq;
++    pthread_mutex_lock(&dec_lock);
++    if (open != dec_open) {
++        dec_open = open;
++        pthread_cond_broadcast(&dec_cond);
++    }
++    pthread_mutex_unlock(&dec_lock);
+ }
+ 
++static void dec_deadline(struct timespec *ts, uint64_t sent_ns)
++{
++    uint64_t now = now_ns(), end = sent_ns + 1000000000ull;
++    uint64_t left = end > now ? end - now : 0;
++
++    clock_gettime(CLOCK_REALTIME, ts);
++    ts->tv_sec += (time_t)(left / 1000000000ull);
++    ts->tv_nsec += (long)(left % 1000000000ull);
++    if (ts->tv_nsec >= 1000000000L) {
++        ts->tv_sec++;
++        ts->tv_nsec -= 1000000000L;
++    }
++}
++
++/* The oldest job back: its picture into the guest's planes, its slot free. Its
++ * picture not in yet: false, or (BLOCK) wait for it up to 1 s after it was sent. */
++static bool dec_give_back(struct virgl_video_codec *codec, bool block)
++{
++    struct dec_job *job = &codec->djobs[codec->dj_head];
++    struct virgl_video_buffer *target;
++    CVPixelBufferRef pix;
++    OSStatus status;
++    uint32_t fw, fh;
++    uint64_t took;
++    bool out;
++
++    pthread_mutex_lock(&dec_lock);
++    if (!job->out && block) {
++        struct timespec ts;
++        dec_deadline(&ts, job->sent_ns);
++        while (!job->out)
++            if (pthread_cond_timedwait(&dec_cond, &dec_lock, &ts))
++                break;
++    }
++    out = job->out;
++    if (!out && !block) {
++        pthread_mutex_unlock(&dec_lock);
++        return false;
++    }
++    pix = job->pix;
++    status = job->status;
++    target = job->target;
++    fw = job->frame_w;
++    fh = job->frame_h;
++    took = out ? job->out_ns - job->sent_ns : 0;
++    memset(job, 0, sizeof(*job));       /* seq 0: a late output finds nothing */
++    pthread_mutex_unlock(&dec_lock);
++    codec->dj_head = (codec->dj_head + 1) % VT_DEC_MAX_JOBS;
++    codec->dj_count--;
++
++    if (!out) {
++        if (codec->errors++ < 5)
++            virgl_warn("vt-video: no picture from the media engine after 1 s: given up\n");
++    } else if (status != noErr || !pix) {
++        if (codec->errors++ < 20)
++            virgl_warn("vt-video: decode failed: %d\n", (int)status);
++    } else {
++        codec->ns_decode += took;
++        if (took > codec->ns_decode_max)
++            codec->ns_decode_max = took;
++        if (target)
++            deliver_picture(codec, target, pix, fw, fh);
++    }
++    if (pix)
++        CVPixelBufferRelease(pix);
++    if (target && callbacks && callbacks->decode_pending)
++        callbacks->decode_pending(codec, target, false);
++    return true;
++}
++
++/* The oldest picture sent 1 s ago or more and still not in? */
++static bool dec_head_stuck(struct virgl_video_codec *codec)
++{
++    const struct dec_job *job = &codec->djobs[codec->dj_head];
++    bool stuck;
++
++    pthread_mutex_lock(&dec_lock);
++    stuck = job->seq && !job->out && now_ns() - job->sent_ns >= 1000000000ull;
++    pthread_mutex_unlock(&dec_lock);
++    return stuck;
++}
++
++static void dec_deliver(struct virgl_video_codec *codec, bool block)
++{
++    while (codec->dj_count && dec_give_back(codec, block))
++        ;
++    dec_update_open();
++}
++
++/* One picture's compressed data to the media engine; its picture goes into
++ * TARGET's planes now (OMACVM_VIDEO_DECODE_SYNC=1) or when it is in. */
++static void decode_picture(struct virgl_video_codec *codec, const uint8_t *data, size_t size,
++                           struct virgl_video_buffer *target)
++{
++    struct dec_job *job;
++    uint32_t fw, fh;
++
++    if (!dec_async()) {
++        if (decode_sample(codec, data, size, NULL))
++            deliver_output(codec, target);
++        return;
++    }
++    dec_deliver(codec, false);
++    if (codec->dj_count == VT_DEC_MAX_JOBS)
++        dec_give_back(codec, true);
++    if (__atomic_load_n(&codec->dec_broken, __ATOMIC_ACQUIRE)) {
++        session_destroy(codec);
++        __atomic_store_n(&codec->dec_broken, false, __ATOMIC_RELEASE);
++        session_create(codec);
++    }
++    frame_size(codec, &fw, &fh);
++    job = &codec->djobs[(codec->dj_head + codec->dj_count) % VT_DEC_MAX_JOBS];
++    pthread_mutex_lock(&dec_lock);
++    memset(job, 0, sizeof(*job));
++    job->seq = ++dec_seq_last;
++    job->target = target;
++    job->frame_w = fw;
++    job->frame_h = fh;
++    job->sent_ns = now_ns();
++    pthread_mutex_unlock(&dec_lock);
++    codec->dj_count++;
++    if (codec->dj_count > codec->in_flight_max)
++        codec->in_flight_max = codec->dj_count;
++    if (callbacks && callbacks->decode_pending)
++        callbacks->decode_pending(codec, target, true);
++    if (!decode_sample(codec, data, size, job)) {
++        /* refused at once: no output comes */
++        pthread_mutex_lock(&dec_lock);
++        if (!job->out) {
++            job->out = true;
++            job->status = kVTVideoDecoderBadDataErr;
++            job->out_ns = now_ns();
++        }
++        pthread_mutex_unlock(&dec_lock);
++    }
++    dec_update_open();
++}
++
+ /* ------------------------------------------------------------------------ */
+ /* H.264                                                                     */
+ /* ------------------------------------------------------------------------ */
+@@ -1095,8 +1458,7 @@
+         }
+     }
+ 
+-    if (decode_sample(codec, au.sample.data, au.sample.size))
+-        deliver_output(codec, target);
++    decode_picture(codec, au.sample.data, au.sample.size, target);
+     bytes_free(&au.sample);
+     return 0;
+ }
+@@ -1847,8 +2209,7 @@
+         if (!set_format(codec, fmt))
+             goto done;
+     }
+-    if (decode_sample(codec, au.sample.data, au.sample.size))
+-        deliver_output(codec, target);
++    decode_picture(codec, au.sample.data, au.sample.size, target);
+     ret = 0;
+ done:
+     bytes_free(&au.sample);
+@@ -1982,8 +2343,7 @@
+     /* One frame per sample, hidden ones too: VideoToolbox returns a picture
+      * for hidden frames as well, which a later show_existing_frame shows
+      * from the guest's surface. */
+-    if (decode_sample(codec, codec->bits.data, codec->bits.size))
+-        deliver_output(codec, target);
++    decode_picture(codec, codec->bits.data, codec->bits.size, target);
+     return 0;
+ }
+ 
+@@ -2197,8 +2557,7 @@
+     if (seq >= 0 && (unsigned)seq < first)
+         bytes_append(&sample, data + obus[seq].start, obus[seq].end - obus[seq].start);
+     bytes_append(&sample, data + obus[first].start, obus[last].end - obus[first].start);
+-    if (decode_sample(codec, sample.data, sample.size))
+-        deliver_output(codec, target);
++    decode_picture(codec, sample.data, sample.size, target);
+     bytes_free(&sample);
+     return 0;
+ }
+@@ -3239,8 +3598,87 @@
+     done = enc_seq_open > seq;
+     pthread_mutex_unlock(&enc_wait_lock);
+     return done;
++}
++
++/* Decoders: pictures that are in go into the guest's planes (vrend's thread,
++ * with a GL context of its share group current). */
++void virgl_video_decode_poll(void)
++{
++    for (struct virgl_video_codec *c = dec_list; c; c = c->dec_next) {
++        if (!c->dj_count)
++            continue;
++        dec_deliver(c, false);
++        /* the oldest picture not in after 1 s: given up (its deadline is past,
++         * so this does not wait), so the fences behind it do not wait 2 s each,
++         * or, polled, until something reads its planes */
++        while (c->dj_count && dec_head_stuck(c)) {
++            dec_give_back(c, true);
++            dec_deliver(c, false);
++        }
++    }
+ }
+ 
++bool virgl_video_decode_busy(void)
++{
++    for (struct virgl_video_codec *c = dec_list; c; c = c->dec_next)
++        if (c->dj_count)
++            return true;
++    return false;
++}
++
++/* Every picture in flight into the guest's planes, waiting for each (vrend's
++ * thread: the guest is about to read or write planes that wait for one). */
++void virgl_video_decode_finish(void)
++{
++    for (struct virgl_video_codec *c = dec_list; c; c = c->dec_next)
++        if (c->dj_count)
++            dec_deliver(c, true);
++}
++
++/* The last picture sent: a fence made now must wait for it (vrend's thread). */
++uint64_t virgl_video_decode_seq(void)
++{
++    return dec_seq_last;
++}
++
++/* Every picture sent up to SEQ given back? (any thread) */
++bool virgl_video_decode_done(uint64_t seq)
++{
++    bool done;
++
++    if (!seq)
++        return true;
++    pthread_mutex_lock(&dec_lock);
++    done = dec_open > seq;
++    pthread_mutex_unlock(&dec_lock);
++    return done;
++}
++
++/* Waits up to TIMEOUT_MS until every picture sent up to SEQ was given back
++ * (the sync thread); false on time out. */
++bool virgl_video_decode_wait(uint64_t seq, uint32_t timeout_ms)
++{
++    struct timespec ts;
++    bool done;
++
++    if (!seq)
++        return true;
++    clock_gettime(CLOCK_REALTIME, &ts);
++    ts.tv_sec += timeout_ms / 1000;
++    ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
++    if (ts.tv_nsec >= 1000000000L) {
++        ts.tv_sec++;
++        ts.tv_nsec -= 1000000000L;
++    }
++    pthread_mutex_lock(&dec_lock);
++    while (dec_open <= seq)
++        if (pthread_cond_timedwait(&dec_cond, &dec_lock, &ts))
++            break;
++    done = dec_open > seq;
++    pthread_mutex_unlock(&dec_lock);
++    return done;
++}
++
+ /* An encoder goes away: VideoToolbox finishes (its callback must not come
+  * later), the jobs are dropped without feedback (vrend drops its buffers). */
+ static void enc_codec_gone(struct virgl_video_codec *codec)
+@@ -3453,8 +3891,11 @@
+            codec->kind == VT_KIND_H264 ? "H.264" : codec->kind == VT_KIND_VP9 ? "VP9" :
+            codec->kind == VT_KIND_HEVC ? "HEVC" : "AV1",
+            args->width, args->height);
+-    if (codec->entrypoint == PIPE_VIDEO_ENTRYPOINT_BITSTREAM)
++    if (codec->entrypoint == PIPE_VIDEO_ENTRYPOINT_BITSTREAM) {
+         live_decoders++;
++        codec->dec_next = dec_list;
++        dec_list = codec;
++    }
+     return codec;
+ }
+ 
+@@ -3466,7 +3907,20 @@
+     if (!codec)
+         return;
+     vt_log("codec done: %u frames, %u errors\n", codec->frames, codec->errors);
++    if (codec->entrypoint == PIPE_VIDEO_ENTRYPOINT_BITSTREAM) {
++        /* the guest may still show the last pictures: they go in first */
++        if (codec->dj_count)
++            dec_deliver(codec, true);
++        for (struct virgl_video_codec **c = &dec_list; *c; c = &(*c)->dec_next)
++            if (*c == codec) {
++                *c = codec->dec_next;
++                break;
++            }
++        dec_update_open();
++    }
+     session_destroy(codec);
++    if (codec->dec_q)
++        dispatch_release(codec->dec_q);
+     if (codec->entrypoint == PIPE_VIDEO_ENTRYPOINT_ENCODE)
+         enc_codec_gone(codec);
+     if (codec->format)
+@@ -3519,6 +3973,16 @@
+ 
+ void virgl_video_destroy_buffer(struct virgl_video_buffer *buffer)
+ {
++    /* pictures still on their way into it go nowhere */
++    for (struct virgl_video_codec *c = dec_list; c && buffer; c = c->dec_next)
++        for (unsigned i = 0; i < c->dj_count; i++) {
++            struct dec_job *job = &c->djobs[(c->dj_head + i) % VT_DEC_MAX_JOBS];
++            if (job->target != buffer)
++                continue;
++            job->target = NULL;
++            if (callbacks && callbacks->decode_pending)
++                callbacks->decode_pending(c, buffer, false);
++        }
+     free(buffer);
+ }
+ 
+--- a/src/vrend/vrend_renderer.c
++++ b/src/vrend/vrend_renderer.c
+@@ -197,6 +197,8 @@
+    /* OmacVM: the last video encoder frame closed before this fence; the fence
+     * signals only once that frame's result is in the guest's buffers. */
+    uint64_t video_seq;
++   /* ... and the last decoded picture sent: in the guest's planes first */
++   uint64_t video_dec_seq;
+ 
+    union {
+       GLsync glsyncobj;
+@@ -1162,6 +1164,21 @@
+ 
+ static int get_glsl_version(void);
+ static void vrend_pause_render_condition(struct vrend_context *ctx, bool pause);
++
++/* OmacVM: the guest reads or writes RES: decoded pictures still on their way
++ * into it (VideoToolbox decodes beside this thread, vrend_video.c) go in first. */
++static inline void vrend_video_ready(const struct vrend_resource *res)
++{
++#ifdef ENABLE_VIDEO
++   if (unlikely(vrend_video_pending_total) && res && res->video_pending)
++      vrend_video_finish_pending();
++#else
++   (void)res;
++#endif
++}
++
++/* ... every texture a draw, a clear or a dispatch of SUB_CTX reads or writes. */
++static void vrend_video_ready_sub(const struct vrend_sub_context *sub_ctx);
+ static void vrend_update_viewport_state(struct vrend_sub_context *sub_ctx);
+ static void vrend_update_scissor_state(struct vrend_sub_context *sub_ctx);
+ static void vrend_destroy_query_object(void *obj_ptr);
+@@ -6141,6 +6158,7 @@
+    if (ctx->in_error)
+       return;
+ 
++   vrend_video_ready_sub(sub_ctx);
+    if (ctx->ctx_switch_pending)
+       vrend_finish_context_switch(ctx);
+ 
+@@ -6211,6 +6229,7 @@
+    if (!has_feature(feat_clear_texture)) {
+       return EINVAL;
+    }
++   vrend_video_ready(res);
+ 
+    /* 32-bit BGRA resources are always reordered to RGBA ordering before
+     * submission to the host driver. Reorder red/blue color bytes in
+@@ -8075,6 +8094,7 @@
+    if (ctx->in_error)
+       return ENOTRECOVERABLE;
+ 
++   vrend_video_ready_sub(sub_ctx);
+    if (info->instance_count && !has_feature(feat_draw_instance))
+       return EINVAL;
+ 
+@@ -8353,6 +8373,8 @@
+       return;
+ 
+     struct vrend_sub_context *sub_ctx = ctx->sub;
++
++   vrend_video_ready_sub(sub_ctx);
+ 
+    if (sub_ctx->cs_shader_dirty) {
+       struct vrend_linked_shader_program *prog;
+@@ -9534,7 +9556,8 @@
+  * QEMU's main loop. A fence made after a frame closed waits for its result. */
+ static bool fence_video_ready(const struct vrend_fence *fence)
+ {
+-   return !fence->video_seq || vrend_video_encode_done(fence->video_seq);
++   return (!fence->video_seq || vrend_video_encode_done(fence->video_seq)) &&
++          (!fence->video_dec_seq || vrend_video_decode_done(fence->video_dec_seq));
+ }
+ 
+ /* Sync thread: hold the fence until its encoder frames are given back
+@@ -9550,6 +9573,9 @@
+    if (!vrend_video_encode_wait(fence->video_seq, 2000) && late++ < 5)
+       virgl_warn("video: encoder frame not back after 2 s; fence %" PRIu64 " signalled anyway\n",
+                  fence->fence_id);
++   if (!vrend_video_decode_wait(fence->video_dec_seq, 2000) && late++ < 5)
++      virgl_warn("video: decoded picture not in after 2 s; fence %" PRIu64 " signalled anyway\n",
++                 fence->fence_id);
+ }
+ #else
+ static bool fence_video_ready(UNUSED const struct vrend_fence *fence) { return true; }
+@@ -9662,6 +9688,9 @@
+       list_addtail(&fence->fences, &vrend_state.fence_list);
+    }
+    vrend_state.fence_waiting = NULL;
++   /* OmacVM: read again after the waits (a decoded picture's can be long): the
++    * context may have gone away meanwhile (vrend_free_fences_for_context) */
++   ctx = fence->ctx;
+    mtx_unlock(&vrend_state.fence_mutex);
+ 
+    if (!vrend_state.use_async_fence_cb) {
+@@ -13644,6 +13673,7 @@
+ 
+    if (!vrend_hw_switch_context(ctx, true))
+       return EINVAL;
++   vrend_video_ready(res);
+ 
+    assert(check_transfer_iovec(res, info));
+    if (info->iovec && info->iovec_cnt) {
+@@ -13886,6 +13916,7 @@
+                                    const struct vrend_transfer_info *info)
+ {
+    static int copy_log_budget = 8;
++   vrend_video_ready(dst_res);
+    if (copy_log_budget > 0) {
+       virgl_warn("copy_transfer3d: dst target=%u base.target=%u samples=%u format=%s level=%u box=[%d,%d,%d %dx%dx%d]\n",
+                  dst_res->target, dst_res->base.target, dst_res->base.nr_samples,
+@@ -13960,6 +13991,7 @@
+                                              struct vrend_resource *src_res,
+                                              const struct vrend_transfer_info *info)
+ {
++   vrend_video_ready(src_res);
+    if (!resource_contains_box(src_res, info->box, info->level)) {
+       vrend_report_context_error(ctx, VIRGL_ERROR_CTX_RESOURCE_OUT_OF_RANGE, src_handle);
+       return EINVAL;
+@@ -14474,6 +14506,8 @@
+       vrend_report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_RESOURCE, dst_handle);
+       return;
+    }
++   vrend_video_ready(src_res);
++   vrend_video_ready(dst_res);
+ 
+    if (!resource_contains_box(src_res, src_box, src_level)) {
+       vrend_report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_CMD_BUFFER, src_handle);
+@@ -15029,6 +15063,8 @@
+       vrend_report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_RESOURCE, dst_handle);
+       return;
+    }
++   vrend_video_ready(src_res);
++   vrend_video_ready(dst_res);
+ 
+    if (ctx->in_error)
+       return;
+@@ -15186,8 +15222,10 @@
+    fence->fence_id = fence_id;
+ #ifdef ENABLE_VIDEO
+    fence->video_seq = vrend_state.video_available ? vrend_video_encode_seq() : 0;
++   fence->video_dec_seq = vrend_state.video_available ? vrend_video_decode_seq() : 0;
+ #else
+    fence->video_seq = 0;
++   fence->video_dec_seq = 0;
+ #endif
+ 
+ #ifdef HAVE_EPOXY_EGL_H
+@@ -15836,6 +15874,35 @@
+ void vrend_renderer_pause_render_condition(struct vrend_context *ctx, bool pause)
+ {
+    vrend_pause_render_condition(ctx, pause);
++}
++
++void vrend_renderer_pause_current_render_condition(bool pause)
++{
++   if (vrend_state.current_hw_ctx && vrend_state.current_hw_ctx->sub)
++      vrend_pause_render_condition(vrend_state.current_hw_ctx, pause);
++}
++
++static void vrend_video_ready_sub(const struct vrend_sub_context *sub_ctx)
++{
++#ifdef ENABLE_VIDEO
++   if (likely(!vrend_video_pending_total))
++      return;
++   for (int t = 0; t < PIPE_SHADER_TYPES; t++) {
++      const struct vrend_shader_view *sv = &sub_ctx->views[t];
++      for (int i = 0; i < sv->max_num_views && i < PIPE_MAX_SHADER_SAMPLER_VIEWS; i++)
++         if (sv->views[i])
++            vrend_video_ready(sv->views[i]->texture);
++      for (uint32_t m = sub_ctx->images_used_mask[t]; m;)
++         vrend_video_ready(sub_ctx->image_views[t][u_bit_scan(&m)].texture);
++   }
++   for (uint32_t i = 0; i < sub_ctx->nr_cbufs && i < PIPE_MAX_COLOR_BUFS; i++)
++      if (sub_ctx->surf[i])
++         vrend_video_ready(sub_ctx->surf[i]->texture);
++   if (sub_ctx->zsurf)
++      vrend_video_ready(sub_ctx->zsurf->texture);
++#else
++   (void)sub_ctx;
++#endif
+ }
+ 
+ void vrend_render_condition(struct vrend_context *ctx,
+--- a/src/vrend/vrend_renderer.h
++++ b/src/vrend/vrend_renderer.h
+@@ -124,6 +124,10 @@
+    /* OmacVM: bytes counted against the guest's memory budget, given back when freed */
+    uint64_t budget_bytes;
+    bool bgra_swizzled;
++   /* OmacVM: decoded pictures still on their way into this video plane
++    * (VideoToolbox decodes beside vrend's thread): read or written by the guest
++    * only after they are in (vrend_video_ready) */
++   uint32_t video_pending;
+    /* OmacVM: a Venus image (Metal heap) that macOS OpenGL cannot import is shown
+     * through this texture, refreshed from the heap when a draw samples it */
+    struct virgl_metal_heap_reader *heap_reader;
+@@ -556,6 +560,8 @@
+                             uint32_t mode);
+ /* Pause the guest's conditional rendering for a host-side copy (and resume it). */
+ void vrend_renderer_pause_render_condition(struct vrend_context *ctx, bool pause);
++/* the same for the context whose GL context is current (OmacVM) */
++void vrend_renderer_pause_current_render_condition(bool pause);
+ void *vrend_renderer_get_cursor_contents(struct pipe_resource *pres,
+                                          uint32_t *width,
+                                          uint32_t *height);
+--- a/src/vrend/vrend_video.c
++++ b/src/vrend/vrend_video.c
+@@ -130,7 +130,14 @@
+ 
+     uint32_t num_planes;
+     struct vrend_video_plane planes[3];
++    /* Pictures on their way into the planes (decoding beside vrend's thread,
++     * virgl_video_vt.c): the planes' resources while there are any. */
++    unsigned pending;
++    struct vrend_resource *pending_res[3];
+ };
++
++/* Planes some picture is still on its way into, in all contexts. */
++unsigned vrend_video_pending_total;
+ 
+ static struct vrend_video_codec *vrend_video_codec(
+         struct virgl_video_codec *codec)
+@@ -306,7 +313,9 @@
+      * on some drivers rasterizer discard) can drop a blit without a GL error,
+      * and the guest would show its old picture. Both are off for the copy, as
+      * vrend's own blits do it. */
+-    vrend_renderer_pause_render_condition(buf->ctx->ctx, true);
++    /* the GL context current here: the decoding one, context 0 (poll) or the
++     * one whose draw waits for this picture */
++    vrend_renderer_pause_current_render_condition(true);
+     discard = glIsEnabled(GL_RASTERIZER_DISCARD);
+     glDisable(GL_RASTERIZER_DISCARD);
+ 
+@@ -391,7 +400,7 @@
+     if (discard)
+         glEnable(GL_RASTERIZER_DISCARD);
+     glColorMask(mask[0], mask[1], mask[2], mask[3]);
+-    vrend_renderer_pause_render_condition(buf->ctx->ctx, false);
++    vrend_renderer_pause_current_render_condition(false);
+     /* Other contexts (the guest's compositor) read these textures. */
+     glFlush();
+     return ok;
+@@ -618,6 +627,8 @@
+ 
+     if (!pix || buf->num_planes < 2)
+         return -1;
++    if (buf->pending)
++        vrend_video_finish_pending();
+     dmabuf->gpu_fence = NULL;
+     if (!getenv("OMACVM_VIDEO_COPY") && blit_video_buffer_to_pixbuf(buf, pix, &dmabuf->gpu_fence))
+         return 0;
+@@ -812,8 +823,54 @@
+ #else
+     sync_dmabuf_to_video_buffer(buf, dmabuf);
+ #endif
++}
++
++
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++/* A picture is on its way into TARGET (PENDING), or no longer: its planes'
++ * resources say so while any is (vrend_video_ready in vrend_renderer.c). */
++static void vrend_video_decode_pending(struct virgl_video_codec *codec,
++                                       struct virgl_video_buffer *target, bool pending)
++{
++    struct vrend_video_buffer *buf = vrend_video_buffer(target);
++
++    (void)codec;
++    if (!buf)
++        return;
++    if (pending) {
++        if (buf->pending++)
++            return;
++        for (unsigned i = 0; i < buf->num_planes; i++) {
++            struct vrend_resource *res =
++                vrend_renderer_ctx_res_lookup(buf->ctx->ctx, buf->planes[i].res_handle);
++            if (!res)
++                continue;
++            vrend_resource_reference(&buf->pending_res[i], res);
++            res->video_pending++;
++        }
++        vrend_video_pending_total++;
++        return;
++    }
++    if (!buf->pending || --buf->pending)
++        return;
++    for (unsigned i = 0; i < ARRAY_SIZE(buf->pending_res); i++) {
++        if (!buf->pending_res[i])
++            continue;
++        buf->pending_res[i]->video_pending--;
++        vrend_resource_reference(&buf->pending_res[i], NULL);
++    }
++    vrend_video_pending_total--;
+ }
+ 
++/* The guest reads or writes planes a picture is on its way into: every picture
++ * in flight goes in first (vrend's thread, any context current). */
++void vrend_video_finish_pending(void)
++{
++    virgl_video_decode_finish();
++}
++#else
++void vrend_video_finish_pending(void) { }
++#endif
+ 
+ static int vrend_video_enocde_upload_picture(
+                                 struct virgl_video_codec *codec,
+@@ -946,21 +1003,42 @@
+     .gpu_fence_wait             = vrend_video_gpu_fence_wait,
+     .gpu_fence_destroy          = vrend_video_gpu_fence_destroy,
+     .encode_wake                = vrend_renderer_video_wake,
++    .decode_pending             = vrend_video_decode_pending,
+ #endif
+ };
+ 
+ #ifdef ENABLE_VIDEO_VIDEOTOOLBOX
+-/* Encoder frames finish after END_FRAME (virgl_video_vt.c): these keep the
+- * guest's fences behind them and move them on. */
++/* Encoder frames and decoded pictures finish after END_FRAME
++ * (virgl_video_vt.c): these keep the guest's fences behind them and move them on. */
+ void vrend_video_poll(void)
+ {
+-    if (!virgl_video_encode_busy())
++    bool enc = virgl_video_encode_busy(), dec = virgl_video_decode_busy();
++
++    if (!enc && !dec)
+         return;
+     /* QEMU's own GL work may have changed the current context. */
+     vrend_renderer_force_ctx_0();
+-    virgl_video_encode_poll();
++    if (enc)
++        virgl_video_encode_poll();
++    if (dec)
++        virgl_video_decode_poll();
+ }
+ 
++uint64_t vrend_video_decode_seq(void)
++{
++    return virgl_video_decode_seq();
++}
++
++bool vrend_video_decode_done(uint64_t seq)
++{
++    return virgl_video_decode_done(seq);
++}
++
++bool vrend_video_decode_wait(uint64_t seq, uint32_t timeout_ms)
++{
++    return virgl_video_decode_wait(seq, timeout_ms);
++}
++
+ uint64_t vrend_video_encode_seq(void)
+ {
+     return virgl_video_encode_seq();
+@@ -977,6 +1055,14 @@
+ }
+ #else
+ void vrend_video_poll(void) { }
++uint64_t vrend_video_decode_seq(void) { return 0; }
++bool vrend_video_decode_done(uint64_t seq) { (void)seq; return true; }
++bool vrend_video_decode_wait(uint64_t seq, uint32_t timeout_ms)
++{
++    (void)seq;
++    (void)timeout_ms;
++    return true;
++}
+ uint64_t vrend_video_encode_seq(void) { return 0; }
+ bool vrend_video_encode_done(uint64_t seq) { (void)seq; return true; }
+ bool vrend_video_encode_wait(uint64_t seq, uint32_t timeout_ms)
+--- a/src/vrend/vrend_video.h
++++ b/src/vrend/vrend_video.h
+@@ -95,6 +95,14 @@
+ uint64_t vrend_video_encode_seq(void);
+ bool vrend_video_encode_done(uint64_t seq);
+ bool vrend_video_encode_wait(uint64_t seq, uint32_t timeout_ms);
++/* Decoded pictures that finish after END_FRAME (VideoToolbox): a fence waits for
++ * the pictures sent before it; planes a picture is still on its way into have
++ * video_pending set (vrend_renderer.c gives them their pictures first). */
++uint64_t vrend_video_decode_seq(void);
++bool vrend_video_decode_done(uint64_t seq);
++bool vrend_video_decode_wait(uint64_t seq, uint32_t timeout_ms);
++extern unsigned vrend_video_pending_total;
++void vrend_video_finish_pending(void);
+ 
+ int vrend_video_end_frame(struct vrend_video_context *ctx,
+                           uint32_t cdc_handle,
