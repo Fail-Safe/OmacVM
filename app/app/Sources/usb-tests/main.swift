@@ -77,6 +77,22 @@ let stick = dev(0x0781, 0x5581, "Ultra", [I(number: 0, interfaceClass: 8, users:
 expect(stick.availability == .usedByMac("macOS uses it as a disk"), "a USB stick stays with the Mac")
 let ftdi = dev(0x0403, 0x6001, "FT232R USB UART", [I(number: 0, interfaceClass: 0xff, users: ["AppleUSBFTDI"])])
 expect(ftdi.availability == .usedByMac("macOS uses it as a serial port"), "an FTDI serial adapter stays with the Mac")
+// A Mac on a USB-C cable (macOS's NCM network), as the IORegistry showed it on the Mac mini (2026-10-25): the
+// CDC composite driver on the device, the network drivers on its interfaces.
+let macCable = dev(0x05ac, 0x1905, "Mac", drivers: ["AppleUSBCDCCompositeDevice"], [
+    I(number: 0, interfaceClass: 2, users: ["AppleUSBNCM11Control"]), I(number: 1, interfaceClass: 0x0a, users: []),
+    I(number: 2, interfaceClass: 2, users: ["AppleUSBNCM11Control"]), I(number: 3, interfaceClass: 0x0a, users: []),
+])
+expect(macCable.availability == .usedByMac("macOS uses it as a network adapter"),
+       "a Mac on a USB-C cable (NCM) is a network adapter, not a serial port")
+let ecm = dev(0x0bda, 0x8153, "USB 10/100/1000 LAN", drivers: ["AppleUSBCDCCompositeDevice"], [
+    I(number: 0, interfaceClass: 2, users: ["AppleUSBCDCECMControl"]), I(number: 1, interfaceClass: 0x0a, users: ["AppleUSBCDCECMData"]),
+])
+expect(ecm.availability == .usedByMac("macOS uses it as a network adapter"), "an ECM network adapter is a network adapter")
+let acm = dev(0x2341, 0x0043, "Arduino Uno", drivers: ["AppleUSBCDCCompositeDevice"], [
+    I(number: 0, interfaceClass: 2, users: ["AppleUSBCDCACMControl"]), I(number: 1, interfaceClass: 0x0a, users: ["AppleUSBCDCACMData"]),
+])
+expect(acm.availability == .usedByMac("macOS uses it as a serial port"), "a CDC ACM board is a serial port")
 let driverOnDevice = dev(0x1234, 0x5678, "Thing", drivers: ["SomeVendorDriver"], [I(number: 0, interfaceClass: 0xff, users: [])])
 expect(driverOnDevice.availability == .usedByMac("in use on the Mac (SomeVendorDriver)"), "a driver on the device itself counts")
 expect(USBDevice.ignoredDeviceChild(className: "AppleUSBHostCompositeDevice")
