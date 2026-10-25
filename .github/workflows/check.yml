@@ -727,3 +727,4 @@ jobs:
         run: |
           sudo apt-get install -yq --no-install-recommends gcc libva-dev
           src/app/guest/tests/va-shim-surfaces.sh
+          src/app/guest/tests/va-shim-vpp-fill.sh
