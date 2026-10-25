@@ -463,6 +463,8 @@ for m in $MODES; do
   esac
 done
 
+# The guest kernel's word on its GPU driver (warnings from the vblank timer show here).
+gssh 'dmesg | grep -iE "virtio.gpu|vsync_lock|vblank|\[drm\]" | tail -40' > "$OUT/guest-dmesg.txt" 2>&1
 # Where the time goes: QEMU's trace against each event's post time and screen time.
 # Stages (medians, ms): mac_to_qemu (the event posted -> QEMU's input layer),
 # qemu_to_compositor (-> Hyprland's first GPU work after it: the terminal took
