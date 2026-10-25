@@ -100,6 +100,7 @@ let acm = dev(0x2341, 0x0043, "Arduino Uno", drivers: ["AppleUSBCDCCompositeDevi
     I(number: 0, interfaceClass: 2, users: ["AppleUSBCDCACMControl"]), I(number: 1, interfaceClass: 0x0a, users: ["AppleUSBCDCACMData"]),
 ])
 expect(acm.availability == .usedByMac("macOS uses it as a serial port"), "a CDC ACM board is a serial port")
+expect(USBDevice.reason("SyncMate") == "in use on the Mac (SyncMate)", "an app name with ncm in it is not a network adapter")
 let driverOnDevice = dev(0x1234, 0x5678, "Thing", drivers: ["SomeVendorDriver"], [I(number: 0, interfaceClass: 0xff, users: [])])
 expect(driverOnDevice.availability == .usedByMac("in use on the Mac (SomeVendorDriver)"), "a driver on the device itself counts")
 expect(USBDevice.ignoredDeviceChild(className: "AppleUSBHostCompositeDevice")

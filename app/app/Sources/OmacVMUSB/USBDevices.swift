@@ -131,8 +131,9 @@ public struct USBDevice: Equatable, Sendable {
         if has("hid") { return "macOS uses it as a keyboard, mouse or security key" }
         if has("audio") { return "macOS uses it for sound" }
         if has("massstorage", "scsi", "uas", "storage") { return "macOS uses it as a disk" }
-        // Network before serial: NCM and ECM drivers are CDC drivers too (AppleUSBCDCECMData).
-        if has("ncm", "ecm", "ethernet", "network") { return "macOS uses it as a network adapter" }
+        // Network before serial: ECM drivers are CDC drivers too (AppleUSBCDCECMData). Whole
+        // driver words, so an app named SyncMate is not a network adapter.
+        if has("usbncm", "cdcecm", "ethernet", "network") { return "macOS uses it as a network adapter" }
         if has("cdc", "serial", "ftdi", "slcom", "chcom", "plcom", "acm") { return "macOS uses it as a serial port" }
         if has("uvc", "video", "camera") { return "macOS uses it as a camera" }
         if has("bluetooth") { return "macOS uses it for Bluetooth" }
