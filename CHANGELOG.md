@@ -15,6 +15,14 @@ in more words.
   download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
   Mac.
 
+- **Control centre switches right after another one are not turned away.** When a switch's job
+  ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
+  switch was refused with "unknown VM" at once and the control centre asked again, so that switch
+  took about 12 s instead of 7-9 s (#528; reproduced in a test VM 3 of 3 times). The Bridge now looks again
+  at once and waits for it (about 1 s), then backs off as before when the VM stays out of reach.
+  Its log also says why it did not take a VM (not running, not set up, the SSH error) and which
+  VM the app named. Needs `omacvm update` (or the app's update) on the Mac.
+
 ## 3.2.1
 
 Google Chrome plays 1440p and 4K video on the Mac's media engine, call tiles show the whole picture,
