@@ -975,6 +975,10 @@ bench lock and are indications only):
   BQL. The link pauses 0.25 s after the last frame, or after a second of
   single frames (pause and wake both on the main thread, so a frame never
   waits behind a paused link).
+- **Surfaces**: the 8-bit ones are Apple's lossless-compressed BGRA ('&BGA',
+  through CoreVideo): QEMU's draw and WindowServer's composite move fewer bytes
+  (ADR 0052; plain `BGRA` for the run after a failure, `OMACVM_GL_LOSSLESS=0`
+  keeps them plain). Nothing reads them on the CPU.
 - **Colour**: surfaces are tagged; Core Animation converts sRGB (or PQ) to
   the display. HDR and 10-bit colour is the app's experimental switch
   (`hdr`, shown only while a display can show HDR; ADR 0049): a start with
