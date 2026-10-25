@@ -990,13 +990,14 @@ bench lock and are indications only):
   `omacvm check` says "Frames in step"; trace `cocoa_present_follow` once a
   second (lead, the frames' median and latest, late frames).
   Measured (Mac mini M4, virtual display, `input-latency-vm.sh`, median of
-  60 per mode, off/on interleaved, tracks/input-vsync.md): at 60 Hz while
-  the screen moves keys 1.4-2.4 ms sooner, the pointer 4.8-4.9 ms, keys
-  while the terminal scrolls 4-5 ms, repeats + drops 86 vs 103 (the free
-  phase drifts against the Mac's and the trims drop frames); idle the same.
-  At 120 Hz about 1 ms: the guest's frames are ready 5 ms after their vblank
-  (median) and up to a whole refresh, so the lead sits at its cap and the
-  late frames wait (the fallback). Not ~8 ms as the model says: the lead
+  60 per mode, off/on interleaved, 4-5 runs a side, tracks/input-vsync.md):
+  at 60 Hz while the screen moves keys 1.5 ms sooner, the pointer 6.3 ms,
+  keys while the terminal scrolls 4.0 ms, repeats + drops 104 vs 134 (the
+  free phase drifts against the Mac's and the trims drop frames); idle the
+  same within the runs' spread. At 120 Hz keys 2.6 ms, the pointer 1.3 ms,
+  the scrolling terminal 1.8 ms: the guest's frames are ready about 5 ms
+  after their vblank (median) and up to a whole refresh, so the lead often
+  sits at its cap and the late frames wait (the fallback). Not ~8 ms as the model says: the lead
   must cover the slowest of 64 frames (8-10 ms after the vblank at 60 Hz).
 - **Locks**: `present_lock` (an `os_unfair_lock`) guards the queue and the
   counters; nothing on the display link thread or the commit queue takes the

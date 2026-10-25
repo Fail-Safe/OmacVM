@@ -9,14 +9,14 @@ in more words.
   section. The VM's display clock had its own beat: a frame it drew right after one refresh of
   the Mac's display waited for the next one, anywhere up to a whole refresh, while the screen was
   moving. With the switch, the VM's clock follows the Mac display's refresh, so its frames are
-  ready just before the Mac shows them. Mac mini, 60 Hz, while the screen moves: keys 1.4-2.4 ms
-  sooner, the pointer 4.8-4.9 ms, keys while the terminal itself scrolls 4-5 ms (medians of 60
-  per mode, 3-8 runs a side), with no more skipped frames than before (fewer: 86 instead of 103
-  repeats and drops over the runs with the final version). At 120 Hz about 1 ms: the VM's frames need most of a refresh there, and then late
-  frames wait as before rather than being skipped. On a still screen nothing changes. The same
-  frames and pixels (checked), the same rate; MacBook Air M2 power the same within noise. Needs
-  Update VM (it builds the VM's graphics driver, internet once); counts from the next start of
-  the VM.
+  ready just before the Mac shows them. Mac mini, 60 Hz, while the screen moves: keys 1.5 ms
+  sooner, the pointer 6.3 ms, keys while the terminal itself scrolls 4 ms (medians of 60 per
+  mode, 4-5 runs a side), with fewer skipped frames than before (104 instead of 134 repeats and
+  drops). At 120 Hz: keys 2.6 ms, the pointer 1.3 ms, keys while the terminal scrolls 1.8 ms
+  sooner; when the VM's frames need more than a refresh, late frames wait as before rather than
+  being skipped. On a still screen nothing changes. The same frames and pixels (checked), the
+  same rate; MacBook Air M2 power the same within noise. Needs Update VM (it builds the VM's
+  graphics driver, internet once); counts from the next start of the VM.
 - **Pointer on its own layer (experimental, off).** A new switch in the VM window's Display section.
   With it, moving the pointer no longer redraws the VM's screen: the VM puts its pointer on the
   graphics card's cursor layer, and the app shows that layer over the window, the same pointer in
