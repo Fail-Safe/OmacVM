@@ -44,12 +44,17 @@ because the wait is in the phase, not in the queue.
    `vsync_lock` (off by default; `linux-virtio-gpu-vsync-lock.patch`, after
    the cursor-plane patch). With it, when the vblank timer starts and every
    half second while it runs (every 100 ms in its first half second), the
-   driver sends OmacVM's own command 0x0f00 (scanout id). The answer (0x11f0)
+   driver sends OmacVM's own command 0x0f00 (scanout id; version 1 adds
+   whether its timer was on the last grid at its last vblank, LOCKED, and
+   the mode's frame time). The answer (0x11f0)
    has the guest counter (CNTVCT) of the next vblank the host wants and the
    period in picoseconds, or no grid. QEMU computes the counter as the Mac's
    clock less hvf's vtimer offset, so no clock is translated twice. A QEMU
    that does not know the command answers with an error once, and the
-   driver stops asking.
+   driver stops asking. QEMU counts the guest's frames as in step (the
+   newest-frame rule, the lead) only while its ask says LOCKED at the grid's
+   rate: a guest that asks but does not follow (another rate, no grid yet)
+   only gets the grid (architecture review 3.2.2, REQUIRED 2).
 2. **The timer follows, gently.** After each vblank (the timer is already
    forwarded) the driver takes the host's period and moves the next expiry
    toward the nearest grid point by at most an eighth of a period, and never
@@ -69,7 +74,12 @@ because the wait is in the phase, not in the queue.
    `test-vsync-follow.c`). Frames are timed on the grid the guest got at its
    last ask, and not for six vblanks after that grid moved: timed on the
    newest grid, a raised lead made the next frames look late and raised it
-   again (the first build's lead wandered between 4.5 and 8.4 ms).
+   again (the first build's lead wandered between 4.5 and 8.4 ms). A frame
+   more than a period late lands where an early one would; since Hyprland
+   draws one frame per vblank, a frame that lands between the same two
+   vblanks as the next one counts a period later. A grid the link has not
+   published for 100 ms (the link paused on a still screen; a ProMotion
+   panel starts again at a phase of its own) is not handed out.
 4. **A late frame costs one repeat.** While a guest follows, a tick that
    finds two frames shows the newer: the older came late for its own
    refresh. Without that, it would be shown a refresh late and keep every
@@ -79,7 +89,12 @@ because the wait is in the phase, not in the queue.
    (also on an 8-bit start: the driver then differs from the stock one only
    by the options asked for). Experimental: a new path between the guest's
    kernel and QEMU, and the late-frame rule changes how a missed refresh
-   looks.
+   looks. The vsync patch is optional in the driver's build: if it does not
+   apply or build on a newer kernel, the driver is built without it (and
+   without the cursor plane if that one fails too), so HDR keeps OmacVM's
+   driver; the loader passes only the options the build has and `omacvm
+   check` says so (architecture review 3.2.2, REQUIRED 1). `omacvm check`
+   says ok only after the driver logged that it was in step.
 
 ## Consequences
 
@@ -96,10 +111,14 @@ because the wait is in the phase, not in the queue.
   sets, 4 rounds a side): whole-Mac power within 1 % (+0.9 % and +0.7 %
   on the means, the rounds of one side spread up to 205 mW), the same
   frames a second, the GPU no busier, 0 pixels differ.
-- Same frames: the guest still draws one frame per vblank at the display's
-  rate (60, 120 Hz, ProMotion); only when it draws moves. Nothing changes on a
-  still screen or for frames that come one at a time (typing on an idle
-  screen): those are shown when ready, as before.
+- Same pixels and the same rate: the guest still draws one frame per vblank at
+  the display's rate (tested at 60 and 120 Hz; a ProMotion panel is not
+  measured yet: rows queued for the M1 Max); only when it draws moves. A
+  frame too late for its refresh is skipped for the newer one while the
+  guest follows: at 120 Hz 6 instead of 1 in about 2 minutes of moving
+  frames, at 60 Hz fewer repeats and skips than without (104 vs 134). No
+  gain on a still screen or for frames that come one at a time (typing on
+  an idle screen): those are shown when ready, as before.
 - The guest timer's own timestamps move with it (by at most an eighth of a
   period a vblank), so the vblank times Hyprland sees are the ones it draws on.
 - One more virtqueue command every half second while the timer runs, and

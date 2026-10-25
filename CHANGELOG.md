@@ -55,9 +55,14 @@ in more words.
   mode, 4-5 runs a side), with fewer skipped frames than before (104 instead of 134 repeats and
   drops). At 120 Hz: keys 2.6 ms, the pointer 1.3 ms, keys while the terminal scrolls 1.8 ms
   sooner; when the VM's frames need more than a refresh, late frames wait as before rather than
-  being skipped. On a still screen nothing changes. The same frames and pixels (checked), the
-  same rate; MacBook Air M2 power within 1 % (pointer moving, scrolling). Needs Update VM (it builds the VM's
-  graphics driver, internet once); counts from the next start of the VM.
+  being skipped. When a frame is too late for its refresh, the newer one is shown and the late
+  one skipped: at 120 Hz that was a few more skipped frames (6 instead of 1 in about 2 minutes of
+  moving frames). On a still screen there is no gain. The same pixels (checked on a MacBook Air)
+  at the same rate (60 or 120 Hz); MacBook Air M2 power within 1 % (pointer moving, scrolling).
+  The VM's driver follows only when its display rate is the Mac's, and if its patch does not fit
+  a newer Linux kernel, Update VM builds the driver without it (HDR and the pointer layer keep
+  working; `omacvm check` says so). Needs Update VM (it builds the VM's graphics driver, internet
+  once); counts from the next start of the VM.
 
 - **Pointer on its own layer (experimental, off).** A new switch in the VM window's Display section.
   With it, moving the pointer no longer redraws the VM's screen: the VM puts its pointer on the

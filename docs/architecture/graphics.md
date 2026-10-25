@@ -986,8 +986,12 @@ bench lock and are indications only):
   frames shows the newer (the older came late: one repeat instead of a
   refresh of delay until the trim), except while the frames are too slow to
   follow (the lead at its cap, or more than 1 in 100 late): then late frames
-  wait as without it. Nothing changes for single frames or a still screen;
-  `omacvm check` says "Frames in step"; trace `cocoa_present_follow` once a
+  wait as without it. Only while the guest's ask says it is on the grid
+  (LOCKED, its mode's period the grid's) does QEMU use the newest-frame
+  rule and measure the lead; a grid older than 100 ms is not handed out; a
+  frame more than a period late counts late (one frame per vblank).
+  Nothing changes for single frames or a still screen; `omacvm check` says
+  "Frames in step" (ok once the driver logged it was in step); trace `cocoa_present_follow` once a
   second (lead, the frames' median and latest, late frames).
   Measured (Mac mini M4, virtual display, `input-latency-vm.sh`, median of
   60 per mode, off/on interleaved, 4-5 runs a side, tracks/input-vsync.md):

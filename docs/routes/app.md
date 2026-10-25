@@ -510,9 +510,11 @@ the VM's SSH on `127.0.0.1:<port>`.
   the guest's vblank comes just early enough before each refresh that the
   frame Hyprland draws after it is shown at that refresh. While the screen
   moves (an animation, scrolling, a video, the pointer), input then shows up
-  to a refresh sooner. The same frames at the same rate; a still screen and
-  frames that come one at a time are as before. `omacvm check` says
-  "Frames in step".
+  to a refresh sooner. The same pixels at the same rate; a frame too late
+  for its refresh is skipped for the newer one (at 120 Hz a few more than
+  without). A still screen and frames that come one at a time are as
+  before. `omacvm check` says "Frames in step" (ok once the driver was in
+  step in this start).
 - Mac pointer for the VM (experimental, off, no switch in the window yet:
   `defaults write org.omacvm.app macPointer -bool true`, from the VM's
   next start): Omarchy is asked to put its pointer on virtio-gpu's cursor
