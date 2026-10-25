@@ -623,6 +623,17 @@ app)
       ok "Pointer layer" "on the cursor plane (experimental): pointer moves do not redraw the screen"
     fi
   fi
+  # Frames in step with the Mac (the app's experimental switch): this start
+  # asked for it (omacvm.vsynclock=1); the driver's loader says whether the
+  # vblank timer follows the Mac's refresh.
+  if grep -qx 'OMACVM_VSYNCLOCK=1' /run/omacvm/host.env 2>/dev/null; then
+    st=$(cat /run/omacvm/virtio-gpu 2>/dev/null)
+    if [[ $st == *vsync_lock=1* ]]; then
+      ok "Frames in step" "the VM's vblanks follow the Mac's refresh (experimental)"
+    else
+      warn "Frames in step" "the switch is on, but the stock driver runs: ${st#stock }$( [[ -z $st ]] && echo "no word from omacvm-virtio-gpu-load (omacvm apply, then restart the VM)")"
+    fi
+  fi
   # Video decoding on the Mac's media engine (an app with it lists decoders).
   drv=virtio_gpu; [[ -f /usr/local/lib/dri/omacvm_drv_video.so ]] && drv=omacvm
   # The shim prints the Mac's per-VM limit (past it, players decode on the CPU).
