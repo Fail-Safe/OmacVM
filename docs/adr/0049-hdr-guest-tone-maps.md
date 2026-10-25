@@ -41,20 +41,19 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
    the headroom themselves; a client that does not is clipped there
    (below). QEMU is the single source of truth; the guest follows.
 2. **The 10-bit driver is dormant until a start asks for it.** (Amended
-   2026-10-25 for [0051](0051-partial-present.md): OmacVM's driver also
-   carries Linux 7.4's damage fix and loads at every start where that fix
-   is ours, that is on kernels before 7.4; the 10-bit formats stay behind
-   the module option `deep_color=1`, passed only for a start that asks, so
-   an 8-bit start offers the stock formats. A patch that does not fit a
-   kernel is left out of that kernel's build (deep colour stays; the
-   builder's `without` file and `--status` say which), and the loader
-   passes only the options the build has. In the initramfs nothing loads
-   for any start (as for 10-bit starts before): QEMU's boot logo stays until
-   udev loads the driver from the real root, so a question or an emergency
-   shell in the initramfs would not show (app VMs have no disk encryption;
-   the VMs have no firmware framebuffer for Linux to use there). A real root
-   without the loader gets the stock driver. What follows is the state
-   before.) `omacvm
+   2026-10-25: the switch "Draw only what changed" asks for it too, SMBIOS
+   `omacvm.damage=1`, for the Linux 7.4 damage fix the driver carries
+   ([0051](0051-partial-present.md), [0055](0055-tiled-present.md)); so do
+   the pointer layer (0054) and frames in step (0056), each with its own
+   module option. The 10-bit formats stay behind `deep_color=1`. A patch
+   that does not fit a kernel is left out of that kernel's build (deep
+   colour stays; the builder's `without` file and `--status` say which),
+   and the loader passes only the options the build has. A start without
+   any of these switches loads the stock driver, in the initramfs too, as
+   below; a 2026-10-25 draft that loaded ours at every start was turned
+   down in review: a tainted out-of-tree module for every user for no gain
+   while both users of the fix are off, and no boot messages in the
+   initramfs.) `omacvm
    apply` builds it on every app VM (7 s; downloaded, patched and built as
    a user id of its own, root only installs it) into `/usr/local/lib/omacvm/virtio-gpu/K`,
    which depmod never sees; a modprobe `install` rule loads it only when

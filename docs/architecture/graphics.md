@@ -101,7 +101,7 @@ on CGL, not on ANGLE.
 | Present on each flush | built: `gpu-native` | `qemu-cocoa-gl-present-on-flush.patch` |
 | IOSurface present | built: `gpu-native` | `qemu-cocoa-gl-present-iosurface.patch` |
 | Partial present (only the box the guest changed; needs Linux 7.4 or OmacVM's driver for real rects) | built: `frame-path`, off by default (`OMACVM_GL_PRESENT_DAMAGE=1`) | `omacvm-cocoa-present-damage*.patch`, ADR 0051 |
-| Tiled present (a frame that changed little goes to WindowServer as a few tile layers over the last whole frame; the same guest rects) | built: `window-draw`, off by default (experimental switch "Draw only what changed", `presentTiles`; `OMACVM_GL_PRESENT_TILES=1`; needs #520's driver or Linux 7.4) | `omacvm-cocoa-present-tiles*.patch`, ADR 0055 |
+| Tiled present (a frame that changed little goes to WindowServer as a few tile layers over the last whole frame; the same guest rects) | built: `window-draw`, off by default (experimental switch "Draw only what changed", `presentTiles`, which also has the VM load OmacVM's driver for its damage fix, SMBIOS `omacvm.damage=1`; `OMACVM_GL_PRESENT_TILES=1`; Linux 7.4 has the fix itself) | `omacvm-cocoa-present-tiles*.patch`, ADR 0055 |
 | Blob alignment for 16 KiB pages | built: `gpu-native`, `gpu-venus` | `qemu-virtio-gpu-blob-alignment.patch` |
 | Venus on MoltenVK | built: `gpu-venus`, merged into `gpu-native`, hidden switch | see section 6 |
 | KosmicKrisp on macOS 26 | built, in release builds (3.0.0, ADR 0035) | `virgl-darwin-vulkan-beside.patch` + `virgl-darwin-kosmickrisp-fallback.patch` |
@@ -1022,11 +1022,9 @@ bench lock and are indications only):
   (`hdr`, shown only while a display can show HDR; ADR 0049): a start with
   it sends SMBIOS `omacvm.deepcolor=1` and `OMACVM_GL_EDR=1` (not in GPU
   safe mode, and only with an EDR display: `Settings.hdrStart`, one
-  `OmacVM: HDR:` line in qemu.log). The guest's own virtio-gpu driver
-  (built ahead by `omacvm apply`; loaded at every start on kernels before
-  7.4 for its damage fix, ADR 0051) offers its 10-bit formats for that
-  start only (`deep_color=1`; the stock driver when it is not built and on
-  any failure; `/run/omacvm/virtio-gpu` says which) and
+  `OmacVM: HDR:` line in qemu.log). The guest loads its 10-bit virtio-gpu
+  driver for that start only (built ahead by `omacvm apply`; the stock one
+  otherwise and on any failure; `/run/omacvm/virtio-gpu` says which) and
   `omacvm-display-sync` runs Virtual-1 at 10 bits: PQ with
   `max_luminance = 203 x edr` while QEMU sends the window display's
   headroom (`"edr"`, once a second, on a 10 % move; 1 while Extra

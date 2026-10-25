@@ -4,9 +4,10 @@ Status: accepted, built (`omacvm-cocoa-present-tiles*.patch`), off by default:
 the experimental switch "Draw only what changed" (`presentTiles`, the VM
 window's Display section) or `OMACVM_GL_PRESENT_TILES=1` (`=check` for tests).
 It acts only when the guest says what changed: Linux 7.4, or OmacVM's
-virtio-gpu driver with the damage fix ([0051](0051-partial-present.md), #520,
-loaded at every start); the switch ships with that driver (on a stock 7.2
-guest it would do nothing). Notes and numbers:
+virtio-gpu driver with the damage fix ([0051](0051-partial-present.md), #520),
+which the switch asks the VM to load (SMBIOS `omacvm.damage=1`; not in GPU
+safe mode); the switch ships with that driver (on a stock 7.2 guest it would
+do nothing). Notes and numbers:
 work/tracks/window-draw.md.
 
 ## Context
