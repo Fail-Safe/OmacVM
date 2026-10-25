@@ -3,21 +3,41 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.2 (unreleased)
+## 3.2.3 (unreleased)
 
 - **Pause drawing while hidden (experimental, off by default).** A new switch in the VM window's
   Display settings. While none of the VM's window can be seen for 2 seconds (minimised, covered
   by other windows, on another Space, the screen locked or asleep), the VM turns its display off
   and stops drawing, as macOS apps do for a window nobody sees. Sound, downloads and everything
   else in the VM keep running. As soon as any part of the window shows again, the VM draws again;
-  its first new picture comes a few frames later (20-40 ms on a Mac mini), and until then you see
-  the last one. A visible window is never touched: every frame, at the display's full rate.
+  its first new picture comes a few frames later (20-45 ms), and until then you see the last one.
+  A visible window is never touched: every frame, at the display's full rate.
   Measured for the whole Mac: on a MacBook Air M2 with the VM's window minimised, a 1080p video in
-  the VM 3.5 -> 2.9 W and a terminal scrolling its output 3.6 -> 2.5 W (macOS idle: 2.3 W); on a
-  MacBook Pro M4 Max with the VM hidden and the display asleep, 5.5 -> 4.6 W and 8.2 -> 2.9 W (the
-  VM's idle level). It works at once in a running VM; Update VM brings the VM's side, and `omacvm check`
-  says "pause while hidden: ready". Only the main window: in full screen on several displays the
-  other windows keep drawing.
+  the VM about 3.5 -> 2.9 W and a terminal scrolling its output 3.6 -> 2.5 W (macOS idle: 2.3 W);
+  on a MacBook Pro M4 Max with the VM hidden and the display asleep, the video 5.4-5.6 -> 4.6 W and
+  the terminal 6.4-8.2 -> 2.9-3.0 W (the VM's idle level). It works at once in a running VM;
+  Update VM brings the VM's side, and `omacvm check` says "pause while hidden: ready". Only the
+  main window: in full screen on several displays the other windows keep drawing.
+
+## 3.2.2 (unreleased)
+
+- **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has
+  odd characters in its command line.** omacvm reads the Mac's process list to find the VM's
+  QEMU. One line that is not UTF-8 (a file name in an old encoding, binary arguments) made
+  macOS's awk stop there, so omacvm missed the VM after it: a control centre switch then tried to
+  start the running VM and ended with "did not get an address" (#545; found in the 3.2.1 test on
+  a MacBook Air). The same line made `pgrep -f` fail, so `omacvm check` could miss a running
+  Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
+  download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
+  Mac.
+
+- **Control centre switches right after another one are not turned away.** When a switch's job
+  ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
+  switch was refused with "unknown VM" at once and the control centre asked again, so that switch
+  took about 12 s instead of 7-9 s (#528; reproduced in a test VM 3 of 3 times). The Bridge now looks again
+  at once and waits for it (about 1 s), then backs off as before when the VM stays out of reach.
+  Its log also says why it did not take a VM (not running, not set up, the SSH error) and which
+  VM the app named. Needs `omacvm update` (or the app's update) on the Mac.
 
 ## 3.2.1
 

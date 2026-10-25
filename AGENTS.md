@@ -716,6 +716,11 @@ The less obvious ones, with causes and where the fix lives, are in
   full, Hyprland and apps die of SIGBUS on their shared-memory buffers there
   (2026-10-19: OmacVM.app's hyprpicker left 3 buffer files per display per
   screenshot; fixed in `src/app/guest/hyprpicker/`, check line "runtime folder").
+- Do not read other programs' text (`ps`, `pgrep -f`, `pkill -f`) with awk patterns,
+  `tolower`, sed, tr, cut or sort in omacvm's UTF-8 locale: one line that is not UTF-8 stops
+  macOS's awk and sed there and makes `pgrep -f` fail (#545: a running VM taken as stopped).
+  Give the reader `LC_ALL=C` (never `ps` itself: it then prints UTF-8 as `M-C`);
+  `src/tests/ps-not-utf8.sh`.
 - Do not put personal data in this repo.
 
 ## 9. Conventions
