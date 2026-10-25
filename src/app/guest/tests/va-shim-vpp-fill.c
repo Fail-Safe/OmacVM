@@ -10,8 +10,9 @@
  * only 180 rows: as it is); processing from a 320x180 NV12 surface into it reaches Mesa with
  * the source region scaled to the picture's part of the rounded planes (0,0,320,169) and the
  * output region the rounded size (0,0,320,192); the app's buffer has its own regions back
- * afterwards; a 16-aligned source, an imported 320x180 NV12 source (its planes are its own)
- * and an output into part of the frame stay as they are.
+ * afterwards (also for an imported 320x180 NV12 source in a 192-row buffer, as Chrome's
+ * decoder imports its GBM buffers); a 16-aligned source, an imported 320x180 NV12 source of
+ * its own size (a camera frame) and an output into part of the frame stay as they are.
  * no: everything as the app gave it. The stand-in says it is Mesa STUB_MESA (26.2.5 if unset).
  */
 #define _GNU_SOURCE
@@ -223,8 +224,9 @@ static VASurfaceID import_argb(unsigned rows)
     return s;
 }
 
-/* an NV12 picture of 320x180 imported from a dma-buf of exactly its size (a camera frame) */
-static VASurfaceID import_nv12(void)
+/* an NV12 picture of 320x180 imported from a dma-buf whose Y plane has ROWS rows: 180 (its
+ * own size, a camera frame) or 192 (Mesa's GBM buffer, as Chrome's decoder imports) */
+static VASurfaceID import_nv12(unsigned rows)
 {
     char path[] = "/tmp/va-shim-vpp-XXXXXX";
     int fd = mkstemp(path);
@@ -233,7 +235,7 @@ static VASurfaceID import_nv12(void)
     VASurfaceID s = VA_INVALID_SURFACE;
 
     unlink(path);
-    if (fd < 0 || ftruncate(fd, (off_t)320 * 180 * 3 / 2))
+    if (fd < 0 || ftruncate(fd, (off_t)320 * rows * 3 / 2))
         return s;
     memset(&d, 0, sizeof(d));
     d.fourcc = VA_FOURCC_NV12;
@@ -241,12 +243,12 @@ static VASurfaceID import_nv12(void)
     d.height = 180;
     d.num_objects = 1;
     d.objects[0].fd = fd;
-    d.objects[0].size = 320 * 180 * 3 / 2;
+    d.objects[0].size = 320 * rows * 3 / 2;
     d.num_layers = 1;
     d.layers[0].drm_format = 0x3231564e;   /* NV12 */
     d.layers[0].num_planes = 2;
     d.layers[0].pitch[0] = d.layers[0].pitch[1] = 320;
-    d.layers[0].offset[1] = 320 * 180;
+    d.layers[0].offset[1] = 320 * rows;
     a[0] = (VASurfaceAttrib){ .type = VASurfaceAttribMemoryType, .flags = VA_SURFACE_ATTRIB_SETTABLE,
                               .value = { .type = VAGenericValueTypeInteger,
                                          .value.i = VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2 } };
@@ -288,10 +290,11 @@ int main(int argc, char **argv)
     }
 
     /* the decoder's NV12 surfaces: 320x180 (VP9) and 320x192 (H.264's coded size) */
-    VASurfaceID src180, src192, cam180;
+    VASurfaceID src180, src192, cam180, gbm180;
     vt.vaCreateSurfaces2(&dc, VA_RT_FORMAT_YUV420, 320, 180, &src180, 1, NULL, 0);
     vt.vaCreateSurfaces2(&dc, VA_RT_FORMAT_YUV420, 320, 192, &src192, 1, NULL, 0);
-    cam180 = import_nv12();
+    cam180 = import_nv12(180);
+    gbm180 = import_nv12(192);
 
     /* Chrome's ARGB frames handed back to VA-API */
     VASurfaceID dst = import_argb(192), small = import_argb(180);
@@ -321,6 +324,8 @@ int main(int argc, char **argv)
           in, yes ? (VARectangle){ 0, 0, 320, 192 } : out },
         { "imported 320x180 NV12 (its own planes) into it", cam180, dst, &out,
           in, yes ? (VARectangle){ 0, 0, 320, 192 } : out },
+        { "imported 320x180 NV12 in a 192-row buffer into it", gbm180, dst, &out,
+          yes ? (VARectangle){ 0, 0, 320, 169 } : in, yes ? (VARectangle){ 0, 0, 320, 192 } : out },
         { "into part of the frame", src192, dst, &part, in, part },
         { "into the 180-row import", src192, small, &out, in, out },
     };

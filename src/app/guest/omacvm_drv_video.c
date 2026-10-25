@@ -45,8 +45,9 @@
  * source region is scaled to the picture's part of them. Chrome converts into
  * an import of its own frame (the dma-buf it exported): such an RGB import whose
  * buffer holds the rounded planes (Mesa made it) is imported at the rounded
- * size, so the conversion may draw all of it. Only Mesa's own 4:2:0 surfaces
- * get the source scaling (an imported one has the planes it came with), and
+ * size, so the conversion may draw all of it. Only 4:2:0 surfaces whose planes
+ * are rounded get the source scaling (Mesa's own, and imports laid out so, as
+ * Chrome's decoder's GBM buffers; an exact-size import keeps its region), and
  * only with a Mesa this was checked with (FILL_MESA_MAX; a newer one: off,
  * logged). OMACVM_VA_FILL=0 or 1 overrides.
  *
@@ -286,6 +287,8 @@ static int import_rounded(VADriverContextP ctx, unsigned int format, unsigned in
                           unsigned int height, VASurfaceID *surfaces, VASurfaceAttrib *attribs,
                           unsigned int num_attribs, VAStatus *st);
 static int fill_on(void);
+static int import420_rounded(unsigned int width, unsigned int height, VASurfaceAttrib *attribs,
+                             unsigned int num_attribs);
 static void own420_add(VADriverContextP ctx, const VASurfaceID *ids, unsigned n, uint32_t w,
                        uint32_t h);
 
@@ -312,9 +315,13 @@ static VAStatus create_surfaces2(VADriverContextP ctx, unsigned int format, unsi
         imported |= attribs[i].type == VASurfaceAttribExternalBufferDescriptor;
     st = create_surfaces_plain(ctx, format, width, height, surfaces, num_surfaces, attribs,
                                num_attribs);
-    /* Mesa's own 4:2:0 surfaces: their planes are rounded (see render_picture) */
-    if (st == VA_STATUS_SUCCESS && !imported && fill_on() &&
-        (format & (VA_RT_FORMAT_YUV420 | VA_RT_FORMAT_YUV420_10)))
+    /* 4:2:0 surfaces with planes rounded up to 16 (see render_picture): Mesa's
+     * own, and imports whose buffer is laid out that way (Chrome's decoder
+     * imports its own GBM buffers) */
+    if (st == VA_STATUS_SUCCESS && fill_on() &&
+        (format & (VA_RT_FORMAT_YUV420 | VA_RT_FORMAT_YUV420_10)) &&
+        (!imported || (num_surfaces == 1 &&
+                       import420_rounded(width, height, attribs, num_attribs))))
         own420_add(ctx, surfaces, num_surfaces, width, height);
     return st;
 }
@@ -557,8 +564,8 @@ static struct bumped {
 } bumped[256];
 static unsigned nbumped, next_bumped;
 
-/* 4:2:0 surfaces Mesa allocated (not imports), so with planes rounded up to 16:
- * their own size. A full table forgets the oldest (its pictures then as before). */
+/* 4:2:0 surfaces with planes rounded up to 16 (Mesa's own, and imports laid out
+ * so): their own size. A full table forgets the oldest (its pictures then as before). */
 static struct bumped own420[512];
 static unsigned nown420, next_own420;
 
@@ -638,6 +645,71 @@ static void bumped_forget(VADriverContextP ctx, const VASurfaceID *ids, int n)
         }
     }
     pthread_mutex_unlock(&tgt_lock);
+}
+
+/* A 4:2:0 import of WIDTH x HEIGHT (height not a multiple of 16): is its Y plane
+ * rounded up to 16 rows (Mesa's GBM buffers), by the chroma plane's offset or, in
+ * a buffer of its own, the Y buffer's size? An exact-size picture (a camera
+ * frame) is not. */
+static int import420_rounded(unsigned int width, unsigned int height, VASurfaceAttrib *attribs,
+                             unsigned int num_attribs)
+{
+    uint64_t ah = (height + 15) & ~15u, rows = 0, pitch = 0;
+    int mem = -1, k = -1;
+    void *p;
+
+    if (!(height & 15) || !width || !height || height > 16384 || !attribs)
+        return 0;
+    for (unsigned int i = 0; i < num_attribs; i++) {
+        if (attribs[i].type == VASurfaceAttribMemoryType)
+            mem = attribs[i].value.value.i;
+        else if (attribs[i].type == VASurfaceAttribExternalBufferDescriptor)
+            k = (int)i;
+    }
+    if (k < 0 || !(p = attribs[k].value.value.p))
+        return 0;
+    if (mem == VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2) {
+        const VADRMPRIMESurfaceDescriptor *d = p;
+        uint32_t y_obj, c_obj, y_off, c_off;
+
+        if (d->num_layers == 1 && d->layers[0].num_planes >= 2) {
+            y_obj = d->layers[0].object_index[0];
+            c_obj = d->layers[0].object_index[1];
+            y_off = d->layers[0].offset[0];
+            c_off = d->layers[0].offset[1];
+            pitch = d->layers[0].pitch[0];
+        } else if (d->num_layers >= 2 && d->layers[0].num_planes == 1) {
+            y_obj = d->layers[0].object_index[0];
+            c_obj = d->layers[1].object_index[0];
+            y_off = d->layers[0].offset[0];
+            c_off = d->layers[1].offset[0];
+            pitch = d->layers[0].pitch[0];
+        } else {
+            return 0;
+        }
+        if (!pitch || y_obj >= d->num_objects || c_obj >= d->num_objects || y_obj >= 4)
+            return 0;
+        if (y_obj == c_obj && c_off > y_off) {
+            rows = (c_off - y_off) / pitch;
+        } else if (y_obj != c_obj) {
+            off_t size = lseek(d->objects[y_obj].fd, 0, SEEK_END);
+
+            lseek(d->objects[y_obj].fd, 0, SEEK_SET);
+            if (size > (off_t)y_off)
+                rows = ((uint64_t)size - y_off) / pitch;
+        }
+    } else if (mem == VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME) {
+        const VASurfaceAttribExternalBuffers *e = p;
+
+        if (e->num_planes < 2 || !e->pitches[0] || e->offsets[1] <= e->offsets[0])
+            return 0;
+        pitch = e->pitches[0];
+        rows = (e->offsets[1] - e->offsets[0]) / pitch;
+    }
+    if (getenv("OMACVM_VA_DEBUG"))
+        fprintf(stderr, "omacvm_drv_video: 4:2:0 import %ux%u, Y plane %llu rows: %s\n", width,
+                height, (unsigned long long)rows, rows >= ah ? "rounded" : "its own size");
+    return rows >= ah;
 }
 
 /* Does the dma-buf FD hold OFFSET + PITCH x ROWS bytes? */
@@ -792,7 +864,7 @@ static VAStatus render_picture(VADriverContextP ctx, VAContextID context, VABuff
         if (ctx->vtable->vaMapBuffer(ctx, buffers[i], &data) != VA_STATUS_SUCCESS || !data)
             continue;
         pp = data;
-        /* only Mesa's own 4:2:0 surfaces: an imported one has the planes it came with */
+        /* only 4:2:0 surfaces with rounded planes: an exact-size import keeps its region */
         src_fix = own420_size(ctx, pp->surface, &sw, &sh) && sw && sh && sw <= 16384 &&
                   sh <= 16384 && ((sw | sh) & 15);
         out_fix = fill && (!pp->output_region ||
