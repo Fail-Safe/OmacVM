@@ -1007,11 +1007,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damag
   die "the partial present's rules fail their test (test-present-damage.sh)"
 "$native_dir/Tests/display/test-present-damage.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the partial present is not wired as tested (test-present-damage.sh)"
-# OmacVM: no App Nap while the VM runs: with its window out of sight (screen
-# locked, another Space) macOS slowed the whole VM to a few percent.
-patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
-grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
-  die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
+# OmacVM: the window's 8-bit surfaces lossless-compressed ('&BGA'): QEMU's draw
+# and WindowServer's composite move fewer bytes; plain surfaces after a failure.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-lossless.patch"
+"$native_dir/Tests/display/test-present-lossless.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the lossless surfaces are not wired as tested (test-present-lossless.sh)"
 # OmacVM: the pointer's layer as bright as the frames with extra brightness
 # (ADR 0054: the switch "Pointer on its own layer"; ADR 0050). Its rules'
 # test, then the wiring.
@@ -1023,6 +1023,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-brigh
   die "the pointer's brightness rules fail their test (test-pointer-bright.sh)"
 "$native_dir/Tests/display/test-pointer-bright.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the pointer's brightness is not wired as tested (test-pointer-bright.sh)"
+# OmacVM: no App Nap while the VM runs: with its window out of sight (screen
+# locked, another Space) macOS slowed the whole VM to a few percent.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
+grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
 # OmacVM: a guest that asks (its virtio-gpu driver with vsync_lock=1) gets the
 # Mac display's refresh grid for its vblank timer. Its rules' test, then the
 # wiring (virtio-gpu, hvf, the present).
