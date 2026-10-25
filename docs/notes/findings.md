@@ -246,10 +246,10 @@ else running. "VM %" is the VM's speed against the Mac's.
 - **The loss is in KosmicKrisp's shader translation, not in Venus.** llama.cpp's prompt processing runs at 99 % of
   the same driver on the Mac; that driver itself is at 29 % of Metal and 38 % of MoltenVK. KosmicKrisp never
   unrolls a loop, so llama.cpp's matmul keeps its accumulators in scratch memory and its caches in if-else trees.
-  Unrolling loops of up to 32 iterations before local arrays are lowered gives llama.cpp's prompt +22 % on an M4
-  (160 -> 196 t/s natively, 159 -> 194 in the VM), but on an M2 it costs Dawn's WebGPU matmul 19 to 45 %
-  (likely register pressure, which M3 and newer hide; the M4 kept 1162 GFLOPS), so it is not shipped yet. Next
-  step: turn it on for M3 and newer GPUs only. Also: KosmicKrisp scalarizes every ALU operation and never merges
+  Unrolling loops of up to 32 iterations before local arrays are lowered gives llama.cpp's prompt +130 % natively
+  on an M1 Max and an M2 and +22 % on an M4 (in a VM: +119 % on an M2, +15 % on an M4 Max). But on an M2 it costs
+  Dawn's WebGPU matmul 25 %, and a model's first pipeline creation takes 54 % longer (about 1.4 s more, once:
+  Metal caches the shaders after), so it is not shipped. Also: KosmicKrisp scalarizes every ALU operation and never merges
   loads into vectors, where MoltenVK's MSL keeps `half2` fma and vector loads (look with `MESA_KK_DEBUG=msl`).
 - **MoltenVK is the faster driver for llama.cpp** (VM: pp512 432 t/s against 159, tg128 42.6 against 45.2) but has
   no OpenCL (Zink needs nullDescriptor), its pipeline barriers cost 38 us each (64 dispatches with barriers:
@@ -257,9 +257,11 @@ else running. "VM %" is the VM's speed against the Mac's.
   picks it for a test.
 - **Each GPU round trip costs ~85 us more in the VM** (submit + wait 185 against 101 us). Polling the fence in the
   guest instead of sleeping saves only ~19 us: most of it is on the Mac (the Venus ring thread's wake-up, the fence
-  through the render server, QEMU's main loop and the interrupt). The ring thread's naps end late on macOS
-  (`virgl-darwin-venus-ring-spin.patch`: 185 -> 170 us, OpenCL 229 -> 208 us; QEMU's CPU +10 % while the GPU
-  works, no change with the VM idle). Token generation and big kernels do not notice it.
+  through the render server, QEMU's main loop and the interrupt). Token generation and big kernels do not
+  notice it. The ring thread's naps end late on macOS (10 us take 16). Looking for the next command 200 us longer
+  before napping was tried and dropped: submit + wait got 8-15 us faster on the M4s (Mac mini 185 -> 170, MacBook
+  Pro M4 Max 154 -> 142), but 64 dispatches recorded with barriers got twice as slow on the M4 Max (285 ->
+  587 us; M1 Max 516 -> 657) and vkcube 10 % slower; WebGPU, GTK4's first frame and scrolling stayed the same.
 - KosmicKrisp re-records a command buffer that is submitted again (Metal's are one-shot): 77 us per
   `vkQueueSubmit` of the same buffer, MoltenVK 6 us.
 - Geekbench 7's Linux ARM preview lists no Vulkan device, only OpenCL. Arch Linux ARM's darktable 5.6.1 (October
