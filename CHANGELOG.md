@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.3 (unreleased)
+
+- **Tiled present, built, off for now.** OmacVM.app shows every frame of the VM as a new whole
+  picture, so macOS redraws the whole window for each one, also when only the pointer moved. With
+  tiles, only the 256x256 squares the VM changed get a new picture. MacBook Air M2, the VM full
+  screen at 60 Hz with a driver that says what changed, the pointer moving: 3.13-3.17 W instead of
+  3.55-3.75 W for the whole Mac (-11 to -17 %, two sets), the same pixels and frame rate; scrolling
+  and typing the same.
+  It needs a VM that says what changed in its frames (Linux 7.4, or OmacVM's own driver with that
+  fix, #520), so there is no switch yet. `OMACVM_GL_PRESENT_TILES=1` in the app's environment
+  turns it on for tests.
+
 ## 3.2.2 (unreleased)
 
 - **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has
@@ -14,16 +26,6 @@ in more words.
   Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
   download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
   Mac.
-- **Tiled present, built, off for now.** OmacVM.app shows every frame of the VM as a new whole
-  picture, so macOS redraws the whole window for each one, also when only the pointer moved. With
-  tiles, only the 256x256 squares the VM changed get a new picture. MacBook Air M2, the VM full
-  screen at 60 Hz with a driver that says what changed, the pointer moving: 3.13-3.17 W instead of
-  3.55-3.75 W for the whole Mac (-11 to -17 %, two sets), the same pixels and frame rate; scrolling
-  and typing the same.
-  It needs a VM that says what changed in its frames (Linux 7.4, or OmacVM's own driver with that
-  fix, #520), so there is no switch yet. `OMACVM_GL_PRESENT_TILES=1` in the app's environment
-  turns it on for tests.
-
 - **Control centre switches right after another one are not turned away.** When a switch's job
   ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
   switch was refused with "unknown VM" at once and the control centre asked again, so that switch
