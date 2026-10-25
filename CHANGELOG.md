@@ -3,6 +3,11 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.1 (unreleased)
+
+- **USB devices** (experimental): the list now says that a USB network adapter, or another Mac on a
+  USB-C cable, is a network adapter that macOS keeps. It said serial port.
+
 ## 3.2.0
 
 Chrome decodes video on the Mac's media engine again, ⌃⌥ Esc takes the right display out of the VM, the

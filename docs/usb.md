@@ -158,8 +158,25 @@ Until then, other ways work for some of these:
   QEMU with a device macOS uses: one line `usb-host: 043e:9a4d (bus 32,
   addr 9) is in use on the host: not taken`, and its IORegistry id stayed the
   same (no re-enumeration).
+- 2026-10-25, with the 3.2.0 runtime (no device of the Mac passed to a VM):
+  - `usb-tests` on a Mac mini M4, a MacBook Pro M4 Max and a MacBook Air M2
+    (macOS 27): all 104 checks pass. `--list` on the three Macs: 17 devices,
+    none that macOS uses offered. A Mac on a USB-C cable was called a serial
+    port; it is a network adapter now.
+  - A test VM (Linux 7.2.9) with the switch on: the controller and its two
+    root hubs come up with no error. 20 times connect and disconnect,
+    through the app's own QMP code with QEMU's emulated tablet in place of a
+    Mac device: 20 good; Linux sees the device 0.3 s after QEMU has it and
+    lets it go 0.05 s after; QEMU keeps no file open after.
+  - What the switch costs while nothing is connected: QEMU used 1.16 % of a
+    core with the empty controller and 1.20 % without it (MacBook Pro M4
+    Max, idle VM, two rounds of 2 minutes each): no difference.
+  - Connect for two devices macOS uses (a display's camera and its HID
+    controls, on the Mac mini): both refused, one log line each, and neither
+    reconnected on the Mac, also when QEMU quit.
 - Not tested yet: a real free device end to end, and the question over a
-  full-screen VM on a Mac (none of the test Macs has a free device plugged in).
+  full-screen VM on a Mac (none of the test Macs has a free device plugged
+  in). USB devices stay experimental until both are done.
 
 ## Known limits
 
