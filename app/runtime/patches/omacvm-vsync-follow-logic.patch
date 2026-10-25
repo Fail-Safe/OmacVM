@@ -20,7 +20,7 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 
 --- /dev/null
 +++ b/ui/omacvm-vsync.h
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,176 @@
 +/*
 + * OmacVM: the guest's vblanks in step with the Mac display's refresh.
 + *
@@ -189,6 +189,8 @@ Test: app/runtime/Tests/display/test-vsync-follow.c.
 +void omacvm_vsync_set_counter_offset(uint64_t mach_offset);
 +/* For the guest: its counter at the next vblank it should have, and the period. */
 +bool omacvm_vsync_for_guest(uint64_t *counter, uint64_t *period_ps);
++/* The grid the guest got last (host ns, ps) and when it last moved; false: none. */
++bool omacvm_vsync_answered(int64_t *vblank_ns, uint64_t *period_ps, int64_t *moved_ns);
 +/* When a guest last asked (host ns; 0: never). */
 +int64_t omacvm_vsync_asked_ns(void);
 +/* mach_absolute_time() in ns. */

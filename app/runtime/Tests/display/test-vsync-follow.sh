@@ -22,7 +22,7 @@ problems() {   # QEMU source folder
     echo "the display link does not give the grid to the guest"
   grep -q 'present_sync.grid_vblank = deadline - present_sync.follow_lead;' "$m" 2>/dev/null ||
     echo "the guest's vblank is not the lead before the commit"
-  grep -q 'omacvm_lead_add(&present_sync.lead, after);' "$m" 2>/dev/null ||
+  grep -q 'omacvm_lead_add(&present_sync.lead,$' "$m" 2>/dev/null && grep -q 'omacvm_vsync_since(now, present_sync.ans_vblank,' "$m" 2>/dev/null ||
     echo "the lead does not follow when the guest's frames are ready"
   grep -q '(input || present_sync.follow) && present_sync.queued > 1' "$m" 2>/dev/null ||
     echo "a late frame waits a refresh while the guest follows"

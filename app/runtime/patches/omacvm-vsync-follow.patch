@@ -15,7 +15,11 @@ are ready after their vblank (ui/omacvm-vsync.h: the latest of the last
 64 + 1 ms, once a second; OMACVM_GL_FOLLOW_LEAD_MS fixes it for tests).
 A frame later than the lead misses its refresh, so the lead covers the
 slowest one, not a percentile: the first build (95th percentile + 1 ms)
-had 1-3 late frames a second at 60 Hz, each a repeat. While a
+had 1-3 late frames a second at 60 Hz, each a repeat. The frames are timed
+on the grid the guest got last (it asks every half second), and not for 6
+vblanks after that grid moved, while the guest's timer comes after it:
+timed on the newest grid, a raised lead made the next frames look late
+and raised it again. While a
 guest follows, a tick that finds more than one frame shows the newest:
 the older one came late for its own refresh (as OMACVM_GL_INPUT_FIRST
 does while input comes), so a late frame costs one repeat, not a
@@ -151,7 +155,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  #include "hw/core/boards.h"
  #include "system/system.h"
  #include "system/runstate.h"
-@@ -7662,6 +7663,18 @@ the one before (slowed link) */
+@@ -7662,6 +7663,19 @@ the one before (slowed link) */
      bool merge;                         /* the guest draws faster than the link */
      unsigned ticks, shown, direct, repeats, merged, dropped, busy; /* trace */
      double wait_sum;
@@ -162,6 +166,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
 +     */
 +    bool follow;
 +    double grid_vblank, grid_period;
++    double ans_vblank, ans_period, ans_moved;  /* the grid the guest got last */
 +    double grid_t0, grid_last;
 +    int grid_hz;
 +    double follow_lead;
@@ -170,7 +175,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  } present_sync = {
      .win_min = INT_MAX, .win_gap = INFINITY, .win_gap2 = INFINITY,
  };
-@@ -7670,6 +7683,7 @@ the one before (slowed link) */
+@@ -7670,6 +7684,7 @@ the one before (slowed link) */
  static bool present_fixed;              /* OMACVM_GL_REFRESH=fixed */
  static bool present_input_first;        /* OMACVM_GL_INPUT_FIRST=1 */
  static bool present_trim_quarter;       /* OMACVM_GL_TRIM=quarter */
@@ -178,7 +183,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  static QEMUBH *present_bh;
  
  /* Main thread: the window is in sight again: its newest frame now, not at the guest's next flush. */
-@@ -7883,6 +7897,9 @@ static bool cocoa_gl_present_init(void)
+@@ -7883,6 +7898,9 @@ static bool cocoa_gl_present_init(void)
      present_input_first = present_vsync && in && !strcmp(in, "1");
      const char *tr = getenv("OMACVM_GL_TRIM");
      present_trim_quarter = present_vsync && tr && !strcmp(tr, "quarter");
@@ -188,7 +193,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
      present_nsurf = present_vsync ? PRESENT_SURFACES : 3;
      if (present_vsync) {
          /*
-@@ -8557,7 +8574,11 @@ static void cocoa_gl_present_screen_changed(void)
+@@ -8557,7 +8575,11 @@ static void cocoa_gl_present_screen_changed(void)
      present_sync.min_hz = min_hz;
      present_sync.hz = max_hz;
      present_sync.slower = 0;
@@ -200,22 +205,26 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
      cocoa_gl_present_link_rate();
      if (changed) {
          if (min_hz < max_hz) {
-@@ -8633,6 +8654,14 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+@@ -8633,6 +8655,18 @@ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
      double gap = present_sync.last_ready > 0 ?
                   now - present_sync.last_ready : INFINITY;
      present_sync.last_ready = now;
-+    /* A following guest's frame: how long after its vblank it was ready. */
-+    if (present_sync.linked && present_sync.follow && present_sync.grid_period > 0) {
-+        double after = omacvm_vsync_since(now, present_sync.grid_vblank,
-+                                          present_sync.grid_period);
-+        omacvm_lead_add(&present_sync.lead, after);
++    /*
++     * A following guest's frame: how long after its vblank it was ready, on
++     * the grid the guest got last (a newer one reaches it at its next ask),
++     * not while its timer is still coming after a moved grid (6 vblanks).
++     */
++    if (present_sync.linked && present_sync.follow && present_sync.ans_period > 0 &&
++        now - present_sync.ans_moved > 6 * present_sync.ans_period) {
++        omacvm_lead_add(&present_sync.lead,
++                        omacvm_vsync_since(now, present_sync.ans_vblank,
++                                           present_sync.ans_period));
 +        present_sync.follow_frames++;
-+        present_sync.follow_late += after > present_sync.follow_lead;
 +    }
      if (!present_sync.linked) {
          present_sync.close_frames =
              gap < PRESENT_CLOSE_S ? present_sync.close_frames + 1 : 0;
-@@ -8769,7 +8798,7 @@ static double present_wanted_hz(void)
+@@ -8769,7 +8803,7 @@ static double present_wanted_hz(void)
   * queued frame on the layer. Returns false once no frame has come for
   * PRESENT_IDLE_S (the link may pause).
   */
@@ -224,7 +233,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  {
      PresentFrame show = { 0 }, drop = { 0 }, stale[PRESENT_QUEUE] = { { 0 } };
      PresentFrame trimmed[PRESENT_QUEUE] = { { 0 } };
-@@ -8780,10 +8809,42 @@ static bool cocoa_gl_present_vsync(double T)
+@@ -8780,10 +8814,51 @@ static bool cocoa_gl_present_vsync(double T)
      double now = CACurrentMediaTime();
      bool rate = false, idle = false;
  
@@ -263,11 +272,20 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
 +        present_sync.grid_period = ps / 1e12;
 +        present_sync.grid_vblank = deadline - present_sync.follow_lead;
 +        omacvm_vsync_publish((int64_t)llround(present_sync.grid_vblank * 1e9), ps);
++        int64_t av, am;
++        uint64_t ap;
++        if (omacvm_vsync_answered(&av, &ap, &am)) {
++            present_sync.ans_vblank = av / 1e9;
++            present_sync.ans_period = ap / 1e12;
++            present_sync.ans_moved = am / 1e9;
++        } else {
++            present_sync.ans_period = 0;
++        }
 +    }
      present_sync.win_ticks++;
      present_sync.ticks++;
      if (present_sync.queued) {
-@@ -8791,7 +8852,7 @@ static bool cocoa_gl_present_vsync(double T)
+@@ -8791,13 +8866,15 @@ static bool cocoa_gl_present_vsync(double T)
           * Input is coming: frames that wait behind a newer one are old news
           * (the newer answers the input). Show the newest at this refresh.
           */
@@ -276,7 +294,15 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
              nstale = present_sync.queued - 1;
              memcpy(stale, present_sync.queue, sizeof(PresentFrame) * nstale);
              memmove(&present_sync.queue[0], &present_sync.queue[nstale],
-@@ -8903,6 +8964,18 @@ static bool cocoa_gl_present_vsync(double T)
+                     sizeof(PresentFrame));
+             present_sync.queued = 1;
+             present_sync.dropped += nstale;
++            /* While the guest follows: the older one was late for its refresh. */
++            present_sync.follow_late += present_sync.follow ? nstale : 0;
+         }
+         show = present_sync.queue[0];
+         present_sync.queued--;
+@@ -8903,6 +8980,18 @@ static bool cocoa_gl_present_vsync(double T)
              (int)(present_sync.wait_sum * 1e6 / present_sync.shown) : 0);
          trace_cocoa_present_skips(present_sync.repeats, present_sync.merged,
                                    present_sync.dropped, present_sync.busy);
@@ -295,7 +321,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
          present_sync.ticks = present_sync.shown = present_sync.direct = 0;
          present_sync.repeats = 0;
          present_sync.merged = present_sync.dropped = present_sync.busy = 0;
-@@ -8974,10 +9047,11 @@ - (void)tick:(CADisplayLink *)link
+@@ -8974,10 +9063,11 @@ - (void)tick:(CADisplayLink *)link
          const char *e = getenv("OMACVM_GL_LEAD_MS");
          lead = (e ? atof(e) : 3.0) / 1000;
      }
@@ -322,7 +348,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
  vnc_ss.add(files(
 --- /dev/null
 +++ b/ui/omacvm-vsync.c
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,135 @@
 +/*
 + * OmacVM: the Mac display's refresh grid for the guest's vblanks
 + * (ui/omacvm-vsync.h). The present's display link publishes it, virtio-gpu
@@ -344,6 +370,10 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
 +static bool vsync_offset_known;
 +static uint64_t vsync_offset;       /* guest counter = mach time - this */
 +static int64_t vsync_asked;
++/* The grid the guest got last: its timer follows that one, not a newer. */
++static bool ans_valid;
++static int64_t ans_vblank_ns, ans_moved_ns;
++static uint64_t ans_period_ps;
 +
 +#ifdef __APPLE__
 +static mach_timebase_info_data_t timebase(void)
@@ -383,6 +413,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
 +{
 +    qemu_spin_lock(&vsync_lock);
 +    vsync_ready = false;
++    ans_valid = false;
 +    qemu_spin_unlock(&vsync_lock);
 +}
 +
@@ -410,6 +441,16 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
 +        at = omacvm_vsync_next(vsync_vblank_ns, vsync_period_ps, now);
 +        *period_ps = vsync_period_ps;
 +        offset = vsync_offset;
++        /* A grid that moved (by more than 0.2 ms): the guest's timer comes after it over a few vblanks. */
++        int64_t d = ans_valid && ans_period_ps ?
++                    omacvm_vsync_next(ans_vblank_ns, ans_period_ps, at) - at : 0;
++        int64_t p = (int64_t)(ans_period_ps / 1000);
++        if (!ans_valid || ans_period_ps != vsync_period_ps || MIN(d, p - d) > 200000) {
++            ans_moved_ns = now;
++        }
++        ans_valid = true;
++        ans_vblank_ns = at;
++        ans_period_ps = vsync_period_ps;
 +    }
 +    qemu_spin_unlock(&vsync_lock);
 +    if (ok) {
@@ -419,6 +460,19 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
 +#else
 +    return false;
 +#endif
++}
++
++bool omacvm_vsync_answered(int64_t *vblank_ns, uint64_t *period_ps, int64_t *moved_ns)
++{
++    bool ok;
++
++    qemu_spin_lock(&vsync_lock);
++    ok = ans_valid;
++    *vblank_ns = ans_vblank_ns;
++    *period_ps = ans_period_ps;
++    *moved_ns = ans_moved_ns;
++    qemu_spin_unlock(&vsync_lock);
++    return ok;
 +}
 +
 +int64_t omacvm_vsync_asked_ns(void)
