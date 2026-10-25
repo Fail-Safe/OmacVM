@@ -497,6 +497,9 @@ jobs:
       - name: The window's surfaces lossless-compressed (the checks catch code without it)
         run: app/runtime/Tests/display/test-present-lossless.sh
 
+      - name: Direct to display (experimental; the checks catch code without it)
+        run: app/runtime/Tests/display/test-present-direct.sh
+
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 
