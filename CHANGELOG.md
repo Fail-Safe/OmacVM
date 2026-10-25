@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.2 (unreleased)
+
+- **HDR costs the Mac's graphics less.** With HDR and 10-bit colour on, Omarchy's compositor drew every
+  window twice per frame: once for the screen and once into an SDR copy it keeps for screen sharing. The
+  copy is now made only while a screenshot or a screen share runs. The screen shows the same pixels and
+  screenshots look the same; the Mac's GPU does 10-19 % less work per frame with HDR on (scrolling, video,
+  a terminal). Needs Update VM.
+
 ## 3.2.1
 
 Google Chrome plays 1440p and 4K video on the Mac's media engine, call tiles show the whole picture,
@@ -65,11 +73,6 @@ silent.
   0.47 W at 120, a small box a few hundredths. It stays off until a VM run shows it draws right, and it
   needs a VM that says what changed in its desktop's frames (Linux 7.4, or OmacVM's own driver with
   that fix). `OMACVM_GL_PRESENT_DAMAGE=1` in the app's environment turns it on for tests.
-- **HDR costs the Mac's graphics less.** With HDR and 10-bit colour on, Omarchy's compositor drew every
-  window twice per frame: once for the screen and once into an SDR copy it keeps for screen sharing. The
-  copy is now made only while a screenshot or a screen share runs. The screen shows the same pixels and
-  screenshots look the same; the Mac's GPU does 10-19 % less work per frame with HDR on (scrolling, video,
-  a terminal). Needs Update VM.
 
 ## 3.2.0
 
