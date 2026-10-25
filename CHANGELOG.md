@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.1 (unreleased)
+
+- **The VM's window redraws only what changed.** OmacVM.app's QEMU drew the whole frame into the
+  window's picture for every frame, also when only the pointer moved. It now draws only the part the
+  VM says changed. On a MacBook Air M2 the full redraw alone cost 0.19 W at 60 frames a second and
+  0.47 W at 120; a small change now costs a few hundredths. The VM must say what changed: Linux 7.4
+  does, the 7.2 kernels of today's VMs do not yet, so for them nothing changes until then.
+  `OMACVM_GL_PRESENT_DAMAGE=0` in the app's environment goes back.
+
 ## 3.2.0
 
 Chrome decodes video on the Mac's media engine again, ⌃⌥ Esc takes the right display out of the VM, the
