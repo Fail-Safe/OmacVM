@@ -912,6 +912,10 @@ if [[ -n $PREV ]] && want update; then
     /usr/bin/python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$F" > "$OUT/feed-server.log" 2>&1 & SERVER=$!
     sleep 1
     # The app updates itself (as the window's "Update to X" does, without the window: --update-now).
+    # The VM shuts down first, while its launcher runs: the launcher removes the VM's run marker when it
+    # sees QEMU end cleanly. A launcher killed first leaves the marker, and the next Update VM and start
+    # then ask "not shut down cleanly" in a modal alert (Update VM's press: -25204; the start never comes).
+    stop_vm || res stop FAIL "the VM of the release before did not shut down from inside"
     close_window
     # The test Bridge and Gestures run from inside the app (a person's live outside it): the updater
     # would wait for them ("A VM runs from OmacVM Test" is any process inside the app).
