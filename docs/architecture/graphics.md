@@ -974,8 +974,13 @@ bench lock and are indications only):
   BQL. The link pauses 0.25 s after the last frame, or after a second of
   single frames (pause and wake both on the main thread, so a frame never
   waits behind a paused link).
-- **Colour**: surfaces are tagged; Core Animation converts sRGB (or PQ) to
-  the display. HDR and 10-bit colour is the app's experimental switch
+- **Colour**: surfaces are tagged; Core Animation converts PQ (HDR) and
+  extended linear sRGB (Extra brightness) to the display. 8-bit SDR frames are
+  drawn into the display's own colour space through a 33^3 table that macOS's
+  colour management fills (`ui/omacvm-dispcolor.h`, checked against macOS's own
+  conversion: more than 2 codes off and that display keeps the sRGB tag) and
+  tagged with it, so WindowServer only copies them (ADR 0052; about 30 % of its
+  GPU time for the window; `OMACVM_GL_DISPLAY_COLOR=0` keeps the sRGB tag). HDR and 10-bit colour is the app's experimental switch
   (`hdr`, shown only while a display can show HDR; ADR 0049): a start with
   it sends SMBIOS `omacvm.deepcolor=1` and `OMACVM_GL_EDR=1` (not in GPU
   safe mode, and only with an EDR display: `Settings.hdrStart`, one

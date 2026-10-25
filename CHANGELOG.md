@@ -3,6 +3,17 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.1 (unreleased)
+
+- **macOS does less work to show the VM's window.** OmacVM.app's frames were tagged sRGB, so
+  macOS's WindowServer converted the whole window to the display's colours on every frame. The app
+  now draws the frames in the display's own colours, as Chrome and other Mac apps do, and
+  WindowServer only copies them: about a third less of its graphics time for the window (a MacBook
+  Air M2, full screen: 80 to 56 ms a second at 30 frames a second, 154 to 109 at 60). Colours stay
+  the same (within 1-2 steps of 255). HDR, Extra brightness, the boot logo and displays whose colour
+  profile the app cannot follow closely keep the old way. `OMACVM_GL_DISPLAY_COLOR=0` in the app's
+  environment goes back.
+
 ## 3.2.0
 
 Chrome decodes video on the Mac's media engine again, ⌃⌥ Esc takes the right display out of the VM, the
