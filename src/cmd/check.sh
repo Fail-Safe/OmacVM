@@ -602,6 +602,21 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     *"works again"*) ok "sound" "the Mac's audio device stopped answering earlier in this run and works again" ;;
   esac
 fi
+# Disk flushes (3.2.1): each guest flush is a write barrier on the Mac's drive,
+# so a power cut leaves the VM's file system whole; qemu.log says which call
+# this start used (at the guest's first flush).
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  df=$(sed -n 's/^OmacVM: disk flush: //p' "$miclog" | tail -1)
+  case $df in
+    "") ;;   # an app from before 3.2.1, or no flush yet
+    *"refused F_FULLFSYNC ("*"): barrier") ok "disk flush" "each flush is a write barrier on the Mac's drive (the drive refused F_FULLFSYNC)" ;;
+    *"refused"*) warn "disk flush" "the drive the VM is on refused the write barrier: after a power cut the VM can lose recent writes (${df})" ;;
+    "barrier"*) ok "disk flush" "each flush is a write barrier on the Mac's drive (F_BARRIERFSYNC)" ;;
+    "full"*) ok "disk flush" "each flush waits for the Mac's drive (F_FULLFSYNC, OMACVM_DISK_FLUSH=full)" ;;
+    "fsync"*) warn "disk flush" "no write barrier (OMACVM_DISK_FLUSH=fsync): after a power cut the VM's file system can be damaged" ;;
+    *) ok "disk flush" "$df" ;;
+  esac
+fi
 # The Mac folder (the app's setting, off by default): what this start shared,
 # and whether the VM has it at ~/Mac.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then

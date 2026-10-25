@@ -130,7 +130,7 @@ installed: the test runs it without installing. Helpers of the copy that the
 run started (its Bridge) are stopped at the end.
 
 On screen only while nobody uses the Mac: no input for 300 s but the test's
-own (its last event, also a run's before, in `~/Library/Caches/omacvm-e2e-last-input`), no Jump Desktop session, the screen unlocked; it stops when someone
+own (its last event, also a run's before, in `~/Library/Caches/omacvm-e2e-last-input`), no Jump Desktop or Screen Sharing session (one nobody used for 30 min does not count), the screen unlocked; it stops when someone
 comes back. Otherwise (or `--headless`) those rows are BLOCKED and
 update-vm (update-vm.sh, as the window runs it) and leftovers (a start
 without a window) run headless. `src/tests/e2e-onscreen.sh` tests the checks

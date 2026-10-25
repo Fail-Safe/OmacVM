@@ -5,9 +5,10 @@ In OmacVM.app, videos in the VM are decoded by the Mac's own video decoder
 second keeps the VM's CPU far less busy: about 0.3 cores in Google Chrome
 154 and 0.4 to 0.6 in Omarchy's own Chromium, instead of 1.0 to 1.6 (see
 [Numbers](#numbers) and [Chromium](#chromium-from-arch-linux-arm)). Google
-Chrome 155 and newer use it up to 1080p since 3.2.0, with more dropped
-frames than its CPU decoders; 1440p and 4K stay on the CPU for now (4K: about
-1 core; [Chrome's converted frames](#chromes-converted-frames)).
+Chrome 155 and newer use it since 3.2.0 (up to 1080p) and at every size
+since 3.2.1, with about as many dropped frames as its CPU decoders: a 4K60
+video at 0.4 cores of the VM instead of 0.8 to 1.3
+([Chrome's converted frames](#chromes-converted-frames)).
 Firefox decodes in hardware too, but its VM stays at about 0.9 cores.
 
 ## What works
@@ -24,15 +25,18 @@ Browsers in an OmacVM.app VM:
 
 - **Google Chrome** (Linux ARM): yes, no flags needed. YouTube chooses AV1 or
   VP9; `chrome://gpu` shows *Video Decode: Hardware accelerated* and
-  `chrome://media-internals` *VaapiVideoDecoder*. Install it with
-  `src/bench/install-chrome.sh` (Arch Linux ARM has no package). Chrome 155
+  `chrome://media-internals` *VaapiVideoDecoder*. Install it from the
+  Omarchy menu (Install > Browser > Chrome, the AUR's `google-chrome`, which
+  builds for ARM), then `omacvm apply` once
+  ([why](routes/app.md)); `src/bench/install-chrome.sh` unpacks Google's
+  .deb instead (the benchmarks use it; the AUR package then stops on its
+  files until `/opt/google/chrome` is removed). Chrome 155
   and newer decode in hardware from OmacVM 3.2.0 with Update VM (before:
   on the CPU, *Plane 0 is out of bounds: ... > 4096* in Chrome's log; see
-  [Chrome's converted frames](#chromes-converted-frames)), for now up to
-  1080p: 1440p and 4K stay on the CPU, where they drop fewer frames. At
-  1080p, too, the media engine drops more frames than the CPU (5.9-6.4 %
-  against 2.1 % on the M4 Max); `OMACVM_VA_EXPORT=0` in Chrome's
-  environment keeps it on the CPU.
+  [Chrome's converted frames](#chromes-converted-frames)); 3.2.0 kept
+  1440p and 4K on the CPU, 3.2.1 decodes them on the media engine too.
+  `OMACVM_VA_EXPORT=0` in Chrome's environment keeps it on the CPU,
+  `OMACVM_VA_MAX=1920` only 1440p and 4K.
 - **Firefox**: yes for H.264 and VP9 (AV1 stays on the CPU, see below; HEVC
   Firefox does not hand to VA-API at all here). The decoding is on the media
   engine, but YouTube 4K at 60 fps in VP9 still kept the VM at 0.9 to 1.0
@@ -110,6 +114,14 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   describe to the host (Mesa leaves `NumPocTotalCurr` and
   `deblocking_filter_control_present_flag` at 0): the backend works both out
   from the values it does get.
+- The media engine decodes beside QEMU's GPU thread (from 3.2.1,
+  `virgl-videotoolbox-decode-async.patch`): END_FRAME hands the picture to the
+  decoder's own queue and returns, and the picture goes into the VM's
+  textures when it is in. Anything that reads or writes those textures
+  first (a draw, a copy, a read back, another app that imports them) waits
+  for it, and a fence the VM asks for after END_FRAME signals only once it
+  is in. Before, the GPU thread waited for every picture (about 5 ms for a
+  4K picture, every app's drawing behind it).
 - The decoded frame is an IOSurface; the GPU copies it into the textures the
   VM sees (no CPU copy on the Mac's OpenGL). The copy pauses the guest's
   conditional rendering and turns its rasterizer discard off while it runs:
@@ -122,12 +134,32 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   of it. The copy fills the rows and columns past the picture with its last
   row and column (`virgl-video-plane-edge.patch`); before 3.1.32 they stayed
   zero and showed as a green bar at the bottom or right of VP9 and AV1
-  videos at 1080p, 540p, 360p, 480p and 240p. The app still shows the
-  rounded size, so the picture is squeezed by those rows (1080p: 8 of 1088,
-  invisible; a 320x180 call tile: 12 of 192) and the strip is its stretched
-  edge. Planes more than 64 bigger than the picture are surfaces the guest
-  crops itself and are left alone. `OMACVM_VIDEO_EDGE_FILL=0` turns the fill
-  off. Test: `Tests/virgl/test-video-padding.c`.
+  videos at 1080p, 540p, 360p, 480p and 240p. Apps that show the planes
+  themselves (mpv, Firefox) still show the rounded size, so the picture is
+  squeezed by those rows (1080p: 8 of 1088, invisible; a 320x180 call tile:
+  12 of 192) and the strip is its stretched edge. Planes more than 64 bigger
+  than the picture are surfaces the guest crops itself and are left alone.
+  `OMACVM_VIDEO_EDGE_FILL=0` turns the fill off. Test:
+  `Tests/virgl/test-video-padding.c`.
+- Chrome's hardware frames (3.2.1): Chrome converts each picture into an
+  ARGB frame of its own and shows that frame by its own size, but Mesa
+  rounds that frame's planes up to 16 too, and its conversion read the
+  picture's planes by the surface's size while they are rounded. A 320x180
+  call tile showed its picture squeezed into the top 168 rows with 12
+  transparent rows below it (8 at 360p and 1080p, a column strip at 854
+  wide). The VM's VA-API shim now, in Chromium's processes only, imports
+  such a frame at its rounded size when its buffer holds it, has the
+  conversion fill the whole frame, and scales the conversion's source
+  region to the picture's part of the rounded planes (only for 4:2:0
+  surfaces Mesa allocated itself: an imported picture, such as a camera
+  frame of its real size, keeps its region): the tile shows every
+  row where Chrome's CPU decoders put it (WebRTC loopback, VP9, AV1 and
+  H.264 at 320x180, 480x270, 640x360, 854x480 and 1920x1080: off by 0.4 to
+  2 rows on average, as on the CPU). It relies on how Mesa rounds and reads
+  those planes, so it runs only with a Mesa it was checked with (up to 26.2,
+  from Mesa's vendor string; a newer Mesa: off, with one line in Chrome's
+  log, until it is checked again). `OMACVM_VA_FILL=0` or `1` in Chrome's
+  environment turns it off or on. Test: `src/app/guest/tests/va-shim-vpp-fill.sh`.
 - In the VM, `src/app/guest/install.sh` adds `vainfo` and a small VA-API driver
   shim (`omacvm_drv_video.c`, used through `LIBVA_DRIVER_NAME=omacvm`): Mesa's
   driver unchanged, but it offers only NV12 surfaces (Firefox cannot show the
@@ -145,14 +177,21 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   ld.so knows, so without it YouTube in Firefox falls back to the CPU.
 
 Switches on the Mac (QEMU's environment): `OMACVM_VIDEO_DECODE=0` turns it
-off, `OMACVM_VIDEO_DEBUG=1` logs each stream and the time per frame,
+off, `OMACVM_VIDEO_DECODE_SYNC=1` has the GPU thread wait for each picture
+(as before 3.2.1; the app then also leaves `omacvm.vadecasync` out, so Chrome
+stays at 1080p in the VM), `OMACVM_VIDEO_DEBUG=1` logs each stream and the time per
+frame (and how many pictures were in flight),
 `OMACVM_VIDEO_AV1=1` offers AV1 (the app sets it for VMs whose `omacvm apply`
 put the shim in: the VM folder's `video-decode` file). In the VM:
 `OMACVM_VA_EXPORT=1` or `0` in an app's environment turns the shim's
 exportable surfaces on or off for it; `OMACVM_VA_MAX=N` sets the largest
-size Chromium decodes in hardware (default 1920, 0: no limit; only in
-Chromium's processes and only for decoding: VA-API encoders and video
-processing keep Mesa's sizes).
+size Chromium decodes in hardware (default: none with an app that says
+`omacvm.vadecasync=1`, else 1920; 0: no limit; only in Chromium's processes
+and only for decoding: VA-API encoders and video processing keep Mesa's
+sizes); `OMACVM_VA_DECODE_WAIT=0` or `1` turns the shim's wait after
+`vaEndPicture` off or on (default: on in Chromium's processes with such an
+app); `OMACVM_VA_FILL=0` keeps Chromium's
+converted frames as Mesa makes them (above).
 
 ## Chrome's converted frames
 
@@ -203,35 +242,59 @@ all fixed in 3.2.0:
   picture description (`virgl-video-picture-size.patch`;
   `OMACVM_VIDEO_DEBUG=1` logs "output WxH, picture WxH").
 
-How well it plays: YouTube *Big Buck Bunny* 60 fps, Chrome 156, test VMs
-with 4 CPUs and 4 GB without a window, `src/bench/video-bench.py`, busy
-cores of the VM and of QEMU on the Mac (the VM's CPUs and the graphics
-thread together) and dropped frames, CPU decoding (before) against the
-media engine (-: not measured):
+How well it plays: *Big Buck Bunny* 60 fps, Chrome 156, test VMs with 4 CPUs
+and 4 GB without a window, busy cores of the VM and of QEMU on the Mac (the
+VM's CPUs and the graphics thread together) and dropped frames over 60 s.
+3.2.1 against the CPU decoders and against 3.2.0's way (the graphics thread
+waits for each picture: `OMACVM_VIDEO_DECODE_SYNC=1`), same app, same
+session, 2026-10-25. YouTube itself played nothing in the test VMs that
+morning, so the rows play the same video from a local file: 40 s of
+Blender's 2160p60 master in VP9 (libvpx, 23 / 12 / 6.7 Mbit/s at 2160p /
+1440p / 1080p) and AV1 (SVT-AV1, 8 / 4 / 2.2 Mbit/s), in a `<video>` that
+fills Chrome's window, measured as `src/bench/video-bench.py` does (Chrome's
+media events and `getVideoPlaybackQuality`). Two runs each, alternating:
 
-| Mac, video | CPU: VM, QEMU, dropped | Media engine: VM, QEMU, dropped |
-|---|---|---|
-| MacBook Pro M4 Max, 4K AV1 | 1.24-1.29, 1.49-1.52, 3.1-3.4 % | 0.43-0.45, 0.95-0.96, 11-14 % |
-| MacBook Pro M4 Max, 1080p AV1 | 0.77, 1.11, 2.1 % | 0.47, 1.01, 5.9-6.4 % |
-| Mac mini M4, 4K AV1 | - | 0.30, -, 3.1 % |
-| MacBook Air M2, 4K VP9 (no AV1 decoder) | 1.77, -, 0.1 % | 0.49, -, 31 % |
-| MacBook Air M2, 1440p VP9 | 1.09, -, 5.1 % | 0.60, -, 15 % |
+| Mac, video | CPU: VM, QEMU, dropped | Media engine, 3.2.1: VM, QEMU, dropped | 3.2.0's way: dropped |
+|---|---|---|---|
+| MacBook Air M2, 4K VP9 (no AV1 decoder) | 1.30-1.32, 1.53-1.55, 0.2 % | 0.39-0.43, 0.88-0.94, 0.5 % | on the CPU (1920 limit) |
+| MacBook Air M2, 1440p VP9 | 1.13-1.20, 1.40-1.45, 0.1-0.2 % | 0.44-0.45, 0.94-0.96, 0.1-0.2 % | on the CPU |
+| MacBook Air M2, 1080p VP9 | 0.98, 1.28-1.29, 0.2-1.9 % | 0.44-0.45, 0.90-0.94, 0.2-1.2 % | 7.3-17.5 % |
+| MacBook Pro M4 Max, 4K AV1 | 0.79-0.80, 1.06-1.08, 3.8-4.1 % | 0.41-0.42, 0.92-0.94, 2.3-2.4 % | on the CPU |
+| MacBook Pro M4 Max, 1440p AV1 | 0.77, 1.07-1.09, 2.5-2.8 % | 0.42-0.43, 0.95-0.96, 2.3-2.4 % | on the CPU |
+| MacBook Pro M4 Max, 1080p AV1 | 0.63-0.65, 0.97-1.01, 1.5-2.0 % | 0.41-0.42, 0.93-0.95, 2.3-2.7 % | 5.0-5.6 % |
 
-The media engine takes about a third of the VM's CPU, but less of the
-Mac's: the frame copies and conversions run on QEMU's graphics thread, so
-at 1080p the VM saves 0.3 cores and the Mac only 0.1 (QEMU minus the VM
-went from about 0.34 to 0.54 cores). And Chrome's hardware path drops more frames, at 1080p about
-three times as many (about 4 frames a second at 60 fps instead of 1), above
-1080p many more (the decoding itself keeps up: FFmpeg
-decodes and converts 4K VP9 at 128 fps on the Air; with the VM's graphics on
-QEMU's main loop, `gpuMainLoop`, 4K AV1 on the M4 Max dropped 2.7 %). Where
-those frames go is not found yet. So the shim tells Chrome a largest size of
-1920 x 1920 (`OMACVM_VA_MAX`, 0: no limit): calls and up to 1080p (also
-portrait) on the media engine, 1440p and 4K on the CPU. With the limit,
-YouTube 4K on the M4 Max played VP9 on the CPU (0.98 cores, 3.7 % dropped).
+Earlier the same day, with YouTube (60 s rows; the Air's on the build
+before the decoder's own queue, below): 4K AV1 on the M4 Max 6.7-6.8 %
+on the media engine against 8.0-8.2 % on the CPU and 12.9-20.2 % the old
+way; 4K VP9 on the Air 6.3-6.6 % against 7.2 % and 38.2 % the old way.
+About 6 % of YouTube's frames went missing on the CPU too in these hidden
+test VMs, so the local file shows the differences better.
+
+Where the frames went: QEMU's graphics thread, which runs every guest app's
+GPU commands, waited for the media engine on every picture (VideoToolbox
+decode and wait, about 5 ms for a 4K picture on the M2, 3 on the M4 Max).
+At 4K60 that thread was busy 94 to 96 % of the time (`sample` of QEMU),
+more than half of it waiting, and Chrome's compositor and the desktop
+waited behind it. Since 3.2.1 (`virgl-videotoolbox-decode-async.patch`)
+END_FRAME hands the picture to the decoder's own queue, which gives it to
+VideoToolbox (its "asynchronous" DecodeFrame still waits on its remote
+decoder, so not on the graphics thread either), and the picture goes into
+the VM's planes when it is in: the thread is idle 38 % of the time at 4K
+on the M2 instead of 4 %. Chrome converts each picture to ARGB right after
+decoding it; so that this conversion does not wait on the graphics thread
+for the picture, the VM's VA-API shim lets Chrome's decoder wait for it
+after `vaEndPicture` (an empty command with a fence, which the Mac signals
+once the picture is in; only in Chromium's processes, only when the app
+says `omacvm.vadecasync=1`; `OMACVM_VA_DECODE_WAIT=0` in Chrome's
+environment turns it off). With such a runtime the shim no longer limits
+Chrome to 1920 x 1920 (`OMACVM_VA_MAX=N` still sets a limit; an older app,
+without the marker, keeps the limit of 1920, and so does the app started
+with `OMACVM_VIDEO_DECODE_SYNC=1`, which leaves the marker out).
 `OMACVM_VA_EXPORT=0` in Chrome's environment keeps every size on the CPU.
-Not measured yet: video calls, 1080p VP9 on M1 and M2 Macs (no AV1 decoder:
-at 1080p YouTube played AV1 on the CPU on the Air), and the M1 Max.
+Not measured yet: video calls at these sizes, M1 and M3 Macs (the M1 Max is
+the user's own), and watts. Firefox, mpv and FFmpeg get no wait of their
+own: their next draw or read of the planes waits for the picture on the
+graphics thread, as before (not measured).
 Chrome's canvas readback of a hardware frame (not the screen) takes the
 ARGB surface's coded size: 8 black rows under 1080p, 10 black columns at 854
 wide.
