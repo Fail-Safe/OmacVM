@@ -542,8 +542,10 @@ final class Runner {
         // Draw only what changed (Settings.presentTilesStart, experimental; ADR
         // 0055): QEMU's tiled present; it says once a minute how many frames
         // went in tiles. Not in GPU safe mode (its present is the plain layer).
+        // An inherited =check (tests: every 30th tile frame is compared with
+        // the same frame drawn whole) stays.
         if tiles.on {
-            env["OMACVM_GL_PRESENT_TILES"] = "1"
+            env["OMACVM_GL_PRESENT_TILES"] = env["OMACVM_GL_PRESENT_TILES"] == "check" ? "check" : "1"
         }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
