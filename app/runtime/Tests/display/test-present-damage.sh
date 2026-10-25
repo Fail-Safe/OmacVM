@@ -4,7 +4,8 @@
 #     folder and test-present-damage.c runs against it (no QEMU, no display);
 #   - with a patched ui/cocoa.m: the wiring (the guest's flush rects go in, the
 #     present draws a surface's box scissored and without the clear, full
-#     draws on the listed changes, OMACVM_GL_PRESENT_DAMAGE=0 and =check);
+#     draws on the listed changes, off unless OMACVM_GL_PRESENT_DAMAGE=1 or
+#     =check);
 #   - with --self-test [<ui/cocoa.m without the patch>]: every wiring check
 #     fails on that code (CI: a stub; the runtime build: the real cocoa.m
 #     before the patch).
@@ -51,6 +52,8 @@ checks() {
   chk "the scissor goes off after the draw" order "$present" \
     'glScissor(pd.x, pd.y, pd.w, pd.h);' 'qemu_gl_run_texture_blit(present_gls, flip);' 'glDisable(GL_SCISSOR_TEST);'
   chk "OMACVM_GL_PRESENT_DAMAGE is read" has "$present" 'getenv("OMACVM_GL_PRESENT_DAMAGE")'
+  chk "off unless OMACVM_GL_PRESENT_DAMAGE=1 or =check" has "$present" \
+    'present_damage_on = e && !strcmp(e, "1") ? 1 : e && !strcmp(e, "check") ? 2 : 0;'
   chk "the check mode is wired" has "$present" 'cocoa_gl_present_pd_check(src, flip, n, pd);'
 }
 if [[ ${1:-} == --self-test ]]; then

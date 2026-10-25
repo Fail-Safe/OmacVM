@@ -5,12 +5,12 @@ in more words.
 
 ## 3.2.1 (unreleased)
 
-- **The VM's window redraws only what changed.** OmacVM.app's QEMU drew the whole frame into the
-  window's picture for every frame, also when only the pointer moved. It now draws only the part the
-  VM says changed. On a MacBook Air M2 the full redraw alone cost 0.19 W at 60 frames a second and
-  0.47 W at 120; a small change now costs a few hundredths. The VM must say what changed: Linux 7.4
-  does, the 7.2 kernels of today's VMs do not yet, so for them nothing changes until then.
-  `OMACVM_GL_PRESENT_DAMAGE=0` in the app's environment goes back.
+- **Partial present, built, off for now.** OmacVM.app's QEMU draws the whole frame into the window's
+  picture for every frame, also when only the pointer moved. It can now draw only the part the VM says
+  changed. In a bench on a MacBook Air M2 (no VM) the full draw cost 0.19 W at 60 frames a second and
+  0.47 W at 120, a small box a few hundredths. It stays off until a VM run shows it draws right, and it
+  needs a VM that says what changed in its desktop's frames (Linux 7.4, or OmacVM's own driver with
+  that fix). `OMACVM_GL_PRESENT_DAMAGE=1` in the app's environment turns it on for tests.
 
 ## 3.2.0
 

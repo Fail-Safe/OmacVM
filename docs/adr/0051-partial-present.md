@@ -1,9 +1,12 @@
 # 0051: Partial present: draw only what the guest changed
 
-Status: accepted, built (`omacvm-cocoa-present-damage*.patch`), on by default;
-`OMACVM_GL_PRESENT_DAMAGE=0` goes back. It acts only when the guest sends
-damage rects: Linux 7.4, or OmacVM's virtio-gpu driver with the fix. Notes
-and numbers: work/tracks/frame-path.md.
+Status: accepted, built (`omacvm-cocoa-present-damage*.patch`), off by
+default until a VM run with `OMACVM_GL_PRESENT_DAMAGE=check` in a window
+that is composited (pointer, typing, a TTY switch, the boot console) shows
+0 differing pixels; `=1` turns it on. It acts only on flushes with real
+rects: a buffer flushed again (boot console, TTYs) on any kernel, a
+compositor's frames from Linux 7.4 or OmacVM's virtio-gpu driver with the
+fix. Notes and numbers: work/tracks/frame-path.md.
 
 ## Context
 

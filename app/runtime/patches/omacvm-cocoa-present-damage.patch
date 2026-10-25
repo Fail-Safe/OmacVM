@@ -3,9 +3,9 @@ Subject: [PATCH] cocoa: draw only what the guest changed into the present surfac
 
 What: QEMU's present copies the guest's scanout into one of its IOSurfaces
 (3, or 5 with the vsync present) and shows that surface. A surface keeps
-what it showed last, so now only the box the guest changed since that
-surface's last draw is drawn into it again (scissored, no clear): the union
-of the guest's RESOURCE_FLUSH rects since then
+what it showed last, so with this on only the box the guest changed since
+that surface's last draw is drawn into it again (scissored, no clear): the
+union of the guest's RESOURCE_FLUSH rects since then
 (omacvm-cocoa-present-damage-logic.patch). Full draws as before for new
 surfaces, another frame size, a scaled frame, the boot logo, the 2D
 console, extra brightness, another colour path (deep colour, HDR), a
@@ -13,28 +13,32 @@ scanout buffer not among the last four seen (a compositor's own buffers
 rotate; a client's buffer scanned out directly may come with damage that is
 not relative to what was shown), a scanout that is part of its resource,
 and a box of three quarters of the frame or more.
-OMACVM_GL_PRESENT_DAMAGE=0 draws every frame in full (as before);
-OMACVM_GL_PRESENT_DAMAGE=check (tests) also draws every 30th partial frame
-in full into a texture of its own and compares them pixel for pixel
-(qemu.log: "present check: N pixels differ ..."). qemu.log says which at
-the first present, and logs the first frame drawn in part.
+Off by default for now (every frame in full, as before):
+OMACVM_GL_PRESENT_DAMAGE=1 turns it on; =check (tests) also draws every
+30th partial frame in full into a texture of its own and compares them
+pixel for pixel (qemu.log: "present check: N
+pixels differ ..."). qemu.log says which at the first present, and logs the
+first frame drawn in part.
 
 Why: on a MacBook Air M2 the present's draw of a full 2940x1840 frame costs
 +0.19 W at 60 frames a second and +0.47 W at 120; drawn in a 64x64 box
-+0.06 / +0.02 W (offscreen bench, whole-Mac power; ADR 0051). Pointer moves, typing, a blinking caret,
-clocks and spinners change a few rects per frame.
-The guest half: Linux before 7.4 drops the rects on every page flip
-(virtgpu_plane.c: ignore_damage_clips when the framebuffer changes), so
-those guests flush the whole plane and every present stays a full one, as
-before. Linux 7.4 keeps them for rendered buffers (upstream 730f8554f35c,
-a9cc9905ddb7); OmacVM's own virtio-gpu driver can carry the two now.
++0.06 / +0.02 W (offscreen bench, no VM, whole-Mac power; ADR 0051).
+Pointer moves, a blinking caret, clocks and spinners change a few rects per
+frame.
+The guest half: Linux before 7.4 drops the compositor's rects on a page
+flip (virtgpu_plane.c: ignore_damage_clips when the framebuffer changes),
+so a compositor's frames flush the whole plane and stay full draws. A
+buffer flushed again (the boot console, a TTY: dumb buffers, DIRTYFB) comes
+with real rects on those kernels too. Linux 7.4 keeps the rects for
+rendered buffers (upstream 730f8554f35c, a9cc9905ddb7).
 
 Upstream: QEMU's cocoa display has no IOSurface present; not sent.
 Test: Tests/display/test-present-damage.sh (the rules, and the wiring in the
-patched ui/cocoa.m; --self-test: the checks fail on the code without it);
-VM: OMACVM_GL_PRESENT_DAMAGE=check with a guest that sends rects (pointer,
-typing, terminal, scrolling, window moves, workspace switches, full screen):
-0 differing pixels; whole-Mac power on the MacBook Air.
+patched ui/cocoa.m; --self-test: every check fails on the code without it,
+the runtime build runs it on the real ui/cocoa.m before this patch).
+Not done yet, and what turns it on by default: a VM run with =check in a
+window that is composited (pointer, typing, a TTY switch, the boot
+console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
@@ -46,7 +50,7 @@ typing, terminal, scrolling, window moves, workspace switches, full screen):
  #include "hw/core/boards.h"
  #include "system/system.h"
  #include "system/runstate.h"
-@@ -7452,6 +7453,109 @@
+@@ -7427,6 +7428,111 @@
   */
  static bool present_deep_failed;
  static unsigned present_next;
@@ -59,9 +63,11 @@ typing, terminal, scrolling, window moves, workspace switches, full screen):
 + * last few (a compositor's own buffers rotate; a new one, as when a client's
 + * buffer goes straight to the screen, may come with damage that is not
 + * relative to what was shown). Only the guest's GL scanout, at its full size,
-+ * is drawn in part. OMACVM_GL_PRESENT_DAMAGE=0 draws every frame in full.
-+ * Guests before Linux 7.4 flush the whole plane on every page flip: their
-+ * frames stay full ones.
++ * is drawn in part. Off (every frame in full, as before) unless
++ * OMACVM_GL_PRESENT_DAMAGE=1 or =check, until a VM run shows partial draws
++ * right (ADR 0051). Guests before Linux 7.4 flush the whole plane on every
++ * page flip; a buffer flushed again (boot console, a TTY) comes with real
++ * rects.
 + */
 +static OmacvmPresentDamage present_pd;
 +static int present_damage_on = -1;
@@ -156,7 +162,7 @@ typing, terminal, scrolling, window moves, workspace switches, full screen):
  static dispatch_queue_t present_queue;
  static QEMUTimer *present_timer;
  static int64_t present_last_ns;
-@@ -8013,6 +8117,7 @@
+@@ -7988,6 +8094,7 @@
      present_deep = deep;
      present_linear = linear;
      present_next = 0;
@@ -164,21 +170,19 @@ typing, terminal, scrolling, window moves, workspace switches, full screen):
      return true;
  }
  
-@@ -8148,6 +8253,51 @@
-     }
+@@ -8124,6 +8231,50 @@
      unsigned n = (present_next + i) % present_nsurf;
      present_next = (n + 1) % present_nsurf;
-+
+ 
 +    /* OmacVM: what surface n needs (partial present, see present_pd). */
 +    if (present_damage_on < 0) {
 +        const char *e = getenv("OMACVM_GL_PRESENT_DAMAGE");
-+        present_damage_on = e && !strcmp(e, "0") ? 0 :
-+                            e && !strcmp(e, "check") ? 2 : 1;
++        present_damage_on = e && !strcmp(e, "1") ? 1 : e && !strcmp(e, "check") ? 2 : 0;
 +        info_report("cocoa: present: %s", !present_damage_on ?
-+                    "every frame in full (OMACVM_GL_PRESENT_DAMAGE=0)" :
++                    "every frame in full (OMACVM_GL_PRESENT_DAMAGE=1: what changed only)" :
 +                    present_damage_on == 2 ?
 +                    "what changed only, checked against full draws (OMACVM_GL_PRESENT_DAMAGE=check)" :
-+                    "what changed only (the guest's flush rects)");
++                    "what changed only (the guest's flush rects, OMACVM_GL_PRESENT_DAMAGE=1)");
 +    }
 +    uint64_t pd_sig = (uint64_t)deep | (uint64_t)pq << 1 | (uint64_t)boost << 2 |
 +                      (uint64_t)linear << 3 | (uint64_t)flip << 4 |
@@ -213,10 +217,11 @@ typing, terminal, scrolling, window moves, workspace switches, full screen):
 +        info_report("cocoa: present: first frame drawn in part (%ux%u of %ux%u)",
 +                    pd.w, pd.h, w, h);
 +    }
- 
++
      glBindFramebuffer(GL_FRAMEBUFFER, present_fbo);
      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-@@ -8157,8 +8307,18 @@
+                            GL_TEXTURE_RECTANGLE, present_tex[n], 0);
+@@ -8132,8 +8283,18 @@
      glDisable(GL_SCISSOR_TEST);
      /* The guest's alpha means nothing here: the window is opaque. */
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -237,7 +242,7 @@ typing, terminal, scrolling, window moves, workspace switches, full screen):
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
      glActiveTexture(GL_TEXTURE0);
      if (splash) {
-@@ -8176,6 +8336,10 @@
+@@ -8151,6 +8312,10 @@
          }
      }
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -248,7 +253,7 @@ typing, terminal, scrolling, window moves, workspace switches, full screen):
      glBindTexture(GL_TEXTURE_2D, 0);
      glBindFramebuffer(GL_FRAMEBUFFER, 0);
      GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-@@ -8900,6 +9064,8 @@
+@@ -8875,6 +9040,8 @@
  {
      gl_dirty = true;
      omacvm_hold_dirty = true;
