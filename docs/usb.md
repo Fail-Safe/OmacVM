@@ -195,8 +195,10 @@ Until then, other ways work for some of these:
   the list: the choice is for the next plug-in.
 - A device that gets another product id when it resets (DFU mode) is a new
   device: OmacVM asks again.
-- When QEMU takes longer than 3 s to add a device (a slow device), the app
-  waits for QEMU to answer "info usb" (up to about 6 s, longer when each
-  look itself waits): a device QEMU added late counts as connected, one it
-  does not list is removed again (#526). A QEMU busy for longer than that
-  still could add it after the removal.
+- The app waits up to 15 s for QEMU's answer to adding a device (a slow
+  device keeps QEMU busy while it opens it). Without an answer by then it
+  asks QEMU which devices the VM has, for up to 6 s more until QEMU answers:
+  a device QEMU added late counts as connected, one it does not list is
+  removed again (#526). A QEMU busy for longer than all of that could still
+  add it after the removal: then the VM has a device the app says is not
+  connected until it is unplugged.
