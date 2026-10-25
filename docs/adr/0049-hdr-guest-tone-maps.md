@@ -104,3 +104,9 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
   macOS kept the current headroom at 1.
 - Half-float surfaces (8 bytes a pixel) and EDR while the VM shows: more
   memory and some battery.
+- Amended 2026-10-25 (hdr-pass): with Virtual-1 in PQ and SDR white at
+  203 nits, Hyprland 0.56 keeps an unmodified SDR copy of every frame for
+  screen sharing by default (`render:keep_unmodified_copy` auto): each
+  window is drawn twice. `omacvm_app.lua` sets it to 0, so the copy is made
+  only while something captures the output. The screen and screenshots
+  are the same; an HDR frame costs the GPU 10-20 % less.

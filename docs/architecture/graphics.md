@@ -1011,6 +1011,19 @@ bench lock and are indications only):
   `--gpu-api=opengl` does not (mpv's master does, with `vo=gpu-next`; app
   VMs use `vo=gpu`), and Chromium clips CSS `rec2100-pq` at SDR white.
   Those show as SDR, correctly tone-mapped.
+- **What HDR costs per frame** (hdr-pass, 2026-10-25; work/tracks/hdr-pass.md):
+  with Virtual-1 in PQ a 30 fps clip in Chromium cost the Mac's GPU ~100 ms/s
+  more than in 10-bit sRGB (mini M4; the M1 Max: 270 ms/s at 60 fps). Not
+  QEMU's copy and not Hyprland's colour-management shaders (through virgl
+  they cost what a plain copy does; Mesa keeps their transfer-function
+  switch as branches). It is bytes: Chromium draws into FP16 buffers in PQ
+  (~43), Hyprland's FP16 work buffer and its final pass to PQ (~40), and
+  Hyprland's unmodified SDR copy of every frame for screen sharing (~21:
+  render:keep_unmodified_copy "auto" draws each window into a second
+  target while the output is PQ with its own SDR white). `omacvm_app.lua`
+  sets that option to 0: the copy only while a screenshot or a screen share
+  runs; the scanout is the same pixel for pixel (read back over KMS) and
+  screenshots are the same.
 - **Measuring** (`tests/graphics/pacing`):
   a pacing page draws its frame number as 16 bit cells; ScreenCaptureKit
   captures the VM window per WindowServer frame and counts how far the number
