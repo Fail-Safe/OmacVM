@@ -694,15 +694,28 @@ enum Settings {
     }
     /// Draw only what changed (experimental, off by default): QEMU's tiled
     /// present (OMACVM_GL_PRESENT_TILES=1, ADR 0055): a frame that changed in
-    /// a few 256x256 tiles goes to WindowServer as those tiles only. Needs a
-    /// VM whose driver sends what changed (OmacVM's virtio-gpu driver with
-    /// Linux 7.4's damage fix, #520, or Linux 7.4); else every frame stays
-    /// whole, as off. Not in GPU safe mode. The VM window's switch
-    /// (PresentTilesRow) or defaults write org.omacvm.app presentTiles -bool
-    /// true. Read at each start.
+    /// a few 256x256 tiles goes to WindowServer as those tiles only. The VM
+    /// then loads OmacVM's virtio-gpu driver for its Linux 7.4 damage fix
+    /// (SMBIOS omacvm.damage=1), so it says what changed; with the switch off
+    /// the stock driver loads as before. Not in GPU safe mode. The VM window's
+    /// switch (PresentTilesRow) or defaults write org.omacvm.app presentTiles
+    /// -bool true. Read at each start (presentTilesStart).
     static var presentTiles: Bool {
         get { UserDefaults.standard.bool(forKey: "presentTiles") }
         set { UserDefaults.standard.set(newValue, forKey: "presentTiles") }
+    }
+    /// Draw only what changed for one start of the VM: the switch on and
+    /// QEMU's IOSurface present (GPU safe mode's CAOpenGLLayer, or
+    /// OMACVM_GL_PRESENT=layer, shows whole frames only). Runner takes QEMU's
+    /// environment, the guest's SMBIOS and the qemu.log line from this one
+    /// answer; why says why not.
+    static func presentTilesStart() -> (on: Bool, why: String) {
+        if !presentTiles { return (false, "switch off") }
+        if gpuSafeMode { return (false, "GPU safe mode") }
+        if ProcessInfo.processInfo.environment["OMACVM_GL_PRESENT"] == "layer" {
+            return (false, "OMACVM_GL_PRESENT=layer: frames in a CAOpenGLLayer")
+        }
+        return (true, "the VM's driver says what changed, QEMU shows it in tiles")
     }
     /// Experimental, off by default, no switch in the window yet: the VM
     /// puts its pointer on virtio-gpu's cursor plane and the Mac's own cursor

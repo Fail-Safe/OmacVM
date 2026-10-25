@@ -17,8 +17,8 @@ MainActor.assumeIsolated {
     guard a.count > 1 else { exit(2) }
     if a[1] == "dump" { SettingsDump.main() }
     if a[1] == "start" {   // what a start of a VM reads (Runner.start), printed; nothing is written
-        let x = Settings.extraBrightnessStart(), h = Settings.hdrStart()
-        print("extra \(x.on) (\(x.why)), hdr \(h.on) (\(h.why))")
+        let x = Settings.extraBrightnessStart(), h = Settings.hdrStart(), t = Settings.presentTilesStart()
+        print("extra \(x.on) (\(x.why)), hdr \(h.on) (\(h.why)), tiles \(t.on) (\(t.why))")
         exit(0)
     }
     guard a[1] == "set", a.count > 3 else { exit(2) }

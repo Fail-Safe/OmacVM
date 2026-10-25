@@ -101,8 +101,7 @@ done
 
 # (b) Changes as the window makes them, read by the next launches; (c) per VM.
 mkdir -p "$H/Shared"
-for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pointerPlane true" "vsyncLock true" "closeAction ask" "appIconTheme flexoki-light" \
-for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pointerPlane true" "presentTiles true" "closeAction ask" "appIconTheme flexoki-light" \
+for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pointerPlane true" "vsyncLock true" "presentTiles true" "closeAction ask" "appIconTheme flexoki-light" \
           "escapeSwipe all" "mouseSwipeFingers 3" "swipeOut true" "updateChecks false"; do
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
@@ -229,5 +228,34 @@ for want in false true; do
     "$(defaults read "$D" extraBrightness)"
 done
 expect "Extra brightness: HDR's own switch as set last" false "$(val app.hdr)"
+
+# (g) Draw only what changed: a start asks the VM for its driver's damage fix (SMBIOS
+# omacvm.damage=1) and QEMU for tiles (OMACVM_GL_PRESENT_TILES=1) only with the switch on and
+# GPU safe mode off; GPU safe mode leaves the switch as set. Runner takes both from one answer.
+for want in false true; do
+  run set presentTiles $want || { echo "FAIL set presentTiles $want"; fail=1; }
+  for step in "plain" "GPU safe mode on" "GPU safe mode off" "layer present"; do
+    case $step in
+      "GPU safe mode on") defaults write "$D" gpuSafeMode -bool true ;;
+      "GPU safe mode off") defaults delete "$D" gpuSafeMode ;;
+    esac
+    if [[ $step == "layer present" ]]; then s=$(OMACVM_GL_PRESENT=layer run start); else s=$(run start); fi
+    case $want/$step in
+      false/*) w="tiles false (switch off)" ;;
+      true/"GPU safe mode on") w="tiles false (GPU safe mode)" ;;
+      true/"layer present") w="tiles false (OMACVM_GL_PRESENT=layer: frames in a CAOpenGLLayer)" ;;
+      true/*) w="tiles true (the VM's driver says what changed, QEMU shows it in tiles)" ;;
+    esac
+    expect "Draw only what changed $want, $step: the start's answer" "$w" "tiles ${s##*, tiles }"
+    dump
+    expect "Draw only what changed $want, $step: the switch still $want" $want "$(val app.presentTiles)"
+  done
+done
+RUNNER=$R/app/app/Sources/OmacVM/Runner.swift
+expect "Runner: QEMU's tiles and the guest's omacvm.damage=1 from the same start answer" "2" \
+  "$(grep -c 'if tiles.on {' "$RUNNER")"
+grep -q 'a += \["-smbios", "type=11,value=omacvm.damage=1"\]' "$RUNNER" && grep -q 'env\["OMACVM_GL_PRESENT_TILES"\] = "1"' "$RUNNER" &&
+  ! grep -q 'Settings.presentTiles && ' "$RUNNER" && echo "ok   Runner: both under tiles.on, not the bare switch" ||
+  { echo "FAIL Runner: omacvm.damage=1 / OMACVM_GL_PRESENT_TILES not from Settings.presentTilesStart()"; fail=1; }
 
 exit $fail

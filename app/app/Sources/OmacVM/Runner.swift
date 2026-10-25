@@ -143,6 +143,13 @@ final class Runner {
         if Settings.vsyncLock {
             a += ["-smbios", "type=11,value=omacvm.vsynclock=1"]
         }
+        // Draw only what changed (Settings.presentTilesStart, experimental): the
+        // guest loads OmacVM's virtio-gpu driver for its Linux 7.4 damage fix,
+        // so QEMU gets what changed in each frame (omacvm-virtio-gpu-load).
+        // Off, or in GPU safe mode: nothing sent, the stock driver as before.
+        if tiles.on {
+            a += ["-smbios", "type=11,value=omacvm.damage=1"]
+        }
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
               "-chardev", "file,id=hvc0,path=\(q(console))",
@@ -413,6 +420,8 @@ final class Runner {
         hdr = Settings.hdrStart()
         // Extra brightness: QEMU follows the switch itself; this is the start's answer.
         extraBright = Settings.extraBrightnessStart()
+        // Draw only what changed: one answer for the guest, QEMU and qemu.log.
+        tiles = Settings.presentTilesStart()
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
         env["OMACVM_PRODUCT_NAME"] = Product.name
@@ -530,10 +539,10 @@ final class Runner {
         if Settings.vkWindowsNoCopy {
             env["OMACVM_VK_WINDOWS"] = "iosurface"
         }
-        // Draw only what changed (presentTiles, experimental; ADR 0055): QEMU's
-        // tiled present; it says once a minute how many frames went in tiles.
-        // Not in GPU safe mode (its present is the plain layer).
-        if Settings.presentTiles && !Settings.gpuSafeMode {
+        // Draw only what changed (Settings.presentTilesStart, experimental; ADR
+        // 0055): QEMU's tiled present; it says once a minute how many frames
+        // went in tiles. Not in GPU safe mode (its present is the plain layer).
+        if tiles.on {
             env["OMACVM_GL_PRESENT_TILES"] = "1"
         }
         if Settings.gpuSafeMode {
@@ -590,7 +599,7 @@ final class Runner {
         }
         // Draw only what changed, while the switch is on (QEMU's minute lines say how often).
         if Settings.presentTiles {
-            log.write(Data("OmacVM: tiled present: \(Settings.gpuSafeMode ? "off (GPU safe mode)" : "on (frames in tiles once the VM says what changed)")\n".utf8))
+            log.write(Data("OmacVM: tiled present: \(tiles.on ? "on" : "off") (\(tiles.why))\n".utf8))
         }
         // Extra brightness for omacvm check, while the switch is on (QEMU's own lines follow it).
         if Settings.extraBrightness {
@@ -746,6 +755,8 @@ final class Runner {
     private(set) var notchSkip = false
     /// HDR and 10-bit colour at this start (Settings.hdrStart), set in start().
     private(set) var hdr: (on: Bool, why: String) = (false, "switch off")
+    /// Draw only what changed at this start (Settings.presentTilesStart), set in start().
+    private(set) var tiles: (on: Bool, why: String) = (false, "switch off")
     /// Extra brightness at this start (Settings.extraBrightnessStart), set in start().
     private(set) var extraBright: (on: Bool, why: String) = (false, "switch off")
     private(set) var notchGeometry: NotchGeometry?
