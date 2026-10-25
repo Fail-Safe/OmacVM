@@ -252,14 +252,14 @@ else running. "VM %" is the VM's speed against the Mac's.
   Metal caches the shaders after), so it is not shipped. Also: KosmicKrisp scalarizes every ALU operation and never merges
   loads into vectors, where MoltenVK's MSL keeps `half2` fma and vector loads (look with `MESA_KK_DEBUG=msl`).
 - **MoltenVK is the faster driver for llama.cpp** (VM: pp512 432 t/s against 159, tg128 42.6 against 45.2) but has
-  no OpenCL (Zink needs nullDescriptor), its pipeline barriers cost 38 us each (64 dispatches with barriers:
-  1.3 ms against 0.36 ms) and it has no copy-free Vulkan windows. `OMACVM_VULKAN_DRIVER=moltenvk` for the app
+  no OpenCL (Zink needs nullDescriptor), its pipeline barriers cost 38 us per dispatch on the Mac (in the VM,
+  64 dispatches recorded with barriers take 1.3 ms against 0.36 ms on KosmicKrisp) and it has no copy-free Vulkan windows. `OMACVM_VULKAN_DRIVER=moltenvk` for the app
   picks it for a test.
 - **Each GPU round trip costs ~85 us more in the VM** (submit + wait 185 against 101 us). Polling the fence in the
   guest instead of sleeping saves only ~19 us: most of it is on the Mac (the Venus ring thread's wake-up, the fence
   through the render server, QEMU's main loop and the interrupt). Token generation and big kernels do not
   notice it. The ring thread's naps end late on macOS (10 us take 16). Looking for the next command 200 us longer
-  before napping was tried and dropped: submit + wait got 8-15 us faster on the M4s (Mac mini 185 -> 170, MacBook
+  before napping was tried and dropped: submit + wait got 12-15 us faster on the M4s (Mac mini 185 -> 170, MacBook
   Pro M4 Max 154 -> 142), but 64 dispatches recorded with barriers got twice as slow on the M4 Max (285 ->
   587 us; M1 Max 516 -> 657) and vkcube 10 % slower; WebGPU, GTK4's first frame and scrolling stayed the same.
 - KosmicKrisp re-records a command buffer that is submitted again (Metal's are one-shot): 77 us per
