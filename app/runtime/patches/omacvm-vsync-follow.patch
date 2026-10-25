@@ -224,7 +224,7 @@ Applies after omacvm-cocoa-no-app-nap.patch and omacvm-vsync-follow-logic.patch.
      double now = CACurrentMediaTime();
      bool rate = false, idle = false;
  
-+    bool follow = omacvm_vsync_now_ns() - omacvm_vsync_asked_ns() < 2 * SCALE_S;
++    bool follow = omacvm_vsync_now_ns() - omacvm_vsync_asked_ns() < 2000000000LL;  /* 2 s */
 +
      os_unfair_lock_lock(&present_lock);
      if (T > 0 && T < 0.1) {
