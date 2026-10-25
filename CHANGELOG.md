@@ -11,13 +11,15 @@ in more words.
   own drawing and the desktop's waited behind it, so the media engine dropped many more frames
   than Chrome's CPU decoders (YouTube 4K: 38 % against 7 % on the Air, 13-20 % against 8 % on a
   MacBook Pro M4 Max), and 3.2.0 kept 1440p and 4K on the CPU. Pictures now finish beside that
-  thread, and Chrome's decoder waits for each one instead of the thread. YouTube 4K60 now drops
-  6.3-6.8 % on the media engine against 7-8 % on the CPU, with the VM at 0.6 cores instead of
-  1.5-1.9 and QEMU on the Mac at 0.9-1.0 instead of 1.4-1.8; 1440p the same within a frame in a
-  hundred. Firefox, mpv and FFmpeg no longer hold up the VM's other apps while a picture decodes
-  either. Needs the app update and Update VM; restart Chrome after it. `OMACVM_VA_MAX=1920` in
-  Chrome's environment keeps 1440p and 4K on the CPU, `OMACVM_VIDEO_DECODE_SYNC=1` in QEMU's
-  has the thread wait for each picture as before.
+  thread, and Chrome's decoder waits for each one instead of the thread. A 60 fps video in
+  Chrome now drops about as many frames on the media engine as on the CPU at 4K, 1440p and
+  1080p (Air: 0.1-1.2 % against 0.1-1.9 %, M4 Max: 2.3-2.7 % against 1.5-4.1 %), with the VM at
+  0.4 cores instead of 1.0-1.3 on the Air (0.6-0.8 on the M4 Max). 1080p, already on the media
+  engine in 3.2.0, drops fewer frames than before: 0.2-1.2 % against 7-18 % on the Air, 2.3-2.7 %
+  against 5.0-5.6 % on the M4 Max. Needs the app update and Update VM; restart Chrome after it.
+  `OMACVM_VA_MAX=1920` in Chrome's environment keeps 1440p and 4K on the CPU;
+  `OMACVM_VIDEO_DECODE_SYNC=1` in the app's environment brings back 3.2.0's way (the thread
+  waits for each picture, Chrome up to 1080p).
 
 ## 3.2.0
 

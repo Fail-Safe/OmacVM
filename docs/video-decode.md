@@ -6,8 +6,8 @@ second keeps the VM's CPU far less busy: about 0.3 cores in Google Chrome
 154 and 0.4 to 0.6 in Omarchy's own Chromium, instead of 1.0 to 1.6 (see
 [Numbers](#numbers) and [Chromium](#chromium-from-arch-linux-arm)). Google
 Chrome 155 and newer use it since 3.2.0 (up to 1080p) and at every size
-since 3.2.1, with no more dropped frames than its CPU decoders: YouTube 4K at
-0.6 cores of the VM instead of 1.5 to 1.9
+since 3.2.1, with about as many dropped frames as its CPU decoders: a 4K60
+video at 0.4 cores of the VM instead of 0.8 to 1.3
 ([Chrome's converted frames](#chromes-converted-frames)).
 Firefox decodes in hardware too, but its VM stays at about 0.9 cores.
 
@@ -154,7 +154,8 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
 
 Switches on the Mac (QEMU's environment): `OMACVM_VIDEO_DECODE=0` turns it
 off, `OMACVM_VIDEO_DECODE_SYNC=1` has the GPU thread wait for each picture
-(as before 3.2.1), `OMACVM_VIDEO_DEBUG=1` logs each stream and the time per
+(as before 3.2.1; the app then also leaves `omacvm.vadecasync` out, so Chrome
+stays at 1080p in the VM), `OMACVM_VIDEO_DEBUG=1` logs each stream and the time per
 frame (and how many pictures were in flight),
 `OMACVM_VIDEO_AV1=1` offers AV1 (the app sets it for VMs whose `omacvm apply`
 put the shim in: the VM folder's `video-decode` file). In the VM:
@@ -216,24 +217,33 @@ all fixed in 3.2.0:
   picture description (`virgl-video-picture-size.patch`;
   `OMACVM_VIDEO_DEBUG=1` logs "output WxH, picture WxH").
 
-How well it plays: YouTube *Big Buck Bunny* 60 fps, Chrome 156, test VMs
-with 4 CPUs and 4 GB without a window, `src/bench/video-bench.py`, 60 s
-each, busy cores of the VM and of QEMU on the Mac (the VM's CPUs and the
-graphics thread together) and dropped frames. 3.2.1 against the CPU
-decoders and against the way before it (the graphics thread waited for each
-picture: `OMACVM_VIDEO_DECODE_SYNC=1`), same app, same session, 2026-10-25:
+How well it plays: *Big Buck Bunny* 60 fps, Chrome 156, test VMs with 4 CPUs
+and 4 GB without a window, busy cores of the VM and of QEMU on the Mac (the
+VM's CPUs and the graphics thread together) and dropped frames over 60 s.
+3.2.1 against the CPU decoders and against 3.2.0's way (the graphics thread
+waits for each picture: `OMACVM_VIDEO_DECODE_SYNC=1`), same app, same
+session, 2026-10-25. YouTube itself played nothing in the test VMs that
+morning, so the rows play the same video from a local file: 40 s of
+Blender's 2160p60 master in VP9 (libvpx, 23 / 12 / 6.7 Mbit/s at 2160p /
+1440p / 1080p) and AV1 (SVT-AV1, 8 / 4 / 2.2 Mbit/s), in a `<video>` that
+fills Chrome's window, measured as `src/bench/video-bench.py` does (Chrome's
+media events and `getVideoPlaybackQuality`). Two runs each, alternating:
 
-| Mac, video | CPU: VM, QEMU, dropped | Media engine, 3.2.1: VM, QEMU, dropped | Before: dropped |
+| Mac, video | CPU: VM, QEMU, dropped | Media engine, 3.2.1: VM, QEMU, dropped | 3.2.0's way: dropped |
 |---|---|---|---|
-| MacBook Pro M4 Max, 4K AV1 | 1.51, 1.41-1.44, 8.0-8.2 % | 0.60-0.64, 0.96-0.97, 6.7-6.8 % | 12.9-20.2 % |
-| MacBook Pro M4 Max, 1440p AV1 | 1.31-1.32, 1.25-1.27, 6.5-7.1 % | 0.60-0.61, 0.96, 6.5-6.8 % | - |
-| MacBook Pro M4 Max, 1080p AV1 | 1.15-1.18, 1.16-1.17, 5.9-6.3 % | 0.63, 0.98-0.99, 6.8-7.6 % | - |
-| MacBook Air M2, 4K VP9 (no AV1 decoder) | 1.94, 1.82, 7.2 % | 0.62, 0.93, 6.3-6.6 % | 38.2 % |
-| MacBook Air M2, 1440p VP9 | 1.38, 1.34, 6.5 % | 0.60, 0.89, 7.6 % | 29.2 % |
+| MacBook Air M2, 4K VP9 (no AV1 decoder) | 1.30-1.32, 1.53-1.55, 0.2 % | 0.39-0.43, 0.88-0.94, 0.5 % | on the CPU (1920 limit) |
+| MacBook Air M2, 1440p VP9 | 1.13-1.20, 1.40-1.45, 0.1-0.2 % | 0.44-0.45, 0.94-0.96, 0.1-0.2 % | on the CPU |
+| MacBook Air M2, 1080p VP9 | 0.98, 1.28-1.29, 0.2-1.9 % | 0.44-0.45, 0.90-0.94, 0.2-1.2 % | 7.3-17.5 % |
+| MacBook Pro M4 Max, 4K AV1 | 0.79-0.80, 1.06-1.08, 3.8-4.1 % | 0.41-0.42, 0.92-0.94, 2.3-2.4 % | on the CPU |
+| MacBook Pro M4 Max, 1440p AV1 | 0.77, 1.07-1.09, 2.5-2.8 % | 0.42-0.43, 0.95-0.96, 2.3-2.4 % | on the CPU |
+| MacBook Pro M4 Max, 1080p AV1 | 0.63-0.65, 0.97-1.01, 1.5-2.0 % | 0.41-0.42, 0.93-0.95, 2.3-2.7 % | 5.0-5.6 % |
 
-(The Air's rows are from the build before the decoder's own queue, below;
-the M4 Max's from the one with it. Around 6 % of the frames go missing on
-the CPU too in these hidden test VMs: the decoding is not the limit there.)
+Earlier the same day, with YouTube (60 s rows; the Air's on the build
+before the decoder's own queue, below): 4K AV1 on the M4 Max 6.7-6.8 %
+on the media engine against 8.0-8.2 % on the CPU and 12.9-20.2 % the old
+way; 4K VP9 on the Air 6.3-6.6 % against 7.2 % and 38.2 % the old way.
+About 6 % of YouTube's frames went missing on the CPU too in these hidden
+test VMs, so the local file shows the differences better.
 
 Where the frames went: QEMU's graphics thread, which runs every guest app's
 GPU commands, waited for the media engine on every picture (VideoToolbox
@@ -253,10 +263,13 @@ once the picture is in; only in Chromium's processes, only when the app
 says `omacvm.vadecasync=1`; `OMACVM_VA_DECODE_WAIT=0` in Chrome's
 environment turns it off). With such a runtime the shim no longer limits
 Chrome to 1920 x 1920 (`OMACVM_VA_MAX=N` still sets a limit; an older app,
-without the marker, keeps the limit of 1920).
+without the marker, keeps the limit of 1920, and so does the app started
+with `OMACVM_VIDEO_DECODE_SYNC=1`, which leaves the marker out).
 `OMACVM_VA_EXPORT=0` in Chrome's environment keeps every size on the CPU.
-Not measured yet: video calls at these sizes, the M1 Max, and the Air with
-the decoder's queue.
+Not measured yet: video calls at these sizes, M1 and M3 Macs (the M1 Max is
+the user's own), and watts. Firefox, mpv and FFmpeg get no wait of their
+own: their next draw or read of the planes waits for the picture on the
+graphics thread, as before (not measured).
 Chrome's canvas readback of a hardware frame (not the screen) takes the
 ARGB surface's coded size: 8 black rows under 1080p, 10 black columns at 854
 wide.
