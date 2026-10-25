@@ -730,6 +730,9 @@ jobs:
           d=$(mktemp -d)
           XDG_RUNTIME_DIR=$d XDG_CONFIG_HOME=$d /tmp/lua-5.5.0/src/lua src/app/guest/tests/omacvm_app_test.lua src/app/guest/omacvm_app.lua
 
+      - name: omacvm check's HDR line says what Hyprland's SDR copy does (the check catches code without it)
+        run: src/tests/hdr-copy-check.sh
+
       - name: Chromium's video decoder builds, and waits for a GPU that is not usable (no render node here)
         run: |
           sudo apt-get update -q
