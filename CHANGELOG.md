@@ -30,8 +30,8 @@ in more words.
   VP9, AV1 and H.264). Only in Chromium-based apps and with Mesa up to 26.2 (a newer Mesa
   turns it off until it is checked); needs Update VM, then restart Chrome. `OMACVM_VA_FILL=0`
   in Chrome's environment turns it off.
-- **Less power to show the VM's window.** OmacVM.app now keeps the VM's picture in the Mac's
-  lossless-compressed format, so the Mac's graphics move fewer bytes for every frame: on a MacBook
+- **Less power to show the VM's window (macOS 27).** OmacVM.app now keeps the VM's picture in the
+  Mac's lossless-compressed format, so the Mac's graphics move fewer bytes for every frame: on a MacBook
   Air M2 scrolling in the VM takes 0.20 W less (4.45 W instead of 4.65 W, 4 %); the picture is the
   same pixel for pixel. A video changes little (its frames compress less). `OMACVM_GL_LOSSLESS=0` in
   the app's environment goes back.

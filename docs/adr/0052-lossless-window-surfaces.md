@@ -25,6 +25,9 @@ back through Core Image: 0 codes off, on an M1 Max, an M2 and an M4).
    them here.
 3. If one cannot be made or bound to GL, every surface is plain `BGRA` for the rest of
    the run (one warning in qemu.log). qemu.log names the kind when it changes.
+4. Only on macOS 27 and newer for now: there it is checked on an M1 Max, an M2 and an M4
+   (the picture as a layer's contents, the same pixels). No Mac here runs an older
+   macOS, and a surface the system cannot show would be a black window, not an error.
 
 ## Consequences
 
