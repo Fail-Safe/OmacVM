@@ -210,6 +210,9 @@ jobs:
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
+      - name: input-latency-vm without a VM (its stage split on a made-up QEMU trace, it refuses ~/OmacVM)
+        run: src/tests/input-latency-harness.sh
+
       - name: omacvm gestures (the escape combo, Swipe out to macOS, Magic Mouse swipe; a throwaway domain)
         run: src/tests/gestures-settings.sh
 
@@ -473,6 +476,11 @@ jobs:
       - name: HDR's headroom for the guest (ADR 0049; the checks catch code without it)
         run: app/runtime/Tests/display/test-hdr-headroom.sh
 
+      - name: Partial present, only what the guest changed (ADR 0051; the checks catch code without it)
+        run: |
+          app/runtime/Tests/display/test-present-damage.sh
+          app/runtime/Tests/display/test-present-damage.sh --self-test
+
       - name: Extra brightness's gain, shader and omacvm check line (ADR 0050; the checks catch code without it)
         run: |
           app/runtime/Tests/display/test-extra-brightness.sh
@@ -535,6 +543,9 @@ jobs:
 
       - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
         run: src/tests/audio-timing.sh
+
+      - name: Disk flushes as write barriers (patch pinned and tested, log lines, check)
+        run: src/tests/disk-flush.sh
 
       - name: The VM's GPU work without QEMU's big lock (patches pinned and ordered, switch, log lines, check, what runs unlocked)
         run: src/tests/gpu-unlocked.sh
