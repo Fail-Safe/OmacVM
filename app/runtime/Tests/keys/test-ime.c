@@ -204,6 +204,27 @@ int main(void)
         EXPECT(u0 == 0 && u1 == 1 && v1 == 1, "a box past the output's edges is cut to it");
     }
 
+    /* ---------- the input method's context off later when only the guest's field went (#357) ---------- */
+    {
+        OmacVMImeState s = on_state();
+        s.focus = false;   /* the terminal after Enter: its field off, and on again at once */
+        EXPECT(!omacvm_ime_active(&s) && omacvm_ime_off_later(&s),
+               "only the guest's field went (VM has the keyboard, the source is an input method): off later");
+        s = on_state();
+        s.window_key = false;
+        EXPECT(omacvm_ime_active(&s) == false && !omacvm_ime_off_later(&s), "another window or app has the keyboard: off at once");
+        s = on_state();
+        s.source_im = false;
+        EXPECT(!omacvm_ime_off_later(&s), "a plain layout chosen on the Mac: off at once");
+        s = on_state();
+        s.hello = false;
+        EXPECT(!omacvm_ime_off_later(&s), "the guest's module gone: off at once");
+        s = on_state();
+        s.password = true;
+        EXPECT(!omacvm_ime_off_later(&s), "a password field: off at once");
+        EXPECT(OMACVM_IME_OFF_DELAY >= 0.1 && OMACVM_IME_OFF_DELAY <= 0.3, "the delay is short (0.1-0.3 s)");
+    }
+
     /* ---------- code points ---------- */
     {
         const uint16_t s[] = { 'a', 0xD83D, 0xDE00, 0x65E5, 'b' };   /* a 😀 日 b */

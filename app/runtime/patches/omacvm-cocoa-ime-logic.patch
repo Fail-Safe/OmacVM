@@ -23,7 +23,7 @@ diff --git a/ui/omacvm-ime.h b/ui/omacvm-ime.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-ime.h
-@@ -0,0 +1,256 @@
+@@ -0,0 +1,270 @@
 +/*
 + * OmacVM mac-ime: the Mac's input methods type into the VM
 + * (docs/adr/0043-mac-ime.md). The rules ui/cocoa.m follows, with no AppKit
@@ -118,6 +118,20 @@ new file mode 100644
 +static inline bool omacvm_ime_active(const OmacVMImeState *s)
 +{
 +    return omacvm_ime_text_focus(s) && s->source_im;
++}
++
++/*
++ * Keys no longer go to the input method: its context goes off at once, or
++ * OMACVM_IME_OFF_DELAY seconds later when only the guest's field went (the
++ * VM still has the keyboard, the source is still an input method, no
++ * password field). A field that comes back meanwhile (a terminal takes its
++ * focus again after Enter) keeps it on: some input methods (WeChat Input)
++ * go back to their first mode when their context goes off and on (#357).
++ */
++#define OMACVM_IME_OFF_DELAY 0.2
++static inline bool omacvm_ime_off_later(const OmacVMImeState *s)
++{
++    return s->hello && !s->password && s->window_key && s->source_im;
 +}
 +
 +/* NSEvent's modifier flags (the same bits macOS's shortcut list uses). */
