@@ -24,7 +24,7 @@ order() {
     END {exit !(x && y && (c == "" || z))}' <<<"$1"
 }
 checks() {
-  local m=$1 present flush alloc tiles show showt queue vsync skip viewsz wanted gate
+  local m=$1 present flush alloc tiles show showt queue vsync skip viewsz hide wanted gate
   present=$(body "$m" 'static bool cocoa_gl_present(void)')
   flush=$(body "$m" 'static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,')
   alloc=$(body "$m" 'static bool cocoa_gl_present_alloc(')
@@ -35,6 +35,7 @@ checks() {
   vsync=$(body "$m" 'static bool cocoa_gl_present_vsync(double T)')
   skip=$(body "$m" 'static void present_frame_skip(PresentFrame *older, PresentFrame *next)')
   viewsz=$(body "$m" 'static void omacvm_splash_view_size(uint32_t w, uint32_t h)')
+  hide=$(body "$m" 'static void present_tiles_hide(void)')
   wanted=$(body "$m" 'static bool present_tiles_wanted(void)')
   # The condition for a frame in tiles, on one line, spaces squeezed.
   gate=$(awk '/if \(present_tiles_wanted\(\) &&/{on=1} on {printf "%s ", $0} on && /\) \{$/ {exit}' <<<"$present" | tr -s ' \t' ' ')
@@ -44,7 +45,8 @@ checks() {
   for want in 'present_tiles_wanted()' 'pd_sig == pd_sig_was' 'pd_known' '!present_pd_unflushed' '!splash' \
               '!boost' 'gl_scanout_borrow' 'w == present_w' 'h == present_h' 'gl_scanout_x == 0' 'gl_scanout_y == 0' \
               'gl_scanout_w == w' 'gl_scanout_h == h' 'present_base_gen == present_alloc_gen' \
-              '!qatomic_read(&present_tiles_full)'; do
+              '!qatomic_read(&present_tiles_full)' \
+              'qatomic_read(&present_tiles_fit) == ((uint64_t)w << 32 | h)'; do
     chk "a frame in tiles needs: $want" has "$gate" "$want"
   done
   chk "tiles are decided before surface n is taken" order "$present" \
@@ -58,6 +60,13 @@ checks() {
   chk "a whole frame hides the tiles" has "$show" 'present_tiles_hide_locked();'
   chk "tiles that do not sit pixel for pixel hide and ask for a whole frame" order "$showt" \
     'if (!fits) {' 'present_tiles_hide_locked();' 'qatomic_set(&present_tiles_full, true);'
+  chk "a whole frame measures if the window shows its size pixel for pixel" order "$show" \
+    'omacvm_present_gravity(layer, surf);' 'qatomic_set(&present_tiles_fit,'
+  chk "tiles that do not fit keep the next frames whole (no back and forth)" order "$showt" \
+    'if (!fits) {' 'qatomic_set(&present_tiles_fit, 0);' 'qatomic_set(&present_tiles_full, true);'
+  chk "a new view size is measured again" has "$hide" 'qatomic_set(&present_tiles_fit, 0);'
+  chk "the pointer hand-off hears only of tiles that were shown" has "$showt" \
+    'if (fits && qatomic_read(&omacvm_park_hold_on)) {'
   chk "a frame skipped while none was queued comes along" has "$queue" 'present_frame_absorb(&f, &present_pend);'
   chk "a merged frame passes its tiles on" has "$queue" 'present_frame_skip(last, &f);'
   chk "a frame pushed out of a full queue passes its tiles on" has "$queue" \

@@ -49,7 +49,10 @@ layers change; else a whole frame, which hides the tiles. Nothing changed:
 nothing is presented. Whole frames for everything 0051 draws in full (boot
 logo, extra brightness, another size or colour path, a buffer not seen lately
 or not flushed yet), and whenever the window does not show the frame pixel for
-pixel (the tiles hide and the next frame is whole). Frames the present queue
+pixel. Each whole frame shown measures that; tiles that do not fit hide, and
+frames stay whole until a whole frame finds the window showing it pixel for
+pixel again (a window that scales the picture never goes back and forth
+between tiles and whole frames). Frames the present queue
 skips hand their tiles to the frame after them, so nothing changed is lost.
 
 ## Measured (a real VM)
