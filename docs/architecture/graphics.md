@@ -276,9 +276,10 @@ stuck GPU job wakes the thread about 1000 times a second, not 20,000; since
 (`virgl-darwin-fence-wait-proportional.patch`): the doubled naps alone woke
 at 1.05, 1.1, 1.2, 1.4, 1.8, 2.6, 3.6 ms, and most of the VM's frames take
 1-3 ms, so a fence done after 1.85 ms was answered at 2.6 ms. Now a fence is
-answered at most an eighth late, never later than before; a frame loop that
-waits for each frame (glFinish) draws 13-27 % more frames at 1.7-4 ms a
-frame, for 5-9 % more wake-ups of the thread on the desktop. The
+answered at most an eighth late (plus a wake-up's and a test's time); a
+frame loop that waits for each frame (glFinish) draws 13-27 % more frames at
+1.7-4 ms a frame, for 5-9 % more wake-ups of the thread on the desktop.
+`OMACVM_VIRGL_FENCE_SHORT_NAPS=0` turns it off. The
 thread's budget per wake (200 us) covers the spin, also when fences finish
 back to back (the spin counts from the last sleep, not per fence). With the bench lock:
 QEMU's CPU during glmark2 195% -> 165%, Aquarium 194% -> 176%, frame rates

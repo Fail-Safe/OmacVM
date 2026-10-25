@@ -79,10 +79,14 @@ takes 1-3 ms: QEMU's trace of fence asked -> answered bunched on exactly
 those times, and a fence done after 1.85 ms was answered at 2.6 ms. The
 doubled naps stay; past the first millisecond the thread also wakes an
 eighth of the time waited after each test (at least 50 us), so a fence is
-answered at most an eighth of its time late and never later than before.
-From 8 ms on the 1 ms naps come first again (long or stuck jobs: about
-1000 wake-ups a second). Cost: 29 wake-ups instead of 26 for a 2 ms fence,
+answered at most an eighth of its time late, plus the time a wake-up and a
+test take; with wake-ups on time never later than before. A doubled nap
+that ran out while the thread was up counts as over, so the thread never
+tests again without a nap. From 8 ms on the 1 ms naps come first again
+(long or stuck jobs: about 1000 wake-ups a second).
+`OMACVM_VIRGL_FENCE_SHORT_NAPS=0` goes back to the doubled naps only. Cost: 29 wake-ups instead of 26 for a 2 ms fence,
 34 instead of 27 for 3 ms; 5-9 % more on a typing and pointer session's
 real fences. Gain: a frame loop that waits for each frame draws 13-27 %
 more frames at 1.7-4 ms a frame; key and pointer latency on the desktop
-did not move beyond the noise. Test: `Tests/virgl/test-fence-nap.c`.
+did not move beyond the noise. Watts not measured. Test:
+`Tests/virgl/test-fence-nap.c` (wake-ups on time and late).
