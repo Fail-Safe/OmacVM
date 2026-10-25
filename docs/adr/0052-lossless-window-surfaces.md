@@ -27,8 +27,12 @@ back through Core Image: 0 codes off, on an M1 Max, an M2 and an M4).
 3. If one cannot be made or bound to GL, every surface is plain `BGRA` for the rest of
    the run (one warning in qemu.log). qemu.log names the kind when it changes.
 4. Only on macOS 27 and newer for now: there it is checked on an M1 Max, an M2 and an M4
-   (the picture as a layer's contents, the same pixels). No Mac here runs an older
-   macOS, and a surface the system cannot show would be a black window, not an error.
+   (the picture as a layer's contents, captured with ScreenCaptureKit: the same pixels
+   as plain surfaces). MacBook Air M2: the real VM, a 144-patch page. M1 Max (built-in
+   ProMotion panel, 120 frames a second) and Mac mini M4 (an external LG UltraFine, 60):
+   `work/window-path/oncheck.m`, GL drawing with a shader into the shown surface as QEMU
+   does, 0 codes off and the full frame rate. No Mac here runs an older macOS, and a
+   surface the system cannot show would be a black window, not an error.
 
 ## Consequences
 

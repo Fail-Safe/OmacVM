@@ -13,7 +13,8 @@ reads the shown surface, keeps them plain. Half-float
 surfaces (HDR, Extra brightness) stay as they are. If one cannot be made
 or bound to GL, every surface is plain 'BGRA' for the rest of the run (one
 warning in qemu.log); OMACVM_GL_LOSSLESS=0 keeps them plain. Shown as a layer's contents they
-are checked on macOS 27 only (M1 Max, M2, M4): older systems keep plain
+are checked on macOS 27 only (captured: an M1 Max at 120 Hz, an M2, an M4
+on an external display; work/window-path/oncheck.m): older systems keep plain
 surfaces. qemu.log says "cocoa: 8-bit surfaces lossless-compressed" (or
 plain, or half-float) for the first surfaces and when it changes.
 
