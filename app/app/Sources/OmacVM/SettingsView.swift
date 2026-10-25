@@ -176,6 +176,7 @@ struct SettingsSections: View {
                 GPUComputeRow(state: state)
                 GPUOffMainLoopRow(tick: state.tick)
                 VKWindowsNoCopyRow(tick: state.tick)
+                PresentTilesRow(tick: state.tick)
                 CloseActionRow(tick: state.tick)
             }
         }

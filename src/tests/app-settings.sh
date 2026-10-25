@@ -69,6 +69,7 @@ expect "fresh: Sound on its own thread on" true "$(val app.audioThread)"
 expect "fresh: Graphics without QEMU's lock on (gpuOffMainLoop)" true "$(val app.gpuOffMainLoop)"
 expect "fresh: Keyboard sharing apps off" false "$(val app.shareKeyboard)"
 expect "fresh: Vulkan windows without a copy on (vkWindowsNoCopy)" true "$(val app.vkWindowsNoCopy)"
+expect "fresh: Draw only what changed off (presentTiles, experimental)" false "$(val app.presentTiles)"
 expect "fresh: HDR and 10-bit colour off" false "$(val app.hdr)"
 expect "fresh: Extra brightness off" false "$(val app.extraBrightness)"
 expect "fresh: Closing the window shuts down" shutdown "$(val app.closeAction)"
@@ -98,7 +99,7 @@ done
 
 # (b) Changes as the window makes them, read by the next launches; (c) per VM.
 mkdir -p "$H/Shared"
-for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "closeAction ask" "appIconTheme flexoki-light" \
+for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "presentTiles true" "hdr true" "extraBrightness true" "closeAction ask" "appIconTheme flexoki-light" \
           "escapeSwipe all" "mouseSwipeFingers 3" "swipeOut true" "updateChecks false"; do
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
@@ -114,6 +115,7 @@ for launch in 1 2; do
   expect "launch $launch: Graphics without QEMU's lock off" false "$(val app.gpuOffMainLoop)"
   expect "launch $launch: Keyboard sharing apps on" true "$(val app.shareKeyboard)"
   expect "launch $launch: Vulkan windows copied" false "$(val app.vkWindowsNoCopy)"
+  expect "launch $launch: Draw only what changed on" true "$(val app.presentTiles)"
   expect "launch $launch: HDR and 10-bit colour on" true "$(val app.hdr)"
   expect "launch $launch: Extra brightness on" true "$(val app.extraBrightness)"
   expect "launch $launch: Closing the window asks" ask "$(val app.closeAction)"

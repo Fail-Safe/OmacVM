@@ -470,6 +470,16 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     "Vulkan windows are copied"*) warn "Vulkan windows" "vkWindowsNoCopy is on, but they are copied this run: $(grep -o 'no IOSurfaces: [^)]*' "$miclog" | tail -1)" ;;
   esac
 fi
+# Draw only what changed this run (experimental: the app's presentTiles switch).
+# QEMU says whether it is on at the first frame and when the first frame went in
+# tiles (the VM said what changed); nothing when the switch is off.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  case $(grep -o 'cocoa: tiled present: .*' "$miclog" | grep -v '^cocoa: tiled present: off$' | tail -1) in
+    *"first frame in tiles"*) ok "Draw only what changed" "on: frames that change little go to macOS in tiles (experimental)" ;;
+    *"off (needs the vsync present)"*) warn "Draw only what changed" "presentTiles is on, but the present has no vsync this run (OMACVM_GL_VSYNC=0)" ;;
+    "cocoa: tiled present: on"*) ok "Draw only what changed" "on, but every frame so far was whole: the VM does not say what changed (Linux before 7.4)" ;;
+  esac
+fi
 # HDR and 10-bit colour this run (experimental: the app's hdr switch). The app
 # says "on (...)" or, with the switch on, "off (why)"; nothing when it is off.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then

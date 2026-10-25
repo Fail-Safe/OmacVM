@@ -518,6 +518,12 @@ final class Runner {
         if Settings.vkWindowsNoCopy {
             env["OMACVM_VK_WINDOWS"] = "iosurface"
         }
+        // Draw only what changed (presentTiles, experimental;
+        // omacvm-cocoa-present-tiles.patch): QEMU says in qemu.log whether
+        // it is on ("cocoa: tiled present: ...").
+        if Settings.presentTiles {
+            env["OMACVM_GL_PRESENT_TILES"] = "1"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"

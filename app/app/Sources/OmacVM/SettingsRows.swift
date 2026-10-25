@@ -344,6 +344,25 @@ struct VKWindowsNoCopyRow: View {
     }
 }
 
+/// Draw only what changed (Settings.presentTiles, experimental, off by
+/// default): read by each start of the VM.
+struct PresentTilesRow: View {
+    var tick = 0
+    @State private var on = Settings.presentTiles
+
+    static let info = "When only a small part of the VM's screen changes (a blinking caret, a clock, a spinner, typing), only that part goes to macOS's window server instead of the whole window, so the Mac's graphics do much less for each frame. The picture, the frame rate, HDR and brightness stay the same. It needs a VM that says what changed on its screen (Linux 7.4 or newer, or OmacVM's display driver with that fix); with an older one every frame is drawn whole, as without this. Experimental: off by default. GPU safe mode turns it off. Counts from the next start of the VM."
+
+    var body: some View {
+        SettingRow(title: "Draw only what changed", badge: "experimental",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Less work for the Mac's graphics when little moves.",
+                   info: Self.info, probe: "present-tiles") {
+            RowSwitch(title: "Draw only what changed", isOn: $on, enabled: !Settings.gpuSafeMode)
+        }
+        .onChange(of: on) { _, v in if v != Settings.presentTiles { Settings.presentTiles = v } }
+        .onChange(of: tick) { _, _ in on = Settings.presentTiles }
+    }
+}
+
 /// The escape combo (EscapeSetting: org.omacvm.gestures EscapeSwipe).
 struct EscapeRow: View {
     var tick = 0

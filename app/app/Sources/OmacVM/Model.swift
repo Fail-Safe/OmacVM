@@ -564,6 +564,16 @@ enum Settings {
             UserDefaults.standard.set(newValue, forKey: "vkWindowsNoCopy")
         }
     }
+    /// Draw only what changed (experimental, off by default): QEMU's present
+    /// gives WindowServer only the changed tiles of a frame
+    /// (omacvm-cocoa-present-tiles.patch, OMACVM_GL_PRESENT_TILES=1). It
+    /// needs a VM that says what changed (Linux 7.4, or OmacVM's display
+    /// driver with its fix); else every frame is whole, as without it.
+    /// GPU safe mode keeps it off. Read at each start of the VM.
+    static var presentTiles: Bool {
+        get { !gpuSafeMode && UserDefaults.standard.bool(forKey: "presentTiles") }
+        set { UserDefaults.standard.set(newValue, forKey: "presentTiles") }
+    }
     /// Added to the sound delay the app tells the VM (AudioLatencyWatch), in
     /// ms, -500 ... 500: negative when the sound comes early in the VM's
     /// videos, positive when it still comes late (a device that under-reports).

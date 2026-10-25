@@ -23,6 +23,7 @@ enum SettingsDump {
             "gpuOffMainLoop": Settings.gpuOffMainLoop,
             "shareKeyboard": Settings.shareKeyboard,
             "vkWindowsNoCopy": Settings.vkWindowsNoCopy,
+            "presentTiles": Settings.presentTiles,
             "hdr": Settings.hdr,
             "extraBrightness": Settings.extraBrightness,
             "closeAction": Settings.closeAction.rawValue,
