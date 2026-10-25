@@ -8,14 +8,15 @@
 # Mac -> QEMU input, QEMU input -> the guest's next flush, flush -> screen.
 #   src/tests/input-latency-vm.sh --runtime DIR --vm DIR --ssh-port PORT [--hz 60|120]
 #        [--count N] [--modes MODES] [--env K=V]... [--hw-cursor] [--native] [--pause S] [--out DIR]
-#        [--app] [--venus MB] [--cpus N] [--memory-mb N]
+#        [--app] [--venus MB] [--cpus N] [--memory-mb N] [--smbios omacvm.KEY=VALUE]...
 # MODES (default all; spaces or commas): key pointer keymove (AppKit), qmpkey qmppointer (QMP:
 # no AppKit), qmpkeymove (keys AppKit, the moving pointer QMP).
 # DIR (vm): a COPY of an OmacVM.app VM made by omacvm apply (disk.img,
 # efi-vars.fd); the test writes to it. --runtime: a built runtime or an
 # app's Contents/Resources/runtime (with --firmware: its firmware's
 # edk2-aarch64-code.fd). --env passes settings to QEMU for an A/B run
-# (e.g. OMACVM_GL_VSYNC=0). OMACVM_GUEST_KEY: the VM's SSH key (default
+# (e.g. OMACVM_GL_VSYNC=0), --smbios a string to the guest as the app sends it
+# (e.g. omacvm.vsynclock=1). OMACVM_GUEST_KEY: the VM's SSH key (default
 # ~/.ssh/omacvm). --hw-cursor: the guest's pointer on
 # virtio-gpu's cursor plane (OMACVM_HW_CURSOR=1, omacvm.hwcursor=1).
 # --app: QEMU's GPU and display settings as OmacVM.app gives them by default
@@ -32,7 +33,7 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 RT=""; VMD=""; PORT=""; HZ=60; COUNT=40; MODES="key pointer keymove qmpkey qmppointer qmpkeymove"; OUT=""; HWC=0; NATIVE=0; PAUSE=0
 APP=0; VENUS=""; CPUS=4; MEM=8192
 FW=$R/app/runtime/.build/firmware/edk2-aarch64-code.fd
-QENV=()
+QENV=(); XSMB=()
 while (( $# )); do
   case $1 in
     --runtime) RT=$2; shift 2 ;;
@@ -43,6 +44,8 @@ while (( $# )); do
     --count) COUNT=$2; shift 2 ;;
     --modes) MODES=${2//,/ }; shift 2 ;;
     --env) QENV+=("$2"); shift 2 ;;
+    --smbios) [[ $2 =~ ^omacvm\.[a-z0-9_]+=[0-9x.]+$ ]] || { echo "input-latency-vm: --smbios omacvm.KEY=VALUE" >&2; exit 2; }
+              XSMB+=(-smbios "type=11,value=$2"); shift 2 ;;
     --hw-cursor) HWC=1; shift ;;
     --native) NATIVE=1; shift ;;
     --pause) PAUSE=$2; shift 2 ;;
@@ -158,7 +161,7 @@ RUN=$W/run; mkdir -p "$RUN"
 TRACE=(-trace 'input_event_key_qcode' -trace 'input_event_abs' -trace 'virtio_gpu_cmd_res_flush'
        -trace 'virtio_gpu_update_cursor' -trace 'cocoa_present_direct' -trace 'cocoa_present_frame'
        -trace 'virtio_gpu_cmd_ctx_create' -trace 'virtio_gpu_cmd_ctx_submit'
-       -trace 'cocoa_present_second' -trace 'cocoa_present_skips'
+       -trace 'cocoa_present_second' -trace 'cocoa_present_skips' -trace 'cocoa_present_follow'
        -trace 'virtio_gpu_fence_ctrl' -trace 'virtio_gpu_fence_resp')
 SMB=()
 ((HWC)) && { QENV+=(OMACVM_HW_CURSOR=1); SMB=(-smbios type=11,value=omacvm.hwcursor=1); }
@@ -170,9 +173,10 @@ if ((APP)); then
   SMB+=(-smbios type=11,value=omacvm.vkwindows=1 -smbios type=11,value=omacvm.notchpointer=1
         -smbios type=11,value=omacvm.vaexport=1)
 fi
+SMB+=(${XSMB[@]+"${XSMB[@]}"})
 GPU="virtio-gpu-gl-pci,max_outputs=1,xres=1920,yres=1080,romfile="
 [[ -n $VENUS ]] && GPU+=",blob=true,venus=true,hostmem=${VENUS}M"
-echo "QEMU: $CPUS CPUs, $MEM MB, $GPU; environment: ${QENV[*]:-none}"
+echo "QEMU: $CPUS CPUs, $MEM MB, $GPU; environment: ${QENV[*]:-none}; smbios: ${XSMB[*]:-none}"
 env OMACVM_PRODUCT_NAME="$NAME" OMACVM_SLIRP_HOST_PORTS=1 OMACVM_NOTCH=0 \
   OMACVM_TEST_SKIP_DISPLAYS="$SKIP" OMACVM_TEST_MAIN_DISPLAY="$VD" OMACVM_BACKGROUND=1 \
   OMACVM_TEST_POINTER=1 OMACVM_DISPLAY_SOCKET="$RUN/display" ${QENV[@]+"${QENV[@]}"} \
