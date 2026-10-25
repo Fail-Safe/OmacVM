@@ -150,12 +150,12 @@ fingerprint > "$OUT/fp-before.txt"
 # The test identity's own state (its CLI, keys, pins, its Bridge's folder): as it was, at the end.
 TSTATE=("$HOME/Library/Application Support/omacvm-test" "$HOME/Library/Application Support/omacvm-test-bridge")
 mkdir -p "$OUT/state-before"
-HELPERS_BEFORE=$(pgrep -f "OmacVM Test (Bridge|Gestures).app/Contents/MacOS/" | tr '\n' ' ')
+HELPERS_BEFORE=$(LC_ALL=C pgrep -f "OmacVM Test (Bridge|Gestures).app/Contents/MacOS/" | tr '\n' ' ')
 for d in "${TSTATE[@]}"; do [[ -d $d ]] && ditto "$d" "$OUT/state-before/$(basename "$d")"; done
 
 QPAT='(runtime/bin/OmacVM|MacOS/OmacVM-VM) -name'
-qemu_pid() { pgrep -f "$QPAT $VM( |$)" | head -1; }
-launcher_pid() { pgrep -f "OmacVM Test.app/Contents/MacOS/OmacVM( |$)" | head -1; }
+qemu_pid() { LC_ALL=C pgrep -f "$QPAT $VM( |$)" | head -1; }
+launcher_pid() { LC_ALL=C pgrep -f "OmacVM Test.app/Contents/MacOS/OmacVM( |$)" | head -1; }
 SERVER=""
 cleanup() {
   local rc=$?
@@ -176,7 +176,7 @@ cleanup() {
     if [[ -n $OLDROOT ]]; then defaults write "$APPID" vmsRoot "$OLDROOT"; else defaults delete "$APPID" vmsRoot 2>/dev/null; fi
   fi
   # The test helpers this run started go again (one that ran before keeps running).
-  [[ -z $HELPERS_BEFORE ]] && pkill -f "OmacVM Test (Bridge|Gestures).app/Contents/MacOS/" 2>/dev/null
+  [[ -z $HELPERS_BEFORE ]] && LC_ALL=C pkill -f "OmacVM Test (Bridge|Gestures).app/Contents/MacOS/" 2>/dev/null
   for d in "${TSTATE[@]}"; do
     rm -rf "$d"; [[ -d $OUT/state-before/$(basename "$d") ]] && ditto "$OUT/state-before/$(basename "$d")" "$d"
   done
@@ -219,7 +219,7 @@ tmo() {   # SECONDS CMD...: macOS has no timeout(1)
 if [[ -n $NEWAPP ]]; then
   [[ $(plist "$NEWAPP" CFBundleIdentifier) == "$APPID" ]] || die "$NEWAPP is not the test identity ($APPID)"
   codesign --verify --deep --strict "$NEWAPP" || die "$NEWAPP does not verify"
-  [[ -n $(launcher_pid) || -n $(pgrep -f "OmacVM Test.app/Contents/" | head -1) ]] && die "the test app runs: quit it first"
+  [[ -n $(launcher_pid) || -n $(LC_ALL=C pgrep -f "OmacVM Test.app/Contents/" | head -1) ]] && die "the test app runs: quit it first"
   # The test app other tests on this Mac use comes back at the end.
   PRE=$OUT/app-before/OmacVM\ Test.app
   [[ -d $APP ]] && { mkdir -p "$OUT/app-before"; ditto "$APP" "$PRE"; }
@@ -271,8 +271,11 @@ cc() {   # ARGS...: guest-cc.py in the VM. Sets CCJ (its JSON, kept as $OUT/cc-<
   # (a short line); call it directly, never in $(...): the two would be lost with the subshell.
   CCN=$(( ${CCN:-0} + 1 ))
   CCJ=$OUT/${PFX}cc-$CCN-$1.json
-  local q="" a rc
-  for a in "$@"; do q+=" $(printf '%q' "$a")"; done
+  local q="" a rc r="'\\''"
+  # Each argument in single quotes, its bytes as they are: bash 3.2's printf %q
+  # writes a byte of some characters on its own (… = E2 '\200' A6), and that
+  # line in ssh's arguments here is not UTF-8 (#545).
+  for a in "$@"; do a=${a//\'/$r}; q+=" '$a'"; done
   gssh "python3 /var/lib/omacvm-e2e/guest-cc.py$q" > "$CCJ" 2> "$CCJ.err"
   rc=$?
   CCS=$(/usr/bin/python3 - "$CCJ" <<'PY'
@@ -308,7 +311,7 @@ bproblems() {   # refusals and failed jobs since the mark, one line
 guest_feature() { gssh "sed -n 's/^OMACVM_FEATURE_${1//-/_}=//p' /etc/omacvm/env | tail -1"; }
 mac_feature() { tr ' ' '\n' < "$VMD/features" 2>/dev/null | sed -n "s/^$1=//p" | tail -1; }
 bridge_start() {   # the test Bridge with its log here (as src/mac/install.sh starts it for the test identity)
-  pkill -f "OmacVM Test Bridge.app/Contents/MacOS/" 2>/dev/null; sleep 1
+  LC_ALL=C pkill -f "OmacVM Test Bridge.app/Contents/MacOS/" 2>/dev/null; sleep 1
   open -g -n --stdout "$BLOG" --stderr "$BLOG" "$BRIDGE_APP"
   local i; for ((i = 0; i < 20; i++)); do lsof -nP -iTCP:47931 -sTCP:LISTEN >/dev/null 2>&1 && { BSTART=$(stat -f %z "$BLOG" 2>/dev/null || echo 0); return 0; }; sleep 0.5; done
   return 1
@@ -423,7 +426,7 @@ use_vm() {   # NAME [CLONE_FROM]: the VM of this pass (an APFS clone of a kept o
     log "clone $src -> $VM"
     [[ -e $VMD ]] && die "$VMD exists"
     [[ -f $src/vm.env && -e $src/ready ]] || die "no finished VM at $src"
-    pgrep -f "$(basename "$src")" | while read -r p; do ps -o args= -p "$p"; done | grep -qE "$QPAT" && die "$src runs: stop it first"
+    LC_ALL=C pgrep -f "$(basename "$src")" | while read -r p; do ps -o args= -p "$p"; done | grep -qE "$QPAT" && die "$src runs: stop it first"
     cp -cR "$src" "$VMD" || die "clone failed"
     CLONES+=("$VMD")
     rm -f "$VMD/fast-network" "$VMD"/logs/*.pid
@@ -435,7 +438,7 @@ use_vm() {   # NAME [CLONE_FROM]: the VM of this pass (an APFS clone of a kept o
   [[ -f $VMD/vm.env && -e $VMD/ready ]] || die "no finished VM $VM in $ROOT"
   [[ -n $(qemu_pid) ]] && die "$VM runs already: shut it down first"
   # One VM from the test app at a time (its launcher is one per Mac); other tests' QEMUs may run.
-  pgrep -f "OmacVM Test.app/Contents/[A-Za-z/]*$QPAT" >/dev/null && die "another VM of the test app runs (one launcher per Mac)"
+  LC_ALL=C pgrep -f "OmacVM Test.app/Contents/[A-Za-z/]*$QPAT" >/dev/null && die "another VM of the test app runs (one launcher per Mac)"
   return 0
 }
 
@@ -912,10 +915,21 @@ if [[ -n $PREV ]] && want update; then
     /usr/bin/python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$F" > "$OUT/feed-server.log" 2>&1 & SERVER=$!
     sleep 1
     # The app updates itself (as the window's "Update to X" does, without the window: --update-now).
+    # The VM shuts down first, while its launcher runs: the launcher removes the VM's run marker when it
+    # sees QEMU end cleanly. A launcher killed first leaves the marker, and the next Update VM and start
+    # then ask "not shut down cleanly" in a modal alert (Update VM's press: -25204; the start never comes).
+    # The release before removes the marker on that clean stop: a marker left here is a product failure.
+    PFX=previous-
+    if stop_vm; then
+      for ((i = 0; i < 5; i++)); do [[ -e $VMD/running ]] || break; sleep 1; done
+      if [[ -e $VMD/running ]]; then res stop FAIL "shut down from inside, but its run marker stays ($VMD/running)"
+      else res stop ok "shut down from inside while its launcher ran; run marker gone"; fi
+    else res stop FAIL "the VM of the release before did not shut down from inside"; fi
+    PFX=update-
     close_window
     # The test Bridge and Gestures run from inside the app (a person's live outside it): the updater
     # would wait for them ("A VM runs from OmacVM Test" is any process inside the app).
-    GESTURES_RAN=$(pgrep -f "OmacVM Test Gestures.app/Contents/MacOS/" | head -1)
+    GESTURES_RAN=$(LC_ALL=C pgrep -f "OmacVM Test Gestures.app/Contents/MacOS/" | head -1)
     stop_inside_app
     hide=(); (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1)   # the updated app starts again: no window either
     open -n -g --env "OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json" --env "OMACVM_APPCAST_KEY=$(cat "$F/key.pub")" \

@@ -23,7 +23,7 @@ diff --git a/ui/omacvm-ime.h b/ui/omacvm-ime.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-ime.h
-@@ -0,0 +1,256 @@
+@@ -0,0 +1,324 @@
 +/*
 + * OmacVM mac-ime: the Mac's input methods type into the VM
 + * (docs/adr/0043-mac-ime.md). The rules ui/cocoa.m follows, with no AppKit
@@ -118,6 +118,74 @@ new file mode 100644
 +static inline bool omacvm_ime_active(const OmacVMImeState *s)
 +{
 +    return omacvm_ime_text_focus(s) && s->source_im;
++}
++
++/*
++ * Keys no longer go to the input method: its context goes off at once, or
++ * OMACVM_IME_OFF_DELAY seconds later when only the guest's field went (it
++ * would be active with the field: the VM still has the keyboard, the source
++ * is still an input method, the module is there). A field that comes back
++ * meanwhile (a terminal takes its focus again after Enter) keeps it on:
++ * some input methods (WeChat Input) go back to their first mode when their
++ * context goes off and on (#357). Anything else while it waits (a password
++ * field, another window, a plain layout, the module gone): off at once.
++ */
++#define OMACVM_IME_OFF_DELAY 0.2
++static inline bool omacvm_ime_off_later(const OmacVMImeState *s)
++{
++    OmacVMImeState with = *s;
++    with.focus = true;
++    with.password = false;
++    return !s->password && omacvm_ime_active(&with);
++}
++
++typedef enum OmacVMImeOff {
++    OMACVM_IME_OFF_NONE,    /* nothing to do */
++    OMACVM_IME_OFF_NOW,     /* deactivate the context now */
++    OMACVM_IME_OFF_LATER,   /* deactivate it after OMACVM_IME_OFF_DELAY (omacvm_ime_off_due) */
++    OMACVM_IME_OFF_KEPT,    /* active again while an off waited: it stays on */
++} OmacVMImeOff;
++
++typedef struct OmacVMImeOffState {
++    bool was_active;
++    bool waiting;           /* a later off is due (the context is still on) */
++    unsigned gen;           /* which later off counts */
++} OmacVMImeOffState;
++
++/* After any change of the state: what happens to the input method's context. */
++static inline OmacVMImeOff omacvm_ime_off_step(OmacVMImeOffState *o, const OmacVMImeState *s)
++{
++    bool active = omacvm_ime_active(s);
++    if (active != o->was_active) {
++        bool waited = o->waiting;
++        o->was_active = active;
++        o->waiting = false;
++        o->gen++;
++        if (active) {
++            return waited ? OMACVM_IME_OFF_KEPT : OMACVM_IME_OFF_NONE;
++        }
++        if (omacvm_ime_off_later(s)) {
++            o->waiting = true;
++            return OMACVM_IME_OFF_LATER;
++        }
++        return OMACVM_IME_OFF_NOW;
++    }
++    if (!active && o->waiting && !omacvm_ime_off_later(s)) {
++        o->waiting = false;
++        o->gen++;
++        return OMACVM_IME_OFF_NOW;
++    }
++    return OMACVM_IME_OFF_NONE;
++}
++
++/* The later off of generation `gen` is due: true when the context goes off now. */
++static inline bool omacvm_ime_off_due(OmacVMImeOffState *o, unsigned gen)
++{
++    if (!o->waiting || gen != o->gen) {
++        return false;
++    }
++    o->waiting = false;
++    return true;
 +}
 +
 +/* NSEvent's modifier flags (the same bits macOS's shortcut list uses). */
