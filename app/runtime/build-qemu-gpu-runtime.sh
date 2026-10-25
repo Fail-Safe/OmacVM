@@ -1007,6 +1007,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-damag
   die "the partial present's rules fail their test (test-present-damage.sh)"
 "$native_dir/Tests/display/test-present-damage.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the partial present is not wired as tested (test-present-damage.sh)"
+# OmacVM: the window's 8-bit surfaces lossless-compressed ('&BGA'): QEMU's draw
+# and WindowServer's composite move fewer bytes; plain surfaces after a failure.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-lossless.patch"
+"$native_dir/Tests/display/test-present-lossless.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the lossless surfaces are not wired as tested (test-present-lossless.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"

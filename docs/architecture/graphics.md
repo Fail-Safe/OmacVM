@@ -976,6 +976,12 @@ bench lock and are indications only):
   BQL. The link pauses 0.25 s after the last frame, or after a second of
   single frames (pause and wake both on the main thread, so a frame never
   waits behind a paused link).
+- **Surfaces**: the 8-bit ones are Apple's lossless-compressed BGRA ('&BGA',
+  through CoreVideo): QEMU's draw and WindowServer's composite move fewer bytes
+  (ADR 0052; plain `BGRA` for the run after a failure, `OMACVM_GL_LOSSLESS=0`
+  keeps them plain; macOS 27 and newer only, where it is checked). Nothing reads
+  them back (no CPU read, no `glReadPixels`: it crashes on them); the partial
+  present's check mode (`OMACVM_GL_PRESENT_DAMAGE=check`) keeps them plain.
 - **Colour**: surfaces are tagged; Core Animation converts sRGB (or PQ) to
   the display. HDR and 10-bit colour is the app's experimental switch
   (`hdr`, shown only while a display can show HDR; ADR 0049): a start with
@@ -1188,6 +1194,50 @@ window on the same display (`nativelat.swift`), the floor macOS itself sets.
   aquamarine does not ask for it), so it waits for the guest side.
 - Posted mouse moves (`CGEventPostToPid`) reach no app's view, so pointer
   rows go in through QMP (no AppKit; AppKit's part for keys is under 1 ms).
+
+### Input latency, stage by stage (3.2.0, lane `input-latency`)
+
+The same probe on the 3.2.0 runtime, with QEMU's GPU settings as the app
+gives them (`input-latency-vm.sh --app --venus 4096`: GPU work without the
+BQL, the present's trim, Vulkan on; no sound card), Mac mini M4, macOS 27,
+a virtual display, a clone of a 3.1.30 Omarchy VM (`foot`), 80 events per
+row, 40 s after the desktop came up, several runs interleaved; median ms
+(run to run the medians move by 2-3 ms). Stages from QEMU's trace: the key
+in QEMU's input layer, Hyprland's first GPU submit, the answer to its fence,
+the frame's RESOURCE_FLUSH, QEMU's present done, on screen. "Its fence" is
+the first fence any context asks for within 50 us after that submit (the
+trace does not say whose), answered before the flush: close, not exact.
+
+| 60 Hz | to screen | Mac -> QEMU | -> Hyprland's GPU work | -> its fence answered | -> flush | -> present done | -> screen |
+|---|---|---|---|---|---|---|---|
+| native AppKit window, key | 15.5 | 0.5 (to the app) | 0.6 (drawn) | | | | 14.3 |
+| VM, key on an idle screen | 21-24 | 0.4-0.7 | 1.3-2.3 | 2.0-2.6 | +0.1-0.2 | 1.1-1.8 | 13-16 |
+| VM, pointer move (QMP) | 20-22 | 0.5-0.8 | 0.5-0.7 | 1.8-2.0 | +0.1 | 1.3-1.7 | 14-16 |
+| VM, key while the pointer moves | 32-35 | 0.4-0.8 | (frames overlap) | | | | |
+
+At 120 Hz: key 15-18, keys while the pointer moves 22-24, pointer 14-16.
+
+- On an idle screen the VM adds about 6-8 ms to macOS's own path, in four
+  stages of 1-3 ms: the guest's key path (key -> foot -> the shell's echo
+  -> foot -> Hyprland, foot waits 0.5 ms by design), Hyprland's frame on the
+  Mac's GPU until its fence is answered (the largest), the guest's commit,
+  and QEMU's present (draw the scanout into a surface, wait for the GPU:
+  0.8 ms of it when the GPU is warm). From the present on it is the Mac's
+  path, the same as the native window's.
+- While frames come steadily a key costs about 11 ms more at 60 Hz: two
+  vsync waits in a row (Hyprland waits for the guest's vblank before its
+  next frame, then the frame waits for the Mac's refresh; a native app has
+  only the second). The present's knobs do not help there: input-first
+  31.0/33.0 vs 31.8/33.9 ms, a 5 or 8 ms lead 33.8/35.3, 1 ms 43.8 (it
+  misses the vsync), no vsync 38.3 (max 186). Lining the guest's vblank up
+  with the Mac's would remove one wait (a guest driver change).
+- The fence answers bunched on a ladder: QEMU's trace of fence asked ->
+  answered had peaks at 1.1-1.2, 1.8-1.9, 2.6-2.7 and 3.6-3.7 ms and almost
+  nothing between, the sync thread's doubled naps after the first
+  millisecond. PR #530 (`virgl-darwin-fence-wait-proportional.patch`) also
+  wakes the thread an eighth of the time waited after each test.
+- The Mac pointer setting (`macPointer`) still gives nothing: no cursor
+  command reaches QEMU with Hyprland 0.56.2 and aquamarine 0.15.1.
 
 ## 13. Merging the tracks
 
