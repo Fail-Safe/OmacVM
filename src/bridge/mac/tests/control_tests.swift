@@ -633,6 +633,12 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
       expect(e.code == "unknown-vm" && e.message == "the Mac cannot reach this VM: no address: its fast network is down: omacvm-netd refused",
              "running, set up, unreachable: says the Mac cannot reach it and why (\(e.message))")
     } else { expect(false, "unreachable app VM") }
+    // The log says why a VM was not taken (#528 had only "409 unknown-vm"); other refusals keep their code.
+    if case .failure(let e) = vmForApp("Omarchy", [lost]) {
+      expect(refusalNote(e) == "unknown-vm (the Mac cannot reach this VM: no address: its fast network is down: omacvm-netd refused)",
+             "log: an unknown VM's refusal says why (\(refusalNote(e)))")
+    }
+    expect(refusalNote(PolicyError(429, "busy", "too many requests")) == "busy", "log: other refusals: the code only")
     // Touch ID needs no SSH: the app vouches for the VM, its key signs the request.
     if case .success(let v) = vmForApp("Omarchy", [lost], ssh: false) { expect(v == lost, "Touch ID: an unreachable app VM still found") }
     else { expect(false, "Touch ID without SSH") }

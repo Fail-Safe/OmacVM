@@ -222,12 +222,12 @@ final class Control {
     // Graphics memory is asked every 2 s while the control centre is open:
     // its answers are not logged (refusals still are).
     var quiet = false
-    func answer(_ code: Int, _ obj: [String: Any], _ note: String = "") {
+    func answer(_ code: Int, _ obj: [String: Any], _ note: String = "", reason: String? = nil) {
       let line = "control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))"
       // Refusals once a minute per address, VM and reason: a guest that
       // floods (or any guest, from addresses of its own) must not fill the
       // log the report reads.
-      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(note)", line) } else if !quiet { log(line) }
+      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(reason ?? note)", line) } else if !quiet { log(line) }
       guard let s = signer else { return respond(fd, code, obj) }
       let data = jsonData(obj) + Data("\n".utf8)
       let sig = answerMAC(key: s.key, nonce: s.nonce, status: code, body: data)
@@ -235,7 +235,8 @@ final class Control {
       close(fd)
     }
     func refuse(_ e: PolicyError, _ extra: [String: Any] = [:]) {
-      answer(e.status, ["error": e.message, "code": e.code].merging(extra) { a, _ in a }, e.code)
+      // Logged once a minute per code (reason), with why the first time.
+      answer(e.status, ["error": e.message, "code": e.code].merging(extra) { a, _ in a }, refusalNote(e), reason: e.code)
     }
 
     let cli: String
@@ -277,6 +278,7 @@ final class Control {
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
         return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
       }
+      vmName = name   // the VM the app named, also in the log of a refusal
       let ssh = routeNeedsSSH(route)
       switch vmForApp(name, vmList(cli, fresh: fresh, every: VMListCache.appEvery, key: "app/" + name, listed: { appVMListed(name, $0) }) {
                         if case .success = vmForApp(name, $0, ssh: ssh) { return true }; return false }, ssh: ssh) {

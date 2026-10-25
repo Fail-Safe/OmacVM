@@ -410,6 +410,12 @@ func unreachableText(_ why: String) -> String {
   return "the Mac cannot reach this VM: " + (w.isEmpty ? "it runs, but SSH from the Mac did not answer" : w)
 }
 
+/// What the log says after a refusal's status: its code, and for a VM that
+/// was not taken also why (not running, not set up, the Mac cannot reach it).
+func refusalNote(_ e: PolicyError) -> String {
+  e.code == "unknown-vm" ? "\(e.code) (\(e.message))" : e.code
+}
+
 /// The file name of a VM's control key (lib/mac.sh vm_key_file): the first
 /// 32 hex digits of SHA-256("<type>/<name>").
 func vmKeyName(type: String, name: String) -> String {
