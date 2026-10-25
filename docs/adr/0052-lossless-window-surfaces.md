@@ -12,9 +12,10 @@ costs: taking WindowServer's colour matching out of its composite (frames in the
 display's colour space, tried and dropped: work/tracks/window-path.md) took a third off
 its GPU time and nothing off the watts. What costs is moving the pixels. Apple GPUs
 keep surfaces in a lossless-compressed layout when asked ('&BGA',
-`kCVPixelFormatType_Lossless_32BGRA`); VideoToolbox and Apple's apps use it. Only the
-CPU cannot read such a surface, and the present never reads its surfaces on the CPU
-(the boot logo's readback reads the guest's texture). GL draws into one exactly (read
+`kCVPixelFormatType_Lossless_32BGRA`); VideoToolbox and Apple's apps use it. Such a
+surface cannot be read back (not on the CPU, not with `glReadPixels`), and the present
+does not read its surfaces back, except in a test mode (below). The boot logo's readback
+reads the guest's texture. GL draws into one exactly (read
 back through Core Image: 0 codes off, on an M1 Max, an M2 and an M4).
 
 ## Decision
@@ -37,4 +38,8 @@ back through Core Image: 0 codes off, on an M1 Max, an M2 and an M4).
 - QEMU's own draw takes 20-25 % less GPU time (a window like the VM's, no VM).
 - How much a frame saves depends on the picture: flat areas and text compress much
   more than video.
-- Nothing may read these surfaces on the CPU; test-present-lossless.sh checks for it.
+- Nothing may read these surfaces back: not on the CPU, and not with `glReadPixels`,
+  which crashes the process on them (M4, macOS 27). The partial present's check mode
+  (`OMACVM_GL_PRESENT_DAMAGE=check`, ADR 0051) reads the shown surface that way, so it
+  keeps the surfaces plain. test-present-lossless.sh checks both: no CPU read, and no
+  `glReadPixels` with a present surface attached outside the check mode.
