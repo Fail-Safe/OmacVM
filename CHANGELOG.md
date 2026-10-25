@@ -5,6 +5,14 @@ in more words.
 
 ## 3.2.1 (unreleased)
 
+- **Draw only what changed (experimental, off by default).** A new switch in the VM window's
+  settings. With it, when only a small part of the VM's screen changes (the pointer, a caret, a
+  clock, a spinner), only that part goes to macOS's window server: the window keeps its last whole
+  picture and small tiles over it get the new pixels. MacBook Air M2, the VM full screen at 60 Hz,
+  the pointer moving: 3.13 W instead of 3.75 W for the whole Mac (-17 %), the same picture (0 pixels
+  differ) and frame rate. It needs a VM that says what changed: Linux 7.4, or OmacVM's display
+  driver with that fix (not in this release's VM side yet); with an older one every frame is drawn
+  whole, as without the switch.
 - **Google Chrome plays 1440p and 4K video on the Mac's media engine.** The Mac's graphics
   thread for the VM, which runs every app's drawing in it, waited for the media engine on each
   picture (about 5 ms for a 4K one on a MacBook Air M2, 3 ms on an M4 Max). Above 1080p Chrome's
