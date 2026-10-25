@@ -24,7 +24,7 @@ order() {
     END {exit !(x && y && (c == "" || z))}' <<<"$1"
 }
 checks() {
-  local m=$1 present flush alloc tiles show showt queue vsync skip viewsz hide wanted gate
+  local m=$1 present flush alloc tiles show showt queue vsync skip viewsz hide wanted stats gate
   present=$(body "$m" 'static bool cocoa_gl_present(void)')
   flush=$(body "$m" 'static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,')
   alloc=$(body "$m" 'static bool cocoa_gl_present_alloc(')
@@ -36,6 +36,7 @@ checks() {
   skip=$(body "$m" 'static void present_frame_skip(PresentFrame *older, PresentFrame *next)')
   viewsz=$(body "$m" 'static void omacvm_splash_view_size(uint32_t w, uint32_t h)')
   hide=$(body "$m" 'static void present_tiles_hide(void)')
+  stats=$(body "$m" 'static void present_tiles_stats(void)')
   wanted=$(body "$m" 'static bool present_tiles_wanted(void)')
   # The condition for a frame in tiles, on one line, spaces squeezed.
   gate=$(awk '/if \(present_tiles_wanted\(\) &&/{on=1} on {printf "%s ", $0} on && /\) \{$/ {exit}' <<<"$present" | tr -s ' \t' ' ')
@@ -69,6 +70,7 @@ checks() {
     'if (fits && qatomic_read(&omacvm_park_hold_on)) {'
   chk "tile surfaces go back after a while without tile frames" has "$tiles" \
     'timer_mod(present_tile_idle_timer, present_tile_last_ns + PRESENT_TILE_IDLE_NS);'
+  chk "the check mode's count is in the minute line" has "$stats" 'present_tile_checks_bad, present_tile_checks'
   chk "a frame skipped while none was queued comes along" has "$queue" 'present_frame_absorb(&f, &present_pend);'
   chk "a merged frame passes its tiles on" has "$queue" 'present_frame_skip(last, &f);'
   chk "a frame pushed out of a full queue passes its tiles on" has "$queue" \
