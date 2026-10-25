@@ -8,6 +8,7 @@
 # Mac -> QEMU input, QEMU input -> the guest's next flush, flush -> screen.
 #   src/tests/input-latency-vm.sh --runtime DIR --vm DIR --ssh-port PORT [--hz 60|120]
 #        [--count N] [--modes MODES] [--env K=V]... [--hw-cursor] [--native] [--pause S] [--out DIR]
+#        [--app] [--venus MB] [--cpus N] [--memory-mb N]
 # MODES (default all; spaces or commas): key pointer keymove (AppKit), qmpkey qmppointer (QMP:
 # no AppKit), qmpkeymove (keys AppKit, the moving pointer QMP).
 # DIR (vm): a COPY of an OmacVM.app VM made by omacvm apply (disk.img,
@@ -17,11 +18,18 @@
 # (e.g. OMACVM_GL_VSYNC=0). OMACVM_GUEST_KEY: the VM's SSH key (default
 # ~/.ssh/omacvm). --hw-cursor: the guest's pointer on
 # virtio-gpu's cursor plane (OMACVM_HW_CURSOR=1, omacvm.hwcursor=1).
-# Each mode prints a JSON summary; --out keeps the raw rows, QEMU's log and
-# the breakdown (breakdown.json).
+# --app: QEMU as OmacVM.app starts it by default (GPU work without the BQL and
+# the present's trim, sound on its own thread, Vulkan windows as IOSurfaces,
+# the app's SMBIOS strings); --venus MB adds Venus with that host memory window
+# (a VM whose Graphics is Vulkan). Each mode prints a JSON summary; --out keeps
+# the raw rows, QEMU's log and the breakdown (breakdown.json): per event the
+# stages Mac -> QEMU input, input -> the guest app's first GPU work, -> the
+# compositor's, -> its flush, -> QEMU's present, -> on screen; with --native
+# the macOS app's own stages (event -> the app, -> drawn, -> on screen).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 RT=""; VMD=""; PORT=""; HZ=60; COUNT=40; MODES="key pointer keymove qmpkey qmppointer qmpkeymove"; OUT=""; HWC=0; NATIVE=0; PAUSE=0
+APP=0; VENUS=""; CPUS=4; MEM=8192
 FW=$R/app/runtime/.build/firmware/edk2-aarch64-code.fd
 QENV=()
 while (( $# )); do
@@ -38,14 +46,19 @@ while (( $# )); do
     --native) NATIVE=1; shift ;;
     --pause) PAUSE=$2; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
-    *) sed -n '9,12s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+    --app) APP=1; shift ;;
+    --venus) VENUS=$2; shift 2 ;;
+    --cpus) CPUS=$2; shift 2 ;;
+    --memory-mb) MEM=$2; shift 2 ;;
+    *) sed -n '9,13s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
 # A runtime from the build (qemu-system-aarch64) or from an app bundle (named OmacVM there).
 QEMU=$RT/bin/qemu-system-aarch64
 [[ -x $QEMU ]] || QEMU=$RT/bin/OmacVM
 [[ -x $QEMU && -f $VMD/disk.img && -f $VMD/efi-vars.fd && $PORT =~ ^[0-9]+$ && -f $FW &&
-   $HZ =~ ^(60|120)$ && $COUNT =~ ^[0-9]+$ ]] || { sed -n '9,12s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+   $HZ =~ ^(60|120)$ && $COUNT =~ ^[0-9]+$ && $VENUS =~ ^[0-9]*$ && $CPUS =~ ^[1-9][0-9]?$ &&
+   $MEM =~ ^[0-9]+$ ]] || { sed -n '9,13s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 [[ -e $HOME/.omacvm-user-testing ]] && { echo "input-latency-vm: the user is testing: no VM (STANDARDS 18)" >&2; exit 1; }
 # The built-in panel's mode ("" without one): read before and after the virtual display (STANDARDS 32).
 panel_mode() {
@@ -121,7 +134,7 @@ echo "virtual display $VD at $HZ Hz; left alone: $SKIP; settings: ${QENV[*]:-non
 # --native: the macOS floor first, a plain AppKit window on the same display (nativelat.swift).
 if ((NATIVE)); then
   swiftc -O "$R/tests/graphics/pacing/nativelat.swift" -o "$W/nativelat" || exit 1
-  "$W/nativelat" "$VD" 60 > "$W/native.out" 2>&1 &
+  "$W/nativelat" "$VD" 60 > "$OUT/native-times.txt" 2>&1 &
   NPID=$!
   sleep 2
   for m in key pointer keymove; do
@@ -132,21 +145,34 @@ fi
 
 RUN=$W/run; mkdir -p "$RUN"
 TRACE=(-trace 'input_event_key_qcode' -trace 'input_event_abs' -trace 'virtio_gpu_cmd_res_flush'
-       -trace 'virtio_gpu_update_cursor' -trace 'cocoa_present_direct' -trace 'cocoa_present_frame')
+       -trace 'virtio_gpu_update_cursor' -trace 'cocoa_present_direct' -trace 'cocoa_present_frame'
+       -trace 'virtio_gpu_cmd_ctx_create' -trace 'virtio_gpu_cmd_ctx_submit'
+       -trace 'cocoa_present_second' -trace 'cocoa_present_skips'
+       -trace 'virtio_gpu_fence_ctrl' -trace 'virtio_gpu_fence_resp')
 SMB=()
 ((HWC)) && { QENV+=(OMACVM_HW_CURSOR=1); SMB=(-smbios type=11,value=omacvm.hwcursor=1); }
+# --app: what Runner.swift gives QEMU by default (gpuOffMainLoop, audioThread, vkWindowsNoCopy).
+if ((APP)); then
+  QENV=(OMACVM_GPU_UNLOCKED=1 OMACVM_GL_TRIM=quarter OMACVM_AUDIO_THREAD=1 OMACVM_VK_WINDOWS=iosurface
+        ${QENV[@]+"${QENV[@]}"})
+  SMB+=(-smbios type=11,value=omacvm.vkwindows=1 -smbios type=11,value=omacvm.notchpointer=1
+        -smbios type=11,value=omacvm.vaexport=1)
+fi
+GPU="virtio-gpu-gl-pci,max_outputs=1,xres=1920,yres=1080,romfile="
+[[ -n $VENUS ]] && GPU+=",blob=true,venus=true,hostmem=${VENUS}M"
+echo "QEMU: $CPUS CPUs, $MEM MB, $GPU; environment: ${QENV[*]:-none}"
 env OMACVM_PRODUCT_NAME="$NAME" OMACVM_SLIRP_HOST_PORTS=1 OMACVM_NOTCH=0 \
   OMACVM_TEST_SKIP_DISPLAYS="$SKIP" OMACVM_TEST_MAIN_DISPLAY="$VD" OMACVM_BACKGROUND=1 \
   OMACVM_TEST_POINTER=1 OMACVM_DISPLAY_SOCKET="$RUN/display" ${QENV[@]+"${QENV[@]}"} \
   "$QEMU" -name "$NAME" -machine virt,gic-version=3 -accel hvf \
-  -cpu host,pmu=off -smp 4,sockets=1,cores=4,threads=1 -m 8192M -nodefaults \
+  -cpu host,pmu=off -smp "$CPUS,sockets=1,cores=$CPUS,threads=1" -m "${MEM}M" -nodefaults \
   -action reboot=reset,shutdown=poweroff \
   -drive "if=pflash,format=raw,readonly=on,file=$FW" \
   -drive "if=pflash,format=raw,file=$VMD/efi-vars.fd" \
   -drive "if=none,id=disk,file=$VMD/disk.img,format=raw,cache=writeback,discard=unmap" \
   -device nvme,serial=omacvm,drive=disk,bootindex=0 \
   -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$PORT-:22" -device virtio-net-pci,netdev=net0,romfile= \
-  -device virtio-gpu-gl-pci,max_outputs=1,xres=1920,yres=1080,romfile= \
+  -device "$GPU" \
   -display "cocoa,gl=on,show-cursor=off,zoom-to-fit=on,full-screen=off,full-grab=on,immersive=off,swap-opt-cmd=off" \
   -device virtio-keyboard-pci,romfile= -device virtio-tablet-pci,romfile= \
   -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-pci,rng=rng0 \
@@ -219,20 +245,61 @@ for m in $MODES; do
 done
 
 # Where the time goes: QEMU's trace against each event's post time and screen time.
+# Stages (medians, ms): mac_to_qemu (the event posted -> QEMU's input layer),
+# qemu_to_compositor (-> Hyprland's first GPU work after it: the terminal took
+# the key and drew; for the pointer Hyprland draws it), split into qemu_to_client
+# and client_to_compositor when the terminal draws on the GPU (foot draws on the
+# CPU), compositor_to_flush (-> the frame's RESOURCE_FLUSH), flush_to_present
+# (-> QEMU's present has the frame done on the Mac's GPU), present_to_screen
+# (-> WindowServer shows it). The guest's GPU contexts are told apart by their
+# names (the process that made them).
 python3 - "$OUT" "$MODES" <<'PY' | tee "$OUT/breakdown.json"
 import datetime, json, os, re, statistics, sys
 out, modes = sys.argv[1], sys.argv[2].split()
-ev = []
+ev, names, sec, fences = [], {}, [], []
 for line in open(os.path.join(out, "qemu.log"), errors="replace"):
-    m = re.match(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?)Z? (\w+)", line)
+    m = re.match(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?)Z? (\w+)(.*)", line)
     if not m:
         continue
     t = datetime.datetime.fromisoformat(m.group(1)).replace(tzinfo=datetime.timezone.utc).timestamp() * 1e6
-    name = m.group(2)
-    if name == "input_event_key_qcode" and "down 1" not in line:
+    name, rest = m.group(2), m.group(3)
+    if name == "input_event_key_qcode" and "down 1" not in rest:
+        continue
+    if name == "virtio_gpu_cmd_ctx_create":
+        c = re.search(r"ctx (0x[0-9a-f]+), name (\S*)", rest)
+        if c:
+            names[c.group(1)] = c.group(2)
+        continue
+    if name == "virtio_gpu_cmd_ctx_submit":
+        c = re.search(r"ctx (0x[0-9a-f]+)", rest)
+        n = names.get(c.group(1), "") if c else ""
+        name = "submit_comp" if n.lower().startswith("hypr") else \
+               "submit_term" if re.match(r"(alacritty|ghostty|foot)", n) else "submit_other"
+    if name in ("cocoa_present_direct", "cocoa_present_frame"):
+        name = "present"
+    if name in ("virtio_gpu_fence_ctrl", "virtio_gpu_fence_resp"):
+        c = re.search(r"fence (0x[0-9a-f]+)", rest)
+        if c:
+            fences.append((t, name.rsplit("_", 1)[1], c.group(1)))
+        continue
+    if name in ("cocoa_present_second", "cocoa_present_skips"):
+        sec.append((t, name, [int(x) for x in re.findall(r"-?\d+", rest)]))
         continue
     ev.append((t, name))
 ev.sort()
+fences.sort()
+resp = {}
+for t, kind, fid in fences:
+    if kind == "resp" and fid not in resp:
+        resp[fid] = t
+def fence_after(after, within=50e3):
+    """The first fence the guest asked for after this time, and when QEMU answered it."""
+    for t, kind, fid in fences:
+        if t > after + within:
+            return None
+        if t >= after and kind == "ctrl":
+            return resp.get(fid)
+    return None
 def first(name, after, within=300e3):
     for t, n in ev:
         if t > after + within:
@@ -240,31 +307,107 @@ def first(name, after, within=300e3):
         if t >= after and n == name:
             return t
     return None
-res = {}
+res = {"contexts": sorted(set(names.values()))}
+med = lambda a: round(statistics.median(a), 2) if a else None
+p90 = lambda a: round(sorted(a)[min(len(a) - 1, int(0.9 * len(a)))], 2) if a else None
 for m in modes:
     p = os.path.join(out, m + ".jsonl")
     if not os.path.exists(p):
         continue
-    inp, guest, present, cur = [], [], [], []
+    st = {k: [] for k in ("total", "mac_to_qemu", "qemu_to_compositor", "qemu_to_client",
+                          "client_to_compositor", "compositor_to_flush", "compositor_fence",
+                          "flush_to_present", "present_to_screen")}
+    cur = []
+    pointer = m.endswith("pointer")
     for row in map(json.loads, open(p)):
         if row["lat_ms"] is None:
             continue
         post, screen = row["post_us"], row["post_us"] + row["lat_ms"] * 1e3
-        q = first("input_event_abs" if m.endswith("pointer") else "input_event_key_qcode", post)
+        q = first("input_event_abs" if pointer else "input_event_key_qcode", post)
         # (keymove: the pointer's own moves are in the trace too; keys are what is timed)
         if q is None or q > screen:
             continue
-        inp.append((q - post) / 1e3)
+        st["total"].append(row["lat_ms"])
+        st["mac_to_qemu"].append((q - post) / 1e3)
         c = first("virtio_gpu_update_cursor", q)
-        if m.endswith("pointer") and c is not None and c < screen:
+        if pointer and c is not None and c < screen:
             cur.append((c - q) / 1e3)
-        f = first("virtio_gpu_cmd_res_flush", q)
-        if f is not None and f < screen:
-            guest.append((f - q) / 1e3)
-            present.append((screen - f) / 1e3)
-    med = lambda a: round(statistics.median(a), 2) if a else None
-    res[m] = {"n": len(inp), "mac_to_qemu_ms": med(inp), "qemu_to_guest_flush_ms": med(guest),
-              "flush_to_screen_ms": med(present), "qemu_to_cursor_cmd_ms": med(cur)}
+        cl = None if pointer else first("submit_term", q)
+        co = first("submit_comp", cl if cl is not None and cl < screen else q)
+        f = first("virtio_gpu_cmd_res_flush", co) if co is not None else None
+        pr = first("present", f) if f is not None else None
+        if co is None or f is None or pr is None or pr > screen:
+            continue
+        st["qemu_to_compositor"].append((co - q) / 1e3)
+        if cl is not None and cl < co:
+            st["qemu_to_client"].append((cl - q) / 1e3)
+            st["client_to_compositor"].append((co - cl) / 1e3)
+        st["compositor_to_flush"].append((f - co) / 1e3)
+        # Of that: Hyprland's first submit -> the answer to the next fence (its GPU work done on the Mac).
+        fr = fence_after(co)
+        if fr is not None and fr <= f:
+            st["compositor_fence"].append((fr - co) / 1e3)
+        st["flush_to_present"].append((pr - f) / 1e3)
+        st["present_to_screen"].append((screen - pr) / 1e3)
+    r = {"n": len(st["total"]), "split_n": len(st["present_to_screen"])}
+    for k, v in st.items():
+        r[k + "_ms"] = med(v)
+    r["total_p90_ms"] = p90(st["total"])
+    r["qemu_to_cursor_cmd_ms"] = med(cur)
+    # The present's own counters while this mode ran (one line a second while the link runs):
+    # frames shown on ticks, shown when ready, the mean wait from flush to tick, repeats/merged/dropped.
+    rows = [json.loads(x) for x in open(p)]
+    if rows:
+        a, b = rows[0]["post_us"], rows[-1]["post_us"] + 1e6
+        on = [v for t, n, v in sec if a <= t <= b and n == "cocoa_present_second"]
+        sk = [v for t, n, v in sec if a <= t <= b and n == "cocoa_present_skips"]
+        if on:
+            shown = sum(v[4] for v in on)
+            r["link_s"] = len(on)
+            r["shown_on_ticks"] = shown
+            r["shown_when_ready"] = sum(v[5] for v in on)
+            r["flush_to_tick_ms"] = round(sum(v[4] * v[6] for v in on) / shown / 1e3, 2) if shown else None
+        if sk:
+            r["repeats_merged_dropped"] = [sum(v[i] for v in sk) for i in range(3)]
+    res[m] = r
+# The macOS app (--native): its own times of each key and move it took and drew.
+nat = os.path.join(out, "native-times.txt")
+if os.path.exists(nat):
+    marks = []
+    for line in open(nat):
+        k = line.split()
+        if len(k) == 2 and k[0] in ("key", "move", "drew"):
+            marks.append((float(k[1]), k[0]))
+    marks.sort()
+    def nfirst(kind, after, within=300e3):
+        for t, n in marks:
+            if t > after + within:
+                return None
+            if t >= after and n == kind:
+                return t
+        return None
+    for m in ("key", "pointer", "keymove"):
+        p = os.path.join(out, "native-" + m + ".jsonl")
+        if not os.path.exists(p):
+            continue
+        st = {"total": [], "mac_to_app": [], "app_to_drawn": [], "drawn_to_screen": []}
+        for row in map(json.loads, open(p)):
+            if row["lat_ms"] is None:
+                continue
+            post, screen = row["post_us"], row["post_us"] + row["lat_ms"] * 1e3
+            a = nfirst("move" if m == "pointer" else "key", post)
+            d = nfirst("drew", a) if a is not None else None
+            if a is None or d is None or d > screen:
+                continue
+            st["total"].append(row["lat_ms"])
+            st["mac_to_app"].append((a - post) / 1e3)
+            st["app_to_drawn"].append((d - a) / 1e3)
+            st["drawn_to_screen"].append((screen - d) / 1e3)
+        r = {"n": len(st["total"])}
+        for k, v in st.items():
+            r[k + "_ms"] = med(v)
+        r["total_p90_ms"] = p90(st["total"])
+        res["native-" + m] = r
 print(json.dumps(res))
 PY
 if ((HWC)); then
