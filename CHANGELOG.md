@@ -3,6 +3,21 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.2 (unreleased)
+
+- **Pause drawing while hidden (experimental, off by default).** A new switch in the VM window's
+  Display settings. While none of the VM's window can be seen for 2 seconds (minimised, covered
+  by other windows, on another Space, the screen locked or asleep), the VM turns its display off
+  and stops drawing, as macOS apps do for a window nobody sees. Sound, downloads and everything
+  else in the VM keep running. As soon as any part of the window shows again, the VM draws again;
+  its first new picture comes a few frames later (20-40 ms on a Mac mini), and until then you see
+  the last one. A visible window is never touched: every frame, at the display's full rate.
+  Measured on a MacBook Pro M4 Max with the VM hidden and the Mac's display asleep, the whole Mac:
+  a 1080p video in the VM 5.5 -> 4.6 W, a terminal scrolling its output 8.2 -> 2.9 W (the VM's
+  idle level). It works at once in a running VM; Update VM brings the VM's side, and `omacvm check`
+  says "pause while hidden: ready". Only the main window: in full screen on several displays the
+  other windows keep drawing.
+
 ## 3.2.1
 
 Google Chrome plays 1440p and 4K video on the Mac's media engine, call tiles show the whole picture,
