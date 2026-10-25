@@ -40,7 +40,7 @@ mkdir -p "$OUT" || exit 3
 KEY=$HOME/.ssh/omacvm
 PORT=$(sed -n "s/^SSH_PORT=//p" "$VMD/vm.env" | tr -d "'\"")
 QPAT='(runtime/bin/OmacVM|MacOS/OmacVM-VM) -name'
-QPID=$(pgrep -f "$QPAT $VM( |$)" | head -1)
+QPID=$(LC_ALL=C pgrep -f "$QPAT $VM( |$)" | head -1)
 [[ -n $QPID ]] || { echo "stale-frames: $VM does not run" >&2; exit 3; }
 CTL=$OUT/.ssh-ctl
 SSHO=(-i "$KEY" -p "$PORT" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no

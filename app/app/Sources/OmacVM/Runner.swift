@@ -131,6 +131,12 @@ final class Runner {
         if Settings.macPointer {
             a += ["-smbios", "type=11,value=omacvm.hwcursor=1"]
         }
+        // Pointer on its own layer (experimental): the guest loads its virtio-gpu
+        // driver with the cursor plane shown and Hyprland puts the pointer there
+        // (omacvm-virtio-gpu-load, omacvm_app.lua). QEMU's cursor layer shows it.
+        if Settings.pointerPlane {
+            a += ["-smbios", "type=11,value=omacvm.pointerplane=1"]
+        }
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
               "-chardev", "file,id=hvc0,path=\(q(console))",
@@ -558,6 +564,12 @@ final class Runner {
         // HDR for omacvm check: on, or why not while the switch is on.
         if hdr.on || Settings.hdr {
             log.write(Data("OmacVM: HDR: \(hdr.on ? "on" : "off") (\(hdr.why))\n".utf8))
+        }
+        // The pointer on its own layer for omacvm check, while the switch is on.
+        // "asked": the guest's driver loader decides (an old guest or a driver
+        // not built yet keeps the stock one); omacvm check says what runs.
+        if Settings.pointerPlane {
+            log.write(Data("OmacVM: pointer layer: \(Settings.macPointer ? "off (macPointer is on)" : "asked (omacvm check says if it runs)")\n".utf8))
         }
         // Extra brightness for omacvm check, while the switch is on (QEMU's own lines follow it).
         if Settings.extraBrightness {

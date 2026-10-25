@@ -484,6 +484,10 @@ jobs:
           app/runtime/Tests/display/test-present-damage.sh
           app/runtime/Tests/display/test-present-damage.sh --self-test
 
+      - name: The pointer's layer as bright as the boosted frames (ADR 0054; the checks catch code without it)
+        run: |
+          app/runtime/Tests/display/test-pointer-bright.sh
+          app/runtime/Tests/display/test-pointer-bright.sh --self-test
       - name: Tiled present, only the changed tiles to WindowServer (the checks catch code without it)
         run: |
           app/runtime/Tests/display/test-present-tiles.sh
@@ -737,6 +741,9 @@ jobs:
           /tmp/lua-5.5.0/src/luac -p src/app/guest/omacvm_app.lua src/omanotch/guest/hypr/notchbar.lua
           d=$(mktemp -d)
           XDG_RUNTIME_DIR=$d XDG_CONFIG_HOME=$d /tmp/lua-5.5.0/src/lua src/app/guest/tests/omacvm_app_test.lua src/app/guest/omacvm_app.lua
+
+      - name: omacvm check's HDR line says what Hyprland's SDR copy does (the check catches code without it)
+        run: src/tests/hdr-copy-check.sh
 
       - name: Chromium's video decoder builds, and waits for a GPU that is not usable (no render node here)
         run: |

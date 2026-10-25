@@ -17,8 +17,9 @@
 #    changes (hyprpicker/; the package's drew every display on every frame)
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
-#  * the 10-bit virtio-gpu driver (HDR), built for every kernel but dormant:
-#    loaded only when the app's switch starts the VM (omacvm-virtio-gpu-load)
+#  * OmacVM's virtio-gpu driver (HDR; the pointer on its own layer),
+#    built for every kernel but dormant: loaded only when one of the app's two
+#    switches starts the VM (omacvm-virtio-gpu-load)
 #  * Vulkan (Venus), when the VM's Graphics setting gives it Vulkan: a Venus
 #    driver for the Mac's 16 KiB pages while Arch Linux ARM's is too old
 #    (venus/), now and at each boot (the setting can change between starts)
@@ -36,15 +37,18 @@ install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displa
 # What the Mac tells the VM at start (SMBIOS strings), for omacvm-app-host and
 # the 10-bit driver's loader.
 install -Dm755 omacvm-smbios /usr/local/lib/omacvm/omacvm-smbios
-# 10-bit colour (HDR): the 10-bit virtio-gpu driver, built now and by a pacman
-# hook for new kernels (as a user id of its own, from kernel.org; a kernel without headers
-# is skipped), into /usr/local/lib/omacvm/virtio-gpu/<kernel>, where depmod
+# 10-bit colour (HDR) and the pointer on its own layer: OmacVM's virtio-gpu
+# driver (10-bit formats, the cursor plane option), built now and by a pacman
+# hook for new kernels (as a user id of its own, from kernel.org; a kernel
+# without headers is skipped), into /usr/local/lib/omacvm/virtio-gpu/<kernel>, where depmod
 # does not see it. A modprobe rule hands virtio_gpu to omacvm-virtio-gpu-load,
-# which loads it only when the app's switch starts the VM, else the stock one.
+# which loads it only when one of the app's switches starts the VM, else the
+# stock one.
 VG=/usr/local/lib/omacvm/virtio-gpu
 install -Dm755 virtio-gpu/omacvm-virtio-gpu-build $VG/omacvm-virtio-gpu-build
 install -Dm755 virtio-gpu/omacvm-virtio-gpu-load $VG/omacvm-virtio-gpu-load
 install -Dm644 virtio-gpu/linux-virtio-gpu-deep-color.patch $VG/linux-virtio-gpu-deep-color.patch
+install -Dm644 virtio-gpu/linux-virtio-gpu-cursor-plane.patch $VG/linux-virtio-gpu-cursor-plane.patch
 ln -sf $VG/omacvm-virtio-gpu-build /usr/local/bin/omacvm-virtio-gpu-build
 install -Dm644 virtio-gpu/95-omacvm-virtio-gpu.hook /etc/pacman.d/hooks/95-omacvm-virtio-gpu.hook
 $VG/omacvm-virtio-gpu-build --hook > /var/log/omacvm-virtio-gpu.log 2>&1 || true

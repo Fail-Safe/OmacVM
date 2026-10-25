@@ -669,6 +669,18 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "keepDockAway") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "keepDockAway") }
     }
+    /// Pointer on its own layer (experimental, off by default): the VM loads
+    /// its virtio-gpu driver with the cursor plane shown (SMBIOS
+    /// omacvm.pointerplane=1, module option cursor_plane=1) and Hyprland puts
+    /// the pointer there; QEMU shows that image over its window. A pointer
+    /// move then no longer redraws the VM's screen (same picture, less GPU).
+    /// Not with macPointer (that needs the hotspot this plane does not get).
+    /// The VM window's switch (PointerPlaneRow) or
+    /// defaults write org.omacvm.app pointerPlane -bool true. Read at each start.
+    static var pointerPlane: Bool {
+        get { UserDefaults.standard.bool(forKey: "pointerPlane") }
+        set { UserDefaults.standard.set(newValue, forKey: "pointerPlane") }
+    }
     /// Experimental, off by default, no switch in the window yet: the VM
     /// puts its pointer on virtio-gpu's cursor plane and the Mac's own cursor
     /// shows it (QEMU's OMACVM_HW_CURSOR, the guest's omacvm.hwcursor), so it

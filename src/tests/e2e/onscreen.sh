@@ -72,7 +72,7 @@ want() { [[ -z $ONLY || $ONLY == *" $1 "* ]]; }
 hid_idle() { ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'; }
 # Remote sessions: Jump Desktop, and a macOS Screen Sharing session unless nobody used it for 30 min (left open).
 jump() {
-  local j s; j=$(pgrep -f 'JumpConnect.*(rtcproxy|desktopproxy)' | wc -l | tr -d ' ')
+  local j s; j=$(LC_ALL=C pgrep -f 'JumpConnect.*(rtcproxy|desktopproxy)' | wc -l | tr -d ' ')
   s=$(pmset -g assertions 2>/dev/null | grep -c 'screensharingd.*Remote user is connected')
   (( s > 0 && $(hid_idle) >= 1800 )) && s=0
   echo $(( j + s ))

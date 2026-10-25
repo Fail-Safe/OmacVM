@@ -52,8 +52,8 @@ run)
   OUT=$D/out/$MODE; rm -rf "$OUT"; mkdir -p "$OUT"
   log() { echo "$(date +%H:%M:%S) $*" | tee -a "$OUT/run.log"; }
   ax() { log "app stderr ($2):"; grep -h "drive:" "$OUT"/app*.stderr 2>/dev/null | sed 's/^/      /' | tee -a "$OUT/run.log"; }
-  lpid() { pgrep -f "^$APP/Contents/MacOS/OmacVM( |\$)" | head -1; }
-  qpid() { pgrep -f "$VOL/VMs/$VM/disk.img" | head -1; }
+  lpid() { LC_ALL=C pgrep -f "^$APP/Contents/MacOS/OmacVM( |\$)" | head -1; }
+  qpid() { LC_ALL=C pgrep -f "$VOL/VMs/$VM/disk.img" | head -1; }
   [[ -d $VOL/VMs/$VM ]] || attach || { log "image not attached"; exit 1; }
   # Only the test VM on the image, through the test app's own VMs folder.
   g=$(e2e_vm_guard "$DOM" "$VM") || { log "guard: not started"; exit 3; }
