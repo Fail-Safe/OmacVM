@@ -3,6 +3,17 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.2 (unreleased)
+
+- **Tiled present, built, off for now.** OmacVM.app shows every frame of the VM as a new whole
+  picture, so macOS redraws the whole window for each one, also when only the pointer moved. With
+  tiles, only the 256x256 squares the VM changed get a new picture. MacBook Air M2, the VM full
+  screen at 60 Hz with a driver that says what changed, the pointer moving: 3.13 W instead of
+  3.75 W for the whole Mac (-17 %), the same pixels and frame rate; scrolling and typing the same.
+  It needs a VM that says what changed in its frames (Linux 7.4, or OmacVM's own driver with that
+  fix, #520), so there is no switch yet. `OMACVM_GL_PRESENT_TILES=1` in the app's environment
+  turns it on for tests.
+
 ## 3.2.1
 
 Google Chrome plays 1440p and 4K video on the Mac's media engine, call tiles show the whole picture,
