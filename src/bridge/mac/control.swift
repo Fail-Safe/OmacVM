@@ -460,9 +460,9 @@ final class Control {
   /// background when it is due (`fresh` false: never for its age).
   /// `listed`: the list has it as running, but it is refused (the Mac cannot
   /// reach it, or OmacVM did not set it up; one that just started again): a
-  /// run at most every VMListCache.refusedEvery (a guest asking again and
-  /// again never makes the Bridge probe every VM each second), waited for as
-  /// below while it goes; else the cache at once. A VM
+  /// run at once, then backing off (VMListCache.refused: a guest asking again
+  /// and again never makes the Bridge probe every VM each second), waited for
+  /// as below while it goes; else the cache at once. A VM
   /// it does not have (or has as not running): a fresh run first (at most
   /// once per `every` seconds), waited for up to VMListCache.unknownWait
   /// (`fresh` false: not waited for, graphics memory is asked every 2 s with

@@ -1058,10 +1058,12 @@ struct VMListCache {
   /// run probes every VM over SSH). `waitFor`: the run the request waits for
   /// (VMListCache.unknownWait at most): the one it started or the one going;
   /// nil: answered from the list at once (no run due).
-  /// The first look for a VM refused this way comes after `refusedEvery`
-  /// (one that just started again is found by it); when that look still
-  /// could not reach it, the next ones wait 30, 60, then 120 s (`backOff`):
-  /// each look probes the VM over SSH, and while its sshd turns the Mac away
+  /// The first look for a VM refused this way starts at once, also when the
+  /// list is only a moment old: a run right after a job may catch the VM
+  /// busy for a second (#528). The second comes `refusedEvery` after it (one
+  /// that just started again is found by it); when that look still could not
+  /// reach it, the next ones wait 30, 60, then 120 s (`backOff`): each look
+  /// probes the VM over SSH, and while its sshd turns the Mac away
   /// (PerSourcePenalties) more tries keep it that way. Per VM (`key`); a
   /// request that finds it again (`reached`) starts over.
   static let refusedEvery: Double = 5
@@ -1071,11 +1073,11 @@ struct VMListCache {
   mutating func refused(key: String, now: Date) -> (start: Bool, waitFor: Int?) {
     guard now.timeIntervalSince(failedAt) >= Self.afterFailure else { return (false, nil) }
     let n = refusedRuns[key] ?? 0
-    let every = n == 0 ? Self.refusedEvery : Self.backOff[min(n - 1, Self.backOff.count - 1)]
+    let every = n == 0 ? 0 : n == 1 ? Self.refusedEvery : Self.backOff[min(n - 2, Self.backOff.count - 1)]
     let last = refusedAt[key] ?? .distantPast
     // Only a run this VM's refusal started (or its first one) is waited for.
     if running { return (false, n == 0 || now.timeIntervalSince(last) < Self.unknownWait ? started : nil) }
-    guard now.timeIntervalSince(last) >= every, now.timeIntervalSince(at) >= Self.refusedEvery else { return (false, nil) }
+    guard now.timeIntervalSince(last) >= every else { return (false, nil) }
     if refusedAt.count > 64 { refusedAt.removeAll(); refusedRuns.removeAll() }   // a guest cannot grow these
     refusedAt[key] = now
     refusedRuns[key] = n + 1
