@@ -138,11 +138,16 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   wide). The VM's VA-API shim now, in Chromium's processes only, imports
   such a frame at its rounded size when its buffer holds it, has the
   conversion fill the whole frame, and scales the conversion's source
-  region to the picture's part of the rounded planes: the tile shows every
+  region to the picture's part of the rounded planes (only for 4:2:0
+  surfaces Mesa allocated itself: an imported picture, such as a camera
+  frame of its real size, keeps its region): the tile shows every
   row where Chrome's CPU decoders put it (WebRTC loopback, VP9, AV1 and
   H.264 at 320x180, 480x270, 640x360, 854x480 and 1920x1080: off by 0.4 to
-  2 rows on average, as on the CPU). `OMACVM_VA_FILL=0` in Chrome's
-  environment turns it off. Test: `src/app/guest/tests/va-shim-vpp-fill.sh`.
+  2 rows on average, as on the CPU). It relies on how Mesa rounds and reads
+  those planes, so it runs only with a Mesa it was checked with (up to 26.2,
+  from Mesa's vendor string; a newer Mesa: off, with one line in Chrome's
+  log, until it is checked again). `OMACVM_VA_FILL=0` or `1` in Chrome's
+  environment turns it off or on. Test: `src/app/guest/tests/va-shim-vpp-fill.sh`.
 - In the VM, `src/app/guest/install.sh` adds `vainfo` and a small VA-API driver
   shim (`omacvm_drv_video.c`, used through `LIBVA_DRIVER_NAME=omacvm`): Mesa's
   driver unchanged, but it offers only NV12 surfaces (Firefox cannot show the

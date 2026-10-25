@@ -12,8 +12,9 @@ in more words.
   the rounded frame as its own size. The VM's VA-API driver now has those frames filled to their
   rounded size and reads only the picture's part of the decoded planes, so Chrome puts every
   row where its own CPU decoders do (checked at 320x180, 480x270, 640x360, 854x480 and 1080p in
-  VP9, AV1 and H.264). Only in Chromium-based apps; needs Update VM, then restart Chrome.
-  `OMACVM_VA_FILL=0` in Chrome's environment turns it off.
+  VP9, AV1 and H.264). Only in Chromium-based apps and with Mesa up to 26.2 (a newer Mesa
+  turns it off until it is checked); needs Update VM, then restart Chrome. `OMACVM_VA_FILL=0`
+  in Chrome's environment turns it off.
 
 ## 3.2.0
 
