@@ -43,11 +43,15 @@ run "OMACVM_HOST_ENV=$T/none.env" no --type=gpu-process
 run "OMACVM_HOST_ENV=$T/host-new.env OMACVM_VA_DECODE_WAIT=0" no --type=gpu-process
 run "OMACVM_HOST_ENV=$T/host-old.env OMACVM_VA_DECODE_WAIT=1" yes
 
-# The app says so at every start (Runner.swift), as host.env's reader expects.
-if grep -q '^        a += \["-smbios", "type=11,value=omacvm.vadecasync=1"\]$' "$repo/app/app/Sources/OmacVM/Runner.swift"; then
-  echo "ok: the app always sends omacvm.vadecasync"
+# The app says so at every start (Runner.swift), as host.env's reader expects, unless QEMU
+# waits for each picture (OMACVM_VIDEO_DECODE_SYNC=1): then the guest is as in 3.2.0 too.
+runner=$repo/app/app/Sources/OmacVM/Runner.swift
+if grep -A1 -F 'if ProcessInfo.processInfo.environment["OMACVM_VIDEO_DECODE_SYNC"] != "1" {' "$runner" |
+   grep -q '^            a += \["-smbios", "type=11,value=omacvm.vadecasync=1"\]$' &&
+   [[ $(grep -c 'omacvm.vadecasync=1' "$runner") == 1 ]]; then
+  echo "ok: the app sends omacvm.vadecasync unless OMACVM_VIDEO_DECODE_SYNC=1"
 else
-  echo "FAIL: Runner.swift does not always send omacvm.vadecasync"; fail=1
+  echo "FAIL: Runner.swift does not send omacvm.vadecasync only without OMACVM_VIDEO_DECODE_SYNC=1"; fail=1
 fi
 (( fail )) && { echo "va-shim-decode-wait: FAILED"; exit 1; }
 echo "va-shim-decode-wait: all ok"

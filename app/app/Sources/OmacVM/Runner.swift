@@ -104,8 +104,12 @@ final class Runner {
         // (omacvm_drv_video.c), so Chrome decodes on the media engine.
         a += ["-smbios", "type=11,value=omacvm.vaexport=1"]
         // This runtime decodes video beside its GPU thread (virgl-videotoolbox-decode-async.patch):
-        // the shim then lets Chromium's decoder wait for each picture, not the Mac's GPU thread.
-        a += ["-smbios", "type=11,value=omacvm.vadecasync=1"]
+        // the shim then lets Chromium's decoder wait for each picture, not the Mac's GPU thread,
+        // and lifts its 1080p limit. OMACVM_VIDEO_DECODE_SYNC=1 (QEMU waits for each picture, as
+        // in 3.2.0) leaves the marker out, so the guest is as in 3.2.0 too.
+        if ProcessInfo.processInfo.environment["OMACVM_VIDEO_DECODE_SYNC"] != "1" {
+            a += ["-smbios", "type=11,value=omacvm.vadecasync=1"]
+        }
         // FullPanel (NotchArea): the camera housing for the guest's bar, which
         // then sits in the strip beside the notch (omacvm-app-host -> host.env;
         // the bar and notchcast read it). Native starts send nothing.
