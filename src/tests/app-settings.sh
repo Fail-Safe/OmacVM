@@ -269,5 +269,11 @@ if [[ $info == *"HDR and 10-bit colour, Pointer on its own layer or Frames in st
 else
   echo "FAIL Draw only what changed (i): says off = the standard driver, but HDR / pointer layer / frames in step load OmacVM's (with the damage fix)"; fail=1
 fi
+# The M1 Max's HDR 120 Hz set (td2) passed: the (i) says 120 Hz is tested, with its numbers.
+if [[ $info == *"M1 Max"* && $info == *"120 Hz"* && $info != *"not tested yet"* ]]; then
+  echo "ok   Draw only what changed (i): tested at 120 Hz (HDR, M1 Max)"
+else
+  echo "FAIL Draw only what changed (i): still says 120 Hz is not tested (td2 passed on the M1 Max)"; fail=1
+fi
 
 exit $fail

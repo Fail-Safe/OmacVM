@@ -527,8 +527,9 @@ the VM's SSH on `127.0.0.1:<port>`.
   the standard one, or OmacVM's own for HDR, the pointer layer or frames in
   step (which now always has the fix; QEMU then only collects the changed
   parts). MacBook Air M2, full screen at 60 Hz, the pointer moving:
-  11-17 % less power for the whole Mac, the same pictures and frame rate
-  (checked at 60 Hz, 8-bit and HDR; 120 Hz not yet).
+  11-17 % less power for the whole Mac; MacBook Pro M1 Max, HDR at 120 Hz:
+  9 % less with the pointer moving, 20 % with a spinner. The same pictures
+  and frame rate at 60 Hz (8-bit and HDR) and 120 Hz (HDR).
 - Mac pointer for the VM (experimental, off, no switch in the window yet:
   `defaults write org.omacvm.app macPointer -bool true`, from the VM's
   next start): Omarchy is asked to put its pointer on virtio-gpu's cursor

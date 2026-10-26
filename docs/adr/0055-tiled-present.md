@@ -75,6 +75,17 @@ pointer moving costs 0.39-0.62 W (11-17 %) less. Pictures of the window,
 tiles on vs off: 0 pixels differ; the check mode never found a differing tile
 (0 of 524 checks in the second set).
 
+MacBook Pro M1 Max, HDR at 120 Hz (3024x1896, XRGB2101010, EDR headroom
+11.43 on both sides), the VM full screen on the built-in panel at brightness
+0.50, OmacVM's driver on both sides (an HDR start loads it), only QEMU's
+tiles on or off, 180 s rows on/off/on/off (2026-10-26, m1-bench set td2):
+the pointer moving 19.83 / 20.18 W with tiles, 21.98 / 22.09 W without
+(-9 %; WindowServer 129 vs 198-209 GPU ms/s); a spinner 13.48 vs 16.89 W
+(-20 %; 47 vs 216). Guest 119-120 flushes and 120 vblanks a second either
+way; about half of the ~7170 frames a minute went in tiles. HDR pictures,
+tiles on vs off from fresh starts: the same within a step; the check mode
+0 of 601 differed.
+
 ## Consequences
 
 - WindowServer composites the changed tiles only; QEMU draws only them.
