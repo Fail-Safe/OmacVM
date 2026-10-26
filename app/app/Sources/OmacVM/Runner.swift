@@ -31,6 +31,9 @@ final class Runner {
     /// told all agree.
     private var startAudioThread: Bool?
     var audioThread: Bool { startAudioThread ?? Settings.audioThread }
+    /// The Mac's output was wireless (AirPods) when this start began (#548):
+    /// the own thread then gives CoreAudio the main loop path's queue.
+    var audioWireless: Bool { audioFramesStart > 0 }
 
     /// virtio-gpu outputs: the window and up to four more Mac displays.
     static let maxOutputs = 5
@@ -82,7 +85,7 @@ final class Runner {
             // No recording without the microphone permission: QEMU's recording
             // would wait minutes for an answer (silence, and a sound that
             // starts meanwhile waits too).
-            "-audiodev", Runner.audiodev(thread: audioThread, mic: Runner.micAllowed),
+            "-audiodev", Runner.audiodev(thread: audioThread, wireless: audioWireless, mic: Runner.micAllowed),
             "-device", "intel-hda,id=hda0,romfile=",
             // The codec paces the guest's sound (no catch-up after a stalled
             // main loop); audioClassic keeps QEMU's own timing.
@@ -133,9 +136,13 @@ final class Runner {
         }
         // Pointer on its own layer (experimental): the guest loads its virtio-gpu
         // driver with the cursor plane shown and Hyprland puts the pointer there
-        // (omacvm-virtio-gpu-load, omacvm_app.lua). QEMU's cursor layer shows it.
+        // (omacvm-virtio-gpu-load, omacvm_app.lua). QEMU's pointer layers show it
+        // over every display's window. 2: this QEMU does (3.2.4 and older sent 1
+        // and showed it over the main window only; a guest from then would leave
+        // the other displays without a pointer, #554, so it gets 2 and draws its
+        // own).
         if Settings.pointerPlane {
-            a += ["-smbios", "type=11,value=omacvm.pointerplane=1"]
+            a += ["-smbios", "type=11,value=omacvm.pointerplane=2"]
         }
         // Frames in step with the Mac (experimental): the guest's virtio-gpu driver
         // asks QEMU for the display's refresh and its vblank timer follows it
@@ -386,6 +393,7 @@ final class Runner {
     func start() throws {
         let c = config
         startAudioThread = Settings.audioThread
+        (audioDeviceStart, audioFramesStart) = AudioLatencyWatch.outputNow()
         try FileManager.default.createDirectory(at: c.folder.appendingPathComponent("logs"),
                                                 withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: c.qmpSocket)
@@ -523,6 +531,13 @@ final class Runner {
         if audioThread {
             env["OMACVM_AUDIO_THREAD"] = "1"
         }
+        // Playback buffers the Mac's output takes (#548): AirPods refuse the own
+        // thread's 256-frame queue. QEMU reads the size for the output now from
+        // this file; AudioLatencyWatch keeps it current while the VM runs.
+        audioFramesFile = Paths.runDir.appendingPathComponent("\(c.id).audio-out-frames").path
+        if AudioLatencyWatch.writeFrames(audioFramesFile, audioFramesStart) {
+            env["OMACVM_AUDIO_OUT_FRAMES_FILE"] = audioFramesFile
+        }
         // virgl's GPU-only commands without the BQL (gpuOffMainLoop, ADR 0046;
         // qemu-virtio-gpu-virgl-unlocked.patch); safe mode keeps the BQL. The
         // VM's frames then come steadily, and the present skips a frame left
@@ -603,6 +618,10 @@ final class Runner {
         if Settings.presentTiles {
             log.write(Data("OmacVM: tiled present: \(tiles.on ? "on" : "off") (\(tiles.why))\n".utf8))
         }
+        // A wireless output at the start (#548): QEMU opens it with larger buffers.
+        if audioFramesStart > 0 {
+            log.write(Data("OmacVM: sound: the Mac's output is wireless: \(audioThread ? "the main loop path's queue on the own thread (44.1 kHz, 512 frames)" : "512-frame buffers")\n".utf8))
+        }
         // Extra brightness for omacvm check, while the switch is on (QEMU's own lines follow it).
         if Settings.extraBrightness {
             log.write(Data("OmacVM: extra brightness: \(extraBright.on ? "on" : "off") (\(extraBright.why))\n".utf8))
@@ -610,8 +629,11 @@ final class Runner {
         p.standardOutput = log
         p.standardError = log
         let agentPath = c.agentSocket.path
+        let framesFile = audioFramesFile
         p.terminationHandler = { [weak self] proc in
             let status = proc.terminationStatus
+            // QEMU's playback size file (#548) is of this run only.
+            if !framesFile.isEmpty { try? FileManager.default.removeItem(atPath: framesFile) }
             // A QEMU killed while the VM had the keyboard leaves macOS's globe
             // shortcut off: give it back (GlobeKey).
             let globe = GlobeKey.giveBack(after: proc.processIdentifier)
@@ -671,7 +693,9 @@ final class Runner {
         if links.camera { startCamera() }
         startControl()
         // The sound's delay on the Mac, so the VM's videos keep the picture in step.
-        let audioDelay = AudioLatencyWatch(agentSocket: agentPath, thread: audioThread) { [weak self] line in
+        let audioDelay = AudioLatencyWatch(agentSocket: agentPath, thread: audioThread, wireless: audioWireless,
+                                           framesFile: audioFramesFile, initialFrames: audioFramesStart,
+                                           initialDevice: audioDeviceStart) { [weak self] line in
             Task { @MainActor in self?.appendLog(line) }
         }
         audioDelay.start()
@@ -923,8 +947,8 @@ final class Runner {
 
     /// The sound backend's options (AudioPath). No recording without the
     /// microphone permission (in.voices=0).
-    static func audiodev(thread: Bool, mic: Bool) -> String {
-        let ring = thread ? AudioPath.threadOptions : AudioPath.mainLoopOptions
+    static func audiodev(thread: Bool, wireless: Bool = false, mic: Bool) -> String {
+        let ring = AudioPath.options(thread: thread, wireless: wireless)
         return "sdl,id=snd0,timer-period=1000,\(ring)\(mic ? "" : ",in.voices=0")"
     }
 
@@ -1090,6 +1114,10 @@ final class Runner {
 
     private var control: NativeControlBridge?
     private var audioLatency: AudioLatencyWatch?
+    /// QEMU's playback size file and what this start wrote into it (#548).
+    private var audioFramesFile = ""
+    private var audioFramesStart = 0
+    private var audioDeviceStart = AudioLatencyWatch.unknown
 
     private func startControl() {
         let path = config.controlSocket.path, name = config.name, gpuMemory = GPUMemory.file(for: config)

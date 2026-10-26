@@ -15,8 +15,9 @@ local function mac_pointer()
   return on
 end
 local mac = mac_pointer()
--- The app's experimental "Pointer on its own layer" (omacvm.pointerplane=1):
--- OmacVM's virtio-gpu driver then shows its cursor plane (cursor_plane=1).
+-- The app's experimental "Pointer on its own layer" (omacvm.pointerplane=2):
+-- OmacVM's virtio-gpu driver then shows a cursor plane on every output
+-- (cursor_plane=1), and QEMU shows each over that display's window.
 -- Read from the running driver, so a start on the stock one stays as before.
 local function driver_option(name)
   local dir = os.getenv("OMACVM_APP_LUA_SYS") or "/sys"

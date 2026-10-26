@@ -100,6 +100,12 @@ commit 82927e9. Changes here:
   refuses (although the guest's Mesa accepted it) skips the draws that need it;
   the guest's context keeps running. `OMACVM_VIRGL_SHADER_FAILURES=lose` goes
   back to upstream (the whole context stops)
+- `patches/virgl-sysval-block-check.patch`: a linked program whose VirglBlock
+  (vrend's own uniform block) the GL reports smaller than vrend fills, or whose
+  size query fails, is refused like a failed link: its draws are skipped. An
+  assert there aborted QEMU once at desktop start, right after the Mac's GL had
+  refused calls of the bar's context (#547). Checked by
+  `Tests/virgl/test-sysval-block.c`
 - `patches/virgl-context-loss-report.patch`: a context that is lost anyway tells
   the guest through a status buffer the guest's Mesa names
   (`src/app/guest/mesa/`), and the log says so once

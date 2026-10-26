@@ -43,8 +43,9 @@ What the patch adds:
     ($XDG_RUNTIME_DIR/omacvm/displays.json); else the bar is the normal one.
     notchcast does not run in such a boot.
   * Toasts on the display with the parked bar keep only the normal gap, not
-    a bar's room (barSizeFor, which Omarchy's notifications ask from about
-    October 2026; older ones get guest/omanotch-notifications.sh).
+    a bar's room; with FullPanel's bar they keep the strip's height and the
+    gap (barSizeFor, which Omarchy's notifications ask from about October
+    2026; older ones get guest/omanotch-notifications.sh).
 
 Omarchy's Bar.qml changed in October 2026 (upstream's notch floor from
 display-cutouts.json, a bar thickness per screen, the centre's hover area):
@@ -55,7 +56,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 34
+VERSION = 35
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -72,7 +73,7 @@ PIECES = [
     "    property bool notchLayout: false\n",                                # 5. around the housing
     "        Item { id: notchLeftEdge; ",
     "    WlrLayershell.layer: barWindow.notchRole === \"notch\" || ",        # 6. layer, repaint, black strip
-    "    // omarchy-notch-bar: a bar parked in the notch strip takes no room here.\n",  # 7. toasts
+    "    // FullPanel's bar the whole strip (its parkedSize).\n",  # 7. toasts
     "  function notchSkipPlace(width, pad, left, right, housing, beside, edge, gap, keep, prev, stick) {\n",  # 1.
     "        readonly property bool notchSkipActive: root.notchSkipOn && barWindow.notchLayout\n",  # 4.
     "    property var notchBeside: [0, 0]\n",                                # 5.
@@ -1181,12 +1182,18 @@ def main():
 ''')
 
     # 7. Toasts on the display whose bar is parked in the notch strip keep
-    #    only the normal gap. Omarchy's notifications ask the bar how much
-    #    room it takes on a screen (barSizeFor) from about October 2026; a
-    #    bar from before has no such function, so it gets one (an older
-    #    notification service reads barSize: guest/omanotch-notifications.sh).
-    room = '''    // omarchy-notch-bar: a bar parked in the notch strip takes no room here.
+    #    only the normal gap; under FullPanel's bar, which is as tall as the
+    #    strip (parkedSize), the strip's height and the gap, not the bar's
+    #    size and the gap (that put them into the bar). Omarchy's
+    #    notifications ask the bar how much room it takes on a screen
+    #    (barSizeFor) from about October 2026; a bar from before has no such
+    #    function, so it gets one (an older notification service reads
+    #    barSize: guest/omanotch-notifications.sh).
+    room = '''    // omarchy-notch-bar: a bar parked in the notch strip takes no room here,
+    // FullPanel's bar the whole strip (its parkedSize).
     if (root.notchParked && String(screenName) === root.notchParkedScreen) return 0
+    if (root.notchRoleFor({ name: String(screenName) }) === "fullpanel")
+      return root.notchBox(0, root.notchHeight, 0, root.barSize, 1)[0]
 '''
     stock_room = "  function barSizeFor(screenName) {\n"
     if text.count(stock_room) == 1:

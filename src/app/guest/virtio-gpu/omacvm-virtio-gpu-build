@@ -246,7 +246,7 @@ rule_text() {
 # mkinitcpio's kms hook puts virtio_gpu in it) such a start loads nothing yet:
 # udev loads it again from the real root, through the loader. Every other
 # start: the stock one, as before.
-install virtio_gpu if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=1 -e omacvm.vsynclock=1 -e omacvm.damage=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi
+install virtio_gpu if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=2 -e omacvm.vsynclock=1 -e omacvm.damage=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi
 EOF
 }
 

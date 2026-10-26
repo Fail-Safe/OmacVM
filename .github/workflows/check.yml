@@ -64,6 +64,14 @@ jobs:
           command -v shellcheck >/dev/null || brew install shellcheck
           tr '\n' '\0' < "$RUNNER_TEMP/shell-files" | xargs -0 shellcheck -S error -s bash
 
+      - name: CHANGELOG, a pull request adds nothing to a released version
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch -q --no-tags --depth=1 origin "$BASE_SHA"
+          src/tests/changelog-released.sh "$BASE_SHA"
+
       - name: Python compiles
         run: |
           git ls-files -z '*.py' | xargs -0 python3 -m py_compile
@@ -401,6 +409,9 @@ jobs:
       - name: The on-screen release test's checks, offline (its tool builds; no screen, VM or app)
         run: src/tests/e2e-onscreen.sh
 
+      - name: Test copies only as the test identity (a lane's own id has no macOS permissions)
+        run: src/tests/e2e-relabel-id.sh
+
       - name: Stale-frame check reads the guest's scanout and finds changed pixels below the bar (#167)
         run: src/tests/stale-frames-diff.sh
 
@@ -466,6 +477,9 @@ jobs:
       - name: QEMU's full-grab tap at the end of the chain with OMACVM_KEYS_LAST (keyboard sharing apps, issue 350)
         run: app/runtime/Tests/keys/test-keys-last.sh
 
+      - name: No macOS prompt for QEMU's full-grab tap at the VM's start (made only when already allowed)
+        run: app/runtime/Tests/keys/test-tap-no-ask.sh
+
       - name: Modifier keys follow each event's flags (Universal Control, issue 412; the old rules fail it)
         run: app/runtime/Tests/keys/test-modifier-state.sh
 
@@ -498,6 +512,10 @@ jobs:
         run: |
           app/runtime/Tests/display/test-pointer-bright.sh
           app/runtime/Tests/display/test-pointer-bright.sh --self-test
+      - name: The pointer's layer over every display's window (ADR 0054, #554; the checks catch code without it)
+        run: |
+          app/runtime/Tests/display/test-pointer-heads.sh
+          app/runtime/Tests/display/test-pointer-heads.sh --self-test
       - name: Tiled present, only the changed tiles to WindowServer (the checks catch code without it)
         run: |
           app/runtime/Tests/display/test-present-tiles.sh

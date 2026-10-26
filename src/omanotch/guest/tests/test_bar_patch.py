@@ -178,7 +178,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertEqual(V, 34)
+        self.assertEqual(V, 35)
         self.assertIn(VERSION_LINE, self.text)
 
     def test_state_files_read_fresh_after_reload(self):
@@ -692,12 +692,15 @@ class RealOmarchy(unittest.TestCase):
             full = self.full(stock)
             self.assertEqual(full.count("  function barSizeFor(screenName) {\n"), 1)
             body = function(full, "barSizeFor")
-            self.assertTrue(body.startswith("\n    // omarchy-notch-bar: a bar parked in the notch strip takes no room here.\n"), body)
+            self.assertTrue(body.startswith("\n    // omarchy-notch-bar: a bar parked in the notch strip takes no room here,\n"), body)
 
     @unittest.skipUnless(shutil.which("node"), "node not installed")
     def test_toasts_keep_only_the_gap_under_the_parked_bar(self):
         # Omarchy's notifications (from about October 2026): the bar's room on
         # that screen plus the gap; a hidden bar counts the default size.
+        # FullPanel (#339): the bar on its screen is as tall as the strip
+        # (34 here, the bar 26), so the toast goes 34 + the gap down, not 26 +
+        # the gap into the bar (the user's MacBook Pro, 2026-10-26).
         js = """
 var BarModel = { barSizeFor: function (sizes, name, fallback) { return sizes[name] > 0 ? sizes[name] : fallback } }
 function barClearance(bar, screenName, defaultBarSize, gapsOut) {
@@ -708,19 +711,26 @@ function barClearance(bar, screenName, defaultBarSize, gapsOut) {
 var out = [];
 CASES.forEach(function (c) {
   var root = { notchParked: c[0], notchParkedScreen: "Virtual-1", barHidden: false, barSize: 26,
+               notchPanelOn: c[2], notchPanelScreen: "Virtual-1", notchHeight: 33.5, position: "top",
                screenBarSizes: { "Virtual-1": 26, "Virtual-2": 34 } }
-  root.barSizeFor = function (screenName) { BODY }
+  with (root) {   // QML resolves the bar's own properties without "root."
+    root.notchRoleFor = function (s) { ROLE }
+    root.notchBox = function (outH, strip, flush, size, scale) { BOX }
+    root.barSizeFor = function (screenName) { BODY }
+  }
   out.push(barClearance(root, c[1], 26, 10))
 })
 console.log(JSON.stringify(out))
 """
-        cases = [[True, "Virtual-1"], [True, "Virtual-2"], [False, "Virtual-1"], [False, "Virtual-2"]]
+        cases = [[True, "Virtual-1", False], [True, "Virtual-2", False], [False, "Virtual-1", False],
+                 [False, "Virtual-2", False], [False, "Virtual-1", True], [False, "Virtual-2", True]]
         for name, stock in self.each():
-            body = function(self.full(stock), "barSizeFor")
-            out = subprocess.run(["node", "-e", js.replace("CASES", json.dumps(cases)).replace("BODY", body)],
-                                 check=True, capture_output=True, text=True)
+            full = self.full(stock)
+            js_case = (js.replace("CASES", json.dumps(cases)).replace("BODY", function(full, "barSizeFor"))
+                       .replace("ROLE", function(full, "notchRoleFor")).replace("BOX", function(full, "notchBox")))
+            out = subprocess.run(["node", "-e", js_case], check=True, capture_output=True, text=True)
             other = 34 if "screenBarSizes" in stock else 26   # a thicker bar there (notch floor) on the newer one
-            self.assertEqual(json.loads(out.stdout), [10, other + 10, 36, other + 10])
+            self.assertEqual(json.loads(out.stdout), [10, other + 10, 36, other + 10, 34 + 10, other + 10])
 
     def test_older_patch_and_restore(self):
         for name, stock in self.each():

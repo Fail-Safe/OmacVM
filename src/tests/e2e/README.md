@@ -137,12 +137,15 @@ without a window) run headless. `src/tests/e2e-onscreen.sh` tests the checks
 offline (CI).
 
 ```bash
-# the release zip as the test identity; a lane's own id keeps another test app's settings apart
-OMACVM_SIGN_ID=<Developer ID> src/tests/e2e/relabel.sh OmacVM-X.Y.Z.zip ~/e2e/app org.omacvm.app.test.e2e
+# the release zip as the test identity (only org.omacvm.app.test: macOS's permissions are kept for
+# that id and the Developer ID team, every copy and build has them; a lane's own id has none and
+# its QEMU asked "would like to control this Mac" at every VM start). Hold ~/.omacvm-test-identity.lock;
+# save the test app's settings first and put them back after (test-vms.sh: e2e_settings_save/restore)
+OMACVM_SIGN_ID=<Developer ID> src/tests/e2e/relabel.sh OmacVM-X.Y.Z.zip ~/e2e/app
 A=~/e2e/app/"OmacVM Test.app"
-defaults write org.omacvm.app.test.e2e vmsRoot ~/e2e/vms
+defaults write org.omacvm.app.test vmsRoot ~/e2e/vms
 # a stopped test VM from the prebuilt image (a few minutes), in that VMs folder
-OMACVM_TEST_IDENTITY=1 OMACVM_APP_ID=org.omacvm.app.test.e2e OMACVM_PASSWORD=<any> "$A/Contents/Resources/omacvm/omacvm" \
+OMACVM_TEST_IDENTITY=1 OMACVM_APP_ID=org.omacvm.app.test OMACVM_PASSWORD=<any> "$A/Contents/Resources/omacvm/omacvm" \
   build --yes --prebuilt --no-mac --vm-type app --vm-name "OmacVM M-e2e" --cpus 4 --memory-gb 4 --disk-gb 64 \
   --user omtest --full-name "OmacVM Test" --hostname omacvm-e2e --feature autologin=on --feature no-idle-lock=on
 # the caller holds the Mac's VM lock; run it from a copy of the checkout (bash reads a script as it runs)

@@ -497,10 +497,14 @@ the VM's SSH on `127.0.0.1:<port>`.
   from compositors that send no cursor hotspots, and Hyprland's aquamarine
   sends none. `omacvm_app.lua` then puts the pointer there (from a CPU
   buffer), and QEMU shows that image over its window, 1:1 at the plane's
-  place, so a pointer move no longer redraws the VM's screen. Only the main
-  window's output gets the plane; external displays keep Hyprland's own
-  pointer. With Extra brightness QEMU gives the layer the frames' gain, so
-  the pointer is as bright as the page under it. Not with the hidden Mac pointer setting (that one needs the
+  place, so a pointer move no longer redraws the VM's screen. Every output
+  gets a plane, and QEMU puts a pointer layer over the window of every
+  display the VM uses (the main window and the windows on other displays;
+  #554). The app sends `omacvm.pointerplane=2` and the VM's loader takes only
+  that: a VM before 3.2.5 draws its own pointer until Update VM, and an app
+  of 3.2.4 or older (`=1`, layer over the main window only) gets Hyprland's
+  own pointer. With Extra brightness QEMU gives the main window's layer the
+  frames' gain, so the pointer is as bright as the page under it. Not with the hidden Mac pointer setting (that one needs the
   hotspot). `omacvm check` says "Pointer layer".
 - Frames in step with the Mac (experimental, off; the VM window's Display
   section, `defaults write org.omacvm.app vsyncLock -bool true`, from the

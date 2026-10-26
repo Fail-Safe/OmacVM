@@ -110,7 +110,7 @@ enum KeyAccess {
     /// Once per app run, when the note would be red: an old "control the
     /// computer" entry goes without a click (only this app's own entry, and
     /// only while macOS refuses). With Accessibility on the note goes away;
-    /// else nothing changes (QEMU's next start asks again).
+    /// else nothing changes (QEMU does not ask at start: only Allow… asks).
     private static var clearedOnce = false   // main thread only
     static func clearOldEntryOnce(done: @escaping @MainActor () -> Void) {
         guard !clearedOnce else { return }

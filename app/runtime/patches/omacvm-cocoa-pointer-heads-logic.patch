@@ -1,0 +1,99 @@
+From: OmacVM
+Subject: [PATCH] ui: where the guest's pointer goes over another display's window, tested without AppKit
+
+What: a header with no AppKit in it: the place and size of the guest's
+pointer image over the window of an output other than the main one, from
+the cursor plane's top left and the image's size in the output's pixels,
+stretched as that window stretches the output's frames (each axis on its
+own); hidden while a size is unknown or the image lies wholly off the
+output. And when QEMU's thread sends an output's size to the main thread:
+only when it changed (not at every page flip). Used by
+omacvm-cocoa-pointer-heads.patch (which explains the why).
+
+Why its own file: so the rules are tested without QEMU or a window
+(app/runtime/Tests/display/test-pointer-heads.sh applies this patch to an
+empty folder; at build time and in CI).
+
+Upstream: with omacvm-cocoa-pointer-heads.patch; not sent.
+Test: app/runtime/Tests/display/test-pointer-heads.c.
+
+--- a/ui/omacvm-pointer-heads.h
++++ b/ui/omacvm-pointer-heads.h
+@@ -0,0 +1,77 @@
++/*
++ * OmacVM: the guest's pointer over the windows of the other displays
++ * (#554, ADR 0054).
++ *
++ * No AppKit in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-pointer-heads.c); ui/cocoa.m uses it.
++ *
++ * With the switch "Pointer on its own layer" every output of the guest has
++ * a cursor plane (its virtio-gpu driver with cursor_plane=1) and the guest
++ * draws no pointer into its frames. QEMU shows each plane's image as a
++ * layer over the window of that output: the main window's cursor layer,
++ * and one over each window of the other displays. The plane's position is
++ * the image's top left in the output's pixels. Those windows show the
++ * output's frames stretched over the whole view, each axis on its own, so
++ * the image is placed and sized the same way.
++ */
++#ifndef OMACVM_POINTER_HEADS_H
++#define OMACVM_POINTER_HEADS_H
++
++#include <stdbool.h>
++
++typedef struct OmacVMHeadPointerFrame {
++    bool shown;
++    double x, y;    /* the image's top left, view points from the bottom left */
++    double w, h;    /* its size, view points */
++} OmacVMHeadPointerFrame;
++
++/*
++ * on: the guest shows the plane; (x, y): its top left and cw x ch its size,
++ * guest pixels of an ow x oh output; vw x vh: the view, points. Not shown
++ * while any size is unknown or the image lies wholly off the output (the
++ * guest moved it to another one). x and y come from the guest: any value.
++ */
++static inline OmacVMHeadPointerFrame
++omacvm_head_pointer_frame(bool on, int x, int y, int cw, int ch,
++                          int ow, int oh, double vw, double vh)
++{
++    OmacVMHeadPointerFrame f = { false, 0, 0, 0, 0 };
++    double sx, sy;
++
++    if (!on || cw <= 0 || ch <= 0 || ow <= 0 || oh <= 0 || !(vw > 0) || !(vh > 0)) {
++        return f;
++    }
++    if (x >= ow || y >= oh || x <= -cw || y <= -ch) {
++        return f;
++    }
++    sx = vw / ow;
++    sy = vh / oh;
++    f.shown = true;
++    f.x = x * sx;
++    f.y = vh - y * sy;
++    f.w = cw * sx;
++    f.h = ch * sy;
++    return f;
++}
++
++/*
++ * The output's size as QEMU's thread last sent it to the main thread (per
++ * output). true, and stored, when w x h differs from it: only then is it
++ * sent. With virgl every page flip sets the scanout again at the same size.
++ */
++typedef struct OmacVMHeadPointerSize {
++    int w, h;
++} OmacVMHeadPointerSize;
++
++static inline bool
++omacvm_head_pointer_size_changed(OmacVMHeadPointerSize *last, int w, int h)
++{
++    if (last->w == w && last->h == h) {
++        return false;
++    }
++    last->w = w;
++    last->h = h;
++    return true;
++}
++
++#endif /* OMACVM_POINTER_HEADS_H */

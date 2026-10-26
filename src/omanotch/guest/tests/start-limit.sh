@@ -130,10 +130,12 @@ sed -n '/^say "installing the notchcast service"/,$p' "$G/install.sh" > "$T/inst
 # guest/install.sh: the drop-in it writes, and what follows it for Omanotch.
 gi=$src/guest/install.sh
 sed -n '/notchcast.service.d"$/,/omacvm-host.conf"$/p' "$gi" | sed '1d' > "$T/dropin.sh"
-sed -n '/home_put .*omacvm-host.conf"$/,/^  # Notifications right under the strip/p' "$gi" | sed '1d;$d' > "$T/repair.sh"
+sed -n '/home_put .*omacvm-host.conf"$/,/^  # Notifications right under /p' "$gi" | sed '1d;$d' > "$T/repair.sh"
 for f in install-tail dropin repair; do
   [[ -s $T/$f.sh ]] || { echo "FAIL: cannot find the $f part in the scripts"; exit 1; }
 done
+# The repair part ends at the notifications comment; past it, the rest of install.sh would run.
+grep -q 'omanotch-notifications' "$T/repair.sh" && { echo "FAIL: the repair part runs past the notifications comment"; exit 1; }
 # The first-login unit's ExecStartPre= commands that call systemctl.
 sed -n 's/^ExecStartPre=-\{0,1\}\(.*systemctl.*\)/\1/p' "$src/guest/omacvm-omanotch.service" > "$T/first-login-pre.sh"
 
