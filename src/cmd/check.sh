@@ -607,9 +607,11 @@ fi
 # outputs with more, and tries a larger size when a start is refused.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   sb=$(grep -oE "OmacVM: sound: (playback buffers: .*|the Mac's output refused every buffer size up to [0-9]+ frames)" "$miclog" | tail -1)
+  # A start with a wireless output already has the buffers a restart would give.
+  wls=""; grep -q "OmacVM: sound: the Mac's output is wireless:" "$miclog" && wls=1
   case $sb in
     "") ;;   # an app from before 3.2.5, or no sound yet
-    *"refused every buffer size"*) warn "sound buffers" "the Mac's output would not start at any buffer size (${sb##* up to }), the VM has no sound; fix: pick another output in System Settings > Sound or connect this one again; with AirPods or another Bluetooth output, restart the VM while it is connected (the VM then opens it as QEMU's main loop path does)" ;;
+    *"refused every buffer size"*) if [[ -n $wls ]]; then warn "sound buffers" "the Mac's output would not start at any buffer size (${sb##* up to }), the VM has no sound; this VM started with the wireless output's buffers, a restart does not change them; fix: pick another output in System Settings > Sound or connect this one again"; else warn "sound buffers" "the Mac's output would not start at any buffer size (${sb##* up to }), the VM has no sound; fix: pick another output in System Settings > Sound or connect this one again; with AirPods or another Bluetooth output, restart the VM while it is connected (the VM then opens it as QEMU's main loop path does)"; fi ;;
     *) ok "sound buffers" "${sb#OmacVM: sound: playback buffers: }" ;;
   esac
 fi

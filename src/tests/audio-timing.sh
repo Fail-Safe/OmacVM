@@ -143,10 +143,15 @@ buffers() {   # QEMU's log lines -> the status of check.sh's "sound buffers" lin
 OWN="qemu-system-aarch64: info: OmacVM: sound: playback buffers: 256 frames (the sound path's own)"
 REF="qemu-system-aarch64: OmacVM: sound: the Mac's output did not start with 256-frame buffers (CoreAudio error (AudioQueueStart): -66681); trying 512 frames"
 GOT="qemu-system-aarch64: info: OmacVM: sound: playback buffers: 512 frames (the Mac's output refused 256)"
-ALL="qemu-system-aarch64: OmacVM: sound: the Mac's output refused every buffer size up to 1024 frames; the VM goes on without sound"
+ALL="qemu-system-aarch64: OmacVM: sound: the Mac's output refused every buffer size up to 512 frames; the VM goes on without sound"
+WLS="OmacVM: sound: the Mac's output is wireless: the main loop path's queue on the own thread (44.1 kHz, 512 frames)"
 check "check.sh: the path's own size is ok" grep -q "^ok:256 frames (the sound path's own)" <<<"$(buffers "$OWN")"
 check "check.sh: a refused size that played larger is ok and says so" grep -q "^ok:512 frames (the Mac's output refused 256)" <<<"$(buffers "$OWN" "$REF" "$GOT")"
 check "check.sh: every size refused warns with the way out" grep -q "^warn:.*restart the VM while it is connected" <<<"$(buffers "$OWN" "$REF" "$ALL")"
+check "check.sh: every size refused after a wireless start does not advise a restart" \
+  grep -q "^warn:.*started with the wireless output's buffers, a restart does not change them" <<<"$(buffers "$WLS" "$ALL")"
+lacks() { ! grep -q "$1" <<<"$2"; }
+check "check.sh: ... and not the restart of a wired start" lacks "restart the VM while" "$(buffers "$WLS" "$ALL")"
 check "check.sh: playing again after that is ok" grep -q "^ok:512" <<<"$(buffers "$ALL" "$GOT")"
 check "check.sh: a run without the lines prints nothing" test -z "$(buffers "OmacVM: HDA sound pacing on")"
 # The guest: RTKit keeps PipeWire real-time after the VM was stopped (src/guest/sound/rtkit-no-canary.conf).
