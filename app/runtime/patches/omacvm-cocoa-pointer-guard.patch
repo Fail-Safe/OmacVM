@@ -16,10 +16,10 @@ Test: app/runtime/Tests/display/test-pointer-guard.c.
 
 diff --git a/ui/omacvm-pointer-guard.h b/ui/omacvm-pointer-guard.h
 new file mode 100644
-index 0000000..6b9b34e
+index 0000000..d7fcb7a
 --- /dev/null
 +++ b/ui/omacvm-pointer-guard.h
-@@ -0,0 +1,418 @@
+@@ -0,0 +1,432 @@
 +/*
 + * OmacVM: the pointer maths of the full-screen guard (Dock and hot corners).
 + *
@@ -98,7 +98,8 @@ index 0000000..6b9b34e
 +    bool let_go_warp;   /* no motion since the let-go's warp: the next one ... */
 +    double lwdx, lwdy;  /* ... carries this distance; the warp went ... */
 +    double lwx, lwy;    /* ... here (the pointer's place, the gap off edges) */
-+    bool seen;          /* an event was handled ... */
++    bool lw_flight;     /* the warp in flight has the let-go's in it */
++    bool seen;         /* an event was handled ... */
 +    double last_time;   /* ... with this time stamp ... */
 +    bool last_place;    /* ... and the guest got (x, y) for it */
 +} OmacVMGuard;
@@ -106,7 +107,9 @@ index 0000000..6b9b34e
 +/*
 + * What the caller does after one event, in this order: warp, then (de)tach.
 + * place: the guest gets (x, y) of the guard for this event, not the event's
-+ * location (held, or just let go).
++ * location (held, or just let go). let_go_out (for the caller's debug log):
++ * the warp in flight taken out of this motion had the let-go's in it;
++ * (ldx, ldy) is the whole distance taken out.
 + */
 +typedef struct OmacVMGuardStep {
 +    bool place;
@@ -114,6 +117,8 @@ index 0000000..6b9b34e
 +    double wx, wy;
 +    bool detach;
 +    bool attach;
++    bool let_go_out;
++    double ldx, ldy;
 +} OmacVMGuardStep;
 +
 +/* Top edge in, bottom edge out: CoreGraphics' pixel rows. */
@@ -277,6 +282,7 @@ index 0000000..6b9b34e
 +    }
 +    g->held = false;
 +    g->warp_pending = false;
++    g->lw_flight = false;
 +}
 +
 +/*
@@ -345,6 +351,12 @@ index 0000000..6b9b34e
 +            dx -= g->wdx;
 +            dy -= g->wdy;
 +            g->warp_pending = false;
++            if (g->lw_flight) {
++                step->let_go_out = true;
++                step->ldx = g->wdx;
++                step->ldy = g->wdy;
++                g->lw_flight = false;
++            }
 +        }
 +        px = g->x + dx;
 +        py = g->y + dy;
@@ -400,6 +412,7 @@ index 0000000..6b9b34e
 +
 +        g->held = true;
 +        g->warp_pending = false;
++        g->lw_flight = false;
 +        step->detach = true;
 +        if (fd >= 0) {
 +            omacvm_guard_fit(s, fd, &fx, &fy, OMACVM_GUARD_GAP);
@@ -421,6 +434,7 @@ index 0000000..6b9b34e
 +            g->wdx += g->lwdx;
 +            g->wdy += g->lwdy;
 +            g->let_go_warp = false;
++            g->lw_flight = true;
 +        }
 +    }
 +    g->x = px;

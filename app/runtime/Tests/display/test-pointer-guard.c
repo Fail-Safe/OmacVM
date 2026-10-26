@@ -584,6 +584,38 @@ int main(void)
         run_steps(&m, &g, 5, 1, 0, 0, "queued: on after the motions");
     }
 
+    /*
+     * The debug log's hint (OMACVM_POINTER_DEBUG=1 in ui/cocoa.m): the motion
+     * after the user's click says it had the let-go's warp taken out, by the
+     * distance it carried; the motion after it does not.
+     */
+    {
+        static const OmacVMRect beside[2] = { { 0, 0, 1512, 982 }, { 1512, 0, 1352, 845 } };
+        OmacVMGuardStep st;
+        Ev down, up, e;
+        double cdx, cdy;
+
+        memset(&g, 0, sizeof(g));
+        m = mac_at(beside, 2, beside, 2, 1512 + 400, 300);
+        run_steps(&m, &g, 130, -2, -2, 0, "debug: up into the external's top-left zone");
+        run_steps(&m, &g, 10, 1, 0, 0, "debug: to a button");
+        down = mac_button(&m);
+        mac_let_go(&m, &g);
+        handle(&m, &g, &down, &gx, &gy);
+        up = mac_button(&m);
+        handle(&m, &g, &up, &gx, &gy);
+        cdx = m.wdx;
+        cdy = m.wdy;
+        for (int k = 0; k < 2; k++) {
+            e = mac_motion(&m, 1, 0);
+            omacvm_guard_event(&g, &m.s, e.time, e.lx, e.ly, e.dx, e.dy, m.x, m.y, &st);
+            CHECK(st.let_go_out == (k == 0) &&
+                  (k || (fabs(st.ldx - cdx) < 1e-9 && fabs(st.ldy - cdy) < 1e-9)),
+                  "debug: motion %d says let-go out %d (%.1f,%.1f), carried %.1f,%.1f",
+                  k, st.let_go_out, st.ldx, st.ldy, k ? 0.0 : cdx, k ? 0.0 : cdy);
+        }
+    }
+
     /* The Mac's cursor shown (show-cursor=on): it follows, at the same speed. */
     memset(&g, 0, sizeof(g));
     g.follow = true;

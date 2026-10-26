@@ -204,7 +204,7 @@ index 6b3270a..010a4e6 100644
      [fullScreenMenuItem setTitle:@"Exit Full Screen"];
      [cocoaView updateScale];
      [cocoaView updateUIInfo];
-@@ -3279,6 +3328,206 @@ static bool omacvm_main_full_screen(void)
+@@ -3279,6 +3328,211 @@ static bool omacvm_main_full_screen(void)
             ([[cocoaView window] styleMask] & NSWindowStyleMaskFullScreen);
  }
  
@@ -406,12 +406,17 @@ index 6b3270a..010a4e6 100644
 +                       dx, dy, cur.x, cur.y, &st);
 +    omacvm_guard_apply(&st);
 +    omacvm_guard_place = st.place;
++    if (st.let_go_out && getenv("OMACVM_POINTER_DEBUG") &&
++        !strcmp(getenv("OMACVM_POINTER_DEBUG"), "1")) {
++        info_report("omacvm-pointer: guard: let-go warp taken out of a motion "
++                    "(%.1f,%.1f)", st.ldx, st.ldy);
++    }
 +}
 +
  /* A display's rectangle in points, top-left origin (CoreGraphics' global space). */
  static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
  {
-@@ -3694,6 +3943,22 @@ static void omacvm_heads_moved(void)
+@@ -3694,6 +3948,22 @@ static void omacvm_heads_moved(void)
      return NO;
  }
  
@@ -434,7 +439,7 @@ index 6b3270a..010a4e6 100644
  /*
   * A click on another display's window makes it key. The keyboard and the
   * main window's pointer tracking belong to the main window: hand it back.
-@@ -4228,6 +4493,14 @@ static void omacvm_displays_init(void)
+@@ -4228,6 +4498,14 @@ static void omacvm_displays_init(void)
      }
  #endif
      omacvm_head_delegate = [[OmacVMHeadDelegate alloc] init];
