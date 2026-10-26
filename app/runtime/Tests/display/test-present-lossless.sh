@@ -2,7 +2,8 @@
 # Lossless-compressed present surfaces (omacvm-cocoa-present-lossless.patch): the patched ui/cocoa.m makes
 # its 8-bit surfaces as '&BGA' and its half-float ones (HDR, Extra brightness) as '&RhA' through CoreVideo,
 # falls back to plain surfaces of that kind for the run when one cannot be made or bound, gives the layer
-# EDR for both half-float kinds, reads OMACVM_GL_LOSSLESS and never reads a present surface on the CPU.
+# EDR for both half-float kinds, makes half float lossless only where that was checked on screen (HDR, Extra
+# brightness; a 10-bit scanout without HDR stays plain), never makes 10-bit 'l10r' surfaces, reads OMACVM_GL_LOSSLESS and never reads a present surface on the CPU.
 # glReadPixels from one (it crashes on a compressed one) happens only in the partial present's check mode
 # (OMACVM_GL_PRESENT_DAMAGE=check), which keeps the surfaces plain. Without an argument: only that the checks catch the code
 # without it (CI); GL drawing into such a surface is checked on the Mac by work/window-path/lbcheck.m (a GPU).
@@ -14,15 +15,22 @@ trap 'rm -rf "$work"' EXIT
 
 bodyx() { awk -v h="$2" 'index($0, h) == 1 {on=1} on {print} on && /^}$/ {exit}' "$1"; }
 problems() {
-  local m=$1 alloc packed follow
+  local m=$1 alloc packed follow choice
   alloc=$(bodyx "$m" 'static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear')
   packed=$(bodyx "$m" 'static IOSurfaceRef cocoa_gl_present_packed(uint32_t w, uint32_t h, bool half)')
   follow=$(bodyx "$m" 'static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf, bool linear)')
   grep -q 'kCVPixelFormatType_Lossless_32BGRA' <<<"$packed" && grep -q 'kCVPixelFormatType_Lossless_64RGBAHalf' <<<"$packed" &&
     grep -q 'CVPixelBufferGetIOSurface(pb)' <<<"$packed" && grep -q 'CFRetain(surf);' <<<"$packed" ||
     echo "the surfaces are not made lossless-compressed (or not kept)"
-  grep -q 'bool packed = present_lossless == 1 && (!half || present_lossless_half == 1);' <<<"$alloc" ||
+  # The statement that chooses a lossless surface, on one line, spaces squeezed.
+  choice=$(awk '/bool packed = /{on=1} on {printf "%s ", $0} on && /;/ {exit}' <<<"$alloc" | tr -s ' \t' ' ')
+  [[ $choice == *'bool packed = present_lossless == 1 && (!half || '*'present_lossless_half == 1'* ]] ||
     echo "the switch or the half-float fallback is not used"
+  grep -q 'bool half_checked = linear || (deep && cocoa_gl_present_hdr_wanted());' <<<"$alloc" &&
+    [[ $choice == *'(!half || (half_checked && present_lossless_half == 1));'* ]] ||
+    echo "half float lossless where it was not checked on screen (only HDR and extra brightness were)"
+  ! grep -q "'l10r'" <<<"$alloc" ||
+    echo "10-bit 'l10r' surfaces are made (on an XDR panel their HDR colours did not show like half float)"
   grep -q 'packed ? cocoa_gl_present_packed(w, h, half)' <<<"$alloc" || echo "the surfaces are still plain"
   grep -q 'present_lossless = 0;' <<<"$alloc" && grep -q 'present_lossless_half = 0;' <<<"$alloc" &&
     grep -q 'goto again;' <<<"$alloc" || echo "no plain surfaces after a lossless one fails (a black window)"
@@ -60,9 +68,11 @@ static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf, bool linear
 }
 static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linear)
 {
+    bool packed = present_lossless == 1 && (!half || present_lossless_half == 1);
     for (int i = 0; i < present_nsurf && ok; i++) {
         present_surf[i] = IOSurfaceCreate((CFDictionaryRef)props);
     }
+    (id)kIOSurfacePixelFormat: @(ten ? (uint32_t)'l10r' : half ? (uint32_t)'RGhA' : (uint32_t)'BGRA'),
 }
 
 static void cocoa_gl_present_snapshot(unsigned n)
@@ -83,7 +93,7 @@ static void cocoa_gl_present_guest(GLuint t)
 EOF2
 old=$(problems "$work/old.m")
 for want in "not made lossless-compressed" "still plain" "no plain surfaces after" "OMACVM_GL_LOSSLESS is not read" "not checked on" \
-  "no EDR for lossless" "check mode gets compressed surfaces" "glReadPixels outside the check mode: cocoa_gl_present_snapshot"; do
+  "no EDR for lossless" "where it was not checked on screen" "10-bit 'l10r' surfaces are made" "check mode gets compressed surfaces" "glReadPixels outside the check mode: cocoa_gl_present_snapshot"; do
   [[ $old == *"$want"* ]] || { echo "test-present-lossless: the checks miss the old code: $want" >&2; exit 1; }
 done
 [[ $old != *cocoa_gl_present_guest* ]] ||

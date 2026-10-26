@@ -4,11 +4,11 @@ Subject: [PATCH] cocoa: the window's surfaces lossless-compressed (fewer bytes p
 What: the IOSurface present makes its surfaces in Apple's lossless-
 compressed forms through CoreVideo: 8-bit ones as '&BGA'
 (kCVPixelFormatType_Lossless_32BGRA) instead of plain 'BGRA', half-float
-ones (Extra brightness; HDR when its 10-bit surfaces are off) as '&RhA'
-(kCVPixelFormatType_Lossless_64RGBAHalf) instead of 'RGhA'; the layer
-takes both half-float kinds for EDR. The GPU writes and reads them
-compressed: QEMU's draw of each frame into the surface and WindowServer's
-composite of the window move fewer bytes. Nothing may read these surfaces
+ones (HDR, Extra brightness) as '&RhA' (kCVPixelFormatType_Lossless_64RGBAHalf)
+instead of 'RGhA'; the layer takes both half-float kinds for EDR. A 10-bit
+scanout without HDR keeps plain half float (not checked on screen). The
+GPU writes and reads them compressed: QEMU's draw of each frame into the
+surface and WindowServer's composite of the window move fewer bytes. Nothing may read these surfaces
 back, on the CPU or with glReadPixels (it crashes on them): the boot logo's
 readback reads the guest's texture, and the partial present's check mode
 (OMACVM_GL_PRESENT_DAMAGE=check, omacvm-cocoa-present-damage.patch), which
@@ -31,14 +31,20 @@ draw: 20-25 % less GPU time. GL draws into these surfaces exactly (read
 back through Core Image on an M1 Max, an M2 and an M4:
 work/window-path/lbcheck.m; half float: lbcheck16.m). Extra brightness
 on the Air (2x, scrolling at 60 Hz): -0.19 W (-4 %) against plain half
-float.
+float. HDR and Extra brightness on an M1 Max's XDR panel (macOS 27, 120 Hz,
+brightness 0.50): the same pixels on screen as plain half float (HDR
+capture through WindowServer: all pixels identical, Delta E ITP 0, the
+same EDR headroom; the VM's own HDR pictures identical too); whole Mac
+with HDR on, a 1080p60 clip -0.6 W (-3.2 %), scrolling -0.5 W (-4.5 %),
+over Extra brightness -0.55 W (-2.6 %) and -0.56 W (-4.0 %), the same
+frame rates.
 
 Upstream: OmacVM only (QEMU's IOSurface present is OmacVM's).
 Test: app/runtime/Tests/display/test-present-lossless.sh (the patched
 ui/cocoa.m is wired as tested; the checks catch code without it).
 Applies after omacvm-cocoa-extra-brightness.patch (before omacvm-cocoa-no-app-nap.patch).
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index e06b42c..804d86c 100644
+index 44f23db..5d6be7f 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -7408,6 +7408,27 @@ static void cocoa_gl_render(void)
@@ -69,7 +75,7 @@ index e06b42c..804d86c 100644
  
  /*
   * Colour. The guest renders sRGB unless it says otherwise, so the surfaces
-@@ -7944,7 +7965,8 @@ static CGColorSpaceRef cocoa_gl_present_colorspace(bool deep, bool linear)
+@@ -7946,7 +7967,8 @@ static CGColorSpaceRef cocoa_gl_present_colorspace(bool deep, bool linear)
   */
  static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf, bool linear)
  {
@@ -79,7 +85,7 @@ index e06b42c..804d86c 100644
                 present_color == 1 && (cocoa_gl_present_hdr_wanted() || linear);
      if ([layer wantsExtendedDynamicRangeContent] != hdr) {
          [layer setWantsExtendedDynamicRangeContent:hdr];
-@@ -8007,6 +8029,26 @@ static void omacvm_present_gravity(CALayer *layer, IOSurfaceRef surf)
+@@ -8009,6 +8031,26 @@ static void omacvm_present_gravity(CALayer *layer, IOSurfaceRef surf)
      }
  }
  
@@ -106,7 +112,7 @@ index e06b42c..804d86c 100644
  /*
   * present_ctx is current. Surfaces for a w x h frame, capped at the
   * largest display. Made again at most every PRESENT_REALLOC_NS: until
-@@ -8058,6 +8100,28 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+@@ -8060,6 +8102,35 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
      present_alloc_ns = now;
      present_realloc_due = false;
  
@@ -131,11 +137,18 @@ index e06b42c..804d86c 100644
 +        }
 +    }
 +again:;
-+    bool packed = present_lossless == 1 && (!half || present_lossless_half == 1);
++    /*
++     * Half float lossless only where that was checked on screen: HDR (PQ)
++     * and extra brightness (linear light). A 10-bit scanout without HDR
++     * keeps plain half float.
++     */
++    bool half_checked = linear || (deep && cocoa_gl_present_hdr_wanted());
++    bool packed = present_lossless == 1 &&
++                  (!half || (half_checked && present_lossless_half == 1));
      NSDictionary *props = @{
          (id)kIOSurfaceWidth: @(w),
          (id)kIOSurfaceHeight: @(h),
-@@ -8068,7 +8132,8 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+@@ -8070,7 +8141,8 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
      CFPropertyListRef cs_plist = cs ? CGColorSpaceCopyPropertyList(cs) : NULL;
      bool ok = true;
      for (int i = 0; i < present_nsurf && ok; i++) {
@@ -145,7 +158,7 @@ index e06b42c..804d86c 100644
          if (!present_surf[i]) {
              ok = false;
              break;
-@@ -8098,10 +8163,28 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+@@ -8100,10 +8172,28 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
      }
      CGColorSpaceRelease(cs);
      glBindTexture(GL_TEXTURE_RECTANGLE, 0);
