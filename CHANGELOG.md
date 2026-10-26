@@ -3,7 +3,11 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.3 (unreleased)
+## 3.2.3
+
+Two new experimental switches in the VM window's Display settings: the VM stops drawing while its
+window cannot be seen, and its frames can follow the refresh of the Mac's display. A tiled present
+is built in, off for now.
 
 - **Pause drawing while hidden (experimental, off by default).** A new switch in the VM window's
   Display settings. While none of the VM's window can be seen for 2 seconds (minimised, covered
