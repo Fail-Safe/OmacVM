@@ -77,7 +77,7 @@ held a GL texture slot, and drawables Core Animation made anew could fill the fi
   valid, nothing over the VM's window): shown directly (WindowServer 0 vs 57-113 GPU ms/s, its CPU
   13-24 % vs 21-41 %, GPU busy 17-25 % vs 19-29 %), the same frame rates (59.9 / 30 flushes a
   second), but the whole Mac is not lower: scrolling 4.17 vs 4.15 W, a 1080p30 video 3.77 vs
-  3.75 W, the pointer moving 3.42 vs 3.42 W. The copy costs QEMU 38-75 GPU ms/s, about what
+  3.75 W, the pointer moving 3.42 vs 3.42 W. The copy costs QEMU 40-75 GPU ms/s, about what
   WindowServer's composite cost. So on an Air in SDR at 60 Hz neither version saves power.
 - Bench, Air, no VM, 60 frames a second, GL draws like QEMU (240 s windows, A B C C B A): today's
   lossless composite 2.74 / 2.75 W; GL into plain drawables 2.64 / 2.64 W; GL into lossless
