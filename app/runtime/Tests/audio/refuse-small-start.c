@@ -28,6 +28,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define DYLD_INTERPOSE(_replacement, _replacee)                              \
     __attribute__((used)) static struct {                                    \
@@ -93,9 +94,9 @@ static OSStatus my_new_output(const AudioStreamBasicDescription *fmt,
         pthread_mutex_lock(&lock);
         Queue *e = find(*out, 1);
         if (e) {
+            memset(e, 0, sizeof(*e));
+            e->q = *out;
             e->fmt = *fmt;
-            e->smallest = 0;
-            e->buffers = 0;
         }
         pthread_mutex_unlock(&lock);
     }
