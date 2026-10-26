@@ -52,8 +52,11 @@ Upstream: not applicable (OmacVM's display windows; QEMU has one window).
 Test: app/runtime/Tests/display/test-pointer-guard.c (motion in the centre,
 near a corner, along the Dock's edge, across the zone's border and a shared
 display edge, the same event twice, a flick, events queued before a let-go,
-the shown cursor following, the place in our windows incl. the top row, the
-notch strip and an external; run at build time and in CI).
+a click on another display's window (let go and hold again, also with
+motion queued behind the release), the shown cursor following, the place in
+our windows incl. the top row, the notch strip and an external; run at
+build time and in CI). OMACVM_POINTER_DEBUG=1 logs when the let-go's warp
+is taken out of a motion (qemu.log: "omacvm-pointer: guard: ...").
 By hand: full screen on the MacBook and an external display, mouse and
 trackpad: the pointer moves the same everywhere; pushed into each corner and
 along each edge: no Dock, no menu bar, no hot corner (notes:
