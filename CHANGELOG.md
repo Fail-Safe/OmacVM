@@ -12,6 +12,14 @@ in more words.
   (SDR's too): `launchctl setenv OMACVM_GL_LOSSLESS 0`, then quit and reopen the app
   (`launchctl unsetenv OMACVM_GL_LOSSLESS` turns it on again).
 
+- **The pointer no longer jumps after a click near a corner of an external display (reported by
+  the user).** In full screen on an external display, near its corners (Omarchy's bar with the
+  workspace buttons), the pointer jumped after each click as soon as the mouse moved again: by
+  about the way from the click before. Near corners OmacVM holds the Mac's cursor still (so no hot
+  corner or Dock comes up) and moves the VM's pointer by the mouse's motion. A click on another
+  display's window lets go of the cursor for a moment and puts it where the pointer is; the motion
+  macOS reports next includes that move, and OmacVM added it to the pointer. Now it takes it out.
+
 ## 3.2.5
 
 Five fixes: no "would like to control this Mac" dialog at every VM start, the pointer on every
