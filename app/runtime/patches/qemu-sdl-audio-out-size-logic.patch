@@ -8,7 +8,9 @@ played after a refusal; a power of two, at most half the ring and 2048:
 a callback as large as the ring would need it full at every call), the
 next size after a refused start (twice as large, at least 512), which SDL
 errors a larger size may get past (only "CoreAudio error
-(AudioQueueStart): N"), and the launcher's size file.
+(AudioQueueStart): N"), the launcher's size file, and how long no new
+start is made after every size was refused (until the size file changes;
+30 s without one).
 
 Why: with AirPods (A2DP) as the Mac's output the VM had no sound on the
 sound's own thread (default since 3.1.17): AudioQueueStart returned -66681
@@ -23,7 +25,7 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 
 --- /dev/null
 +++ b/audio/omacvm-sdl-out-size.h
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,144 @@
 +/*
 + * OmacVM: the size of the buffers QEMU's SDL backend asks the Mac's output
 + * for (#548). SDL3 opens CoreAudio's AudioQueue at QEMU's rate (at least
@@ -39,6 +41,7 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 +#ifndef OMACVM_SDL_OUT_SIZE_H
 +#define OMACVM_SDL_OUT_SIZE_H
 +
++#include <limits.h>
 +#include <stdbool.h>
 +#include <stdlib.h>
 +#include <string.h>
@@ -127,6 +130,20 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 +static inline bool omacvm_sdl_out_start_refused(const char *sdl_error)
 +{
 +    return sdl_error && strstr(sdl_error, "(AudioQueueStart)") != NULL;
++}
++
++/*
++ * After the Mac's output refused every size: until when (monotonic, NOW and
++ * WAIT in the caller's unit) no new start is made. Each failed start may
++ * leave coreaudiod silent (#548). The launcher writes its size file anew at
++ * every change of the Mac's output, and a new file ends the wait: with that
++ * file (SIZE_FILE) the wait lasts until it changes; without one (QEMU not
++ * started by the app) for WAIT.
++ */
++static inline long long omacvm_sdl_out_hold_until(bool size_file, long long now,
++                                                  long long wait)
++{
++    return size_file ? LLONG_MAX : now + wait;
 +}
 +
 +/*
