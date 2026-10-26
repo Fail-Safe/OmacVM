@@ -586,7 +586,7 @@ elif [[ ${F[omanotch]} == on ]]; then
   if pgrep -u "$U" -x Hyprland >/dev/null && user_ctl -q is-enabled notchcast.service 2>/dev/null; then
     user_ctl restart notchcast.service 2>/dev/null || true
   fi
-  # Notifications right under the strip, not a bar's height lower (see the script).
+  # Notifications right under Omanotch's bar: the strip when parked, FullPanel's taller bar (see the script).
   install -Dm755 "$R/guest/omanotch-notifications.sh" /usr/local/lib/omacvm/omanotch-notifications.sh
   install -Dm644 /dev/stdin /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook <<'HOOK'
 [Trigger]
@@ -596,7 +596,7 @@ Operation = Upgrade
 Target = usr/share/omarchy/shell/plugins/notifications/Service.qml
 
 [Action]
-Description = OmacVM: Omarchy's notifications under Omanotch's strip
+Description = OmacVM: Omarchy's notifications under Omanotch's bar
 When = PostTransaction
 Exec = /usr/local/lib/omacvm/omanotch-notifications.sh on
 HOOK
