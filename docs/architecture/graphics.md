@@ -1241,7 +1241,9 @@ window on the same display (`nativelat.swift`), the floor macOS itself sets.
   plane), so Hyprland puts the pointer there and QEMU shows it at the
   plane's top left (no hotspot needed for that): the main window's cursor
   layer, and a pointer layer over each other display's window
-  (`omacvm-cocoa-pointer-heads*.patch`). An output without a plane would show
+  (`omacvm-cocoa-pointer-heads*.patch`; QEMU's thread wakes the main thread
+  for those only on a move, a new image or a new output size, not at each
+  page flip's SET_SCANOUT). An output without a plane would show
   no pointer at all: aquamarine 0.15.1 takes a cursor for a CRTC without a
   cursor plane without an error, so Hyprland draws none there either (#554). A pointer move then renders
   nothing in the guest; Hyprland still commits a frame per move (aquamarine's
