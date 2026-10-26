@@ -10,7 +10,7 @@
  * gl_pervertex_redeclare(1): a vertex shader that writes gl_Position without redeclaring
  * gl_PerVertex gets the redeclaration. Apple's GL refuses to link such a separable shader
  * (GLSL 4.10; Mesa's GL does not insist) and vrend's last vertex stage never redeclares
- * it, so without this no separable pipeline links on the Mac at all.
+ * it, so without this no separable pipeline links on the Mac at all (#567).
  * It also counts the glDrawArrays calls that reach the GL and every VirglBlock size
  * query. Test-only; never shipped. */
 #define GL_SILENCE_DEPRECATION 1
