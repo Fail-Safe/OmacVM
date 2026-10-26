@@ -101,7 +101,13 @@ res() {   # STEP ok|FAIL|BLOCKED|skip DETAIL
 }
 log() { echo "== $(date +%H:%M:%S) $*"; }
 CLONES=()   # VMs this run cloned: deleted at the end unless --keep-vm
-remove_clones() { local c; for c in ${CLONES[@]+"${CLONES[@]}"}; do (( KEEP )) || rm -rf "$c"; done; CLONES=(); }
+remove_clones() {   # and the SSH host key each clone was given (use_vm)
+  local c
+  for c in ${CLONES[@]+"${CLONES[@]}"}; do
+    (( KEEP )) || { rm -rf "$c"; (source "$HERE/test-vms.sh" && e2e_pin_drop "$(basename "$c")"); }
+  done
+  CLONES=()
+}
 DIED=""; FINISHED=0   # a run that stops before its end is never a gate result
 die() { DIED=$*; echo "cc-switches: $*" >&2; exit 3; }
 plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null; }
@@ -433,7 +439,15 @@ use_vm() {   # NAME [CLONE_FROM]: the VM of this pass (an APFS clone of a kept o
     local port=$(( 52500 + RANDOM % 400 ))
     # A test VM's size (STANDARDS: at most 8 GB / 6 CPUs), whatever the kept one had.
     sed -i '' "s/^NAME=.*/NAME='$VM'/; s/^SSH_PORT=.*/SSH_PORT=$port/; s/^CPUS=.*/CPUS=${OMACVM_E2E_CPUS:-6}/; s/^MEM_MB=.*/MEM_MB=${OMACVM_E2E_MEM_MB:-8192}/" "$VMD/vm.env"
-    res clone ok "$(basename "$src") -> $VM (APFS clone, SSH port $port, ${OMACVM_E2E_CPUS:-6} CPUs, ${OMACVM_E2E_MEM_MB:-8192} MB)"
+    # The clone is the VM it was cloned from under a new name: set up from this Mac as that one was
+    # (its remembered SSH host key). Without it, a pass with no Update VM (the update pass: a base the
+    # release before made) has a VM that OmacVM never set up, and the Bridge refuses its control centre.
+    local from pin
+    from=$(sed -n "s/^NAME=//p" "$src/vm.env" | head -1); from=${from#\'}; from=${from%\'}
+    if (source "$HERE/test-vms.sh" && e2e_clone_pin "$from" "$VM"); then
+      [[ -s $(source "$HERE/test-vms.sh" && _e2e_pin "$VM") ]] && pin="host key of $from kept" || pin="$from has no host key here: not set up from this Mac"
+    else pin="host key not copied"; fi
+    res clone ok "$(basename "$src") -> $VM (APFS clone, SSH port $port, ${OMACVM_E2E_CPUS:-6} CPUs, ${OMACVM_E2E_MEM_MB:-8192} MB; $pin)"
   fi
   [[ -f $VMD/vm.env && -e $VMD/ready ]] || die "no finished VM $VM in $ROOT"
   [[ -n $(qemu_pid) ]] && die "$VM runs already: shut it down first"
@@ -492,13 +506,27 @@ read_features() {
 }
 # Omanotch: the test identity's VMs reach only a test Omanotch on 47911 (never the person's).
 test_omanotch() { lsof -nP -iTCP:47911 -sTCP:LISTEN >/dev/null 2>&1; }
-# The VM's package list matches the mirrors: a file it names is there (a 404 = older than the mirrors).
+# The VM's package list matches the mirrors: each package list (sync database) the VM has is
+# the one its first mirror serves now. pkg-add never syncs, so a package the mirror has a newer
+# version of is a 404. One package's file is not enough: in 3.2.3's gate jq's was still there,
+# Mesa's build tools were not (src/tests/e2e-mirrors.sh). Prints why when it is not current.
 mirrors_current() {
-  gssh 'u=$(pacman -Sp --noconfirm jq 2>/dev/null | grep -m1 "^http"); [ -n "$u" ] && curl -fsIL --max-time 20 "$u" >/dev/null' >/dev/null 2>&1
+  gssh 'd=$(pacman-conf DBPath 2>/dev/null); d=${d:-/var/lib/pacman/}; d=${d%/}/sync; n=0; t=$(mktemp) || exit 1
+    for db in "$d"/*.db; do
+      [ -f "$db" ] || continue
+      r=$(basename "$db" .db); s=$(pacman-conf -r "$r" Server 2>/dev/null | head -1)
+      if [ -z "$s" ] || ! curl -fsL --max-time 60 -o "$t" "$s/$r.db"; then
+        echo "$r: no answer from its mirror ${s:-(none)}"; rm -f "$t"; exit 1
+      fi
+      cmp -s "$t" "$db" || { echo "$r: the mirror has a newer list ($s)"; rm -f "$t"; exit 1; }
+      n=$((n + 1))
+    done
+    rm -f "$t"; [ "$n" -gt 0 ] || { echo "no package lists in $d"; exit 1; }' 2>&1
 }
 prepare_system() {   # a kept VM older than the mirrors: OmacVM cannot install its packages (pkg-add refuses a partial update)
-  mirrors_current && return 0
-  log "the VM's packages are older than the mirrors: omarchy update -y, then omacvm apply (limit 45 min)"
+  local why
+  why=$(mirrors_current) && return 0
+  log "the VM's packages are older than the mirrors ($(tail -1 <<<"$why" | cut -c1-120)): omarchy update -y, then omacvm apply (limit 45 min)"
   local t0 rc
   t0=$(date +%s)
   # As the desktop user, as the control centre's "o" runs it; sudo without a password only meanwhile

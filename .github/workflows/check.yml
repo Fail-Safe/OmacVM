@@ -213,6 +213,9 @@ jobs:
       - name: input-latency-vm without a VM (its stage split on a made-up QEMU trace, it refuses ~/OmacVM)
         run: src/tests/input-latency-harness.sh
 
+      - name: cc-switches.sh's mirrors check (a VM package list older than the mirror, not only jq's file)
+        run: src/tests/e2e-mirrors.sh
+
       - name: omacvm gestures (the escape combo, Swipe out to macOS, Magic Mouse swipe; a throwaway domain)
         run: src/tests/gestures-settings.sh
 

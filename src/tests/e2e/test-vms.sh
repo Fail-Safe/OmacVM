@@ -66,3 +66,32 @@ e2e_vm_guard() {
   app_prod_dir "$d" && { echo "e2e: $d is a VM of the installed OmacVM: not started" >&2; return 1; }
   echo "$d"
 }
+
+# A clone's SSH host key. omacvm remembers each VM's host key under its name
+# when OmacVM sets the VM up (lib/vm.sh vm_pin); only a VM with one counts as
+# set up from this Mac (`omacvm vms` "setup"), and the Bridge refuses the
+# control centre of one without it (409 "did not set this VM up"). An APFS
+# clone has the disk, and so the host keys, of the VM it was cloned from:
+#   e2e_clone_pin FROM NAME   NAME gets FROM's remembered key (FROM without one:
+#                             NAME has none either; a key an earlier VM of that
+#                             name left would not match this disk)
+#   e2e_pin_drop NAME         NAME's remembered key removed (the clone is gone)
+# Always the test identity's keys (OMACVM_TEST_IDENTITY=1), never the person's.
+# 2026-10-26: the update pass's clone of a base made by the release before got
+# no Update VM (same version) and so no key: its first look failed 409.
+_e2e_pin() {
+  (export OMACVM_TEST_IDENTITY=1; source "$_E2E_LIB/mac.sh" >/dev/null 2>&1; source "$_E2E_LIB/vm.sh" >/dev/null 2>&1
+   vm_pin "$1" app; [[ $OMA_PIN == "$HOME/Library/Application Support/omacvm-test/known_hosts/"* ]] && echo "$OMA_PIN")
+}
+e2e_clone_pin() {
+  local from to
+  from=$(_e2e_pin "$1") && to=$(_e2e_pin "$2") || { echo "e2e: no test identity key file for $1 or $2" >&2; return 1; }
+  rm -f "$to"
+  [[ -s $from ]] || return 0
+  cp -p "$from" "$to"
+}
+e2e_pin_drop() {
+  local p
+  p=$(_e2e_pin "$1") || return 1
+  rm -f "$p"
+}
