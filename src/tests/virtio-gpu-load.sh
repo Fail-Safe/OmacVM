@@ -1,7 +1,7 @@
 #!/bin/bash
 # OmacVM.app's virtio-gpu driver, offline. omacvm-virtio-gpu-load loads it
 # for a start that asks for an option it has (SMBIOS omacvm.deepcolor=1, an
-# older app's omacvm.hdr=1, omacvm.pointerplane=1, omacvm.vsynclock=1) or for
+# older app's omacvm.hdr=1, omacvm.pointerplane=2, omacvm.vsynclock=1) or for
 # its damage fix (omacvm.damage=1, "Draw only what changed"), after its
 # dependencies; else the stock driver, and it says why. omacvm-smbios reads the
 # strings as omacvm-app-host did. The modprobe rule falls back to the stock
@@ -24,6 +24,9 @@ trap 'rm -rf "$T"' EXIT
 fail=0
 expect() {   # WHAT WANT GOT
   if [[ $2 == "$3" ]]; then echo "ok   $1"; else printf 'FAIL %s\n  want: %s\n  got:  %s\n' "$1" "$2" "$3"; fail=1; fi
+}
+lacks() {   # WHAT NEEDLE HAYSTACK
+  case $3 in *"$2"*) printf 'FAIL %s\n  %s in it\n' "$1" "$2"; fail=1 ;; *) echo "ok   $1" ;; esac
 }
 has() {   # WHAT NEEDLE HAYSTACK
   case $3 in *"$2"*) echo "ok   $1" ;; *) printf 'FAIL %s\n  no %s in: %s\n' "$1" "$2" "$3"; fail=1 ;; esac
@@ -168,23 +171,23 @@ guest omacvm.screen=3024x1964 omacvm.hdr=1
 load; expect "an older app's omacvm.hdr=1: ours" "omacvm" "$(said)"
 has "omacvm.hdr=1: insmod with deep_color=1" "insmod $KO opt=1 deep_color=1;" "$(calls)"
 
-guest omacvm.pointerplane=1 omacvm.screen=3024x1964; nofix
-load; expect "pointer on its own layer (omacvm.pointerplane=1): ours at 8 bits, its option said" "omacvm 8-bit cursor_plane=1" "$(said)"
-has "omacvm.pointerplane=1: insmod with cursor_plane=1, then the given options, no deep_color (the stock formats)" "insmod $KO cursor_plane=1 opt=1;" "$(calls)"
+guest omacvm.pointerplane=2 omacvm.screen=3024x1964; nofix
+load; expect "pointer on its own layer (omacvm.pointerplane=2): ours at 8 bits, its option said" "omacvm 8-bit cursor_plane=1" "$(said)"
+has "omacvm.pointerplane=2: insmod with cursor_plane=1, then the given options, no deep_color (the stock formats)" "insmod $KO cursor_plane=1 opt=1;" "$(calls)"
 
-guest omacvm.pointerplane=1 omacvm.hwcursor=1; nofix
+guest omacvm.pointerplane=2 omacvm.hwcursor=1; nofix
 load; expect "pointer plane with the Mac pointer (needs the hotspot), no damage fix to add: not ours" "stock not asked for this start" "$(said)"
 expect "pointer plane + Mac pointer: only the stock driver" "$P1$STOCK" "$(calls)"
-guest omacvm.pointerplane=1 omacvm.hwcursor=1
+guest omacvm.pointerplane=2 omacvm.hwcursor=1
 load; expect "pointer plane with the Mac pointer, the build has the damage fix, not asked: stock" "stock not asked for this start" "$(said)"
-guest omacvm.pointerplane=1 omacvm.hwcursor=1 omacvm.damage=1
+guest omacvm.pointerplane=2 omacvm.hwcursor=1 omacvm.damage=1
 load; expect "pointer plane with the Mac pointer, omacvm.damage=1: ours, no cursor_plane" "omacvm 8-bit" "$(said)"
 has "pointer plane + Mac pointer, omacvm.damage=1: insmod without cursor_plane" "insmod $KO opt=1;" "$(calls)"
 
-guest omacvm.deepcolor=1 omacvm.pointerplane=1 omacvm.hwcursor=1
+guest omacvm.deepcolor=1 omacvm.pointerplane=2 omacvm.hwcursor=1
 load; expect "10-bit, pointer plane and Mac pointer: ours without cursor_plane" "omacvm" "$(said)"
 
-guest omacvm.deepcolor=1 omacvm.pointerplane=1
+guest omacvm.deepcolor=1 omacvm.pointerplane=2
 load; expect "10-bit and pointer plane: ours with cursor_plane=1" "omacvm cursor_plane=1" "$(said)"
 has "10-bit and pointer plane: insmod with both" "insmod $KO cursor_plane=1 opt=1 deep_color=1;" "$(calls)"
 
@@ -195,11 +198,24 @@ has "10-bit only: insmod with the given options and deep_color=1" "insmod $KO op
 guest omacvm.pointerplane=0; nofix
 load; expect "pointer plane switch off (=0): stock" "stock not asked for this start" "$(said)"
 
+# An app whose QEMU shows the pointer over its main window only (3.2.3 and
+# older: omacvm.pointerplane=1): no plane, Hyprland draws the pointer on every
+# display (with the plane, other displays showed none, #554).
+guest omacvm.pointerplane=1 omacvm.screen=3024x1964; nofix
+load; expect "an older app's omacvm.pointerplane=1: stock, and why" \
+  "stock the app shows the pointer layer on its main display only (update the app)" "$(said)"
+expect "omacvm.pointerplane=1: only the stock driver" "$P1$STOCK" "$(calls)"
+guest omacvm.deepcolor=1 omacvm.pointerplane=1
+load; expect "10-bit and an older app's pointer plane: ours without cursor_plane" "omacvm" "$(said)"
+has "10-bit and omacvm.pointerplane=1: no cursor_plane" "insmod $KO opt=1 deep_color=1;" "$(calls)"
+has "the app's switch sends the value the loader takes (2: QEMU shows it on every display)" \
+  '"type=11,value=omacvm.pointerplane=2"' "$(cat "$R/app/app/Sources/OmacVM/Runner.swift")"
+
 guest omacvm.vsynclock=1 omacvm.screen=3024x1964
 load; expect "frames in step (omacvm.vsynclock=1): ours at 8 bits, its option said" "omacvm 8-bit vsync_lock=1" "$(said)"
 has "omacvm.vsynclock=1: insmod with vsync_lock=1, then the given options, no deep_color" "insmod $KO vsync_lock=1 opt=1;" "$(calls)"
 
-guest omacvm.deepcolor=1 omacvm.pointerplane=1 omacvm.vsynclock=1
+guest omacvm.deepcolor=1 omacvm.pointerplane=2 omacvm.vsynclock=1
 load; expect "all three switches: ours with both options" "omacvm cursor_plane=1 vsync_lock=1" "$(said)"
 has "all three: insmod with all three options" "insmod $KO cursor_plane=1 vsync_lock=1 opt=1 deep_color=1;" "$(calls)"
 
@@ -207,7 +223,7 @@ guest omacvm.vsynclock=0; nofix
 load; expect "frames in step off (=0): stock" "stock not asked for this start" "$(said)"
 
 # A build without the vsync lock (its patch did not fit the kernel): only the options it has.
-guest omacvm.deepcolor=1 omacvm.pointerplane=1 omacvm.vsynclock=1
+guest omacvm.deepcolor=1 omacvm.pointerplane=2 omacvm.vsynclock=1
 FAKE_PARMS="deep_color cursor_plane" load
 expect "build without vsync_lock: ours, the others' options, and it says so" "omacvm cursor_plane=1 without vsync_lock" "$(said)"
 has "build without vsync_lock: insmod without it" "insmod $KO cursor_plane=1 opt=1 deep_color=1;" "$(calls)"
@@ -229,24 +245,24 @@ load; expect "HDR off (=0), omacvm.damage=1: ours at 8 bits, no deep_color" "oma
 has "HDR off, omacvm.damage=1: insmod without deep_color" "insmod $KO opt=1;" "$(calls)"
 
 # A build without the cursor plane (its patch did not fit the kernel): only the options it has.
-guest omacvm.deepcolor=1 omacvm.pointerplane=1
+guest omacvm.deepcolor=1 omacvm.pointerplane=2
 FAKE_PARMS="deep_color" load
 expect "build without cursor_plane: ours, HDR stays, and it says so" "omacvm without cursor_plane" "$(said)"
 has "build without cursor_plane: insmod without it" "insmod $KO opt=1 deep_color=1;" "$(calls)"
-guest omacvm.pointerplane=1; nofix
+guest omacvm.pointerplane=2; nofix
 FAKE_PARMS="deep_color" load
 expect "only the pointer layer asked, the build has no cursor_plane, no damage fix: stock, and why" "stock built without cursor_plane for $K" "$(said)"
 expect "only the pointer layer asked, no cursor_plane: no insmod" "$P1$STOCK" "$(calls)"
-guest omacvm.pointerplane=1
+guest omacvm.pointerplane=2
 FAKE_PARMS="deep_color" load
 expect "only the pointer layer asked, no cursor_plane, the build has the damage fix: stock, and why" "stock built without cursor_plane for $K" "$(said)"
-guest omacvm.pointerplane=1 omacvm.damage=1
+guest omacvm.pointerplane=2 omacvm.damage=1
 FAKE_PARMS="deep_color" load
 expect "pointer layer + omacvm.damage=1, no cursor_plane: ours at 8 bits, and it says so" "omacvm 8-bit without cursor_plane" "$(said)"
-guest omacvm.deepcolor=1 omacvm.pointerplane=1
+guest omacvm.deepcolor=1 omacvm.pointerplane=2
 FAKE_PARMS="" load
 expect "modinfo lists no options: all asked, as before" "omacvm cursor_plane=1" "$(said)"
-guest omacvm.pointerplane=1 omacvm.vsynclock=1
+guest omacvm.pointerplane=2 omacvm.vsynclock=1
 FAKE_PARMS="" load
 expect "modinfo lists no options, pointer + frames in step: all asked" "omacvm 8-bit cursor_plane=1 vsync_lock=1" "$(said)"
 
@@ -292,7 +308,7 @@ mkdir -p "$T/r"
 OMACVM_VIRTIO_GPU_TEST_ROOT=$T/r "$BUILD" --remove > /dev/null   # nothing there: fine
 rule_line=$(sed -n 's/^install virtio_gpu //p' "$BUILD")
 expect "the rule: the loader if it is there; without it (the initramfs) nothing for a start that asks for ours, else the stock driver" \
-  'if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=1 -e omacvm.vsynclock=1 -e omacvm.damage=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi' \
+  'if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=2 -e omacvm.vsynclock=1 -e omacvm.damage=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi' \
   "$rule_line"
 run_rule() {   # LOADER (a path) SMBIOS-ROOT: runs the rule with the loader, modprobe and SMBIOS swapped for stand-ins
   local cmd=${rule_line//\$CMDLINE_OPTS/opt=1}
@@ -304,12 +320,14 @@ run_rule() {   # LOADER (a path) SMBIOS-ROOT: runs the rule with the loader, mod
 }
 smbios "$T/rs" omacvm.notchskip=1 omacvm.deepcolor=1
 smbios "$T/rn" omacvm.notchskip=1
-smbios "$T/ro" omacvm.pointerplane=1
+smbios "$T/ro" omacvm.pointerplane=2
+smbios "$T/ro1" omacvm.pointerplane=1
 smbios "$T/rv" omacvm.vsynclock=1
 smbios "$T/rd" omacvm.damage=1
 run_rule "$T/r/missing" "$T/rn"; expect "rule: no loader (the initramfs), an 8-bit start: the stock driver (boot messages on screen)" "0 $STOCK" "$? $(calls)"
 run_rule "$T/r/missing" "$T/rs"; expect "rule: no loader (the initramfs), a 10-bit start: nothing yet (the real root loads it)" "0 " "$? $(calls)"
 run_rule "$T/r/missing" "$T/ro"; expect "rule: no loader (the initramfs), a pointer-plane start: nothing yet" "0 " "$? $(calls)"
+run_rule "$T/r/missing" "$T/ro1"; expect "rule: no loader (the initramfs), an older app's pointer plane: the stock driver" "0 $STOCK" "$? $(calls)"
 run_rule "$T/r/missing" "$T/rv"; expect "rule: no loader (the initramfs), a frames-in-step start: nothing yet" "0 " "$? $(calls)"
 run_rule "$T/r/missing" "$T/rd"; expect "rule: no loader (the initramfs), a Draw only what changed start: nothing yet" "0 " "$? $(calls)"
 run_rule "$T/r/missing" "$T/none"; expect "rule: no loader, no SMBIOS: the stock driver" "0 $STOCK" "$? $(calls)"
@@ -471,6 +489,15 @@ out=$(FAKE_MAKE_FAIL=deep-color unpriv); rc=$?
 expect "deep colour does not build: no build" "1 omacvm-virtio-gpu: no build: deep_color does not build on 7.2.9" "$rc $(tail -n1 "$U/err")"
 
 # The 10-bit formats only with deep_color=1: a pointer-layer start offers the stock formats.
+# The pointer layer: the hotspot rule off, and a cursor plane on every output.
+# aquamarine takes a cursor for an output without a plane and shows nothing:
+# Hyprland then draws no pointer there either (#554).
+CUR=$(cat "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch")
+has "cursor plane: the option, read-only" "module_param_named(cursor_plane, virtio_gpu_cursor_plane, bool, 0444);" "$CUR"
+has "cursor plane: the hotspot rule off with it" "dev->driver_features &= ~DRIVER_CURSOR_HOTSPOT;" "$CUR"
+lacks "cursor plane: every output keeps its cursor plane (no rule for some outputs)" "virtio_gpu_plane_init(vgdev, DRM_PLANE_TYPE_CURSOR" "$CUR"
+lacks "cursor plane: no output left without a plane" "virtgpu_display.c" "$CUR"
+
 DEEP=$(cat "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch")
 has "deep colour: the option, read-only" "module_param_named(deep_color, virtio_gpu_deep_color, bool, 0444);" "$DEEP"
 has "deep colour: the primary plane's 10-bit formats only with it" "} else if (vgdev->has_virgl_3d && virtio_gpu_deep_color) {" "$DEEP"

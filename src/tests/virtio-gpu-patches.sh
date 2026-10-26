@@ -42,6 +42,15 @@ for d in "$S"/v*/; do
   else
     echo "FAIL $v: applied, but a patch's change is missing"; fail=1
   fi
+  # Every output keeps its cursor plane (#554: aquamarine takes a cursor for an
+  # output without one and shows nothing, so Hyprland drew no pointer there).
+  disp=$T/$v/drivers/gpu/drm/virtio/virtgpu_display.c
+  if grep -q 'cursor = virtio_gpu_plane_init(vgdev, DRM_PLANE_TYPE_CURSOR, index);' "$disp" &&
+     ! grep -q 'virtio_gpu_cursor_plane' "$disp"; then
+    echo "ok   $v: a cursor plane on every output, with or without cursor_plane"
+  else
+    echo "FAIL $v: some outputs get no cursor plane: $(grep -n 'virtio_gpu_cursor_plane\|DRM_PLANE_TYPE_CURSOR' "$disp" | tr '\n' ' ')"; fail=1
+  fi
 done
 (( n >= 2 )) || { echo "FAIL fewer than two kernel versions in $S"; fail=1; }
 
