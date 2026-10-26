@@ -176,7 +176,8 @@ cleanup() {
   local rc=$?
   log "cleanup"
   local ev; ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" end
-  (( FINISHED )) || res aborted FAIL "the run stopped before its end (exit $rc${DIED:+: $DIED})"
+  # Stopped for someone at the Mac: not a product failure (the person row says which row was next).
+  (( FINISHED )) || res aborted "$( (( ${PERSON_STOP:-0} )) && echo BLOCKED || echo FAIL)" "the run stopped before its end (exit $rc${DIED:+: $DIED})"
   local p; p=$(qemu_pid)
   if [[ -n $p ]]; then gssh "systemctl poweroff" >/dev/null 2>&1; for _ in $(seq 60); do kill -0 "$p" 2>/dev/null || break; sleep 1; done; kill "$p" 2>/dev/null; fi
   p=$(launcher_pid); [[ -n $p ]] && kill "$p" 2>/dev/null
@@ -234,7 +235,7 @@ person_overlap() {   # EVENTS NEXT
   res person "${r%%$'\t'*}" "${r#*$'\t'}"
 }
 gate() {   # ROW: the row about to run
-  person_gate "$PFX$1" || { res person BLOCKED "$PERSON_WHY: $PFX$1 and the rows after it not run"; die "$PERSON_WHY"; }
+  person_gate "$PFX$1" || { res person BLOCKED "$PERSON_WHY: $PFX$1 and the rows after it not run"; PERSON_STOP=1; die "$PERSON_WHY"; }
   GATE_LINE=$(wc -l < "$OUT/summary.tsv" | tr -d ' ')
 }
 # This Mac's CI runners stopped for the run (their jobs start VMs and load the Mac).

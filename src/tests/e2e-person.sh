@@ -188,7 +188,8 @@ wired "cc-switches waits before its first row and before each step" "$E/cc-switc
   '^source "\$HERE/person.sh"' '^person_gate start' 'person_watch_start' 'gate "switch-\$n"' '    gate "\$st"' \
   '\{ gate keys; step_keys; \}' '\{ gate window; step_window; \}' '\{ gate unplug; step_unplug; \}' '^  gate update' '^    gate prepare'
 wired "cc-switches: a visit's row, the watcher stopped, CI runners back" "$E/cc-switches.sh" \
-  'person_overlap "\$ev" end' 'person_watch_stop' 'ci-runners.sh" resume --holder \$\$' 'ci-runners.sh" pause --wait'
+  'person_overlap "\$ev" end' 'person_watch_stop' 'ci-runners.sh" resume --holder \$\$' 'ci-runners.sh" pause --wait' \
+  'PERSON_STOP=1; die' 'res aborted "\$\( \(\( \$\{PERSON_STOP:-0\} \)\) && echo BLOCKED'
 # No question to the Mac's state left that looks only once (the old start-only checks).
 if grep -nE 'HIDIdleTime|screensharingd|JumpConnect' "$E/cc-switches.sh" "$E/onscreen.sh" "$E/modifier-keys.sh" "$E/display-unplug.sh"; then
   bad "wiring: a harness asks HID idle or remote sessions itself (person.sh does)"
