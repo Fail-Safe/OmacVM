@@ -5,21 +5,22 @@
 # for it and it is built for the running kernel: SMBIOS omacvm.deepcolor=1
 # from the app's HDR switch, omacvm.hdr=1 from an older app's hidden one,
 # omacvm.pointerplane=2 from the switch "Pointer on its own layer",
-# omacvm.vsynclock=1 from "Frames in step with the Mac", omacvm.damage=1 from
-# "Draw only what changed" (the build's Linux 7.4 damage fix: the
+# omacvm.damage=1 from "Draw only what changed" (the build's Linux 7.4 damage fix: the
 # compositor's damage reaches QEMU, which then shows only what changed); else,
 # and on any failure, the stock driver. The VM never goes without one.
 # Each switch adds its own module option: 10-bit deep_color=1 (the 10-bit
 # formats; without it the driver offers what the stock one does), the pointer
 # layer cursor_plane=1, but not with omacvm.hwcursor=1 (the Mac pointer needs
-# the hotspot that this plane does not get), the refresh vsync_lock=1. The
+# the hotspot that this plane does not get). An app of 3.2.3-3.2.6 may send
+# omacvm.vsynclock=1 (Frames in step with the Mac, removed in 3.2.7): it asks
+# for nothing. The
 # damage fix is no option: it is in the build when the kernel needed it
 # (its file "damage": ours, kernel, unknown), and in every start of ours.
 # omacvm.pointerplane=1 is an app (3.2.4 and older) whose QEMU shows the
 # pointer over its main window only: no plane then, Hyprland draws the
 # pointer (with the plane, other displays had none, #554).
 # /run/omacvm/virtio-gpu says which: "omacvm" (10-bit) or "omacvm 8-bit",
-# then " cursor_plane=1" with the plane and " vsync_lock=1", then " without
+# then " cursor_plane=1" with the plane, then " without
 # NAME" for each asked option this kernel's build does not have (its patch
 # did not fit), or "stock WHY".
 #   omacvm-virtio-gpu-load [module options]
@@ -42,20 +43,18 @@ say() {
 # skips it; a grep over the raw bytes would miss the first string).
 # deep: 10-bit asked (deep_color=1); plane: the pointer layer asked
 # (cursor_plane=1) by an app that shows it on every display, never with the
-# Mac pointer; old: asked by an app that does not (=1); follow: vblanks in step with
-# the Mac's refresh asked (vsync_lock=1); fix: the damage fix asked (Draw
-# only what changed). Unreadable strings: nothing asked.
-deep=0 plane=0 old=0 follow=0 fix=0 why=""
+# Mac pointer; old: asked by an app that does not (=1); fix: the damage fix
+# asked (Draw only what changed). Unreadable strings: nothing asked.
+deep=0 plane=0 old=0 fix=0 why=""
 if host=$(python3 -I "$here/../omacvm-smbios" "$P/sys/firmware/dmi/entries" 2>/dev/null); then
   grep -qxE 'OMACVM_(DEEPCOLOR|HDR)=1' <<< "$host" && deep=1
   grep -qx 'OMACVM_POINTERPLANE=2' <<< "$host" && ! grep -qx 'OMACVM_HWCURSOR=1' <<< "$host" && plane=1
   grep -qx 'OMACVM_POINTERPLANE=1' <<< "$host" && old=1
-  grep -qx 'OMACVM_VSYNCLOCK=1' <<< "$host" && follow=1
   grep -qx 'OMACVM_DAMAGE=1' <<< "$host" && fix=1
 fi
 if [[ ! -f $ko ]]; then
   why="not built for $kernel"
-elif [[ $(cat "$root/$kernel/stamp" 2>/dev/null) != "$(cat "$root/linux-virtio-gpu-deep-color.patch" "$root/linux-virtio-gpu-cursor-plane.patch" "$root/linux-virtio-gpu-vsync-lock.patch" "$root/linux-virtio-gpu-damage-clips.patch" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1) $kernel" ]]; then
+elif [[ $(cat "$root/$kernel/stamp" 2>/dev/null) != "$(cat "$root/linux-virtio-gpu-deep-color.patch" "$root/linux-virtio-gpu-cursor-plane.patch" "$root/linux-virtio-gpu-damage-clips.patch" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1) $kernel" ]]; then
   why="stamp out of date"
 else
   # Only the options this build has: a patch that did not fit this kernel is
@@ -63,8 +62,8 @@ else
   # unknown option. (No list at all from modinfo: as before, all asked options.)
   have=$(modinfo -F parm "$ko" 2>/dev/null | cut -d: -f1)
   without=""
-  for o in deep plane follow; do
-    case $o in deep) n=deep_color ;; plane) n=cursor_plane ;; follow) n=vsync_lock ;; esac
+  for o in deep plane; do
+    case $o in deep) n=deep_color ;; plane) n=cursor_plane ;; esac
     if [[ -n $have ]] && (( ${!o} )) && ! grep -qx "$n" <<< "$have"; then printf -v "$o" 0; without+=" without $n"; fi
   done
   # The damage fix: ours in the build, or the kernel's own (the stock driver
@@ -77,17 +76,16 @@ else
       *) fix=0; without+=" without damage_clips" ;;
     esac
   fi
-  if (( deep || plane || follow || fix )); then
+  if (( deep || plane || fix )); then
     for dep in $(modinfo -F depends "$ko" 2>/dev/null | tr ',' ' '); do
       modprobe -q "$dep" 2>/dev/null
     done
     opts=()
     (( plane )) && opts+=(cursor_plane=1)
-    (( follow )) && opts+=(vsync_lock=1)
     opts+=("$@")
     (( deep )) && opts+=(deep_color=1)
     if err=$(insmod "$ko" ${opts[@]+"${opts[@]}"} 2>&1); then
-      s=omacvm; (( deep )) || s="omacvm 8-bit"; (( plane )) && s+=" cursor_plane=1"; (( follow )) && s+=" vsync_lock=1"
+      s=omacvm; (( deep )) || s="omacvm 8-bit"; (( plane )) && s+=" cursor_plane=1"
       say "$s$without"
       exit 0
     fi

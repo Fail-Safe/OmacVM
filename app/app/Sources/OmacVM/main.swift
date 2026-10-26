@@ -141,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TestSnapshots.start()
         // Before any VM start reads the Graphics setting.
         Settings.migrateVenusSwitch()
+        Settings.removeRetiredSwitches()
         // The control centre's Mac jobs run this app's omacvm when there is no checkout.
         ControlCLI.refresh()
         state.startVM = { [weak self] in self?.startVM() }

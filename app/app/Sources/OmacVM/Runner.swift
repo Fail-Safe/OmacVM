@@ -144,12 +144,6 @@ final class Runner {
         if Settings.pointerPlane {
             a += ["-smbios", "type=11,value=omacvm.pointerplane=2"]
         }
-        // Frames in step with the Mac (experimental): the guest's virtio-gpu driver
-        // asks QEMU for the display's refresh and its vblank timer follows it
-        // (omacvm-virtio-gpu-load, omacvm-vsync-follow.patch).
-        if Settings.vsyncLock {
-            a += ["-smbios", "type=11,value=omacvm.vsynclock=1"]
-        }
         // Draw only what changed (Settings.presentTilesStart, experimental): the
         // guest loads OmacVM's virtio-gpu driver for its Linux 7.4 damage fix,
         // so QEMU gets what changed in each frame (omacvm-virtio-gpu-load).
@@ -608,11 +602,6 @@ final class Runner {
         // not built yet keeps the stock one); omacvm check says what runs.
         if Settings.pointerPlane {
             log.write(Data("OmacVM: pointer layer: \(Settings.macPointer ? "off (macPointer is on)" : "asked (omacvm check says if it runs)")\n".utf8))
-        }
-        // Frames in step for omacvm check, while the switch is on (QEMU's trace
-        // cocoa_present_follow says when the guest follows).
-        if Settings.vsyncLock {
-            log.write(Data("OmacVM: frames in step: asked (omacvm check says if it runs)\n".utf8))
         }
         // Draw only what changed, while the switch is on (QEMU's minute lines say how often).
         if Settings.presentTiles {
