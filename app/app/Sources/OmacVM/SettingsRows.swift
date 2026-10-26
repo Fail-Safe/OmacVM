@@ -295,32 +295,13 @@ struct PointerPlaneRow: View {
     }
 }
 
-/// Frames in step with the Mac (Settings.vsyncLock, experimental, off by
-/// default): read by each start of the VM.
-struct VsyncLockRow: View {
-    var tick = 0
-    @State private var on = Settings.vsyncLock
-
-    static let info = "Typing and the pointer show a little sooner while the screen is moving (an animation, scrolling, a video, the pointer itself): on a 60 Hz display about 1.5 to 7 ms, at 120 Hz up to about 2.5 ms. Linux's display clock runs in step with the Mac display's refresh, so a frame the VM draws is ready just before the Mac shows the next one, instead of waiting for it. The same pixels at the same rate (tested at 60 and 120 Hz). When a frame comes too late for its refresh, the VM shows the newer one at the next refresh and skips the late one: in the tests that was a few more skipped frames at 120 Hz (8 instead of 2 in about 3 minutes of moving frames) and fewer at 60 Hz (143 repeats and skips instead of 170). On a still screen there is no gain. Counts from the next start of the VM; the VM gets the driver for it with Update VM (needs internet once). Experimental."
-
-    var body: some View {
-        SettingRow(title: "Frames in step with the Mac", badge: "experimental",
-                   subtitle: "Input shows sooner while the screen moves. From the next start of the VM.",
-                   info: Self.info, probe: "vsync-lock") {
-            RowSwitch(title: "Frames in step with the Mac", isOn: $on)
-        }
-        .onChange(of: on) { _, v in if v != Settings.vsyncLock { Settings.vsyncLock = v } }
-        .onChange(of: tick) { _, _ in on = Settings.vsyncLock }
-    }
-}
-
 /// Draw only what changed (Settings.presentTiles, experimental, off by
 /// default): QEMU's tiled present, read by each start of the VM.
 struct PresentTilesRow: View {
     var tick = 0
     @State private var on = Settings.presentTiles
 
-    static let info = "When only a small part of the VM's screen changes (the pointer, a blinking cursor, a clock, a spinner), only that part goes to macOS as new pixels, in squares of 256 x 256; macOS then redraws only those squares of the window instead of all of it. Less GPU work and battery, measured for the whole Mac: a MacBook Air M2 at 60 Hz with the pointer moving 11-17 % less power. On a MacBook Pro M1 Max with HDR at 120 Hz, macOS used less GPU time to draw the window with the pointer moving or a spinner (its power is still being measured). The same picture and the same frame rate in the tests (60 Hz 8-bit and HDR, 120 Hz HDR). Pages that scroll or play video change most of the screen and stay as before. With the switch on, the VM loads OmacVM's own build of its graphics driver, which tells the Mac what changed in each frame: Update VM builds it (needs internet once). Off, the Mac draws whole frames as before, and the VM loads the driver it would without this switch: the standard one, or OmacVM's own when HDR and 10-bit colour, Pointer on its own layer or Frames in step with the Mac is on (that one now always says what changed, but the Mac does not use it). A window that scales the VM's picture (not shown pixel for pixel) draws whole frames as before. Counts from the next start of the VM. Experimental: it may use up to about 130 MB more memory on large displays while parts change (the squares' own pictures and what macOS keeps of them). GPU safe mode turns it off."
+    static let info = "When only a small part of the VM's screen changes (the pointer, a blinking cursor, a clock, a spinner), only that part goes to macOS as new pixels, in squares of 256 x 256; macOS then redraws only those squares of the window instead of all of it. Less GPU work and battery, measured for the whole Mac: a MacBook Air M2 at 60 Hz with the pointer moving 11-17 % less power. On a MacBook Pro M1 Max with HDR at 120 Hz, macOS used less GPU time to draw the window with the pointer moving or a spinner (its power is still being measured). The same picture and the same frame rate in the tests (60 Hz 8-bit and HDR, 120 Hz HDR). Pages that scroll or play video change most of the screen and stay as before. With the switch on, the VM loads OmacVM's own build of its graphics driver, which tells the Mac what changed in each frame: Update VM builds it (needs internet once). Off, the Mac draws whole frames as before, and the VM loads the driver it would without this switch: the standard one, or OmacVM's own when HDR and 10-bit colour or Pointer on its own layer is on (that one now always says what changed, but the Mac does not use it). A window that scales the VM's picture (not shown pixel for pixel) draws whole frames as before. Counts from the next start of the VM. Experimental: it may use up to about 130 MB more memory on large displays while parts change (the squares' own pictures and what macOS keeps of them). GPU safe mode turns it off."
 
     var body: some View {
         SettingRow(title: "Draw only what changed", badge: "experimental",
