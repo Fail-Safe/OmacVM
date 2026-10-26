@@ -73,10 +73,19 @@ held a GL texture slot, and drawables Core Animation made anew could fill the fi
 
 ## Consequences
 
-- Bench, Air, no VM, 60 frames a second, GL draws like QEMU (240 s windows): today's lossless
-  composite 2.74 W; GL into plain drawables 2.64 W; GL into lossless surfaces + Metal copy into
-  compressed drawables 2.69 W (all direct: WindowServer 0 GPU ms/s). The real VM's rows are in
-  work/tracks/direct-display.md (the bench did not predict the first version's VM result).
+- The real VM on the Air, the copy version (full screen, 60 Hz, off/on/on/off, 240 s windows, all
+  valid, nothing over the VM's window): shown directly (WindowServer 0 vs 57-113 GPU ms/s, its CPU
+  13-24 % vs 21-41 %, GPU busy 17-25 % vs 19-29 %), the same frame rates (59.9 / 30 flushes a
+  second), but the whole Mac is not lower: scrolling 4.17 vs 4.15 W, a 1080p30 video 3.77 vs
+  3.75 W, the pointer moving 3.42 vs 3.42 W. The copy costs QEMU 38-75 GPU ms/s, about what
+  WindowServer's composite cost. So on an Air in SDR at 60 Hz neither version saves power.
+- Bench, Air, no VM, 60 frames a second, GL draws like QEMU (240 s windows, A B C C B A): today's
+  lossless composite 2.74 / 2.75 W; GL into plain drawables 2.64 / 2.64 W; GL into lossless
+  surfaces + Metal copy into compressed drawables 2.69 / 2.67 W (all direct). The bench did not
+  predict either VM result.
+- Not measured yet: HDR at 120 Hz on an XDR display (M1 Max), where WindowServer's half-float
+  composite costs 125-158 GPU ms/s. Queued with the M1 Max bench; merge only if it saves watts
+  there.
 - It only works while nothing covers the VM: a notification, a menu, another app's always-on-top
   window (even 1x1 pt) composites again until it is gone. qemu.log and `omacvm check` say which it
   is.
