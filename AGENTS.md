@@ -591,13 +591,15 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   every renamed or ad hoc test copy asks again, while copies of `org.omacvm.app.test` at any path and of any
   build share its grants (2026-10-26: 8 copies of 3 builds on the mini, all allowed). A lane's own id
   (`org.omacvm.app.test.<lane>`) is a new app to macOS with no grants (`src/tests/e2e/relabel.sh` refuses it;
-  the release kits' r322-r324 made 54 "would like to control this Mac" dialogs in 36 hours). Test with only this one:
+  the release kits' r322-r324 made 54 "would like to control this Mac" dialogs in 36 hours). One id is not enough for
+  Local Network: macOS asks it again for each new build even of `org.omacvm.app.test` (2026-10-26 on the M1 Max), so
+  a new build's first start on a Mac someone uses can show that prompt. Test with only this one:
   `OMACVM_SIGN_ID=<Developer ID> app/scripts/build-app.sh --test-identity --install` builds "OmacVM Test"
   (`org.omacvm.app.test`) and copies it over `~/Applications/OmacVM Test.app`; its helpers in
   `Contents/Helpers` are "OmacVM Test Bridge" (`org.omacvm.test.bridge`, port 47931,
   `~/Library/Application Support/omacvm-test-bridge`) and "OmacVM Test Gestures" (`org.omacvm.test.gestures`,
   port 47930, settings domain `org.omacvm.test.gestures`). The test Bridge and Gestures take only OmacVM
-  Test.app's VMs (and a lane's copy re-signed as `org.omacvm.app.test.<lane>`), the normal ones only the others (the Bridge reads the app a VM runs from, Gestures the VM's
+  Test.app's VMs, the normal ones only the others (the Bridge reads the app a VM runs from, Gestures the VM's
   code signature `<bundle id>.qemu`; a development build's QEMU is every helper's). Its VMs reach Omanotch on 47911 only: a test Omanotch
   (src/omanotch/mac build, launched with `--args -port 47911 -bridgeDir omacvm-test-bridge`; never `defaults write
   ch.gillesgoetsch.omanotch`, which is the person's Omanotch's) on a Mac without the user's. Start a helper with `open` (so macOS checks its own

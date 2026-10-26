@@ -14,8 +14,10 @@
 # the Developer ID team, so every copy and build of it has them. A lane's own
 # id (org.omacvm.app.test.<lane>) has none: the QEMU of 3.2.4 and older asked
 # "would like to control this Mac" at every VM start (54 dialogs in 36 hours
-# on the test Mac mini), and Local Network asks for each new id. Another test
-# app's settings are kept apart by the test identity's lock instead.
+# on the test Mac mini), and Local Network asks for each new id. Local Network
+# also asks again for each new build of org.omacvm.app.test, so one id does not
+# stop that prompt. Another test app's settings are kept apart by the test
+# identity's lock instead.
 set -euo pipefail
 ZIP=${1:?usage: relabel.sh ZIP OUT_DIR [ID]}; O=${2:?usage: relabel.sh ZIP OUT_DIR [ID]}; ID=${3:-org.omacvm.app.test}
 [[ $ID == org.omacvm.app.test ]] || { echo "relabel.sh: $ID: only org.omacvm.app.test (a lane's own id has no macOS permissions: a dialog at every VM start)" >&2; exit 2; }
