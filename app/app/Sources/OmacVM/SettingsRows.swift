@@ -222,11 +222,11 @@ struct DirectDisplayRow: View {
     var tick = 0
     @State private var on = Settings.directDisplay
 
-    static let info = "In full screen, the Mac's display shows the VM's picture itself, as it does for full-screen games, instead of macOS's window server copying it onto the screen for every frame. The picture, the frame rate (also 120 Hz), HDR and brightness stay the same; the Mac's graphics do less for each frame, which saves battery while the screen moves (scrolling, video). It works while nothing else is on top of the VM: a notification, a menu, or another app's always-on-top window (even a tiny one) makes macOS copy the picture again until it is gone. In a window it changes nothing. Experimental: off by default. GPU safe mode turns it off. Counts from the next start of the VM."
+    static let info = "In full screen, the Mac's display can show the VM's picture itself, as it does for full-screen games, instead of macOS's window server copying it onto the screen for every frame. That only works while nothing else is on top of the VM: a notification, a menu, or another app's always-on-top window (even a tiny one) makes macOS copy the picture again until it is gone. While the switch is on, the VM draws every frame in full and without the compressed frames OmacVM uses otherwise, also in a window. On a MacBook Air (60 Hz) it did not save power. Whether it does with HDR at 120 Hz is still being measured. Experimental: off by default. GPU safe mode turns it off. Counts from the next start of the VM."
 
     var body: some View {
         SettingRow(title: "Show directly on the display", badge: "experimental",
-                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "In full screen, less work for the Mac's graphics. From the next start of the VM.",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "In full screen, the display shows the VM itself. From the next start of the VM.",
                    info: Self.info, probe: "direct-display") {
             RowSwitch(title: "Show directly on the display", isOn: $on, enabled: !Settings.gpuSafeMode)
         }
