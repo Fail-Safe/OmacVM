@@ -78,6 +78,25 @@ expect "guard: a folder whose vm.env names another VM" refused "$(guard Other)"
 defaults delete "$DOM" vmsRoot
 expect "guard: no setting" refused "$(guard Omarchy)"
 
+# A clone's SSH host key (the update pass's 409 "did not set this VM up", 2026-10-26): the clone
+# counts as set up like the VM it was cloned from, by omacvm's own rule (vms.sh: its pin file is
+# not empty); a stale key of the clone's name goes; nothing outside the test identity's keys.
+PH="$T/pin home"
+pin() { (export HOME=$PH OMACVM_TEST_IDENTITY=1; source "$R/src/lib/mac.sh"; source "$R/src/lib/vm.sh"; vm_pin "$1" app; echo "$OMA_PIN"); }
+setup() { [[ -s $(pin "$1") ]] && echo true || echo false; }
+mkdir -p "$(dirname "$(pin "OmacVM M-base")")"
+echo "omacvm-vm ssh-ed25519 AAAAbase" > "$(pin "OmacVM M-base")"
+(HOME=$PH; e2e_clone_pin "OmacVM M-base" "OmacVM M-base-u")
+expect "clone of a set-up VM: set up" true "$(setup "OmacVM M-base-u")"
+expect "clone: the same key" "omacvm-vm ssh-ed25519 AAAAbase" "$(cat "$(pin "OmacVM M-base-u")" 2>/dev/null)"
+echo "omacvm-vm ssh-ed25519 AAAAold" > "$(pin "OmacVM M-other")"
+(HOME=$PH; e2e_clone_pin "OmacVM M-never" "OmacVM M-other")
+expect "clone of a VM without a key: a stale key of its name gone" false "$(setup "OmacVM M-other")"
+(HOME=$PH; e2e_pin_drop "OmacVM M-base-u")
+expect "drop: the clone's key gone" false "$(setup "OmacVM M-base-u")"
+expect "drop: the source's key kept" true "$(setup "OmacVM M-base")"
+expect "nothing outside the test identity's keys" 0 "$(find "$PH" -type f | grep -vc '/Application Support/omacvm-test/known_hosts/')"
+
 # The harnesses use it: no unquoted save, no ROOT that falls back to ~/OmacVM.
 expect "drive-drop.sh restores through e2e_settings_restore" 1 "$(grep -c 'e2e_settings_restore "$DOM" "$SAVED" vmsRoot' "$R/src/tests/e2e/drive-drop.sh")"
 expect "cc-switches.sh: no ~/OmacVM fallback for the test app" 0 "$(grep -c 'read "$APPID" vmsRoot 2>/dev/null || echo' "$R/src/tests/e2e/cc-switches.sh")"
