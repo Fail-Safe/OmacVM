@@ -536,5 +536,6 @@ has "install.sh installs the cursor-plane patch" 'install -Dm644 virtio-gpu/linu
 has "install.sh installs the damage patch" 'install -Dm644 virtio-gpu/linux-virtio-gpu-damage-clips.patch $VG/linux-virtio-gpu-damage-clips.patch' "$(cat "$G/install.sh")"
 lacks "install.sh no longer installs the vsync-lock patch" 'install -Dm644 virtio-gpu/linux-virtio-gpu-vsync-lock.patch' "$(cat "$G/install.sh")"
 has "install.sh removes the vsync-lock patch an earlier version installed" 'rm -f $VG/linux-virtio-gpu-vsync-lock.patch' "$(cat "$G/install.sh")"
+lacks "omacvm check: no Frames in step line (an old app's flag shows nothing)" "OMACVM_VSYNCLOCK" "$(cat "$R/src/guest/check.sh")"
 
 exit $fail
