@@ -1,9 +1,10 @@
 #!/bin/bash
 # OmacVM.app's virtio-gpu driver, offline. omacvm-virtio-gpu-load loads it
 # for a start that asks for an option it has (SMBIOS omacvm.deepcolor=1, an
-# older app's omacvm.hdr=1, omacvm.pointerplane=2, omacvm.vsynclock=1) or for
-# its damage fix (omacvm.damage=1, "Draw only what changed"), after its
-# dependencies; else the stock driver, and it says why. omacvm-smbios reads the
+# older app's omacvm.hdr=1, omacvm.pointerplane=2) or for its damage fix
+# (omacvm.damage=1, "Draw only what changed"), after its dependencies; else the
+# stock driver, and it says why. An older app's omacvm.vsynclock=1 (Frames in
+# step with the Mac, 3.2.3-3.2.6, removed in 3.2.7) asks for nothing. omacvm-smbios reads the
 # strings as omacvm-app-host did. The modprobe rule falls back to the stock
 # driver without the loader (in the initramfs only for a start that asks for none).
 # The builder skips current builds and kernels without headers, drops the old
@@ -31,6 +32,9 @@ lacks() {   # WHAT NEEDLE HAYSTACK
 has() {   # WHAT NEEDLE HAYSTACK
   case $3 in *"$2"*) echo "ok   $1" ;; *) printf 'FAIL %s\n  no %s in: %s\n' "$1" "$2" "$3"; fail=1 ;; esac
 }
+lacks() {   # WHAT NEEDLE HAYSTACK
+  case $3 in *"$2"*) printf 'FAIL %s\n  %s is still there\n' "$1" "$2"; fail=1 ;; *) echo "ok   $1" ;; esac
+}
 
 K=7.2.9-1-aarch64-ARCH
 VG=usr/local/lib/omacvm/virtio-gpu
@@ -53,7 +57,7 @@ echo "modinfo $*" >> "$CALLS"
 case "$1 $2" in
   "-F depends") echo "drm,virtio_dma_buf" ;;
   "-F vermagic") echo "$FAKE_KERNEL SMP preempt mod_unload aarch64" ;;
-  "-F parm") for p in ${FAKE_PARMS-deep_color cursor_plane vsync_lock}; do echo "$p:an option (bool)"; done ;;
+  "-F parm") for p in ${FAKE_PARMS-deep_color cursor_plane}; do echo "$p:an option (bool)"; done ;;
 esac
 EOF
 printf '#!/bin/bash\necho "$FAKE_KERNEL"\n' > "$T/bin/uname"
@@ -69,7 +73,7 @@ command -v sha256sum >/dev/null || printf '#!/bin/bash\nexec shasum -a 256 "$@"\
 chmod +x "$T/bin"/*
 export PATH=$T/bin:$PATH
 
-PATCH_SUM=$(cat "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" | sha256sum | cut -d' ' -f1)
+PATCH_SUM=$(cat "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" | sha256sum | cut -d' ' -f1)
 
 # One SMBIOS type 11 structure (OEM strings): type, length 5, handle, count,
 # then the strings. The count byte runs straight into the first string.
@@ -86,7 +90,7 @@ PY
 # A guest with the driver built for $K, the strings given.
 guest() {   # STRING...
   rm -rf "$T/root" && mkdir -p "$T/root/$VG/$K"
-  cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" "$T/root/$VG/"
+  cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" "$T/root/$VG/"
   echo "not a real module" > "$T/root/$VG/$K/virtio-gpu.ko"
   echo "$PATCH_SUM $K" > "$T/root/$VG/$K/stamp"
   echo ours > "$T/root/$VG/$K/damage"
@@ -224,29 +228,28 @@ has "docs/routes/app.md: a VM before $new draws its own pointer until Update VM"
 has "docs/routes/app.md: an app of $old or older gets Hyprland's own pointer" \
   "an app of $old or older (\`=1\`, layer over the main window only) gets Hyprland's own pointer" "$doc"
 
+# An app of 3.2.3-3.2.6 with Frames in step with the Mac on (omacvm.vsynclock=1; the switch and
+# the driver's vsync_lock are gone since 3.2.7): the flag asks for nothing, the others as they are.
 guest omacvm.vsynclock=1 omacvm.screen=3024x1964
-load; expect "frames in step (omacvm.vsynclock=1): ours at 8 bits, its option said" "omacvm 8-bit vsync_lock=1" "$(said)"
-has "omacvm.vsynclock=1: insmod with vsync_lock=1, then the given options, no deep_color" "insmod $KO vsync_lock=1 opt=1;" "$(calls)"
-
-guest omacvm.deepcolor=1 omacvm.pointerplane=2 omacvm.vsynclock=1
-load; expect "all three switches: ours with both options" "omacvm cursor_plane=1 vsync_lock=1" "$(said)"
-has "all three: insmod with all three options" "insmod $KO cursor_plane=1 vsync_lock=1 opt=1 deep_color=1;" "$(calls)"
-
-guest omacvm.vsynclock=0; nofix
-load; expect "frames in step off (=0): stock" "stock not asked for this start" "$(said)"
-
-# A build without the vsync lock (its patch did not fit the kernel): only the options it has.
-guest omacvm.deepcolor=1 omacvm.pointerplane=2 omacvm.vsynclock=1
-FAKE_PARMS="deep_color cursor_plane" load
-expect "build without vsync_lock: ours, the others' options, and it says so" "omacvm cursor_plane=1 without vsync_lock" "$(said)"
-has "build without vsync_lock: insmod without it" "insmod $KO cursor_plane=1 opt=1 deep_color=1;" "$(calls)"
+load; expect "an old app's frames in step alone (omacvm.vsynclock=1): exit 0" 0 $?
+expect "an old app's frames in step alone: stock, not asked" "stock not asked for this start" "$(said)"
+expect "an old app's frames in step alone: no insmod" "$P1$STOCK" "$(calls)"
 guest omacvm.vsynclock=1; nofix
-FAKE_PARMS="deep_color cursor_plane" load
-expect "only frames in step asked, the build has no vsync_lock, no damage fix: stock, and why" "stock built without vsync_lock for $K" "$(said)"
-expect "only frames in step asked, no vsync_lock: no insmod" "$P1$STOCK" "$(calls)"
+load; expect "an old app's frames in step alone, the kernel's own damage fix: stock, not asked" "stock not asked for this start" "$(said)"
 guest omacvm.deepcolor=1 omacvm.vsynclock=1
-FAKE_PARMS="deep_color" load
-expect "HDR + frames in step on a build with deep colour only: HDR stays ours" "omacvm without vsync_lock" "$(said)"
+load; expect "an old app's HDR + frames in step: ours for HDR" "omacvm" "$(said)"
+has "an old app's HDR + frames in step: insmod without vsync_lock" "insmod $KO opt=1 deep_color=1;" "$(calls)"
+guest omacvm.deepcolor=1 omacvm.pointerplane=2 omacvm.vsynclock=1
+load; expect "an old app's three switches (3.2.5-3.2.6): ours with cursor_plane only" "omacvm cursor_plane=1" "$(said)"
+has "an old app's three switches (3.2.5-3.2.6): insmod with cursor_plane and deep_color, no vsync_lock" "insmod $KO cursor_plane=1 opt=1 deep_color=1;" "$(calls)"
+guest omacvm.deepcolor=1 omacvm.pointerplane=1 omacvm.vsynclock=1
+load; expect "an old app's three switches (3.2.3-3.2.4, pointer layer =1): ours for HDR only" "omacvm" "$(said)"
+has "an old app's three switches (3.2.3-3.2.4): insmod with deep_color only" "insmod $KO opt=1 deep_color=1;" "$(calls)"
+# Even a module that still lists vsync_lock (a driver built before 3.2.7) never gets it.
+guest omacvm.pointerplane=2 omacvm.vsynclock=1
+FAKE_PARMS="deep_color cursor_plane vsync_lock" load
+expect "a module with vsync_lock, an old app asks for it: not passed" "omacvm 8-bit cursor_plane=1" "$(said)"
+has "a module with vsync_lock: insmod without it" "insmod $KO cursor_plane=1 opt=1;" "$(calls)"
 
 guest omacvm.deepcolor=0 omacvm.hdr=0; nofix
 load; expect "switch off (=0): stock" "stock not asked for this start" "$(said)"
@@ -277,7 +280,7 @@ FAKE_PARMS="" load
 expect "modinfo lists no options: all asked, as before" "omacvm cursor_plane=1" "$(said)"
 guest omacvm.pointerplane=2 omacvm.vsynclock=1
 FAKE_PARMS="" load
-expect "modinfo lists no options, pointer + frames in step: all asked" "omacvm 8-bit cursor_plane=1 vsync_lock=1" "$(said)"
+expect "modinfo lists no options, pointer + an old app's frames in step: the pointer layer only" "omacvm 8-bit cursor_plane=1" "$(said)"
 
 guest omacvm.deepcolor=1
 FAKE_KERNEL=7.3.0-1-aarch64-ARCH load; expect "asked, another kernel: exit 0" 0 $?
@@ -321,7 +324,7 @@ mkdir -p "$T/r"
 OMACVM_VIRTIO_GPU_TEST_ROOT=$T/r "$BUILD" --remove > /dev/null   # nothing there: fine
 rule_line=$(sed -n 's/^install virtio_gpu //p' "$BUILD")
 expect "the rule: the loader if it is there; without it (the initramfs) nothing for a start that asks for ours, else the stock driver" \
-  'if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=2 -e omacvm.vsynclock=1 -e omacvm.damage=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi' \
+  'if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=2 -e omacvm.damage=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi' \
   "$rule_line"
 run_rule() {   # LOADER (a path) SMBIOS-ROOT: runs the rule with the loader, modprobe and SMBIOS swapped for stand-ins
   local cmd=${rule_line//\$CMDLINE_OPTS/opt=1}
@@ -341,7 +344,7 @@ run_rule "$T/r/missing" "$T/rn"; expect "rule: no loader (the initramfs), an 8-b
 run_rule "$T/r/missing" "$T/rs"; expect "rule: no loader (the initramfs), a 10-bit start: nothing yet (the real root loads it)" "0 " "$? $(calls)"
 run_rule "$T/r/missing" "$T/ro"; expect "rule: no loader (the initramfs), a pointer-plane start: nothing yet" "0 " "$? $(calls)"
 run_rule "$T/r/missing" "$T/ro1"; expect "rule: no loader (the initramfs), an older app's pointer plane: the stock driver" "0 $STOCK" "$? $(calls)"
-run_rule "$T/r/missing" "$T/rv"; expect "rule: no loader (the initramfs), a frames-in-step start: nothing yet" "0 " "$? $(calls)"
+run_rule "$T/r/missing" "$T/rv"; expect "rule: no loader (the initramfs), an old app's frames-in-step start (omacvm.vsynclock=1): the stock driver" "0 $STOCK" "$? $(calls)"
 run_rule "$T/r/missing" "$T/rd"; expect "rule: no loader (the initramfs), a Draw only what changed start: nothing yet" "0 " "$? $(calls)"
 run_rule "$T/r/missing" "$T/none"; expect "rule: no loader, no SMBIOS: the stock driver" "0 $STOCK" "$? $(calls)"
 printf '#!/bin/sh\necho "loader $*" >> "$CALLS"\n' > "$T/r/ok"; chmod +x "$T/r/ok"
@@ -354,7 +357,7 @@ B=$T/b
 builder() { OMACVM_VIRTIO_GPU_TEST_ROOT=$B "$BUILD" "$@" 2>&1; }
 mkdir -p "$B/tmp" "$B/$VG/$K" "$B/lib/modules/$K/build" "$B/lib/modules/$K/kernel" "$B/lib/modules/$K/updates" \
   "$B/lib/modules/7.1.4-1-aarch64-ARCH/kernel" "$B/$VG/7.0.9-1-aarch64-ARCH" "$B/etc/omacvm"
-cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" "$B/$VG/"
+cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" "$B/$VG/"
 echo "module" > "$B/$VG/$K/virtio-gpu.ko"; echo "$PATCH_SUM $K" > "$B/$VG/$K/stamp"
 echo "old" > "$B/lib/modules/$K/updates/virtio-gpu.ko"; : > "$B/etc/omacvm/virtio-gpu-deep-color"
 : > "$CALLS"
@@ -412,11 +415,11 @@ has "a .0 kernel: fetched from tag v7.3" "--unprivileged 7.3.0-1-aarch64-ARCH 7.
 out=$(builder --kernel ../x); expect "not a kernel name: exit 1" "1 omacvm-virtio-gpu: not a kernel name: ../x" "$? $out"
 
 out=$(builder --remove); expect "remove: exit 0" 0 $?
-expect "remove: builds and rule go, the scripts' folder stays" "linux-virtio-gpu-cursor-plane.patch linux-virtio-gpu-damage-clips.patch linux-virtio-gpu-deep-color.patch linux-virtio-gpu-vsync-lock.patch -" \
+expect "remove: builds and rule go, the scripts' folder stays" "linux-virtio-gpu-cursor-plane.patch linux-virtio-gpu-damage-clips.patch linux-virtio-gpu-deep-color.patch -" \
   "$(ls "$B/$VG" | tr '\n' ' ')$([[ -e $RULE ]] && echo rule || echo -)"
 
 rm -rf "$B" && mkdir -p "$B/$VG" "$B/lib/modules/$K/kernel"
-cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" "$B/$VG/"
+cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" "$B/$VG/"
 builder --hook > /dev/null
 expect "no build anywhere: no modprobe rule" "-" "$([[ -e $RULE ]] && echo rule || echo -)"
 
@@ -424,7 +427,7 @@ expect "no build anywhere: no modprobe rule" "-" "$([[ -e $RULE ]] && echo rule 
 # build is left out and said; the damage fix only on a kernel without it; deep colour alone
 # failing is no build.
 U=$T/u; mkdir -p "$U/bin" "$U/root/$VG" "$U/lib/modules/$K/build"
-cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" "$U/root/$VG/"
+cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-damage-clips.patch" "$U/root/$VG/"
 cat > "$U/bin/curl" <<'EOS'
 #!/bin/bash
 while (( $# )); do
@@ -459,40 +462,33 @@ unpriv() {   # runs the build's unprivileged step; stdout: the module, stderr to
   PATH=$U/bin:$PATH OMACVM_VIRTIO_GPU_TEST_ROOT=$U/root "$BUILD" --unprivileged "$K" 7.2.9 "$U/w" 2> "$U/err"
 }
 said_b() { grep -E 'built without|damage fix:|no build:' "$U/err" | tr '\n' ';'; }
-out=$(unpriv); expect "unprivileged: all fit: built with all four, deep colour first" "0 deep-color cursor-plane vsync-lock damage-clips " "$? $out"
+out=$(unpriv); expect "unprivileged: all fit: built with all three, deep colour first" "0 deep-color cursor-plane damage-clips " "$? $out"
 expect "unprivileged: all fit: nothing left out, the damage fix is ours" "omacvm-virtio-gpu: damage fix: ours;" "$(said_b)"
 out=$(FAKE_HAS_FIX=1 unpriv)
-expect "a kernel with the damage fix (7.4): not patched again" "0 deep-color cursor-plane vsync-lock " "$? $out"
+expect "a kernel with the damage fix (7.4): not patched again" "0 deep-color cursor-plane " "$? $out"
 expect "a kernel with the damage fix: said, nothing left out, the word the loader reads (kernel)" "omacvm-virtio-gpu: damage fix: kernel;" "$(said_b)"
 out=$(FAKE_HAS_FIX=neither unpriv)
-expect "neither the old line nor Linux 7.4's fix: not patched" "0 deep-color cursor-plane vsync-lock " "$? $out"
+expect "neither the old line nor Linux 7.4's fix: not patched" "0 deep-color cursor-plane " "$? $out"
 expect "neither line: left out, and the damage fix is unknown (not taken for the kernel's own)" \
   "omacvm-virtio-gpu: built without damage_clips: 7.2.9's virtgpu_plane.c has neither the line it replaces nor Linux 7.4's fix;omacvm-virtio-gpu: damage fix: unknown;" "$(said_b)"
 out=$(FAKE_PATCH_FAIL=damage-clips unpriv)
-expect "damage patch does not apply: built with the other three" "0 deep-color cursor-plane vsync-lock " "$? $out"
+expect "damage patch does not apply: built with the other two" "0 deep-color cursor-plane " "$? $out"
 expect "damage patch does not apply: says so" "omacvm-virtio-gpu: built without damage_clips: damage_clips does not apply to 7.2.9;" "$(said_b)"
 out=$(FAKE_PATCH_FAIL=cursor-plane unpriv)
-expect "cursor patch does not apply: deep colour and the damage fix (the vsync lock sits on it)" "0 deep-color damage-clips " "$? $out"
-expect "cursor patch does not apply: it and the vsync lock left out" \
-  "omacvm-virtio-gpu: built without cursor_plane: cursor_plane does not apply to 7.2.9;omacvm-virtio-gpu: built without vsync_lock: it needs cursor_plane, which is left out;omacvm-virtio-gpu: damage fix: ours;" "$(said_b)"
-out=$(FAKE_PATCH_FAIL=vsync-lock unpriv)
-expect "vsync patch does not apply: built with the other three" "0 deep-color cursor-plane damage-clips " "$? $out"
-expect "vsync patch does not apply: says so" "omacvm-virtio-gpu: built without vsync_lock: vsync_lock does not apply to 7.2.9;omacvm-virtio-gpu: damage fix: ours;" "$(said_b)"
-out=$(FAKE_MAKE_FAIL=vsync-lock unpriv)
-expect "vsync lock does not build: only it goes out (each extra one is tried alone)" "0 deep-color cursor-plane damage-clips " "$? $out"
-expect "vsync lock does not build: said, the damage fix stays" \
-  "omacvm-virtio-gpu: built without vsync_lock: vsync_lock does not build on 7.2.9;omacvm-virtio-gpu: damage fix: ours;" "$(said_b)"
+expect "cursor patch does not apply: deep colour and the damage fix" "0 deep-color damage-clips " "$? $out"
+expect "cursor patch does not apply: says so" \
+  "omacvm-virtio-gpu: built without cursor_plane: cursor_plane does not apply to 7.2.9;omacvm-virtio-gpu: damage fix: ours;" "$(said_b)"
 out=$(FAKE_MAKE_FAIL=damage-clips unpriv)
-expect "damage fix does not build: built with the other three" "0 deep-color cursor-plane vsync-lock " "$? $out"
+expect "damage fix does not build: built with the other two" "0 deep-color cursor-plane " "$? $out"
 expect "damage fix does not build: says so" "omacvm-virtio-gpu: built without damage_clips: damage_clips does not build on 7.2.9;" "$(said_b)"
 out=$(FAKE_MAKE_FAIL=cursor-plane unpriv)
-expect "cursor plane does not build: it and the vsync lock (which sits on it) go out; deep colour and the damage fix stay" "0 deep-color damage-clips " "$? $out"
-expect "cursor plane does not build: said, and why the vsync lock went too" \
-  "omacvm-virtio-gpu: built without cursor_plane: cursor_plane does not build on 7.2.9;omacvm-virtio-gpu: built without vsync_lock: it needs cursor_plane, which is left out;omacvm-virtio-gpu: damage fix: ours;" "$(said_b)"
-out=$(FAKE_MAKE_FAIL="vsync-lock damage-clips" unpriv)
-expect "two extra ones do not build: deep colour alone" "0 deep-color " "$? $out"
-expect "two extra ones do not build: each extra one said" \
-  "omacvm-virtio-gpu: built without cursor_plane: left out, the build on 7.2.9 failed with two or more of the extra patches;omacvm-virtio-gpu: built without vsync_lock: left out, the build on 7.2.9 failed with two or more of the extra patches;omacvm-virtio-gpu: built without damage_clips: left out, the build on 7.2.9 failed with two or more of the extra patches;" "$(said_b)"
+expect "cursor plane does not build: only it goes out; deep colour and the damage fix stay" "0 deep-color damage-clips " "$? $out"
+expect "cursor plane does not build: said" \
+  "omacvm-virtio-gpu: built without cursor_plane: cursor_plane does not build on 7.2.9;omacvm-virtio-gpu: damage fix: ours;" "$(said_b)"
+out=$(FAKE_MAKE_FAIL="cursor-plane damage-clips" unpriv)
+expect "both extra ones do not build: deep colour alone" "0 deep-color " "$? $out"
+expect "both extra ones do not build: each said" \
+  "omacvm-virtio-gpu: built without cursor_plane: left out, the build on 7.2.9 failed with two or more of the extra patches;omacvm-virtio-gpu: built without damage_clips: left out, the build on 7.2.9 failed with two or more of the extra patches;" "$(said_b)"
 out=$(FAKE_PATCH_FAIL="cursor-plane damage-clips" unpriv)
 expect "neither applies: deep colour alone" "0 deep-color " "$? $out"
 out=$(FAKE_PATCH_FAIL=deep-color unpriv); rc=$?
@@ -525,13 +521,20 @@ has "damage fix: the builder knows Linux 7.4's own fix (the line the patch puts 
 
 # Order and stamp: deep colour first, then the cursor plane (its hunks sit on the first one's),
 # then the damage fix (src/tests/virtio-gpu-patches.sh applies them to real kernel sources).
-has "build: deep colour, then the cursor plane, the vsync lock, the damage fix" \
+# The vsync-lock patch (Frames in step with the Mac) is gone since 3.2.7: builder and loader
+# leave it out of the stamp alike (else every start would load the stock driver), install.sh
+# removes the copy an earlier version put there.
+has "build: deep colour first" \
   "$(printf '%s\n' '  local -a use=("$patch_file") left=()')" "$(cat "$BUILD")"
-has "build: the others in this order" '  for p in "$cursor_file" "$vsync_file" "$damage_file"; do' "$(cat "$BUILD")"
-has "build: a stale stamp when any patch changes" 'cat "$patch_file" "$cursor_file" "$vsync_file" "$damage_file" 2>/dev/null | sha256sum' "$(cat "$BUILD")"
-has "loader: the same stamp" '"$root/linux-virtio-gpu-deep-color.patch" "$root/linux-virtio-gpu-cursor-plane.patch" "$root/linux-virtio-gpu-vsync-lock.patch" "$root/linux-virtio-gpu-damage-clips.patch"' "$(cat "$LOAD")"
+has "build: then the cursor plane and the damage fix" '  for p in "$cursor_file" "$damage_file"; do' "$(cat "$BUILD")"
+has "build: a stale stamp when any patch changes" 'cat "$patch_file" "$cursor_file" "$damage_file" 2>/dev/null | sha256sum' "$(cat "$BUILD")"
+has "loader: the same stamp" '"$root/linux-virtio-gpu-deep-color.patch" "$root/linux-virtio-gpu-cursor-plane.patch" "$root/linux-virtio-gpu-damage-clips.patch" 2>/dev/null | sha256sum' "$(cat "$LOAD")"
+lacks "build: no vsync lock" "vsync" "$(cat "$BUILD")"
+lacks "loader: no vsync_lock option" "vsync_lock" "$(cat "$LOAD")"
+lacks "loader: OMACVM_VSYNCLOCK not read" "OMACVM_VSYNCLOCK" "$(cat "$LOAD")"
 has "install.sh installs the cursor-plane patch" 'install -Dm644 virtio-gpu/linux-virtio-gpu-cursor-plane.patch $VG/linux-virtio-gpu-cursor-plane.patch' "$(cat "$G/install.sh")"
-has "install.sh installs the vsync-lock patch" 'install -Dm644 virtio-gpu/linux-virtio-gpu-vsync-lock.patch $VG/linux-virtio-gpu-vsync-lock.patch' "$(cat "$G/install.sh")"
 has "install.sh installs the damage patch" 'install -Dm644 virtio-gpu/linux-virtio-gpu-damage-clips.patch $VG/linux-virtio-gpu-damage-clips.patch' "$(cat "$G/install.sh")"
+lacks "install.sh no longer installs the vsync-lock patch" 'install -Dm644 virtio-gpu/linux-virtio-gpu-vsync-lock.patch' "$(cat "$G/install.sh")"
+has "install.sh removes the vsync-lock patch an earlier version installed" 'rm -f $VG/linux-virtio-gpu-vsync-lock.patch' "$(cat "$G/install.sh")"
 
 exit $fail
