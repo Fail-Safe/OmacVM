@@ -1,27 +1,26 @@
 From: OmacVM
-Subject: [PATCH] cocoa: direct to display (experimental): frames drawn into a CAMetalLayer
+Subject: [PATCH] cocoa: direct to display (experimental): frames copied into a CAMetalLayer
 
 What: with OMACVM_GL_DIRECT=1 (OmacVM.app: "Show directly on the
-display", experimental, off by default) the view's layer is a CAMetalLayer
-and the IOSurface present draws each frame with GL straight into one of
-its drawables (their IOSurfaces bound as GL textures, once each) instead of
-into surfaces of its own that a plain CALayer shows. The vsync queue,
-pacing, colour tags, HDR / extra brightness kinds (half-float drawables),
-the band below a guest a few rows shorter than the window and the
-sublayers stay as they are; a drawable is presented where a surface was
-set as the layer's contents. Drawables come from a queue of their own
-(nextDrawable can wait); QEMU's thread takes the spare one without waiting
-and treats "none yet" as all surfaces busy (the frame waits a refresh, as
-before). No partial draws into drawables (each comes back holding an older
-frame). A drawable's IOSurface keeps its GL texture in a present slot;
-new drawables (Core Animation can make new ones without a change of size
-or kind) take a free slot or the one drawn into longest ago that no
-queued frame holds, and a slot not drawn into for 20 frames lets its
-surface go, so they never run out of slots and old ones are not kept.
-The layer's size and kind change on the drawables' queue, never during a
-nextDrawable. Needs the vsync present and a Metal device (dlsym: Metal is not
-linked into QEMU); GPU safe mode keeps the plain layer. A drawable GL
-cannot draw into turns it off for the run (plain layer, one warning).
+display", experimental, off by default) the view's layer is a
+CAMetalLayer. QEMU draws each frame into its own surfaces as before
+(lossless-compressed 8-bit, half float, partial draws), and the commit
+thread copies the frame's surface with a Metal blit into one of the
+layer's drawables (lossless-compressed where the 8-bit surfaces are: Core
+Animation's private wantsIOSurfaceCompression, checked with
+respondsToSelector, macOS 27 as the lossless surfaces) instead of setting
+it as a plain CALayer's contents. The vsync queue, pacing, colour tags,
+EDR settings, the band below a guest a few rows shorter than the window
+and the sublayers stay as they are; the vsync queue holds a frame's
+drawable with its surface. Drawables come from a queue of their own
+(nextDrawable can wait); QEMU's thread takes the spare one without
+waiting and treats "none yet" (or one of an old size or kind) as all
+surfaces busy (the frame waits a refresh, as before). The layer's size
+and kind change on that queue, never during a nextDrawable. A surface
+stays in use until the GPU has copied it. Needs the vsync present and a
+Metal device (dlsym, and Metal classes by name: Metal is not linked into
+QEMU); GPU safe mode keeps the plain layer. A frame Metal cannot read
+turns it off for the run (plain layer, one warning).
 qemu.log: "cocoa: direct to display: on", and from Core Animation's own
 status of the layer "the display shows the window itself" or "composited
 by WindowServer (status ...)", once a minute how many frames went direct.
@@ -31,26 +30,20 @@ WindowServer composite: it neither reads the frame nor writes its own
 framebuffer) only when its layer is a CAMetalLayer and no other window
 covers any part of it; a CALayer showing IOSurfaces is always composited,
 whatever the surface's kind, tags or Core Animation's private switches.
-sRGB tags, scaled modes, our own sublayers, half-float drawables and a
-window over the menu-bar strip (Omanotch's) keep it direct; any window over
-the VM's window (a 1x1 pt one is enough) composites again.
-Measured on a MacBook Air M2 (macOS 27.0.1, its scaled default mode, the
-real VM full screen at 60 Hz, on/off/on/off, the same frame rates and
-pixels): shown directly, WindowServer 0 vs 58-113 GPU ms/s and 13-24 % vs
-22-41 % CPU, but the whole Mac no lower (scrolling 4.29 vs 4.27 W, 1080p30
-video 3.85 vs 3.79 W, pointer 3.58 vs 3.44 W): GL can only draw into plain
-drawables (lossless-compressed ones refuse a GL binding), so QEMU's draw
-and the display's read move the bytes WindowServer's composite of the
-lossless surfaces saved. Hence experimental and off: where the composite
-costs more (half-float HDR frames at 120 Hz on an XDR display) it is not
-measured yet.
+sRGB tags, scaled modes, our own sublayers, half-float and compressed
+drawables and a window over the menu-bar strip (Omanotch's) keep it
+direct; any window over the VM's window (a 1x1 pt one is enough)
+composites again. The first version had GL draw straight into the
+drawables: shown directly, but GL cannot draw into compressed drawables,
+so it lost the lossless surfaces and partial draws and the whole Mac used
+the same or more power (MacBook Air M2, the real VM at 60 Hz). Copying
+keeps both; in a window (composited) it costs one extra copy a frame.
 
 Upstream: OmacVM only (QEMU's IOSurface present is OmacVM's).
 Test: app/runtime/Tests/display/test-present-direct.sh (the wiring of the
-patched ui/cocoa.m; the checks catch code without it; the slot choice runs
-from this patch's own text, also in CI). work/direct-display
-(ddbench, the Air rows) for the numbers.
-Applies after omacvm-cocoa-present-lossless.patch (before omacvm-cocoa-no-app-nap.patch).
+patched ui/cocoa.m; the checks catch code without it and the first
+version). work/direct-display (ddbench, the Air rows) for the numbers.
+Applies after omacvm-cocoa-pointer-bright.patch (before omacvm-cocoa-no-app-nap.patch).
 diff --git a/ui/cocoa.m b/ui/cocoa.m
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
@@ -62,7 +55,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  #include <crt_externs.h>
  #include <stdarg.h>
  
-@@ -77,6 +78,7 @@
+@@ -78,6 +79,7 @@
  #include <Carbon/Carbon.h>
  #include <dlfcn.h>
  #include <objc/runtime.h>
@@ -70,7 +63,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  #include <AppKit/NSOpenGL.h>
  #ifdef CONFIG_OPENGL
  #import <IOSurface/IOSurface.h>
-@@ -194,6 +196,7 @@
+@@ -201,6 +203,7 @@
  static bool gl_dirty;
  static bool gl_present_pending;
  static bool cocoa_gl_present_iosurface_wanted(void);
@@ -78,7 +71,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  static void cocoa_gl_present_screen_changed(void);
  static void omacvm_bright_reread(void);
  static void omacvm_bright_look(void);
-@@ -1272,8 +1275,14 @@
+@@ -1279,8 +1282,14 @@
  #endif
          [self setWantsLayer:YES];
          if (cgl && cocoa_gl_present_iosurface_wanted()) {
@@ -95,40 +88,45 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
              [layer setOpaque:YES];
              [layer setBackgroundColor:CGColorGetConstantColor(kCGColorBlack)];
              [layer setContentsGravity:kCAGravityResize];
-@@ -7705,8 +7714,351 @@
- static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
-                                          double flushed, bool linear);
+@@ -7735,6 +7744,405 @@
  static void cocoa_gl_present_request(void);
-+
-+/*
+ 
+ /*
 + * OmacVM, direct to display (OMACVM_GL_DIRECT=1: the app's experimental
 + * switch "Show directly on the display"): the view's layer is a
-+ * CAMetalLayer and QEMU's GL draws each frame straight into one of its
-+ * drawables (their IOSurfaces bound as GL textures, in present_surf/_tex)
-+ * instead of into surfaces of its own that a plain CALayer shows. macOS 27
-+ * then shows a full-screen window on the display itself, without
-+ * WindowServer's composite, while no other window covers any part of it; a
-+ * CALayer showing IOSurfaces is always composited (measured on an M2: 0 vs
-+ * 55-110 WindowServer GPU ms/s at 60 frames/s). Same pixels and colour
-+ * tags, same frames and pacing: the vsync queue holds the drawables as it
-+ * held the surfaces, and a frame is presented where a surface was set.
++ * CAMetalLayer. QEMU draws each frame into its own surfaces as before
++ * (lossless-compressed 8-bit, half float, partial draws), and the commit
++ * thread copies the frame's surface with Metal into one of the layer's
++ * drawables (lossless-compressed where the surfaces are) instead of setting
++ * it as a plain CALayer's contents. macOS 27 then shows a full-screen
++ * window on the display itself, without WindowServer's composite, while no
++ * other window covers any part of it; a CALayer showing IOSurfaces is
++ * always composited (measured on an M2: 0 vs 55-110 WindowServer GPU ms/s
++ * at 60 frames/s). Same pixels (a copy), colour tags and EDR settings,
++ * same frames and pacing: the vsync queue holds a frame's drawable with
++ * its surface.
 + *
 + * Threads: drawables come from direct_queue (nextDrawable can block while
 + * all three are on screen or queued); QEMU's thread takes the spare one
-+ * without waiting, and treats "none yet" as all surfaces busy (the frame
-+ * waits a refresh, as before). The commit thread presents. direct_lock
-+ * guards the spare and the drawables of queued frames.
++ * without waiting and treats "none yet" as all surfaces busy (the frame
++ * waits a refresh, as before). The layer's size and kind change on
++ * direct_queue too, never during a nextDrawable. The commit thread copies
++ * and presents; the surface stays in use until the GPU has copied it.
++ * direct_lock guards the spare and the drawables of queued frames.
 + *
 + * Needs the vsync present and a Metal device; otherwise, and with GPU safe
-+ * mode (OMACVM_GL_PRESENT=layer), the plain layer as before. A drawable GL
-+ * cannot draw into turns it off for the run (plain layer, one warning).
++ * mode (OMACVM_GL_PRESENT=layer), the plain layer as before. A surface
++ * Metal cannot read turns it off for the run (plain layer, one warning).
 + * qemu.log says when the display shows the window itself and when it is
-+ * composited (Core Animation's own status of the layer), and once a
-+ * minute how many frames went direct.
++ * composited (Core Animation's own status of the layer), and once a minute
++ * how many frames went direct.
 + */
 +#define DIRECT_PENDING PRESENT_SURFACES
-+static int present_direct = -1;         /* 1: CAMetalLayer drawables */
++#define DIRECT_TEXTURES (2 * PRESENT_SURFACES)
++static int present_direct = -1;         /* 1: CAMetalLayer, frames copied */
 +static CAMetalLayer *direct_layer;
++static id<MTLDevice> direct_dev;
++static id<MTLCommandQueue> direct_cq;
 +static dispatch_queue_t direct_queue;
 +static os_unfair_lock direct_lock = OS_UNFAIR_LOCK_INIT;
 +static id<CAMetalDrawable> direct_spare;           /* direct_lock */
@@ -137,66 +135,16 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    IOSurfaceRef surf;
 +    id<CAMetalDrawable> drawable;
 +} direct_pending[DIRECT_PENDING];                  /* direct_lock */
++static unsigned direct_gen;             /* atomic: new surfaces were made */
++static struct {
++    IOSurfaceRef surf;
++    id<MTLTexture> tex;
++} direct_tex[DIRECT_TEXTURES];          /* commit thread */
++static unsigned direct_tex_gen, direct_tex_next; /* commit thread */
 +static int direct_shown_state = -1;     /* commit thread: 1 direct, 0 composited */
 +static double direct_state_logged;      /* commit thread */
 +static unsigned direct_frames, direct_frames_direct; /* commit thread */
 +static double direct_minute;            /* commit thread */
-+static uint64_t direct_slot_used[PRESENT_SURFACES]; /* QEMU thread: when slot k was last drawn into */
-+static uint64_t direct_slot_clock;      /* QEMU thread: frames drawn */
-+
-+/*
-+ * The present slot (present_surf/_tex) for a drawable's IOSurface: its own
-+ * slot if it was bound before, else a free one, else the slot drawn into
-+ * longest ago that no queued frame holds (*evict: let its surface and GL
-+ * texture go first), else -1 (every slot held by a queued frame: the frame
-+ * waits a refresh, as all busy). So drawables Core Animation makes anew
-+ * (without a change of size or kind) never run out of slots.
-+ * Plain C: test-present-direct.sh runs it.
-+ */
-+static int omacvm_direct_slot(IOSurfaceRef const *slot, const uint64_t *used,
-+                              unsigned nslot, IOSurfaceRef ds,
-+                              bool (*held)(IOSurfaceRef), bool *evict)
-+{
-+    int free_k = -1, old_k = -1;
- 
-+    *evict = false;
-+    for (unsigned k = 0; k < nslot; k++) {
-+        if (slot[k] == ds) {
-+            return k;
-+        }
-+    }
-+    for (unsigned k = 0; k < nslot; k++) {
-+        if (!slot[k]) {
-+            if (free_k < 0) {
-+                free_k = k;
-+            }
-+        } else if (!held(slot[k]) && (old_k < 0 || used[k] < used[old_k])) {
-+            old_k = k;
-+        }
-+    }
-+    if (free_k >= 0) {
-+        return free_k;
-+    }
-+    *evict = old_k >= 0;
-+    return old_k;
-+}
-+
- /*
-+ * A slot whose surface was not drawn into for 4 x nslot frames and that no
-+ * queued frame holds: Core Animation no longer hands out that drawable, so
-+ * its surface (and GL texture) can go. -1 if none. Plain C, as above.
-+ */
-+static int omacvm_direct_stale(IOSurfaceRef const *slot, const uint64_t *used,
-+                               unsigned nslot, uint64_t now,
-+                               bool (*held)(IOSurfaceRef))
-+{
-+    for (unsigned k = 0; k < nslot; k++) {
-+        if (slot[k] && now - used[k] > 4 * nslot && !held(slot[k])) {
-+            return k;
-+        }
-+    }
-+    return -1;
-+}
 +
 +/* Main thread, once, from the view's init: the layer, or nil for the plain one. */
 +static CALayer *omacvm_direct_layer_new(void)
@@ -217,25 +165,28 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    id<MTLDevice> (*create)(void) =
 +        mtl ? (id<MTLDevice> (*)(void))dlsym(mtl, "MTLCreateSystemDefaultDevice") : NULL;
 +    id<MTLDevice> dev = create ? create() : nil;
-+    if (!dev) {
++    id<MTLCommandQueue> cq = [dev newCommandQueue];
++    if (!dev || !cq) {
 +        warn_report("cocoa: direct to display: off (no Metal device)");
++        [dev release];
 +        return nil;
 +    }
 +    CAMetalLayer *layer = [[CAMetalLayer alloc] init];
 +    [layer setDevice:dev];
-+    [dev release];
 +    [layer setPixelFormat:MTLPixelFormatBGRA8Unorm];
-+    /* GL draws into the drawables' IOSurfaces. */
++    /* The frames are copied in with a Metal blit. */
 +    [layer setFramebufferOnly:NO];
 +    [layer setMaximumDrawableCount:3];
 +    [layer setDisplaySyncEnabled:YES];
 +    [layer setAllowsNextDrawableTimeout:YES];
 +    direct_layer = [layer retain];
++    direct_dev = dev;
++    direct_cq = cq;
 +    direct_queue = dispatch_queue_create("org.omacvm.present.drawable",
 +        dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
 +                                                QOS_CLASS_USER_INTERACTIVE, 0));
 +    present_direct = 1;
-+    info_report("cocoa: direct to display: on (frames drawn into a CAMetalLayer's "
++    info_report("cocoa: direct to display: on (frames copied into a CAMetalLayer's "
 +                "drawables; the display shows a full-screen window itself while "
 +                "nothing covers it)");
 +    return layer;
@@ -294,7 +245,51 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    [d release];
 +}
 +
-+/* QEMU thread: surf's frame was drawn into d; held until the frame is put. */
++static CGColorSpaceRef cocoa_gl_present_colorspace(bool deep, bool linear);
++
++/*
++ * QEMU thread, after new surfaces: the drawables follow their size, kind
++ * and colours (lossless-compressed where the 8-bit surfaces are; Core
++ * Animation's private switch, macOS 27). On direct_queue, never while a
++ * nextDrawable runs there; drawables made before are dropped when taken.
++ */
++static void omacvm_direct_alloc(uint32_t w, uint32_t h, bool deep, bool linear,
++                                bool compressed)
++{
++    bool half = deep || linear;
++    CGColorSpaceRef cs = cocoa_gl_present_colorspace(deep, linear);
++    MTLPixelFormat pf = half ? MTLPixelFormatRGBA16Float : MTLPixelFormatBGRA8Unorm;
++    CGSize size = CGSizeMake(w, h);
++
++    qatomic_inc(&direct_gen);
++    dispatch_async(direct_queue, ^{
++        SEL sel = NSSelectorFromString(@"setWantsIOSurfaceCompression:");
++        [CATransaction begin];
++        [CATransaction setDisableActions:YES];
++        [direct_layer setPixelFormat:pf];
++        [direct_layer setDrawableSize:size];
++        [direct_layer setColorspace:cs];
++        if ([direct_layer respondsToSelector:sel]) {
++            ((void (*)(id, SEL, BOOL))objc_msgSend)(direct_layer, sel, compressed);
++        }
++        [CATransaction commit];
++        CGColorSpaceRelease(cs);
++    });
++    omacvm_direct_drop_spare();
++    omacvm_direct_fetch();
++}
++
++/* QEMU thread: is d made for the surfaces now (size and kind)? */
++static bool omacvm_direct_fits(id<CAMetalDrawable> d, uint32_t w, uint32_t h,
++                               bool half)
++{
++    id<MTLTexture> t = [d texture];
++    return t && [t width] == w && [t height] == h &&
++           [t pixelFormat] == (half ? MTLPixelFormatRGBA16Float :
++                                      MTLPixelFormatBGRA8Unorm);
++}
++
++/* QEMU thread: surf's frame goes into d; held until the frame is put. */
 +static void omacvm_direct_hold(IOSurfaceRef surf, id<CAMetalDrawable> d)
 +{
 +    os_unfair_lock_lock(&direct_lock);
@@ -307,34 +302,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        }
 +    }
 +    os_unfair_lock_unlock(&direct_lock);
-+    /* No room cannot happen (at most three drawables); never leak one. */
++    /* No room cannot happen (one per queued surface); never leak one. */
 +    [d release];
-+}
-+
-+/* QEMU thread: a queued frame still holds surf's drawable. */
-+static bool omacvm_direct_held(IOSurfaceRef surf)
-+{
-+    bool held = false;
-+
-+    os_unfair_lock_lock(&direct_lock);
-+    for (int i = 0; i < DIRECT_PENDING; i++) {
-+        held |= direct_pending[i].surf == surf;
-+    }
-+    os_unfair_lock_unlock(&direct_lock);
-+    return held;
-+}
-+
-+/* QEMU thread: slot k's surface and GL texture go (see omacvm_direct_slot). */
-+static void omacvm_direct_slot_free(unsigned k)
-+{
-+    if (present_tex[k]) {
-+        glDeleteTextures(1, &present_tex[k]);
-+        present_tex[k] = 0;
-+    }
-+    if (present_surf[k]) {
-+        CFRelease(present_surf[k]);
-+        present_surf[k] = NULL;
-+    }
 +}
 +
 +/* Commit thread: the display shows the window itself, or WindowServer composites it. */
@@ -377,7 +346,58 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    }
 +}
 +
-+/* Commit thread, in place of setting the layer's contents: present surf's drawable. */
++/*
++ * Commit thread: a Metal texture on surf, made once per surface. New
++ * surfaces (direct_gen) let the old textures, and with them the old
++ * surfaces, go. nil if Metal cannot read it.
++ */
++static id<MTLTexture> omacvm_direct_texture(IOSurfaceRef surf)
++{
++    unsigned gen = qatomic_read(&direct_gen);
++
++    if (gen != direct_tex_gen) {
++        for (int i = 0; i < DIRECT_TEXTURES; i++) {
++            [direct_tex[i].tex release];
++            direct_tex[i].tex = nil;
++            direct_tex[i].surf = NULL;
++        }
++        direct_tex_gen = gen;
++    }
++    for (int i = 0; i < DIRECT_TEXTURES; i++) {
++        if (direct_tex[i].surf == surf) {
++            return direct_tex[i].tex;
++        }
++    }
++    uint32_t f = IOSurfaceGetPixelFormat(surf);
++    bool half = f == 'RGhA' || f == '&RhA';
++    /* By name: Metal is not linked into QEMU. */
++    Class desc = NSClassFromString(@"MTLTextureDescriptor");
++    MTLTextureDescriptor *d =
++        [desc texture2DDescriptorWithPixelFormat:half ? MTLPixelFormatRGBA16Float :
++                                                        MTLPixelFormatBGRA8Unorm
++                                           width:IOSurfaceGetWidth(surf)
++                                          height:IOSurfaceGetHeight(surf)
++                                       mipmapped:NO];
++    [d setUsage:MTLTextureUsageShaderRead];
++    [d setStorageMode:MTLStorageModeShared];
++    id<MTLTexture> t = [direct_dev newTextureWithDescriptor:d iosurface:surf plane:0];
++    if (!t) {
++        return nil;
++    }
++    unsigned k = direct_tex_next++ % DIRECT_TEXTURES;
++    [direct_tex[k].tex release];
++    direct_tex[k].surf = surf;
++    direct_tex[k].tex = t;
++    return t;
++}
++
++static void omacvm_direct_fallback(const char *why);
++
++/*
++ * Commit thread, in place of setting the layer's contents: copy surf into
++ * the frame's drawable and present it. The surface stays in use (QEMU does
++ * not draw into it) until the GPU has copied it.
++ */
 +static bool omacvm_direct_show(IOSurfaceRef surf)
 +{
 +    id<CAMetalDrawable> d = nil;
@@ -393,7 +413,32 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    if (!d) {
 +        return false;
 +    }
-+    [d present];
++    id<MTLTexture> src = omacvm_direct_texture(surf);
++    id<MTLTexture> dst = [d texture];
++    if (!src) {
++        [d release];
++        omacvm_direct_fallback("Metal cannot read the frames");
++        return true;
++    }
++    if ([src width] != [dst width] || [src height] != [dst height] ||
++        [src pixelFormat] != [dst pixelFormat]) {
++        /* Cannot happen: a drawable that does not fit is dropped when taken. */
++        warn_report_once("cocoa: direct to display: a drawable of another size or kind");
++        [d release];
++        return true;
++    }
++    id<MTLCommandBuffer> cb = [direct_cq commandBuffer];
++    id<MTLBlitCommandEncoder> be = [cb blitCommandEncoder];
++    [be copyFromTexture:src toTexture:dst];
++    [be endEncoding];
++    [cb presentDrawable:d];
++    IOSurfaceIncrementUseCount(surf);
++    CFRetain(surf);
++    [cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
++        IOSurfaceDecrementUseCount(surf);
++        CFRelease(surf);
++    }];
++    [cb commit];
 +    [d release];
 +    omacvm_direct_status();
 +    return true;
@@ -418,14 +463,16 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +}
 +
 +/*
-+ * QEMU thread: GL could not draw into a drawable. The plain layer from now
-+ * on: frames still queued show from their surfaces as a layer's contents.
++ * Any thread: Metal could not read a frame. The plain layer from now on:
++ * frames still queued show from their surfaces as a layer's contents.
 + */
 +static void omacvm_direct_fallback(const char *why)
 +{
++    if (!qatomic_xchg(&present_direct, 0)) {
++        return;
++    }
 +    warn_report("cocoa: direct to display: off for this run (%s); the plain "
 +                "layer from now on", why);
-+    qatomic_set(&present_direct, 0);
 +    omacvm_direct_drop_spare();
 +    dispatch_async(dispatch_get_main_queue(), ^{
 +        CALayer *old = [cocoaView layer];
@@ -447,170 +494,41 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
   * OmacVM, extra brightness (ADR 0050, ui/omacvm-bright.h): with the app's
   * switch (extraBrightness, read live) the guest's frames go through a
   * shader into half-float surfaces in extended linear sRGB, times a gain
-@@ -8119,6 +8471,47 @@
-     cocoa_gl_present_free();
-     present_alloc_ns = now;
-     present_realloc_due = false;
-+
+@@ -8234,6 +8642,9 @@
+     present_linear = linear;
+     present_next = 0;
+     omacvm_pd_reset(&present_pd, present_nsurf, present_pd.fw, present_pd.fh);
 +    if (omacvm_direct_on()) {
-+        /*
-+         * Direct to display: no surfaces of our own. The layer makes
-+         * drawables of this size and kind; GL binds them as they come
-+         * (cocoa_gl_present).
-+         */
-+        CGColorSpaceRef dcs = cocoa_gl_present_colorspace(deep, linear);
-+        MTLPixelFormat dpf = half ? MTLPixelFormatRGBA16Float :
-+                                    MTLPixelFormatBGRA8Unorm;
-+        CGSize dsize = CGSizeMake(w, h);
-+        /*
-+         * On direct_queue: never while a nextDrawable runs there. Drawables
-+         * made before are dropped by their size and kind (cocoa_gl_present).
-+         */
-+        dispatch_async(direct_queue, ^{
-+            [CATransaction begin];
-+            [CATransaction setDisableActions:YES];
-+            [direct_layer setPixelFormat:dpf];
-+            [direct_layer setDrawableSize:dsize];
-+            [direct_layer setColorspace:dcs];
-+            [CATransaction commit];
-+            CGColorSpaceRelease(dcs);
-+        });
-+        omacvm_direct_drop_spare();
-+        omacvm_direct_fetch();
-+        if (!present_packed_logged || half != present_packed_half) {
-+            present_packed_logged = true;
-+            info_report("cocoa: %s drawables %ux%u (direct to display)",
-+                        half ? "half-float" : "8-bit", w, h);
-+        }
-+        present_packed = false;
-+        present_packed_half = half;
-+        present_w = w;
-+        present_h = h;
-+        present_deep = deep;
-+        present_linear = linear;
-+        present_next = 0;
-+        omacvm_pd_reset(&present_pd, present_nsurf, present_pd.fw, present_pd.fh);
-+        return true;
++        omacvm_direct_alloc(w, h, deep, linear, packed);
 +    }
+     return true;
+ }
  
-     if (present_lossless < 0) {
-         const char *e = getenv("OMACVM_GL_LOSSLESS");
-@@ -8320,11 +8713,84 @@
- 
-     /* The next surface Core Animation is not showing or reading. */
-     unsigned i;
--    for (i = 0; i < present_nsurf; i++) {
--        unsigned n = (present_next + i) % present_nsurf;
--        if (!IOSurfaceIsInUse(present_surf[n])) {
--            break;
-+    int direct_n = -1;
+@@ -8354,6 +8765,23 @@
+             break;
+         }
+     }
 +    id<CAMetalDrawable> drawable = nil;
-+    if (omacvm_direct_on()) {
++    if (i < present_nsurf && omacvm_direct_on()) {
 +        /*
-+         * Direct to display: the spare drawable, if one is there (else
-+         * all are on screen or queued: as all surfaces busy). Its IOSurface
-+         * gets a GL texture the first time it comes.
++         * Direct to display: the frame is copied into a drawable when it
++         * shows. None spare (all on screen or queued), or one made before
++         * the last change of size or kind: as all surfaces busy.
 +         */
 +        drawable = omacvm_direct_take();
-+        IOSurfaceRef ds = drawable ? [[drawable texture] iosurface] : NULL;
-+        bool half = present_deep || present_linear;
-+        if (ds && (IOSurfaceGetWidth(ds) != present_w ||
-+                   IOSurfaceGetHeight(ds) != present_h ||
-+                   (IOSurfaceGetPixelFormat(ds) == 'RGhA') != half)) {
-+            /* Made before the last change of size or kind. */
-+            [drawable release];
-+            drawable = nil;
-+            ds = NULL;
-         }
-+        bool evict = false;
-+        int dk = ds ? omacvm_direct_slot(present_surf, direct_slot_used,
-+                                         present_nsurf, ds, omacvm_direct_held,
-+                                         &evict) : -1;
-+        if (dk >= 0 && evict) {
-+            static bool evict_logged;
-+            if (!evict_logged) {
-+                evict_logged = true;
-+                info_report("cocoa: direct to display: new drawables of the same "
-+                            "size; the oldest unused one is let go");
-+            }
-+            omacvm_direct_slot_free(dk);
-+        }
-+        if (dk >= 0 && !present_surf[dk]) {
-+            CFRetain(ds);
-+            present_surf[dk] = ds;
-+            glGenTextures(1, &present_tex[dk]);
-+            glBindTexture(GL_TEXTURE_RECTANGLE, present_tex[dk]);
-+            CGLError ce = CGLTexImageIOSurface2D(present_ctx, GL_TEXTURE_RECTANGLE,
-+                                                 half ? GL_RGBA16F : GL_RGBA,
-+                                                 present_w, present_h,
-+                                                 half ? GL_RGBA : GL_BGRA,
-+                                                 half ? GL_HALF_FLOAT :
-+                                                        GL_UNSIGNED_INT_8_8_8_8_REV,
-+                                                 ds, 0);
-+            glBindTexture(GL_TEXTURE_RECTANGLE, 0);
-+            if (ce != kCGLNoError) {
-+                [drawable release];
-+                cocoa_gl_present_free();
-+                omacvm_direct_fallback("GL cannot draw into the drawables");
-+                CGLSetCurrentContext(prev);
-+                gl_dirty = true;
-+                timer_mod(present_timer, qemu_clock_get_ns(QEMU_CLOCK_REALTIME));
-+                return true;
-+            }
-+        }
-+        if (dk >= 0) {
-+            direct_n = dk;
-+            direct_slot_used[dk] = ++direct_slot_clock;
-+            /* A drawable Core Animation dropped: its surface goes (one a frame). */
-+            int sk = omacvm_direct_stale(present_surf, direct_slot_used,
-+                                         present_nsurf, direct_slot_clock,
-+                                         omacvm_direct_held);
-+            if (sk >= 0 && sk != dk) {
-+                omacvm_direct_slot_free(sk);
-+            }
-+        } else if (ds) {
-+            /* Every slot held by a queued frame: wait, as all busy. */
++        if (drawable && !omacvm_direct_fits(drawable, present_w, present_h,
++                                            present_deep || present_linear)) {
 +            [drawable release];
 +            drawable = nil;
 +        }
-+        i = direct_n < 0 ? present_nsurf : 0;
-+    } else {
-+        for (i = 0; i < present_nsurf; i++) {
-+            unsigned n = (present_next + i) % present_nsurf;
-+            if (!IOSurfaceIsInUse(present_surf[n])) {
-+                break;
-+            }
++        if (!drawable) {
++            i = present_nsurf;
 +        }
-     }
++    }
      if (i == present_nsurf) {
          /* All busy: try again after the next refresh. */
-@@ -8339,8 +8805,13 @@
-                                  qatomic_read(&present_period_ns));
-         return true;
-     }
--    unsigned n = (present_next + i) % present_nsurf;
--    present_next = (n + 1) % present_nsurf;
-+    unsigned n;
-+    if (direct_n >= 0) {
-+        n = direct_n;
-+    } else {
-+        n = (present_next + i) % present_nsurf;
-+        present_next = (n + 1) % present_nsurf;
-+    }
- 
-     /* OmacVM: what surface n needs (partial present, see present_pd). */
-     if (present_damage_on < 0) {
-@@ -8379,7 +8850,8 @@
-                 gl_scanout_borrow && !present_pd_unflushed && !splash && !boost &&
-                 w == present_w && h == present_h &&
-                 gl_scanout_x == 0 && gl_scanout_y == 0 &&
--                gl_scanout_w == w && gl_scanout_h == h;
-+                gl_scanout_w == w && gl_scanout_h == h &&
-+                direct_n < 0;
-     if (part && !present_pd_logged) {
-         present_pd_logged = true;
-         info_report("cocoa: present: first frame drawn in part (%ux%u of %ux%u)",
-@@ -8437,6 +8909,9 @@
+         CGLSetCurrentContext(prev);
+@@ -8465,6 +8893,9 @@
      IOSurfaceRef surf = present_surf[n];
      double flushed = CACurrentMediaTime();
      CFRetain(surf);
@@ -620,7 +538,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      if (present_vsync) {
          os_unfair_lock_lock(&present_lock);
          present_sync.inflight++;
-@@ -8564,6 +9039,7 @@
+@@ -8592,6 +9023,7 @@
  
  static void surface_put(IOSurfaceRef surf)
  {
@@ -628,7 +546,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      IOSurfaceDecrementUseCount(surf);
      CFRelease(surf);
  }
-@@ -8581,8 +9057,15 @@
+@@ -8609,8 +9041,15 @@
      [layer setMinificationFilter:f];
      cocoa_gl_layer_follow(layer, surf, linear);
      omacvm_present_gravity(layer, surf);
