@@ -5,10 +5,10 @@ in more words.
 
 ## 3.2.7 (unreleased)
 
-- **A refused OpenGL call no longer writes memory bytes into qemu.log or stops an app's drawing.**
-  Follow-up to #547: when the Mac's OpenGL refuses calls, the log of a shader it did not compile or
-  link is now empty instead of whatever was in memory, and a pipeline check the Mac did not answer no
-  longer counts as a failed one (that stopped all drawing of the app).
+- **A refused OpenGL call no longer writes memory bytes into qemu.log.** Follow-up to #547: when the
+  Mac's OpenGL does not compile or link a shader and gives no log, the log line is now empty instead of
+  whatever was in memory. A pipeline check the Mac did not answer also no longer counts as a failed
+  one; that path only runs once separable pipelines link on the Mac (#567).
 
 ## 3.2.5
 
