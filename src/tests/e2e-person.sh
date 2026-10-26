@@ -137,7 +137,9 @@ cat > "$B/launchctl" <<EOF
 echo "\$*" >> "$T/launchctl.log"
 case \$1 in
   print) [[ -e "$L/\${2##*/}" ]] ;;
-  bootout) [[ -e "$L/\${2##*/}" ]] && rm -f "$L/\${2##*/}" ;;
+  # launchd tears a service down after bootout returns (FAKE_ASYNC: a second later)
+  bootout) [[ -e "$L/\${2##*/}" ]] || exit 1
+    if [[ -n \${FAKE_ASYNC:-} ]]; then ( sleep 1; rm -f "$L/\${2##*/}" ) & else rm -f "$L/\${2##*/}"; fi ;;
   bootstrap) touch "$L/\$(plutil -extract Label raw -o - "\$3")" ;;
 esac
 EOF
@@ -175,6 +177,10 @@ same "ci: ... exit 0, state gone" "0 gone" "$rc $([[ -e $T/ci-state ]] && echo t
 CR resume > /dev/null; rc=$?
 same "ci: resume with nothing paused does nothing" "0" "$rc"
 has "ci: status lists the runners" "actions.runner.o-r.mini-1	running	idle" "$(CR status)"
+# bootout returns before the service is gone: pause says "no runner runs" only once it is.
+FAKE_ASYNC=1 CR pause --wait 0 --holder $$ > "$T/ci5.txt"; rc=$?
+same "ci: an asynchronous bootout: pause waits until the runners are gone" "0 none" "$rc $(ls "$L" | grep -c . | sed 's/^0$/none/')"
+CR resume --holder $$ > /dev/null
 
 # ---- the harnesses ask between rows, not only at their start (3.2.4: two Screen Sharing connects
 # inside a run that looked only at its start)

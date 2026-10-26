@@ -66,8 +66,11 @@ case $cmd in
         if busy "$d"; then left=$((left + 1)); continue; fi
         # Written down before it goes: a resume finds it even if this gate dies right here.
         grep -qxF "$l	$p" "$STATE/stopped" || printf '%s\t%s\n' "$l" "$p" >> "$STATE/stopped"
-        if launchctl bootout "$DOMAIN/$l" 2>/dev/null || ! loaded "$l"; then log "$l stopped (no job)"
-        else log "$l: bootout failed"; left=$((left + 1)); fi
+        launchctl bootout "$DOMAIN/$l" 2>/dev/null
+        # bootout returns while launchd still tears the service down: until it is gone (<= 15 s).
+        for ((i = 0; i < 15; i++)); do loaded "$l" || break; sleep 1; done
+        if ! loaded "$l"; then log "$l stopped (no job)"
+        else log "$l: still loaded after bootout"; left=$((left + 1)); fi
       done < <(runners)
       (( left == 0 )) && { log "no runner runs (paused for $HOLDER)"; exit 0; }
       (( $(date +%s) - t0 >= WAIT )) && { log "$left runner(s) still on a job after $WAIT s"; exit 4; }
