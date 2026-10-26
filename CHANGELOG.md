@@ -15,6 +15,10 @@ in more words.
   before. MacBook Air M2, the VM full screen at 60 Hz, the pointer moving: 3.13-3.17 W instead of
   3.55-3.75 W for the whole Mac (-11 to -17 %, two sets); scrolling and typing the same. The same
   pixels and frame rate, checked at 60 Hz so far. `omacvm check` has a "Changed parts" line.
+- **Guest driver patches must fit exactly.** Update VM applied the VM driver's patches with up to
+  two lines of fuzz, so a part could land in the wrong place of a newer Linux kernel and still
+  build. Now each part must fit exactly; if one does not, the driver is built without that patch
+  (as when it does not apply at all), down to the standard driver.
 
 ## 3.2.3
 

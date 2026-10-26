@@ -145,7 +145,10 @@ make_with() {   # KERNEL WORK PATCH...: those patches on the stock sources, buil
 tree() {   # WORK PATCH...: the stock sources again, these patches on them; 1 if one does not apply
   local w=$1 p; shift
   rm -rf "$w/drivers" && cp -R "$w/stock" "$w/drivers" || return 1
-  for p; do patch -s -d "$w" -p1 -f -i "$p" || return 1; done
+  # No fuzz: each hunk's context must fit exactly (a shift in lines is fine).
+  # With patch's default fuzz a hunk can land in the wrong place of a newer
+  # kernel and still build; this way it does not apply, and the patch is left out.
+  for p; do patch -s -d "$w" -p1 -f -F 0 -i "$p" || return 1; done
 }
 
 option_of() {   # PATCH FILE: its name in the build's "without" list
