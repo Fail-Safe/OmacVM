@@ -588,7 +588,10 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   tccd: "Failed to match existing code requirement ... kTCCServicePostEvent") refuses it whatever Accessibility shows;
   the app clears its own (`KeyAccess.reset`), by hand `tccutil reset PostEvent org.omacvm.app`.
 - **Test identity (one per Mac, granted once)**: macOS keys a grant on the bundle id and the signing team, so
-  every renamed or ad hoc test copy asks again. Test with only this one:
+  every renamed or ad hoc test copy asks again, while copies of `org.omacvm.app.test` at any path and of any
+  build share its grants (2026-10-26: 8 copies of 3 builds on the mini, all allowed). A lane's own id
+  (`org.omacvm.app.test.<lane>`) is a new app to macOS with no grants (`src/tests/e2e/relabel.sh` refuses it;
+  the release kits' r322-r324 made 54 "would like to control this Mac" dialogs in 36 hours). Test with only this one:
   `OMACVM_SIGN_ID=<Developer ID> app/scripts/build-app.sh --test-identity --install` builds "OmacVM Test"
   (`org.omacvm.app.test`) and copies it over `~/Applications/OmacVM Test.app`; its helpers in
   `Contents/Helpers` are "OmacVM Test Bridge" (`org.omacvm.test.bridge`, port 47931,

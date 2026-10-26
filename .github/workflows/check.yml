@@ -401,6 +401,9 @@ jobs:
       - name: The on-screen release test's checks, offline (its tool builds; no screen, VM or app)
         run: src/tests/e2e-onscreen.sh
 
+      - name: Test copies only as the test identity (a lane's own id has no macOS permissions)
+        run: src/tests/e2e-relabel-id.sh
+
       - name: Stale-frame check reads the guest's scanout and finds changed pixels below the bar (#167)
         run: src/tests/stale-frames-diff.sh
 
