@@ -31,16 +31,16 @@ that place the cursor by its hotspot at their own mouse position.
    output keeps its cursor plane, and QEMU shows each output's image over
    that output's window (the main window's cursor layer; a pointer layer
    over each other display's window, `omacvm-cocoa-pointer-heads*.patch`).
-   (3.2.3 gave only the first output a plane, meaning the others to keep
-   Hyprland's software pointer. They got none: aquamarine 0.15.1's
+   (3.2.2 to 3.2.4 gave only the first output a plane, meaning the others
+   to keep Hyprland's software pointer. They got none: aquamarine 0.15.1's
    `CDRMOutput::setCursor` accepts a cursor for a CRTC without a cursor
    plane and its commit leaves it out, so Hyprland's hardware cursor
    "works" there and it draws no pointer itself. #554: no pointer on an
    external display.)
-2. **The app's switch sends `omacvm.pointerplane=2`** (3.2.3 sent `=1`; a
-   guest loader takes only `2`, the value of an app whose QEMU shows the
-   pointer on every display, so an app and a guest from different sides of
-   #554 fall back to Hyprland's own pointer, never to none). The loader
+2. **The app's switch sends `omacvm.pointerplane=2`** (3.2.4 and older
+   sent `=1`; a guest loader takes only `2`, the value of an app whose QEMU
+   shows the pointer on every display, so an app and a guest from different
+   sides of #554 fall back to Hyprland's own pointer, never to none). The loader
    (`omacvm-virtio-gpu-load`) then loads OmacVM's driver with
    `cursor_plane=1` (also on an 8-bit start), never together with the hidden
    `macPointer` (`omacvm.hwcursor=1`): that one makes the image the Mac's
@@ -87,12 +87,15 @@ that place the cursor by its hotspot at their own mouse position.
   rounding two pictures of today's setup show too). Extra brightness: on
   the mini, a boosted layer with the patch's pointer image and an HDR
   capture (page 2.00, the new pointer image 2.00, the old 8-bit one 1.00).
-  Two outputs (#554; Mac mini, two Mac displays, the VM in full screen with
-  "Use external displays"): the pointer on each output's cursor plane shows
-  over that display's window, moves between them, comes back after the
-  second display is unplugged and plugged in again, and has the same pixels
-  as Hyprland's own pointer with the switch off (0 differing pixels around
-  it on both displays).
+  Two outputs (#554; Mac mini, two virtual 1600x900 HiDPI displays, the
+  test app's test mode: borderless windows, not macOS's own full screen;
+  "Use external displays" on, HDR and Frames in step off): the pointer on
+  each output's cursor plane shows over that display's window, moves
+  between them, comes back after the second display is unplugged and
+  plugged in again, and has the same pixels as Hyprland's own pointer with
+  the switch off (0 differing pixels around it on both displays). Not
+  checked on screen: macOS's own full screen on the external, HDR and
+  Frames in step on, two displays of different sizes (the user's M1 Max).
   Not yet checked on screen: HDR at 120 Hz and Extra brightness on an XDR
   panel (queued on the M1 Max, tracks/m1-bench-queue.md). The pointer's soft edge is blended by macOS over the
   frames, not by the guest into them: with Extra brightness on, those few
