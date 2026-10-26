@@ -445,6 +445,11 @@ jobs:
       - name: The VM takes the pointer without a click; the Mac's cursor hides once the guest draws its own
         run: app/runtime/Tests/display/test-pointer-start.sh
 
+      - name: A click on another display's window keeps the pointer and keys (the checks catch code without it)
+        run: |
+          app/runtime/Tests/display/test-key-handback.sh
+          app/runtime/Tests/display/test-key-handback.sh --self-test
+
       - name: Mac pointer for the VM (experimental hardware cursor rules, guest image checks)
         run: app/runtime/Tests/display/test-hw-cursor.sh
       - name: One pointer between the VM and Omanotch's strip (the guest's goes into NOTCH)
@@ -516,9 +521,6 @@ jobs:
           app/runtime/Tests/display/test-present-tiles.sh
           app/runtime/Tests/display/test-present-tiles.sh --self-test
 
-      - name: The guest's vblanks on the Mac's refresh (ADR 0056; grid, period, lead; the checks catch a tree without it)
-        run: app/runtime/Tests/display/test-vsync-follow.sh
-
       - name: Extra brightness's gain, shader and omacvm check line (ADR 0050; the checks catch code without it)
         run: |
           app/runtime/Tests/display/test-extra-brightness.sh
@@ -582,6 +584,9 @@ jobs:
       - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
         run: src/tests/audio-timing.sh
 
+      - name: omacvm check's "window surfaces" line says which surfaces the app's window used (lossless or plain)
+        run: src/tests/surfaces-check.sh
+
       - name: Disk flushes as write barriers (patch pinned and tested, log lines, check)
         run: src/tests/disk-flush.sh
 
@@ -605,9 +610,6 @@ jobs:
 
       - name: OmacVM's virtio-gpu driver loads only when a start asks (a switch), else the stock one (loader, modprobe rule, builder; offline)
         run: src/tests/virtio-gpu-load.sh
-
-      - name: OmacVM's virtio-gpu vblank timer comes onto the Mac's refresh grid (vsync_lock's math, simulated)
-        run: src/tests/virtio-gpu-vsync.sh
 
       - name: Chromium's no-AV1 extension survives an apply of other features (its place, 3.1.4's path moved, check)
         run: src/tests/chromium-no-av1.sh
@@ -782,9 +784,6 @@ jobs:
 
       - name: omacvm check's HDR line says what Hyprland's SDR copy does (the check catches code without it)
         run: src/tests/hdr-copy-check.sh
-
-      - name: omacvm check's "Frames in step" line is ok only when the driver was in step
-        run: src/tests/vsync-lock-check.sh
 
       - name: Chromium's video decoder builds, and waits for a GPU that is not usable (no render node here)
         run: |

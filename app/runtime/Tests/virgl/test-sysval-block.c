@@ -8,7 +8,14 @@
  *  - the query fails (a GL error, nothing written): the same;
  *  - then, the GL answering again: new shaders draw (green in the colour buffer), and a
  *    program that was refused stays refused (not linked again for every draw), as for
- *    other refused shaders. */
+ *    other refused shaders;
+ *  - a separable pipeline whose VirglBlock fails at a rebind (its shaders were used by
+ *    another pipeline since): that draw is skipped, the next one binds again and draws.
+ * Status queries that write nothing on such a GL (virgl-query-results-init.patch), in a
+ * second context, with the stack filled first so an unset value shows:
+ *  - a shader's compile status and info log: the "Shader failed to compile" line has an
+ *    empty log, not stack bytes; the same for a program's link;
+ *  - a pipeline's validate status: no ILLEGAL_PROGRAM_PIPELINE, the context draws on. */
 #include <OpenGL/OpenGL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,13 +29,24 @@
 void sysval_block_fault(int mode);
 unsigned long sysval_block_faults(void);
 unsigned long sysval_block_draws(void);
+unsigned long sysval_block_queries(void);
+void gl_status_fault(int mode);
+void gl_pervertex_redeclare(int on);
+unsigned long gl_status_faults(void);
 
 enum { TEST_SHADER_VERTEX = 0, TEST_SHADER_FRAGMENT = 1, TEST_PRIM_TRIANGLES = 4,
        TEST_TEXTURE_2D = 2, TEST_CLEAR_COLOR0 = 1 << 2 };
-enum { GREEN = 0xff00ff00, GREY = 0xff808080 };
+enum { GREEN = 0xff00ff00, BLUE = 0xffff0000, GREY = 0xff808080 };
 
 static CGLContextObj main_ctx;
-static int failures, refused_lines, block_lines;
+static int failures, refused_lines, block_lines, ctx_error_lines;
+static char compile_line[256], link_line[256];
+
+static void keep_first(char *dst, size_t size, const char *message, const char *start)
+{
+   if (!dst[0] && !strncmp(message, start, strlen(start)))
+      snprintf(dst, size, "%s", message);
+}
 
 static void count_log(enum virgl_log_level_flags level, const char *message, void *data)
 {
@@ -36,7 +54,19 @@ static void count_log(enum virgl_log_level_flags level, const char *message, voi
    (void)data;
    refused_lines += strstr(message, "refused a shader (link)") != NULL;
    block_lines += strstr(message, "VirglBlock") != NULL;
+   ctx_error_lines += strstr(message, "context error reported") != NULL;
+   keep_first(compile_line, sizeof(compile_line), message, "Shader failed to compile");
+   keep_first(link_line, sizeof(link_line), message, "Error linking program");
    fputs(message, stderr);
+}
+
+/* Fills the stack below main with one byte, so a value vrend leaves unset in a frame
+ * there reads as that byte, not as whatever an earlier call left. */
+static void __attribute__((noinline)) fill_stack(int byte)
+{
+   volatile char junk[512 * 1024];
+   for (size_t i = 0; i < sizeof(junk); i++)
+      junk[i] = (char)byte;
 }
 
 static void check(int ok, const char *what)
@@ -220,17 +250,154 @@ static const char *fs_green =
    "  0: MOV OUT[0], IMM[0]\n"
    "  1: END\n";
 
+/* The same as separable programs (vrend links each stage alone, into a pipeline); linked
+ * with gl_pervertex_redeclare on (sysval-block-gl.c: Apple's GL wants gl_PerVertex). */
+static const char *vs_separable =
+   "VERT\n"
+   "PROPERTY SEPARABLE_PROGRAM 1\n"
+   "DCL SV[0], VERTEXID\n"
+   "DCL OUT[0], POSITION\n"
+   "DCL TEMP[0]\n"
+   "IMM[0] UINT32 {1, 2, 0, 0}\n"
+   "IMM[1] FLT32 {    4.0000,    -1.0000,     0.5000,     1.0000}\n"
+   "  0: AND TEMP[0].x, SV[0].xxxx, IMM[0].xxxx\n"
+   "  1: AND TEMP[0].y, SV[0].xxxx, IMM[0].yyyy\n"
+   "  2: USHR TEMP[0].y, TEMP[0].yyyy, IMM[0].xxxx\n"
+   "  3: U2F TEMP[0].xy, TEMP[0].xyyy\n"
+   "  4: MAD OUT[0].xy, TEMP[0].xyyy, IMM[1].xxxx, IMM[1].yyyy\n"
+   "  5: MOV OUT[0].zw, IMM[1].zzzw\n"
+   "  6: END\n";
+
+static const char *fs_separable_green =
+   "FRAG\n"
+   "PROPERTY SEPARABLE_PROGRAM 1\n"
+   "DCL OUT[0], COLOR\n"
+   "IMM[0] FLT32 {    0.0000,     1.0000,     0.0000,     1.0000}\n"
+   "  0: MOV OUT[0], IMM[0]\n"
+   "  1: END\n";
+
+static const char *fs_separable_blue =
+   "FRAG\n"
+   "PROPERTY SEPARABLE_PROGRAM 1\n"
+   "DCL OUT[0], COLOR\n"
+   "IMM[0] FLT32 {    0.0000,     0.0000,     1.0000,     1.0000}\n"
+   "  0: MOV OUT[0], IMM[0]\n"
+   "  1: END\n";
+
 /* new shader objects (so a new program), three draws, one submit */
-static int draw_with_new_shaders(struct cmds *c, uint32_t handle)
+static int draw_with_new_shaders_in(int ctx_id, struct cmds *c, uint32_t handle,
+                                    const char *vs, const char *fs)
 {
    emit_clear_grey(c);
-   emit_shader(c, handle, TEST_SHADER_VERTEX, vs_text);
+   emit_shader(c, handle, TEST_SHADER_VERTEX, vs);
    emit_bind(c, handle, TEST_SHADER_VERTEX);
-   emit_shader(c, handle + 1, TEST_SHADER_FRAGMENT, fs_green);
+   emit_shader(c, handle + 1, TEST_SHADER_FRAGMENT, fs);
    emit_bind(c, handle + 1, TEST_SHADER_FRAGMENT);
    for (int i = 0; i < 3; i++)
       emit_draw(c);
-   return submit(1, c);
+   return submit(ctx_id, c);
+}
+
+static int draw_with_new_shaders(struct cmds *c, uint32_t handle)
+{
+   return draw_with_new_shaders_in(1, c, handle, vs_text, fs_green);
+}
+
+/* clear, bind the two shaders, one draw, one submit */
+static int draw_with(int ctx_id, struct cmds *c, uint32_t vs, uint32_t fs)
+{
+   emit_clear_grey(c);
+   emit_bind(c, vs, TEST_SHADER_VERTEX);
+   emit_bind(c, fs, TEST_SHADER_FRAGMENT);
+   emit_draw(c);
+   return submit(ctx_id, c);
+}
+
+/* A separable pipeline's rebind (vrend_select_program): its shaders were bound into
+ * another pipeline since, so vrend binds its blocks again, VirglBlock included. When the
+ * GL's answer fails there, that draw is skipped and the pipeline stays usable: the next
+ * draw binds again and draws. */
+static void separable_rebind(struct cmds *c)
+{
+   gl_pervertex_redeclare(1);
+   emit_shader(c, 50, TEST_SHADER_VERTEX, vs_separable);
+   emit_shader(c, 51, TEST_SHADER_FRAGMENT, fs_separable_green);
+   emit_shader(c, 52, TEST_SHADER_FRAGMENT, fs_separable_blue);
+   check(submit(1, c) == 0, "separable: shaders");
+   unsigned long draws = sysval_block_draws(), queries = sysval_block_queries();
+   refused_lines = 0;
+   check(draw_with(1, c, 50, 51) == 0 && sysval_block_draws() == draws + 1 &&
+         sysval_block_queries() > queries && refused_lines == 0 && read_middle() == GREEN,
+         "separable: the first pipeline links, binds its VirglBlock and draws (green)");
+   check(draw_with(1, c, 50, 52) == 0 && sysval_block_draws() == draws + 2 &&
+         read_middle() == BLUE, "separable: a second pipeline with the same vertex shader (blue)");
+
+   unsigned long faults = sysval_block_faults();
+   sysval_block_fault(2);
+   int r = draw_with(1, c, 50, 51);
+   sysval_block_fault(0);
+   check(r == 0 && sysval_block_faults() > faults,
+         "separable: back to the first pipeline, its rebind gets 16 bytes: no abort");
+   check(sysval_block_draws() == draws + 2 && read_middle() == GREY,
+         "separable: that draw is skipped");
+   check(refused_lines == 0, "separable: not refused as a link (the pipeline stays)");
+
+   queries = sysval_block_queries();
+   emit_clear_grey(c);
+   emit_draw(c);
+   check(submit(1, c) == 0 && sysval_block_queries() > queries,
+         "separable: the next draw binds the pipeline's blocks again");
+   check(sysval_block_draws() == draws + 3 && read_middle() == GREEN,
+         "separable: and draws (green)");
+   gl_pervertex_redeclare(0);
+}
+
+/* Status queries that write nothing, in their own context (a context logs the details
+ * only of its first refused shader). */
+static void unwritten_status(void)
+{
+   check(!virgl_renderer_context_create(2, 6, "statusq"), "status queries: context");
+   virgl_renderer_ctx_attach_resource(2, 5);
+   struct cmds c = { .n = 0 };
+   emit_setup(&c);
+   check(submit(2, &c) == 0, "status queries: framebuffer");
+
+   unsigned long faults = gl_status_faults(), draws = sysval_block_draws();
+   gl_status_fault(1);
+   fill_stack('X');
+   int r = draw_with_new_shaders_in(2, &c, 10, vs_text, fs_green);
+   gl_status_fault(0);
+   check(r == 0 && gl_status_faults() > faults && sysval_block_draws() == draws,
+         "compile status unwritten: taken as a failed compile, no draw");
+   check(!strcmp(compile_line, "Shader failed to compile\n\n"),
+         "compile status unwritten: \"Shader failed to compile\" with an empty log");
+
+   faults = gl_status_faults();
+   gl_status_fault(3);
+   fill_stack('X');
+   r = draw_with_new_shaders_in(2, &c, 20, vs_text, fs_green);
+   gl_status_fault(0);
+   check(r == 0 && gl_status_faults() > faults && sysval_block_draws() == draws,
+         "link status unwritten: taken as a failed link, no draw");
+   check(!strcmp(link_line, "Error linking program:\n\n"),
+         "link status unwritten: \"Error linking program\" with an empty log");
+
+   faults = gl_status_faults();
+   ctx_error_lines = 0;
+   gl_pervertex_redeclare(1);
+   gl_status_fault(2);
+   fill_stack(0);
+   r = draw_with_new_shaders_in(2, &c, 30, vs_separable, fs_separable_green);
+   gl_status_fault(0);
+   gl_pervertex_redeclare(0);
+   check(gl_status_faults() > faults, "validate status unwritten: the pipeline was validated");
+   check(r == 0 && ctx_error_lines == 0,
+         "validate status unwritten: no context error (ILLEGAL_PROGRAM_PIPELINE)");
+   check(sysval_block_draws() == draws + 3 && read_middle() == GREEN,
+         "validate status unwritten: the pipeline draws (green)");
+
+   virgl_renderer_ctx_detach_resource(2, 5);
+   virgl_renderer_context_destroy(2);
 }
 
 int main(void)
@@ -295,6 +462,9 @@ int main(void)
    check(submit(1, &c) == 0 && sysval_block_draws() == draws + 3 &&
          sysval_block_faults() == faults && read_middle() == GREY,
          "the refused program is not linked again, its draws stay skipped");
+
+   separable_rebind(&c);
+   unwritten_status();
 
    virgl_renderer_ctx_detach_resource(1, 5);
    virgl_renderer_context_destroy(1);
