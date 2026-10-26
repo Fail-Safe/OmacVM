@@ -15,7 +15,7 @@
 # the hotspot that this plane does not get), the refresh vsync_lock=1. The
 # damage fix is no option: it is in the build when the kernel needed it
 # (its file "damage": ours, kernel, unknown), and in every start of ours.
-# omacvm.pointerplane=1 is an app (3.2.3 and older) whose QEMU shows the
+# omacvm.pointerplane=1 is an app (3.2.4 and older) whose QEMU shows the
 # pointer over its main window only: no plane then, Hyprland draws the
 # pointer (with the plane, other displays had none, #554).
 # /run/omacvm/virtio-gpu says which: "omacvm" (10-bit) or "omacvm 8-bit",

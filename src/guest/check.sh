@@ -675,7 +675,7 @@ app)
   esac
   # Pointer on its own layer (the app's experimental switch): this start asked
   # for it (omacvm.pointerplane=2; =1 from an app that shows it on its main
-  # display only, 3.2.3 and older); the driver's loader says whether the
+  # display only, 3.2.4 and older); the driver's loader says whether the
   # cursor plane shows, and Hyprland must put the pointer there.
   if grep -qxE 'OMACVM_POINTERPLANE=[12]' /run/omacvm/host.env 2>/dev/null; then
     st=$(cat /run/omacvm/virtio-gpu 2>/dev/null)

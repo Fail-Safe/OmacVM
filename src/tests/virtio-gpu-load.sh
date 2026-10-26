@@ -198,7 +198,7 @@ has "10-bit only: insmod with the given options and deep_color=1" "insmod $KO op
 guest omacvm.pointerplane=0; nofix
 load; expect "pointer plane switch off (=0): stock" "stock not asked for this start" "$(said)"
 
-# An app whose QEMU shows the pointer over its main window only (3.2.3 and
+# An app whose QEMU shows the pointer over its main window only (3.2.4 and
 # older: omacvm.pointerplane=1): no plane, Hyprland draws the pointer on every
 # display (with the plane, other displays showed none, #554).
 guest omacvm.pointerplane=1 omacvm.screen=3024x1964; nofix
@@ -210,6 +210,11 @@ load; expect "10-bit and an older app's pointer plane: ours without cursor_plane
 has "10-bit and omacvm.pointerplane=1: no cursor_plane" "insmod $KO opt=1 deep_color=1;" "$(calls)"
 has "the app's switch sends the value the loader takes (2: QEMU shows it on every display)" \
   '"type=11,value=omacvm.pointerplane=2"' "$(cat "$R/app/app/Sources/OmacVM/Runner.swift")"
+# The apps that send =1 are the versions before the one with #554's entry in the CHANGELOG.
+old=$(awk '/^## / { v = $2; if (hit) { print v; exit } } /\(#554/ { hit = 1 }' "$R/CHANGELOG.md")
+for f in "$LOAD" "$R/src/guest/check.sh" "$R/app/app/Sources/OmacVM/Runner.swift" "$R/AGENTS.md"; do
+  has "${f#"$R"/}: omacvm.pointerplane=1 comes from $old and older" "$old and older" "$(cat "$f")"
+done
 
 guest omacvm.vsynclock=1 omacvm.screen=3024x1964
 load; expect "frames in step (omacvm.vsynclock=1): ours at 8 bits, its option said" "omacvm 8-bit vsync_lock=1" "$(said)"
