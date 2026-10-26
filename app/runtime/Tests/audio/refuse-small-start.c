@@ -13,6 +13,9 @@
  *   AQREFUSE_BELOW_FILE=F  read the limit from this file at each start
  *                        instead (a number; missing file: the variable's),
  *                        for an output that changes while the VM runs
+ *   AQREFUSE_RATE=48000  also refuse playback queues at this rate, whatever
+ *                        their buffers (the other way the AirPods could
+ *                        tell the two sound paths apart)
  *   AQREFUSE_LOG=FILE    one line per playback queue start: its format,
  *                        buffers and what the start returned, and one when
  *                        it is disposed: buffers played, how many had sound
@@ -150,7 +153,9 @@ static OSStatus my_start(AudioQueueRef q, const AudioTimeStamp *when)
     }
 
     UInt32 frames = e.fmt.mBytesPerFrame ? e.smallest / e.fmt.mBytesPerFrame : 0;
-    if (below && frames < below) {
+    const char *rate_text = getenv("AQREFUSE_RATE");
+    double rate = rate_text ? strtod(rate_text, NULL) : 0;
+    if ((below && frames < below) || (rate > 0 && e.fmt.mSampleRate == rate)) {
         r = kAudioQueueErr_CannotStart;
     } else {
         r = AudioQueueStart(q, when);
