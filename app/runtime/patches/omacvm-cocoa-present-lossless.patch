@@ -13,10 +13,10 @@ surface and WindowServer's composite of the window move fewer bytes. Nothing may
 back, on the CPU or with glReadPixels (it crashes on them): the boot logo's
 readback reads the guest's texture, and the partial present's check mode
 (OMACVM_GL_PRESENT_DAMAGE=check, omacvm-cocoa-present-damage.patch), which
-reads the shown surface, keeps them plain. If one cannot be made or
-bound to GL, surfaces of that kind (8-bit or half float) are plain for
-the rest of the run (one warning in qemu.log); OMACVM_GL_LOSSLESS=0 keeps
-them all plain. Shown as a layer's contents they
+reads the shown surface, keeps them plain. If a half-float one cannot be
+made or bound to GL, half-float surfaces are plain for the rest of the
+run; if an 8-bit one cannot, all of them (one warning in qemu.log);
+OMACVM_GL_LOSSLESS=0 keeps them all plain. Shown as a layer's contents they
 are checked on macOS 27 only (captured: an M1 Max at 120 Hz, an M2, an M4
 on an external display; work/window-path/oncheck.m): older systems keep plain
 surfaces. qemu.log says "cocoa: 8-bit surfaces lossless-compressed" (or
@@ -45,7 +45,7 @@ Test: app/runtime/Tests/display/test-present-lossless.sh (the patched
 ui/cocoa.m is wired as tested; the checks catch code without it).
 Applies after omacvm-cocoa-extra-brightness.patch (before omacvm-cocoa-no-app-nap.patch).
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index 44f23db..779b4ec 100644
+index 44f23db..42ee258 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -7408,6 +7408,27 @@ static void cocoa_gl_render(void)
@@ -65,8 +65,8 @@ index 44f23db..779b4ec 100644
 + * on the CPU, not with glReadPixels (it crashes on them). The boot logo's
 + * readback reads the guest's texture; the partial present's check mode
 + * (OMACVM_GL_PRESENT_DAMAGE=check) reads the surfaces, so it keeps them
-+ * plain. If one cannot be
-+ * made or bound, surfaces of that kind are plain for the rest of the run;
++ * plain. If a half-float one cannot be made or bound, half-float surfaces
++ * are plain for the rest of the run; if an 8-bit one cannot, all of them;
 + * OMACVM_GL_LOSSLESS=0 keeps them all plain. Shown as a layer's contents they
 + * are checked on macOS 27 only (M1 Max, M2, M4): older systems keep plain
 + * surfaces.
@@ -163,7 +163,7 @@ index 44f23db..779b4ec 100644
          if (!present_surf[i]) {
              ok = false;
              break;
-@@ -8100,10 +8174,28 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
+@@ -8100,10 +8174,29 @@ static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep, bool linea
      }
      CGColorSpaceRelease(cs);
      glBindTexture(GL_TEXTURE_RECTANGLE, 0);
@@ -174,7 +174,8 @@ index 44f23db..779b4ec 100644
 +            warn_report("cocoa: lossless half-float surfaces failed, plain ones from now on");
 +        } else {
 +            present_lossless = 0;
-+            warn_report("cocoa: lossless surfaces failed, plain 8-bit surfaces from now on");
++            /* present_lossless = 0 turns half float plain too */
++            warn_report("cocoa: lossless surfaces failed, plain surfaces from now on");
 +        }
 +        goto again;
 +    }

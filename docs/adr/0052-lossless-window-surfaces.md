@@ -53,8 +53,9 @@ back through Core Image: 0 codes off, on an M1 Max, an M2 and an M4).
 - Half-float surfaces of HDR (PQ) and Extra brightness (linear light, with or without
   HDR) are lossless too ('&RhA', `kCVPixelFormatType_Lossless_64RGBAHalf`); this
   replaces point 2. A 10-bit scanout without HDR keeps plain half float (not checked on
-  screen; the app turns 10-bit on only with HDR). A failure makes only half-float
-  surfaces plain for the run. GL draws into them exactly within half-float rounding,
+  screen; the app turns 10-bit on only with HDR). A half-float failure makes only
+  half-float surfaces plain for the run; an 8-bit failure makes both kinds plain
+  (point 3). GL draws into them exactly within half-float rounding,
   values above 1 included (M1 Max, M2, M4: work/window-path/lbcheck16.m).
 - Checked on an M1 Max's XDR panel (macOS 27, 120 Hz, brightness 0.50) through
   WindowServer (ScreenCaptureKit HDR capture, work/hdr-surfaces/kit/hdrcheck.m `cmpq`,
