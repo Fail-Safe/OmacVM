@@ -490,6 +490,10 @@ jobs:
         run: |
           app/runtime/Tests/display/test-pointer-bright.sh
           app/runtime/Tests/display/test-pointer-bright.sh --self-test
+      - name: Tiled present, only the changed tiles to WindowServer (the checks catch code without it)
+        run: |
+          app/runtime/Tests/display/test-present-tiles.sh
+          app/runtime/Tests/display/test-present-tiles.sh --self-test
 
       - name: The guest's vblanks on the Mac's refresh (ADR 0056; grid, period, lead; the checks catch a tree without it)
         run: app/runtime/Tests/display/test-vsync-follow.sh
