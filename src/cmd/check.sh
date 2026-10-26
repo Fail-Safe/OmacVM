@@ -609,7 +609,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   sb=$(grep -oE "OmacVM: sound: (playback buffers: .*|the Mac's output refused every buffer size up to [0-9]+ frames)" "$miclog" | tail -1)
   case $sb in
     "") ;;   # an app from before 3.2.5, or no sound yet
-    *"refused every buffer size"*) warn "sound buffers" "the Mac's output would not start at any buffer size (${sb##* up to }), the VM has no sound; fix: restart the VM while this output is connected (it then gets the buffers of QEMU's main loop path), or pick another output in System Settings > Sound" ;;
+    *"refused every buffer size"*) warn "sound buffers" "the Mac's output would not start at any buffer size (${sb##* up to }), the VM has no sound; fix: pick another output in System Settings > Sound or connect this one again; with AirPods or another Bluetooth output, restart the VM while it is connected (the VM then opens it as QEMU's main loop path does)" ;;
     *) ok "sound buffers" "${sb#OmacVM: sound: playback buffers: }" ;;
   esac
 fi

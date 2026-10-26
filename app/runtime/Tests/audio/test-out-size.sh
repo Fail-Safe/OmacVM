@@ -35,6 +35,16 @@ grep -q 'omacvm_sdl_out_frames(' <<<"$want" && grep -q 'op->spec.samples = sdl_o
 # After every size was refused, no start for a while unless the Mac's output changes.
 grep -q 'sdl->refused_until = now + SDL_OUT_REFUSED_US;' <<<"$(body 'static void sdl_out_poll(SDLVoiceOut *sdl)')" &&
   grep -q 'sdl->refused_until' <<<"$start" || fail "a refusing output is started again at every stream"
+# Each size gets its own time limit: slow refusals in a row are not a device that does not answer.
+grep -q 'op->started = g_get_monotonic_time();' <<<"$(awk '/for \(;;\) \{/,/^    }$/' <<<"$open")" ||
+  fail "the sizes tried in a row share one time limit"
+# A new size file is another Mac output: what the last one refused no longer counts.
+hint=$(body 'static void sdl_out_hint_read(SDLVoiceOut *sdl)')
+grep -q 'sdl->out_floor = 0;' <<<"$hint" && grep -q 'sdl->refused_until = 0;' <<<"$hint" ||
+  fail "a refusal of the last output still counts for a new one"
+# A new size that did not open (its old device closed) is tried again while the guest plays.
+grep -q 'op->close_first ? now + SDL_OUT_RETRY_US' <<<"$(body 'static void sdl_out_poll(SDLVoiceOut *sdl)')" ||
+  fail "a failed resize leaves the VM silent until its next stream"
 # The launcher's size is followed while the device runs.
 grep -q 'sdl_out_hint' <<<"$route" || fail "a change of the Mac's output is not followed"
 echo "test-out-size: wiring ok"

@@ -146,7 +146,7 @@ GOT="qemu-system-aarch64: info: OmacVM: sound: playback buffers: 512 frames (the
 ALL="qemu-system-aarch64: OmacVM: sound: the Mac's output refused every buffer size up to 1024 frames; the VM goes on without sound"
 check "check.sh: the path's own size is ok" grep -q "^ok:256 frames (the sound path's own)" <<<"$(buffers "$OWN")"
 check "check.sh: a refused size that played larger is ok and says so" grep -q "^ok:512 frames (the Mac's output refused 256)" <<<"$(buffers "$OWN" "$REF" "$GOT")"
-check "check.sh: every size refused warns with the way out" grep -q "^warn:.*restart the VM while this output is connected" <<<"$(buffers "$OWN" "$REF" "$ALL")"
+check "check.sh: every size refused warns with the way out" grep -q "^warn:.*restart the VM while it is connected" <<<"$(buffers "$OWN" "$REF" "$ALL")"
 check "check.sh: playing again after that is ok" grep -q "^ok:512" <<<"$(buffers "$ALL" "$GOT")"
 check "check.sh: a run without the lines prints nothing" test -z "$(buffers "OmacVM: HDA sound pacing on")"
 # The guest: RTKit keeps PipeWire real-time after the VM was stopped (src/guest/sound/rtkit-no-canary.conf).

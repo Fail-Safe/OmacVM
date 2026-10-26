@@ -389,7 +389,7 @@ final class Runner {
     func start() throws {
         let c = config
         startAudioThread = Settings.audioThread
-        audioFramesStart = AudioLatencyWatch.minimumFramesNow()
+        (audioDeviceStart, audioFramesStart) = AudioLatencyWatch.outputNow()
         try FileManager.default.createDirectory(at: c.folder.appendingPathComponent("logs"),
                                                 withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: c.qmpSocket)
@@ -625,8 +625,11 @@ final class Runner {
         p.standardOutput = log
         p.standardError = log
         let agentPath = c.agentSocket.path
+        let framesFile = audioFramesFile
         p.terminationHandler = { [weak self] proc in
             let status = proc.terminationStatus
+            // QEMU's playback size file (#548) is of this run only.
+            if !framesFile.isEmpty { try? FileManager.default.removeItem(atPath: framesFile) }
             // A QEMU killed while the VM had the keyboard leaves macOS's globe
             // shortcut off: give it back (GlobeKey).
             let globe = GlobeKey.giveBack(after: proc.processIdentifier)
@@ -687,7 +690,8 @@ final class Runner {
         startControl()
         // The sound's delay on the Mac, so the VM's videos keep the picture in step.
         let audioDelay = AudioLatencyWatch(agentSocket: agentPath, thread: audioThread, wireless: audioWireless,
-                                           framesFile: audioFramesFile, initialFrames: audioFramesStart) { [weak self] line in
+                                           framesFile: audioFramesFile, initialFrames: audioFramesStart,
+                                           initialDevice: audioDeviceStart) { [weak self] line in
             Task { @MainActor in self?.appendLog(line) }
         }
         audioDelay.start()
@@ -1109,6 +1113,7 @@ final class Runner {
     /// QEMU's playback size file and what this start wrote into it (#548).
     private var audioFramesFile = ""
     private var audioFramesStart = 0
+    private var audioDeviceStart = AudioLatencyWatch.unknown
 
     private func startControl() {
         let path = config.controlSocket.path, name = config.name, gpuMemory = GPUMemory.file(for: config)

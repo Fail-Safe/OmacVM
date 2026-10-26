@@ -9,17 +9,22 @@ the Mac's output now (OMACVM_AUDIO_OUT_FRAMES_FILE: 512 for Bluetooth and
 AirPlay outputs) and to a size that played after a refused one. When
 CoreAudio's queue does not start ("CoreAudio error (AudioQueueStart): N"),
 the same open tries the next size at once (512, then 1024, ...), up to
-what the voice's ring can feed; the size that played stays for the run,
-a refused one is not tried again; when every size was refused, no new
-start for 30 s unless the Mac's output changes (failed starts in a row
-may leave coreaudiod silent). While a device runs, a new launcher
+what the voice's ring can feed, each with its own 3 s limit; the size
+that played stays while the Mac's output stays, a refused one is not
+tried again; when every size was refused, no new start for 30 s unless
+the Mac's output changes (failed starts in a row may leave coreaudiod
+silent). The app writes the size file anew at every change of the Mac's
+output, and a new file clears what the last output refused. While a
+device runs, a new launcher
 size (the Mac's output changed to or from AirPods) opens the same device
 again with it: the old device is closed first on the open's thread (SDL3
 shares an open physical device, so the new size would not take), the
-sound waits in the ring meanwhile. The size file is read again only when
-it changed (inode, time, size), with the route check every 250 ms.
+sound waits in the ring meanwhile, and a new size that fails to open is
+tried again every 5 s while the guest plays. The size file is read again
+only when it changed (inode, time, size), with the route check every
+250 ms.
 qemu.log:
-  OmacVM: sound: playback buffers: N frames (the sound path's own|the launcher's size for the Mac's output|the Mac's output refused M)
+  OmacVM: sound: playback buffers: N frames (the sound path's own|the launcher's size for the Mac's output|the Mac's output refused M|the Mac's output refused smaller ones before)
   OmacVM: sound: the Mac's output did not start with N-frame buffers (<SDL error>); trying M frames
   OmacVM: sound: the Mac's output refused every buffer size up to N frames; the VM goes on without sound
   OmacVM: sound: the Mac's output changed: playback buffers N -> M frames
@@ -55,7 +60,7 @@ lane's runs are in the PR).
  
  #define TYPE_AUDIO_SDL "audio-sdl"
  OBJECT_DECLARE_SIMPLE_TYPE(AudioSdl, AUDIO_SDL)
-@@ -71,6 +72,13 @@ typedef struct SDLVoiceOut {
+@@ -71,6 +72,12 @@ typedef struct SDLVoiceOut {
      bool silent;                /* the Mac's audio device does not answer */
      bool dropping;              /* no device: the sound goes nowhere */
      RateCtl drop_rate;
@@ -65,11 +70,10 @@ lane's runs are in the PR).
 +    unsigned out_logged;        /* the size qemu.log named last */
 +    struct stat hint_stat;      /* of the launcher's size file, last read */
 +    gint64 refused_until;       /* every size refused: no open before this */
-+    unsigned refused_hint;      /* ... unless the launcher's size changes */
  } SDLVoiceOut;
  
  typedef struct SDLCapture SDLCapture;
-@@ -387,11 +395,21 @@ static void sdl_callback_in(void *opaque, Uint8 *buf, int len)
+@@ -387,11 +394,21 @@ static void sdl_callback_in(void *opaque, Uint8 *buf, int len)
   */
  #define SDL_OUT_OPEN_TIMEOUT_US (3 * G_USEC_PER_SEC)
  #define SDL_OUT_RETRY_US (5 * G_USEC_PER_SEC)
@@ -92,7 +96,7 @@ lane's runs are in the PR).
      /* Under sdl_out_lock. */
      gint64 started;             /* when SDL got it, 0 while it waits */
      bool done;
-@@ -438,6 +456,16 @@ static void *sdl_out_open_thread(void *opaque)
+@@ -438,6 +455,16 @@ static void *sdl_out_open_thread(void *opaque)
      SDL_AudioDeviceID devid;
      bool route_matches = false;
      bool abandoned;
@@ -109,7 +113,7 @@ lane's runs are in the PR).
  
      /*
       * A recording open may hold sdl_open_lock for minutes (a pending
-@@ -450,12 +478,41 @@ static void *sdl_out_open_thread(void *opaque)
+@@ -450,12 +477,47 @@ static void *sdl_out_open_thread(void *opaque)
      op->started = g_get_monotonic_time();
      qemu_mutex_unlock(&sdl_out_lock);
  
@@ -154,10 +158,16 @@ lane's runs are in the PR).
 +                     "%u-frame buffers (%s); trying %u frames",
 +                     op->refused, err, next);
 +        op->spec.samples = next;
++        /* Each size has its own time limit: a slow refusal is no hang. */
++        qemu_mutex_lock(&sdl_out_lock);
++        if (!op->late) {
++            op->started = g_get_monotonic_time();
++        }
++        qemu_mutex_unlock(&sdl_out_lock);
      }
      if (devid) {
          SDL_PauseAudioDevice(devid, 1);
-@@ -482,23 +539,81 @@ static void *sdl_out_open_thread(void *opaque)
+@@ -482,23 +544,83 @@ static void *sdl_out_open_thread(void *opaque)
      return NULL;
  }
  
@@ -165,8 +175,9 @@ lane's runs are in the PR).
 -static void sdl_out_start_open(SDLVoiceOut *sdl, char *device_name)
 +/*
 + * The launcher's size for the Mac's output (OMACVM_AUDIO_OUT_FRAMES_FILE,
-+ * replaced whenever the Mac's output changes), read again only when the
-+ * file did: this runs on the sound's thread.
++ * written anew whenever the Mac's output changes), read again only when the
++ * file did: this runs on the sound's thread. A new file is another output:
++ * what an earlier one refused no longer counts.
 + */
 +static void sdl_out_hint_read(SDLVoiceOut *sdl)
 +{
@@ -186,6 +197,8 @@ lane's runs are in the PR).
 +    }
 +    sdl->hint_stat = st;
 +    sdl->out_hint = 0;
++    sdl->out_floor = 0;
++    sdl->refused_until = 0;
 +    if (st.st_size <= 16 && g_file_get_contents(path, &text, NULL, NULL)) {
 +        sdl->out_hint = omacvm_sdl_out_parse_hint(text);
 +    }
@@ -231,8 +244,7 @@ lane's runs are in the PR).
      }
  
 +    sdl_out_hint_read(sdl);
-+    if (!close_first && g_get_monotonic_time() < sdl->refused_until &&
-+        sdl->out_hint == sdl->refused_hint) {
++    if (!close_first && g_get_monotonic_time() < sdl->refused_until) {
 +        g_free(device_name);
 +        return;
 +    }
@@ -244,7 +256,7 @@ lane's runs are in the PR).
      op->device_name = device_name;
      sdl->opening = op;
      sdl->opening_late = false;
-@@ -507,6 +622,11 @@ static void sdl_out_start_open(SDLVoiceOut *sdl, char *device_name)
+@@ -507,6 +629,11 @@ static void sdl_out_start_open(SDLVoiceOut *sdl, char *device_name)
                         QEMU_THREAD_DETACHED);
  }
  
@@ -256,7 +268,7 @@ lane's runs are in the PR).
  /* The device the route file names, else the one last used. */
  static void sdl_out_open_route(SDLVoiceOut *sdl)
  {
-@@ -563,13 +683,25 @@ static void sdl_out_poll(SDLVoiceOut *sdl)
+@@ -563,13 +690,26 @@ static void sdl_out_poll(SDLVoiceOut *sdl)
  
      sdl->opening = NULL;
      devid = op->devid;
@@ -267,7 +279,7 @@ lane's runs are in the PR).
 +    }
 +    if (op->refused_all) {
 +        sdl->refused_until = now + SDL_OUT_REFUSED_US;
-+        sdl->refused_hint = sdl->out_hint;
++        sdl->out_logged = 0;    /* the next size that plays is logged again */
 +    }
      if (!devid) {
          /*
@@ -276,15 +288,16 @@ lane's runs are in the PR).
 -         * (coreaudiod restarted) right away.
 +         * (coreaudiod restarted) right away; one that refused every size
 +         * every few seconds while the guest plays, which opens it only once
-+         * the Mac's output changed or the wait ran out (refused_until).
++         * the Mac's output changed or the wait ran out (refused_until); a
++         * new size for a device that played (its old one is closed) too.
           */
 -        sdl->next_open = sdl->opening_late ? now + SDL_OUT_RETRY_US : INT64_MAX;
-+        sdl->next_open = sdl->opening_late || op->refused_all ?
-+                         now + SDL_OUT_RETRY_US : INT64_MAX;
++        sdl->next_open = sdl->opening_late || op->refused_all ||
++                         op->close_first ? now + SDL_OUT_RETRY_US : INT64_MAX;
          sdl_out_free_open(op);
          return;
      }
-@@ -588,6 +720,21 @@ static void sdl_out_poll(SDLVoiceOut *sdl)
+@@ -588,6 +728,23 @@ static void sdl_out_poll(SDLVoiceOut *sdl)
          sdl->silent = false;
          info_report("OmacVM: sound: the Mac's audio device works again");
      }
@@ -300,13 +313,15 @@ lane's runs are in the PR).
 +                        sdl->open_frames,
 +                        sdl->open_frames == (unsigned)sdl->reopen_spec.samples ?
 +                        "the sound path's own" :
++                        sdl->out_floor > sdl->out_hint ?
++                        "the Mac's output refused smaller ones before" :
 +                        "the launcher's size for the Mac's output");
 +        }
 +    }
      SDL_PauseAudioDevice(devid, 0);
      if (old) {
          sdl_out_close_later(old);
-@@ -605,10 +752,17 @@ static void sdl_release_out(SDLVoiceOut *sdl)
+@@ -605,10 +762,17 @@ static void sdl_release_out(SDLVoiceOut *sdl)
      sdl->devid = 0;
  }
  
@@ -325,7 +340,7 @@ lane's runs are in the PR).
      bool present;
  
      if (!sdl->devid || sdl->opening) {
-@@ -617,6 +771,17 @@ static void sdl_refresh_route_Out(SDLVoiceOut *sdl)
+@@ -617,6 +781,17 @@ static void sdl_refresh_route_Out(SDLVoiceOut *sdl)
      if (!sdl_route_check_due(&sdl->next_route_check)) {
          return;
      }
