@@ -25,13 +25,19 @@ WindowServer composite: it neither reads the frame nor writes its own
 framebuffer) only when its layer is a CAMetalLayer and no other window
 covers any part of it; a CALayer showing IOSurfaces is always composited,
 whatever the surface's kind, tags or Core Animation's private switches.
-MacBook Air M2, macOS 27.0.1, its own scaled mode (2940x1912 for the
-2560x1664 panel), no VM, a window like the VM's at 60 frames/s:
-WindowServer 0 GPU ms/s (Metal HUD: "Direct") vs 54-110 composited, its
-CPU 13-17 % vs 30-40 %; the whole Mac 2.64 W vs 2.84 W (A/B/A/B, idle
-2.27 W). sRGB tags, our own sublayers (the cursor layer) and a window over
-the menu-bar strip (Omanotch's) keep it direct; any window over the VM's
-window (a 1x1 pt one is enough) makes it composited again.
+sRGB tags, scaled modes, our own sublayers, half-float drawables and a
+window over the menu-bar strip (Omanotch's) keep it direct; any window over
+the VM's window (a 1x1 pt one is enough) composites again.
+Measured on a MacBook Air M2 (macOS 27.0.1, its scaled default mode, the
+real VM full screen at 60 Hz, on/off/on/off, the same frame rates and
+pixels): shown directly, WindowServer 0 vs 58-113 GPU ms/s and 13-24 % vs
+22-41 % CPU, but the whole Mac no lower (scrolling 4.29 vs 4.27 W, 1080p30
+video 3.85 vs 3.79 W, pointer 3.58 vs 3.44 W): GL can only draw into plain
+drawables (lossless-compressed ones refuse a GL binding), so QEMU's draw
+and the display's read move the bytes WindowServer's composite of the
+lossless surfaces saved. Hence experimental and off: where the composite
+costs more (half-float HDR frames at 120 Hz on an XDR display) it is not
+measured yet.
 
 Upstream: OmacVM only (QEMU's IOSurface present is OmacVM's).
 Test: app/runtime/Tests/display/test-present-direct.sh (the wiring of the

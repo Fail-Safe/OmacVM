@@ -982,6 +982,15 @@ bench lock and are indications only):
   keeps them plain; macOS 27 and newer only, where it is checked). Nothing reads
   them back (no CPU read, no `glReadPixels`: it crashes on them); the partial
   present's check mode (`OMACVM_GL_PRESENT_DAMAGE=check`) keeps them plain.
+- **Direct to display** (the app's experimental `directDisplay`, ADR 0056,
+  `OMACVM_GL_DIRECT=1`): the view's layer is a CAMetalLayer and QEMU draws each
+  frame into one of its drawables instead of its own surfaces, so macOS 27 can
+  show the full-screen window on the display itself (no WindowServer composite)
+  while no other window covers any part of it; a CALayer showing IOSurfaces is
+  always composited. Drawables come from their own queue; QEMU's thread never
+  waits for one (none = all surfaces busy). No partial draws and no lossless
+  surfaces while it is on. qemu.log says what the display does (Core
+  Animation's own status of the layer), and `omacvm check` repeats it.
 - **Colour**: surfaces are tagged; Core Animation converts sRGB (or PQ) to
   the display. HDR and 10-bit colour is the app's experimental switch
   (`hdr`, shown only while a display can show HDR; ADR 0049): a start with
