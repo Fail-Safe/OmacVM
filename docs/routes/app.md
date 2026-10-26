@@ -402,7 +402,10 @@ one VM at a time: the build stops at the start while another one runs.
 
 - The password for Omarchy, typed in the setup.
 - macOS asks whether OmacVM may find devices on local networks the first
-  time the Developer ID build starts a VM: allow it.
+  time it starts a VM: allow it. Omarchy's network runs through OmacVM (its
+  DNS server and devices on your network). Updates keep the answer; another
+  version in another folder is asked again
+  ([troubleshooting 42](../troubleshooting.md#42-app-macos-asks-to-let-omacvm-find-devices-on-local-networks)).
 - The permissions OmacVM's Mac helpers ask for (as on the other routes).
 
 ## Not done yet

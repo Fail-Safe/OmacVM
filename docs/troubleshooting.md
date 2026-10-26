@@ -14,6 +14,14 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   are set up per Mac, by Update VM in OmacVM. The app says so before the
   start and offers it
   ([40](#40-app-gestures-and-the-bar-do-nothing-in-a-vm-copied-from-another-mac)).
+- **macOS asks "Allow OmacVM to find devices on local networks?"**: click
+  Allow. Omarchy's network runs through OmacVM, so its name lookups (through
+  the Mac's DNS server, often your router or Tailscale) and the devices on
+  your network count as OmacVM reaching the local network. macOS asks once;
+  updates through OmacVM keep the answer. A copy of another version in
+  another folder is asked again. To change it later: System Settings ›
+  Privacy & Security › Local Network › OmacVM, then restart the VM
+  ([42](#42-app-macos-asks-to-let-omacvm-find-devices-on-local-networks)).
 - **A feature does not switch on: "Omarchy's package list is older than the
   mirrors"**: the VM's system was not updated for a while, and the packages
   the feature needs are no longer on the mirrors in those versions. OmacVM
@@ -1145,3 +1153,30 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `OMACVM_AUDIO_OUT_FRAMES_FILE`); tests `Tests/audio/test-out-size.sh`,
   `Tests/audio/refuse-small-start.c` (fakes the refusal),
   `swift run audio-tests`, `src/tests/audio-timing.sh`.
+
+## 42. app: macOS asks to let OmacVM find devices on local networks
+
+- **Symptom:** at the first start of a VM macOS asks "Allow "OmacVM" to find
+  devices on local networks?". With Don't Allow, macOS may keep Omarchy from
+  devices on your network (printers, a NAS, other computers).
+- **Cause:** macOS's Local Network privacy (macOS 15 and later). QEMU's own
+  network (the default; the fast network is off) sends the VM's traffic from
+  QEMU, which OmacVM starts inside the app: the VM's DNS queries go to the
+  Mac's DNS server, its connections to the Mac's networks go from there.
+  macOS counts QEMU as OmacVM and keeps one answer for the app in its folder:
+  by bundle id, not by signature or version. An update through OmacVM puts
+  the new version in the same place: no new question (tested from 3.2.3 to
+  3.2.4 through the app's updater, both with new programs; macOS's log says
+  "allowed by preference"). Another version of the app in another folder is
+  asked again for that folder. With the fast network on, the Mac reaches the
+  VM at 192.168.77.x: the same answer covers it.
+- **Fix:** Allow. To change it later: System Settings › Privacy & Security ›
+  Local Network › OmacVM, then restart the VM. Keep one copy of the app (in
+  Applications).
+- **Where:** the question's text is `NSLocalNetworkUsageDescription` in
+  `app/scripts/build-app.sh`. macOS keeps the answers in
+  `/Library/Preferences/com.apple.networkextension.plist` (one rule per
+  bundle id, and one per folder for copies of other versions); `log show
+  --info --predicate 'process == "nehelper"'` says "Local network preference
+  not yet set, prompting for OmacVM", or "allowed by preference" / "denied by
+  preference" when macOS already has an answer.
