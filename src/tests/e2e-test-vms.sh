@@ -96,6 +96,8 @@ expect "clone of a VM without a key: a stale key of its name gone" false "$(setu
 expect "drop: the clone's key gone" false "$(setup "OmacVM M-base-u")"
 expect "drop: the source's key kept" true "$(setup "OmacVM M-base")"
 expect "nothing outside the test identity's keys" 0 "$(find "$PH" -type f | grep -vc '/Application Support/omacvm-test/known_hosts/')"
+expect "cc-switches.sh: a clone keeps its source's key" 1 "$(grep -c 'e2e_clone_pin "$from" "$VM"' "$R/src/tests/e2e/cc-switches.sh")"
+expect "cc-switches.sh: a removed clone's key goes" 1 "$(grep -c 'e2e_pin_drop "$(basename "$c")"' "$R/src/tests/e2e/cc-switches.sh")"
 
 # The harnesses use it: no unquoted save, no ROOT that falls back to ~/OmacVM.
 expect "drive-drop.sh restores through e2e_settings_restore" 1 "$(grep -c 'e2e_settings_restore "$DOM" "$SAVED" vmsRoot' "$R/src/tests/e2e/drive-drop.sh")"
