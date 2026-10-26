@@ -31,6 +31,15 @@ in more words.
   the bar. They now keep the strip's height and Omarchy's normal gap. Window, Full screen with Omanotch's
   strip and displays without a notch stay as they were. Update VM brings it.
 
+- **Sound with AirPods.** With AirPods (or another Bluetooth or AirPlay output) as the Mac's output,
+  the VM had no sound since 3.1.17: macOS refused to start the queue of the sound's own thread (48 kHz,
+  256-frame buffers; AudioQueueStart -66681). A VM started with a wireless output now gives macOS the
+  queue of QEMU's main loop path (44.1 kHz, 512-frame buffers), which played for the reporter. A switch
+  to one while the VM runs reopens it with 512-frame buffers; that helps if the buffer size was the
+  cause, else restart the VM with the output connected. Any output that refuses a start gets the next
+  size at once. `omacvm check` says which size plays ("sound buffers"). Not yet confirmed with real
+  AirPods. Thanks to @maxschoenberger for the report, the workaround and the cause analysis (#548).
+
 ## 3.2.4
 
 A new experimental switch in the VM window's Display settings: the Mac redraws only the parts of the

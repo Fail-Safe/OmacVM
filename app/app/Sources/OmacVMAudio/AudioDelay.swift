@@ -28,8 +28,26 @@ public enum AudioDelay {
     /// instead of 4 x 512 (46 ms): 72 ms less than qemuMs.
     public static let qemuThreadMs = 43
 
-    /// QEMU's part for the sound path this VM runs.
-    public static func qemuPart(thread: Bool) -> Int { thread ? qemuThreadMs : qemuMs }
+    /// QEMU's part on the own thread started with a wireless output
+    /// (AudioPath.threadWirelessOptions, #548): its ring 4 x 512 frames and
+    /// SDL's queue 4 x 512 at 44.1 kHz (46 + 46 ms) instead of 6 x 256 at 48
+    /// kHz (32 + 32 ms), scaled as qemuThreadMs was measured against those
+    /// 64 ms: an estimate, not measured with AirPods.
+    public static let qemuThreadWirelessMs = Int((Double(qemuThreadMs) * (2 * 2048.0 / 44.1) / 64).rounded())
+
+    /// QEMU's part for the sound path this VM runs. WIRELESS: the own thread
+    /// was started with a wireless output; OUTFRAMES: the playback buffers
+    /// QEMU asks the Mac's output for now (AudioOutputSize; 512 when the VM
+    /// was switched to AirPods while it ran): a longer AudioQueue than the
+    /// start's own adds its difference.
+    public static func qemuPart(thread: Bool, wireless: Bool = false, outFrames: Int? = nil) -> Int {
+        let own = AudioOutputSize.ownFrames(thread: thread, wireless: wireless)
+        let rate = AudioOutputSize.rate(thread: thread, wireless: wireless)
+        let frames = max(outFrames ?? own, own)
+        let extra = AudioOutputSize.queueMs(frames: frames, rate: rate) - AudioOutputSize.queueMs(frames: own, rate: rate)
+        let base = !thread ? qemuMs : wireless ? qemuThreadWirelessMs : qemuThreadMs
+        return base + Int(extra.rounded())
+    }
 
     /// The QEMU delays measured on the Mac mini (2026-10-06, ms after the
     /// picture without the fix, minus the device), for the tests.
@@ -66,8 +84,9 @@ public enum AudioDelay {
     /// The delay the VM is told, in whole ms: QEMU's part, the device's
     /// (none when unknown) and the user's correction (audioDelayExtraMs),
     /// kept within 0 ... 1000 ms.
-    public static func total(deviceMs: Double?, extraMs: Int = 0, thread: Bool = false) -> Int {
-        let ms = Double(qemuPart(thread: thread)) + (deviceMs ?? 0) + Double(extraMs)
+    public static func total(deviceMs: Double?, extraMs: Int = 0, thread: Bool = false, wireless: Bool = false,
+                             outFrames: Int? = nil) -> Int {
+        let ms = Double(qemuPart(thread: thread, wireless: wireless, outFrames: outFrames)) + (deviceMs ?? 0) + Double(extraMs)
         return Int(min(max(ms, 0), 1000).rounded())
     }
 }

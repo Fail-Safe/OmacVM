@@ -653,6 +653,12 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thr
 # OmacVM: the playback device opens and closes off the BQL too: a Mac audio
 # device that does not answer no longer hangs the VM, it runs without sound.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-playback-thread.patch"
+# OmacVM: playback buffers the Mac's output takes (#548): AirPods refused the
+# own thread's 256-frame queue (AudioQueueStart -66681); a refused start tries
+# 512, the main loop path's size, at once.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-out-size-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-out-size.patch"
+"$native_dir/Tests/audio/test-out-size.sh" "$source_dir/audio/sdlaudio.c"
 # OmacVM: the main loop (sound card timers, virgl) at user-interactive QoS, so a
 # busy guest on a busy Mac no longer delays it and the sound stays clean.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-main-loop-qos.patch"

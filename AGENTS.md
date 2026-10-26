@@ -518,7 +518,7 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 | Mac input | `features` `mac-ime=on` (+ `mac-ime-pending` while stopped) | off | VM |
 | Swipe out to macOS | Gestures `SwipeOut` (bool); hidden `SwipeOutTravel` (trackpad widths per Space, 0.15-1.5) | `false`; 0.5 | app |
 | Keyboard sharing apps | `shareKeyboard` (bool; QEMU's `OMACVM_KEYS_LAST=1` at each start; Gestures and the Bridge read it when they make their taps) | `false` (3.0.18: defaults only; switch from 3.1.23) | app |
-| Sound on its own thread | `audioThread` (bool; hidden `audioMainLoop`, `audioClassic` force it off; read at each start) | `true` (from 3.1.17; 3.1.16 `false`) | app |
+| Sound on its own thread | `audioThread` (bool; hidden `audioMainLoop`, `audioClassic` force it off; read at each start; the playback buffers follow the Mac's output (#548): a start with a Bluetooth/AirPlay output uses the main loop's queue, 44.1 kHz 512 frames (`AudioPath.threadWirelessOptions`), a switch to one while it runs 512 frames (the app's size file, `OMACVM_AUDIO_OUT_FRAMES_FILE`, `AudioOutputSize`), a refused start the next size (`qemu-sdl-audio-out-size*.patch`); check line "sound buffers") | `true` (from 3.1.17; 3.1.16 `false`) | app |
 | Mac folder | `mac-folder` (the folder's path) | off (no file) | VM |
 | USB devices | `usb-enabled`, remembered devices `usb.json` | off | VM |
 | Fast network | `fast-network` + `features` `fast-network=on` | off | VM |
