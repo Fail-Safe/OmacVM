@@ -1022,9 +1022,10 @@ bench lock and are indications only):
 - **Surfaces**: the 8-bit ones are Apple's lossless-compressed BGRA ('&BGA',
   through CoreVideo), the half-float ones of HDR and Extra brightness lossless
   half float ('&RhA'; a 10-bit scanout without HDR keeps plain 'RGhA'): QEMU's
-  draw and WindowServer's composite move fewer bytes (ADR 0052; plain ones of
-  that kind for the run after a failure, `OMACVM_GL_LOSSLESS=0` keeps them all
-  plain; macOS 27 and newer only, where it is checked). Nothing reads them back
+  draw and WindowServer's composite move fewer bytes (ADR 0052; after a
+  half-float failure plain half float for the run, after an 8-bit one all
+  plain; `OMACVM_GL_LOSSLESS=0` keeps them all plain; macOS 27 and newer only,
+  where it is checked). Nothing reads them back
   (no CPU read, no `glReadPixels`: it crashes on them); the partial present's
   check mode (`OMACVM_GL_PRESENT_DAMAGE=check`) keeps them plain and compares in
   the shown surface's kind.
