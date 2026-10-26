@@ -884,6 +884,19 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
   start_vm && reachable 60 || res window-start FAIL "$(vminfo)"
 }
 
+# A child harness ended (its rows are in): "ended RC" is a FAIL row of its own unless RC is what its
+# rows say: 1 with a FAIL row, 5 (someone stayed) with a BLOCKED row. Its time limit (142) while it
+# waited for someone at the Mac is BLOCKED; any other code (a crash, 3 for a setup error) is a FAIL.
+child_end() {   # STEP SCRIPT RC SUMMARY LOG
+  local step=$1 sc=$2 rc=$3 sum=$4 lg=$5
+  (( rc == 0 )) && return 0
+  (( rc == 1 )) && grep -q $'\tFAIL\t' "$sum" 2>/dev/null && return 0
+  (( rc == 5 )) && grep -q $'\tBLOCKED\t' "$sum" 2>/dev/null && return 0
+  if (( rc == 142 )) && grep -q 'PAUSE before' "$lg" 2>/dev/null; then
+    res "$step" BLOCKED "$sc hit its time limit while it waited for someone at the Mac to leave: run it again on a quiet Mac"
+  else res "$step" FAIL "$sc ended $rc: $(tail -2 "$lg" 2>/dev/null | tr '\n' '|')"; fi
+}
+
 # The VM's modifier keys from each event's flags (#412; modifier-keys.sh, on the running VM).
 step_keys() {
   log "keys: modifier key cases into the VM (Universal Control's ways included)"
@@ -891,8 +904,7 @@ step_keys() {
   perl -e 'alarm shift; exec @ARGV' $(( 300 + PERSON_WAIT )) "$HERE/modifier-keys.sh" --vm "$VM" --out "$OUT/keys" > "$OUT/keys.log" 2>&1
   local rc=$?
   while IFS=$'\t' read -r st r d; do res "$st" "$r" "$d"; done < "$OUT/keys/summary.tsv" 2>/dev/null
-  (( rc == 0 )) || grep -q -E $'\t(FAIL|BLOCKED)\t' "$OUT/keys/summary.tsv" 2>/dev/null ||
-    res keys FAIL "modifier-keys.sh ended $rc: $(tail -2 "$OUT/keys.log" | tr '\n' '|')"
+  child_end keys modifier-keys.sh "$rc" "$OUT/keys/summary.tsv" "$OUT/keys.log"
 }
 
 # The VM's display unplugged under it, its window there (#402; display-unplug.sh, the VM stopped).
@@ -902,8 +914,7 @@ step_unplug() {
   perl -e 'alarm shift; exec @ARGV' $(( 2700 + PERSON_WAIT )) "$HERE/display-unplug.sh" --vm "$VM" --out "$OUT/unplug" > "$OUT/unplug.log" 2>&1
   local rc=$?
   while IFS=$'\t' read -r st r d; do res "$st" "$r" "$d"; done < "$OUT/unplug/summary.tsv" 2>/dev/null
-  (( rc == 0 )) || grep -q -E $'\t(FAIL|BLOCKED)\t' "$OUT/unplug/summary.tsv" 2>/dev/null ||
-    res unplug FAIL "display-unplug.sh ended $rc: $(tail -2 "$OUT/unplug.log" | tr '\n' '|')"
+  child_end unplug display-unplug.sh "$rc" "$OUT/unplug/summary.tsv" "$OUT/unplug.log"
 }
 
 steps() {   # every step on the running VM of this pass

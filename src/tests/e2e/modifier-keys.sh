@@ -20,7 +20,8 @@
 # remote session can move the timing the cases check. A case that failed while
 # someone came and went gets a BLOCKED "person" row. Our own events are stamped
 # (person_posted), so they never count as someone's.
-# Exit 0 only when every case passed; 3 when someone stayed (BLOCKED).
+# Exit 0 only when every case passed; 1 a case failed; 2 a wrong call; 3 it could
+# not run (no VM, no SSH, no tool); 5 someone stayed at the Mac (BLOCKED rows).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 source "$HERE/person.sh"
@@ -137,8 +138,11 @@ while IFS='|' read -r name evs want; do
 done <<< "$CASES"
 # Nothing at all would also pass the nocap cases: the others must have arrived.
 ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" end
-grep -q $'^keys-mac-shift2\tok' "$OUT/summary.tsv" || (( n_blocked )) || res delivery FAIL "no key reached the VM"
+if ! grep -q $'^keys-mac-shift2\tok' "$OUT/summary.tsv"; then
+  if grep -q $'^keys-mac-shift2\tBLOCKED' "$OUT/summary.tsv"; then res delivery BLOCKED "not checked: mac-shift2 did not run"
+  else res delivery FAIL "no key reached the VM"; fi
+fi
 gssh "rm -f /root/omacvm-evread.py" < /dev/null
 (( n_fail > 0 )) && exit 1
-(( n_blocked > 0 )) && exit 3
+(( n_blocked > 0 )) && exit 5
 exit 0

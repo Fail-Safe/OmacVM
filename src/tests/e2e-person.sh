@@ -164,6 +164,24 @@ has "modifier-keys: a visit over a FAIL case adds a BLOCKED person row" "keys-x:
 has "modifier-keys: ... the FAIL rows stay" "fail=2 blocked=1" "$h"
 same "modifier-keys: ... the case before the gate is not blamed" 0 "${h##*$'\n'}"
 
+# ---- cc-switches' child_end: a child harness's exit code next to its rows
+sed -n '/^child_end() {/,/^}/p' "$E/cc-switches.sh" > "$T/child_end.sh"
+ce() {   # RC SUMMARY LOG: the rows child_end adds
+  ( ROWS=""; res() { ROWS+="$1 $2;"; }
+    source "$T/child_end.sh"
+    printf "$2" > "$T/ce-sum.tsv"; printf '%s\n' "$3" > "$T/ce.log"
+    child_end keys modifier-keys.sh "$1" "$T/ce-sum.tsv" "$T/ce.log" 2>&1; echo "$ROWS" )
+}
+same "child: 0 -> no row" "" "$(ce 0 'keys-a\tok\t-\n' '')"
+same "child: 1 with a FAIL row -> no row more" "" "$(ce 1 'keys-a\tFAIL\t-\n' '')"
+same "child: 5 (someone stayed) with a BLOCKED row -> no row more" "" "$(ce 5 'keys-a\tBLOCKED\t-\n' '')"
+same "child: 3 (could not run) next to a BLOCKED row -> FAIL" "keys FAIL;" "$(ce 3 'keys-a\tBLOCKED\t-\n' 'modifier-keys: VM does not run')"
+same "child: 1 without a FAIL row -> FAIL" "keys FAIL;" "$(ce 1 'keys-a\tok\t-\n' '')"
+same "child: 5 without a BLOCKED row -> FAIL" "keys FAIL;" "$(ce 5 'keys-a\tok\t-\n' '')"
+same "child: a crash (139) next to a FAIL row -> FAIL" "keys FAIL;" "$(ce 139 'keys-a\tFAIL\t-\n' '')"
+same "child: its time limit while it waited for someone -> BLOCKED" "keys BLOCKED;" "$(ce 142 'keys-a\tok\t-\n' '== 10:00:00 PAUSE before keys-b: input 3 s ago, not ours')"
+same "child: its time limit with no wait -> FAIL" "keys FAIL;" "$(ce 142 'keys-a\tok\t-\n' 'x')"
+
 # ---- ci-runners.sh with a fake launchctl and pgrep
 B=$T/bin; L=$T/loaded; W=$T/busy; A=$T/agents; mkdir -p "$B" "$L" "$W" "$A"
 cat > "$B/launchctl" <<EOF
@@ -262,7 +280,15 @@ if grep -nE 'HIDIdleTime|screensharingd|JumpConnect' "$E/cc-switches.sh" "$E/ons
   bad "wiring: a harness asks HID idle or remote sessions itself (person.sh does)"
 else ok "wiring: HID idle and remote sessions only through person.sh"; fi
 wired "modifier-keys waits before each case and stamps its own events" "$E/modifier-keys.sh" \
-  '^source "\$HERE/person.sh"' 'person_gate "keys-\$name"' 'person_posted 3; "\$KS" --pid "\$PID" \$evs; person_posted' 'exit 3'
+  '^source "\$HERE/person.sh"' 'person_gate "keys-\$name"' 'person_posted 3; "\$KS" --pid "\$PID" \$evs; person_posted' \
+  'res delivery BLOCKED'
+# Someone who stayed has its own exit code (5); 3 stays "could not run" (no VM, no SSH: maybe a crash).
+for f in modifier-keys display-unplug; do
+  same "exit code: $f exits 5 only for BLOCKED" "1 1" \
+    "$(grep -c 'exit 5' "$E/$f.sh") $(grep -c '^(( n_blocked > 0 )) && exit 5$' "$E/$f.sh")"
+done
+wired "cc-switches reads the children's exit codes" "$E/cc-switches.sh" \
+  'child_end keys modifier-keys.sh "\$rc"' 'child_end unplug display-unplug.sh "\$rc"'
 # The cleanup goes to its end whatever comes (a second Ctrl-C, a hangup, a lost stdout): first thing in it.
 for f in cc-switches onscreen; do
   first=$(awk '/^cleanup\(\) \{/ { c = 1; next } c && !/^ *#/ && !/^  local rc=\$\?$/ { print; exit }' "$E/$f.sh")

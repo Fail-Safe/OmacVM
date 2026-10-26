@@ -38,7 +38,8 @@
 # startFullScreen and the VM's notch-mode are put back as they were.
 # Between cases it waits while someone is at the Mac (person.sh); a case that
 # failed while someone came and went gets a BLOCKED "person" row.
-# Exit 0 only when every unplug passed; 3 when someone stayed (BLOCKED).
+# Exit 0 only when every unplug passed; 1 a case failed; 2 a wrong call; 3 it
+# could not run (another VM, a tool); 5 someone stayed at the Mac (BLOCKED rows).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 source "$HERE/person.sh"
@@ -135,6 +136,7 @@ lockhook() { "$LOCKTOOL" "$1"; }
 FS_BEFORE=$(defaults read "$APPID" startFullScreen 2>/dev/null || echo unset)
 NOTCH_BEFORE=$(cat "$VMD/notch-mode" 2>/dev/null || echo none)
 restore() {
+  person_watch_stop
   unplug
   local p; p=$(qemu_pid)
   if [[ -n $p ]]; then
@@ -336,5 +338,5 @@ ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" end
 person_watch_stop
 log "done: $n_fail failed, $n_blocked blocked ($OUT/summary.tsv)"
 (( n_fail > 0 )) && exit 1
-(( n_blocked > 0 )) && exit 3
+(( n_blocked > 0 )) && exit 5
 exit 0
