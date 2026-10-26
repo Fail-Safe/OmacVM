@@ -5,11 +5,11 @@ in more words.
 
 ## 3.2.5 (unreleased)
 
-- **A refused shader no longer ends the VM.** Seen once in about 30 test starts on a Mac mini. QEMU
-  stopped the whole VM at the desktop's start: right after the Mac's OpenGL had refused calls of Omarchy's
-  bar, virglrenderer checked the size of its own uniform block with an assertion and aborted (#547).
-  Now such a program is refused like any other shader the Mac does not take: the draws that need it
-  are skipped and the VM keeps running.
+- **A failed OpenGL query at desktop start no longer ends the VM.** Seen once in about 30 test starts
+  on a Mac mini (#547). While the Mac's OpenGL was failing calls of Omarchy's bar, virglrenderer read the
+  size of its own uniform block without checking that the query worked, then checked it with an
+  assertion and aborted QEMU. Now a program whose block size is too small or unknown is refused like any
+  other shader the Mac does not take: the draws that need it are skipped and the VM keeps running.
 
 ## 3.2.4
 
