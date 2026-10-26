@@ -12,8 +12,8 @@ expect() {   # WHAT WANT GOT
   if [[ $2 == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: want '$2', got '$3'"; fail=1; fi
 }
 
-# The split's parser, as the harness runs it (its python heredoc).
-awk '/^python3 - "\$OUT" "\$MODES" <<.PY. \| tee/ {f = 1; next} /^PY$/ {f = 0} f' "$H" > "$W/split.py"
+# The split's parser, as the harness runs it (its python heredoc in breakdown()).
+awk '/^python3 - "\$1" "\$2" <<.PY.$/ {f = 1; next} /^PY$/ {f = 0} f' "$H" > "$W/split.py"
 [[ -s $W/split.py ]] || { echo "FAIL the harness's parser not found"; exit 1; }
 
 # Fence 0x5 was asked and answered once before; asked again after Hyprland's submit, it is
@@ -34,6 +34,10 @@ post=$(python3 -c 'import datetime as d; print(d.datetime(2026, 10, 25, 5, 0, 0,
 echo "{\"post_us\": $post, \"lat_ms\": 20}" > "$W/fence/key.jsonl"
 got=$(python3 "$W/split.py" "$W/fence" key 2>&1 | python3 -c 'import json, sys; d = json.loads(sys.stdin.readline()); print(d["key"]["compositor_fence_ms"], d["key"]["compositor_to_flush_ms"])' 2>&1)
 expect "a fence id asked again: its answer after the ask (2 ms), not the one before" "2.0 2.2" "$got"
+# --parse (a run recorded on a Mac without python3): the same split, into breakdown.json.
+"$H" --parse "$W/fence" > /dev/null 2>&1
+got=$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["key"]["compositor_fence_ms"], d["key"]["compositor_to_flush_ms"])' "$W/fence/breakdown.json" 2>&1)
+expect "--parse: the same split from a recorded run" "2.0 2.2" "$got"
 
 # The person's VM, by its path and through a link; --hz 61 is invalid, so a harness that does not
 # refuse first stops at its usage (exit 2) instead.

@@ -623,6 +623,15 @@ enum Settings {
         get { UserDefaults.standard.bool(forKey: ExtraBrightness.key) }
         set { UserDefaults.standard.set(newValue, forKey: ExtraBrightness.key) }
     }
+    /// Pause drawing while hidden (experimental, off by default): while the
+    /// VM's main window cannot be seen the guest turns that display off and
+    /// stops drawing. QEMU reads this key itself while the VM runs (it runs
+    /// as the app), so a change counts at once. PauseWhileHiddenRow or
+    /// defaults write org.omacvm.app pauseWhileHidden -bool true
+    static var pauseWhileHidden: Bool {
+        get { UserDefaults.standard.bool(forKey: "pauseWhileHidden") }
+        set { UserDefaults.standard.set(newValue, forKey: "pauseWhileHidden") }
+    }
     /// Extra brightness at a start of the VM (ExtraBrightness.start): QEMU's
     /// OMACVM_EXTRA_BRIGHT (for a QEMU not started as the app) and the
     /// qemu.log line. Main thread (NSScreen).
@@ -680,6 +689,17 @@ enum Settings {
     static var pointerPlane: Bool {
         get { UserDefaults.standard.bool(forKey: "pointerPlane") }
         set { UserDefaults.standard.set(newValue, forKey: "pointerPlane") }
+    }
+    /// Frames in step with the Mac (experimental, off by default): the VM
+    /// loads its virtio-gpu driver with vsync_lock=1 (SMBIOS
+    /// omacvm.vsynclock=1), whose vblank timer then follows the Mac display's
+    /// refresh as QEMU's present gives it (ADR 0056). While frames come
+    /// steadily a frame no longer waits up to a refresh on the Mac: input shows
+    /// sooner, same frames, same rate. The VM window's switch (VsyncLockRow)
+    /// or defaults write org.omacvm.app vsyncLock -bool true. Read at each start.
+    static var vsyncLock: Bool {
+        get { UserDefaults.standard.bool(forKey: "vsyncLock") }
+        set { UserDefaults.standard.set(newValue, forKey: "vsyncLock") }
     }
     /// Experimental, off by default, no switch in the window yet: the VM
     /// puts its pointer on virtio-gpu's cursor plane and the Mac's own cursor

@@ -5,6 +5,39 @@ in more words.
 
 ## 3.2.3 (unreleased)
 
+- **Pause drawing while hidden (experimental, off by default).** A new switch in the VM window's
+  Display settings. While none of the VM's window can be seen for 2 seconds (minimised, covered
+  by other windows, on another Space, the screen locked or asleep), the VM turns its display off
+  and stops drawing, as macOS apps do for a window nobody sees. Sound, downloads and everything
+  else in the VM keep running. As soon as any part of the window shows again, the VM draws again;
+  its first new picture comes a few frames later (20-45 ms), and until then you see the last one.
+  A visible window is never touched: every frame, at the display's full rate.
+  Measured for the whole Mac: on a MacBook Air M2 with the VM's window minimised, a 1080p video in
+  the VM 3.5 -> 2.9 W (one clean row without the switch) and a terminal scrolling its output
+  3.6 -> 2.5 W (two rows each; macOS idle: 2.3 W);
+  on a MacBook Pro M4 Max with the VM hidden and the display asleep, the video 5.4-5.6 -> 4.6 W and
+  the terminal 6.4-8.2 -> 2.9-3.0 W (the VM's idle level). It works at once in a running VM;
+  Update VM brings the VM's side, and `omacvm check` says "pause while hidden: ready". Only the
+  main window: in full screen on several displays the other windows keep drawing.
+
+- **Frames in step with the Mac (experimental, off).** A new switch in the VM window's Display
+  section. The VM's display clock had its own beat: a frame it drew right after one refresh of
+  the Mac's display waited for the next one, anywhere up to a whole refresh, while the screen was
+  moving. With the switch, the VM's clock follows the Mac display's refresh, so its frames are
+  ready just before the Mac shows them. Mac mini, while the screen moves (medians of 60 per mode,
+  two rounds of tests, 6-7 runs a side): at 60 Hz keys 1.5 to 7 ms sooner, the pointer about 6 ms,
+  keys while the terminal itself scrolls 3.5 to 4 ms, with fewer repeated and skipped frames (143
+  instead of 170); at 120 Hz up to 2.6 ms sooner (keys while the pointer moves 0 to 2.6 ms, the
+  terminal 1.7 to 1.8 ms). When the VM's frames need more than a refresh, late frames wait as
+  before. When a frame is too late for its refresh, the newer one is shown and the late one
+  skipped: at 120 Hz that was a few more skipped frames (8 instead of 2 in about 3 minutes of
+  moving frames). On a still screen there is no gain. The same pixels (checked on a MacBook Air)
+  at the same rate (60 or 120 Hz); MacBook Air M2 power within 1 % (pointer moving, scrolling).
+  The VM's driver follows only when its display rate is the Mac's, and if its patch does not fit
+  a newer Linux kernel, Update VM builds the driver without it (HDR and the pointer layer keep
+  working; `omacvm check` says so). Needs Update VM (it builds the VM's graphics driver, internet
+  once); counts from the next start of the VM.
+
 - **Tiled present, built, off for now.** OmacVM.app shows every frame of the VM as a new whole
   picture, so macOS redraws the whole window for each one, also when only the pointer moved. With
   tiles, only the 256x256 squares the VM changed get a new picture. MacBook Air M2, the VM full
@@ -30,6 +63,7 @@ new experimental switch puts the pointer on its own layer.
   Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
   download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
   Mac.
+
 - **Control centre switches right after another one are not turned away.** When a switch's job
   ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
   switch was refused with "unknown VM" at once and the control centre asked again, so that switch

@@ -113,7 +113,7 @@ on CGL, not on ANGLE.
 | Guest scanout textures as IOSurfaces (zero copy present) | planned | ADR 0010 option 3 |
 | Frames on the display's refresh (jitter buffer, display link thread) | built: `pacing-hdr` | `qemu-cocoa-gl-present-vsync.patch`, ADR 0020 |
 | Colour-tagged frames, 10-bit scanout, HDR (PQ, EDR) | built: `pacing-hdr`, `hdr` (the app's switch, off by default; the guest tone-maps into the display's headroom) | `qemu-cocoa-gl-present-color.patch`, `omacvm-cocoa-hdr-headroom*.patch`, `src/app/guest/virtio-gpu/`, ADR 0021, 0049 |
-| Guest paced by the host's vsync | planned | ADR 0020 option 1 |
+| Guest paced by the host's vsync (its vblank timer follows the Mac's refresh) | built: `input-vsync` (the app's switch "Frames in step with the Mac", experimental, off) | `src/app/guest/virtio-gpu/linux-virtio-gpu-vsync-lock.patch`, `omacvm-vsync-follow*.patch`, ADR 0056 |
 | Chrome's GL renderer without "virgl" (Skia keeps instanced drawing) | built: `gpu-browser` (3.1.32) | `src/app/guest/50-omacvm-chrome.drirc` |
 
 Chrome's renderer string: Skia turns instanced drawing off when the GL
@@ -962,7 +962,15 @@ bench lock and are indications only):
   A frame kept for a window out of sight (`omacvm-cocoa-present-unseen.patch`)
   is no tick work: it is drawn when the window shows again
   (`omacvm-cocoa-idle-refresh-unseen.patch`; before, any frame that came while
-  the window was away kept the tick at the display's rate). In the guest,
+  the window was away kept the tick at the display's rate). The guest still
+  drew every frame then (its vblank is its own timer); with "Pause drawing
+  while hidden" (experimental, `pauseWhileHidden`,
+  `omacvm-cocoa-guest-pause*.patch`) QEMU tells the display agent after 2 s
+  out of sight (or locked, asleep) and it turns that output off with
+  Hyprland's DPMS: no vblank, no frame callbacks, no virgl work; seen again,
+  on at once, the window keeping its last picture until the first new
+  frame (QEMU would draw the console's "display not active" one while the
+  scanout is off). In the guest,
   virtio-gpu's vblank (a kernel timer at the mode's rate) stops 100 ms after
   the last frame instead of DRM's 5 s (`drm.vblankoffdelay`, app VMs:
   `src/app/guest/90-omacvm-vblank.tmpfiles`).
@@ -971,7 +979,41 @@ bench lock and are indications only):
   delay from a finished guest frame to the glass is set by the guest's vblank
   phase (free-running), between ~3 ms and one refresh more. Only a guest
   vblank locked to the host's (ADR 0020 option 1, a guest module change)
-  can take the average half refresh off.
+  can take the average half refresh off: "Frames in step with the Mac"
+  below (ADR 0056, experimental).
+- **Frames in step with the Mac** (`vsyncLock`, experimental, off; ADR 0056):
+  the guest's virtio-gpu driver (OmacVM's, `vsync_lock=1`) asks QEMU every
+  half second for the refresh grid (OmacVM's command 0x0f00: the guest
+  counter of the next vblank it should have, the period in ps) and moves its
+  vblank timer onto it, at most an eighth of a period per vblank. QEMU puts
+  the guest's vblank the lead before each tick's commit; the lead is when the
+  guest's frames are ready after their vblank (the latest of the last 64 + 1
+  ms, down 2 ms a second, 2 ms .. a period less 1 ms), timed on the grid
+  the guest got. Hyprland then draws right after a vblank and its frame is
+  in the queue just before the commit: the wait in QEMU goes from anywhere
+  up to a refresh to about the margin. While a guest follows, a tick with two
+  frames shows the newer (the older came late: one repeat instead of a
+  refresh of delay until the trim), except while the frames are too slow to
+  follow (the lead at its cap, or more than 1 in 100 late): then late frames
+  wait as without it. Only while the guest's ask says it is on the grid
+  (LOCKED, its mode's period the grid's) does QEMU use the newest-frame
+  rule and measure the lead; a grid older than 100 ms is not handed out; a
+  frame more than a period late counts late (one frame per vblank).
+  Nothing changes for single frames or a still screen; `omacvm check` says
+  "Frames in step" (ok once the driver logged it was in step); trace `cocoa_present_follow` once a
+  second (lead, the frames' median and latest, late frames).
+  Measured (Mac mini M4, virtual display, `input-latency-vm.sh`, median of
+  60 per mode, off/on interleaved, 4-5 runs a side, tracks/input-vsync.md):
+  at 60 Hz while the screen moves keys 1.5 ms sooner, the pointer 6.3 ms,
+  keys while the terminal scrolls 4.0 ms, repeats + drops 104 vs 134 (the
+  free phase drifts against the Mac's and the trims drop frames); idle the
+  same within the runs' spread. At 120 Hz keys 2.6 ms, the pointer 1.3 ms,
+  the scrolling terminal 1.8 ms: the guest's frames are ready about 5 ms
+  after their vblank (median) and up to a whole refresh, so the lead often
+  sits at its cap and the late frames wait (the fallback). Not ~8 ms as the model says: the lead
+  must cover the slowest of 64 frames (8-10 ms after the vblank at 60 Hz).
+  After the review fixes (2 runs a side, CI busy): 60 Hz -6.9 / -6.0 / -3.4
+  ms, 120 Hz 0 / -0.4 / -1.7 ms; the same frames a second both ways.
 - **Locks**: `present_lock` (an `os_unfair_lock`) guards the queue and the
   counters; nothing on the display link thread or the commit queue takes the
   BQL. The link pauses 0.25 s after the last frame, or after a second of
@@ -1248,8 +1290,12 @@ At 120 Hz: key 15-18, keys while the pointer moves 22-24, pointer 14-16.
 - The fence answers bunched on a ladder: QEMU's trace of fence asked ->
   answered had peaks at 1.1-1.2, 1.8-1.9, 2.6-2.7 and 3.6-3.7 ms and almost
   nothing between, the sync thread's doubled naps after the first
-  millisecond. PR #530 (`virgl-darwin-fence-wait-proportional.patch`) also
-  wakes the thread an eighth of the time waited after each test.
+  millisecond. Waking the thread also an eighth of the time waited after
+  each test (PR #530, closed) took the ladder away and made a frame loop
+  that waits for every frame 13-27 % faster, but Chromium's Aquarium and
+  MotionMark (median of 3: 39.6 vs 38.5 fps, 3007 vs 3016) and the key and
+  pointer rows stayed the same, for 5-19 % more wake-ups. The doubled naps
+  stay.
 - The Mac pointer setting (`macPointer`) still gives nothing: no cursor
   command reaches QEMU with Hyprland 0.56.2 and aquamarine 0.15.1.
 

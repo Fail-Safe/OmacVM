@@ -48,8 +48,8 @@ index b7d0924..5ae261a 100644
  #include "ui/omacvm-pointer-bright.h"
 +#include "ui/omacvm-present-tiles.h"
  #include "ui/omacvm-present-damage.h"
+ #include "ui/omacvm-guest-pause.h"
  #include "hw/core/boards.h"
- #include "system/system.h"
 @@ -263,6 +264,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
  static void cocoa_gl_render(void);
  /* OmacVM boot splash: the main view's size in pixels (BQL). */
