@@ -515,6 +515,33 @@ int main(void)
         run_steps(&m, &g, 5, 1, 0, 0, "unseen: on after the click");
     }
 
+    /*
+     * A hold taken by a button puts the let-go's warp in flight without
+     * moving the cursor. A let-go right after it (no motion between: another
+     * Space, a display change) must count that warp in its own: the next
+     * motion carries both (the model's pending distance).
+     */
+    {
+        static const OmacVMRect beside[2] = { { 0, 0, 1512, 982 }, { 1512, 0, 1352, 845 } };
+        Ev down, up;
+
+        memset(&g, 0, sizeof(g));
+        m = mac_at(beside, 2, beside, 2, 1512 + 400, 300);
+        run_steps(&m, &g, 130, -2, -2, 0, "twice: up into the external's top-left zone");
+        run_steps(&m, &g, 10, 1, 0, 0, "twice: to a button");
+        down = mac_button(&m);
+        mac_let_go(&m, &g);
+        handle(&m, &g, &down, &gx, &gy);
+        up = mac_button(&m);
+        handle(&m, &g, &up, &gx, &gy);
+        CHECK(g.held && g.warp_pending, "twice: the release took hold (held %d, pending %d)",
+              g.held, g.warp_pending);
+        mac_let_go(&m, &g);
+        CHECK(g.let_go_warp && fabs(g.lwdx - m.wdx) < 1e-9 && fabs(g.lwdy - m.wdy) < 1e-9,
+              "twice: the let-go counts %.1f,%.1f in flight, the next motion carries %.1f,%.1f",
+              g.lwdx, g.lwdy, m.wdx, m.wdy);
+    }
+
     /* The Mac's cursor shown (show-cursor=on): it follows, at the same speed. */
     memset(&g, 0, sizeof(g));
     g.follow = true;

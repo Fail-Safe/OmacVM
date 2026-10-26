@@ -16,10 +16,10 @@ Test: app/runtime/Tests/display/test-pointer-guard.c.
 
 diff --git a/ui/omacvm-pointer-guard.h b/ui/omacvm-pointer-guard.h
 new file mode 100644
-index 0000000..ba9fbf7
+index 0000000..6382e38
 --- /dev/null
 +++ b/ui/omacvm-pointer-guard.h
-@@ -0,0 +1,405 @@
+@@ -0,0 +1,409 @@
 +/*
 + * OmacVM: the pointer maths of the full-screen guard (Dock and hot corners).
 + *
@@ -264,10 +264,14 @@ index 0000000..ba9fbf7
 +            g->fx[1] = g->ox;
 +            g->fy[1] = g->oy;
 +        }
-+        /* A warp still in flight comes in the same next motion. */
++        /*
++         * A warp still in flight comes in the same next motion. Its own
++         * distance, not cx - ox: a hold taken by a button puts the let-go's
++         * warp in flight without moving the cursor.
++         */
 +        g->let_go_warp = true;
-+        g->lwdx = x - (g->warp_pending ? g->ox : g->cx);
-+        g->lwdy = y - (g->warp_pending ? g->oy : g->cy);
++        g->lwdx = x - g->cx + (g->warp_pending ? g->wdx : 0);
++        g->lwdy = y - g->cy + (g->warp_pending ? g->wdy : 0);
 +        g->lwx = x;
 +        g->lwy = y;
 +    }
