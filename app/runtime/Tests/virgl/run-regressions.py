@@ -65,7 +65,17 @@ def vulkan_stub_link_args(compiler):
     return ["-Wl,-rpath," + str(stub)]
 
 
-def run_api_test(name, frameworks=(), oracle=False, vulkan_stub=False, env=None):
+def interposer_link_args(compiler, name):
+    """<name>.c as a dylib: a test's GL stand-in (its __interpose section replaces GL calls)."""
+    lib = output / f"lib{name}.dylib"
+    subprocess.run([compiler, "-dynamiclib", str(Path(__file__).with_name(name + ".c")),
+                    "-framework", "OpenGL", "-Wno-deprecated-declarations",
+                    "-install_name", f"@rpath/lib{name}.dylib", "-o", str(lib)], check=True)
+    return ["-L" + str(output), "-l" + name, "-Wl,-rpath," + str(output)]
+
+
+def run_api_test(name, frameworks=(), oracle=False, vulkan_stub=False, env=None,
+                 interposer=None):
     """Link against the built libvirglrenderer and drive it through its public API.
     The tests run on Apple's software renderer (soft-gl.h), never on the GPU."""
     entry = next(item for item in entries if item["file"].endswith("/virglrenderer.c"))
@@ -75,6 +85,7 @@ def run_api_test(name, frameworks=(), oracle=False, vulkan_stub=False, env=None)
     binary = output / name
     extra = oracle_link_args(command[0]) if oracle else []
     extra += vulkan_stub_link_args(command[0]) if vulkan_stub else []
+    extra += interposer_link_args(command[0], interposer) if interposer else []
     subprocess.run([command[0], "-I" + str(source), "-I" + str(build / "src"),
                     "-I" + str(build), str(Path(__file__).with_name(name + ".c")),
                     "-L" + str(build / "src"), "-lvirglrenderer",
@@ -244,6 +255,7 @@ run_api_test("test-video-encode", ("VideoToolbox", "CoreMedia", "CoreVideo", "Co
              env={"OMACVM_VIDEO_ENCODE_BASE_QP": "1"})
 run_api_test("test-upload-pbo")
 run_api_test("test-context-loss")
+run_api_test("test-sysval-block", interposer="sysval-block-gl")
 run_api_test("test-transform-feedback")
 run_api_test("test-gpu-ranges", oracle=True)
 run_api_test("test-resource-budget")
