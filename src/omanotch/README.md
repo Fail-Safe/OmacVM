@@ -165,11 +165,13 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   session is locked.
 - Full-screen video (or anything in real fullscreen, Super+F) turns the strip
   black, like macOS does. Maximized and tiled-fullscreen windows keep the bar.
-- Omarchy's notification popups keep their usual distance below where the
-  bar *would* be (a bar's height lower than panels). The notification service
-  takes that distance from the bar's size and runs cloned copies sandboxed, so
-  Omanotch cannot change it without editing Omarchy's own files. The popups
-  never reach into the strip, though.
+- Omarchy's notification popups sit right under Omanotch's bar: with the bar
+  parked in the strip, only the normal gap below it; with OmacVM.app's full
+  panel, the strip's height plus the gap. The bar tells the notification
+  service its room per display (`barSizeFor`); on an older service OmacVM
+  patches Omarchy's file (`src/guest/omanotch-notifications.sh`), since cloned
+  copies of it run sandboxed. With the bar hidden they keep Omarchy's own
+  distance.
 - Hover effects (tooltips, hover highlights) are not mirrored; clicks, right
   and middle clicks and scrolling are. The one hover the strip passes on: the
   pointer on the bar's free space shows Omarchy's auto-hidden indicators, and
