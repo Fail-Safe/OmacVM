@@ -1,0 +1,367 @@
+From: OmacVM
+Subject: [PATCH] cocoa: the guest stops drawing while the window cannot be seen
+
+What: with OmacVM.app's "Pause drawing while hidden" on (the app's defaults
+key pauseWhileHidden, watched live; OMACVM_GUEST_PAUSE=1 or 0 decides
+instead), the guest's display agent is told {"unseen": ["Virtual-1"]} over
+org.omacvm.display once the main window has been out of sight for 2 s:
+macOS's occlusion says none of it is on screen (minimised, wholly covered,
+on a Space not shown, closed with Keep running), or the screen is locked,
+the displays sleep or another user is on the console. The agent turns that
+output's display off (DPMS). Seen again: {"unseen": []} at once; until the
+guest's first frame the window keeps its last picture, not QEMU's "display
+not active" one. Only an agent that says "pause": 1 in its hello is told
+(a restarted agent again at its hello). The channel drops a line it cannot
+write at once, so "unseen" is a lease said again every 5 s (the agent turns
+its displays on after 15 s without it) and "seen" is said again every
+0.25 s until the guest's first frame (at most 5 s). qemu.log:
+the switch at start and on a change, and after each pause how long it was
+and when the guest's first two frames came after the window was seen.
+OMACVM_PRESENT_HIDDEN=1 keeps the guest drawing too.
+
+Why: omacvm-cocoa-present-unseen.patch stops QEMU's copy for an unseen
+window, but the guest kept drawing every frame at the display's rate:
+Hyprland, the apps, virgl on the Mac's GPU (M1 Max, a video in the hidden
+test VM: 13.9 W against 17.4 W visible, macOS idle 3.9 W). A macOS app
+gets no frames for a window nobody sees. With the guest's display off
+there are no vblanks, so Wayland apps stop drawing too; sound, downloads,
+timers and the guest's own work go on. Visible windows are not touched.
+
+Upstream: not sent (OmacVM's display channel).
+Test: app/runtime/Tests/display/test-guest-pause.sh (the rules, and the
+wiring in the patched ui/cocoa.m at build time); src/app/guest/tests/
+test_omacvm_displays.py (the agent's side). Applies after
+omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -58,6 +58,7 @@
+ #include "ui/omacvm-bright.h"
+ #include "ui/omacvm-pointer-bright.h"
+ #include "ui/omacvm-present-damage.h"
++#include "ui/omacvm-guest-pause.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -181,6 +182,37 @@
+ static void omacvm_present_seen_again(void);
+ #endif
+ 
++/*
++ * OmacVM: the guest stops drawing while the window cannot be seen
++ * (omacvm-cocoa-guest-pause.patch, ui/omacvm-guest-pause.h). Fed on the
++ * main thread, read by the present and the guest's flushes, all with the
++ * BQL.
++ */
++static OmacVMGuestPause omacvm_gp = { .seen = true };
++static bool omacvm_gp_dark;     /* the guest's display went off while told (BQL) */
++static void omacvm_gp_update(void);
++static void omacvm_gp_hello(NSDictionary *hello);
++
++/*
++ * QEMU thread, BQL: the guest drew a frame, from a GL scanout's flush or a
++ * plain surface's update (GPU safe mode). The first one after "seen" ends
++ * the hold; the second goes into qemu.log after a pause.
++ */
++static void omacvm_gp_guest_frame(void)
++{
++    static double first_ms;
++    unsigned n = omacvm_gp_frame(&omacvm_gp);
++
++    if (n == 1) {
++        first_ms = 1000 * (CACurrentMediaTime() - omacvm_gp.seen_at);
++    } else if (n == 2 && omacvm_gp_dark) {
++        omacvm_gp_dark = false;
++        fprintf(stderr, "omacvm: guest drawing: paused for %.0f s while the window was out of sight; "
++                "frames again %.0f and %.0f ms after it was seen\n", omacvm_gp.paused_s, first_ms,
++                1000 * (CACurrentMediaTime() - omacvm_gp.seen_at));
++    }
++}
++
+ static NSInteger cbchangecount = -1;
+ static QemuClipboardInfo *cbinfo;
+ static QemuEvent cbevent;
+@@ -4837,6 +4869,11 @@
+     static double since;
+     NSWindow *w = [note object];
+     bool seen = ([w occlusionState] & NSWindowOcclusionStateVisible) != 0;
++    /*
++     * Before the check below: a window hidden from the start sent no
++     * notice, so omacvm_window_seen still says seen when it first shows.
++     */
++    omacvm_gp_update();
+     if (seen == qatomic_read(&omacvm_window_seen)) {
+         return;
+     }
+@@ -7263,6 +7300,10 @@
+     });
+     cocoa_refresh_activity();
+     omacvm_hold_dirty = true;
++    /* OmacVM: a plain surface's frame (GPU safe mode) after a pause; QEMU's "not active" one is none. */
++    if (surface && !surface_is_placeholder(surface)) {
++        omacvm_gp_guest_frame();
++    }
+ }
+ 
+ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+@@ -8205,6 +8246,15 @@
+     if (!qatomic_read(&omacvm_window_seen) && !always) {
+         gl_dirty = true;
+         omacvm_frames_unseen++;
++        return true;
++    }
++    /*
++     * OmacVM: the guest's display is off since its window was out of sight
++     * (omacvm-cocoa-guest-pause.patch): the window keeps its last picture
++     * until the guest's first frame, not QEMU's "display not active".
++     */
++    if (omacvm_gp_keep(&omacvm_gp, gl_scanout_borrow != NULL, CACurrentMediaTime())) {
++        gl_dirty = false;
+         return true;
+     }
+ 
+@@ -9092,6 +9142,9 @@
+ 
+ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
+ {
++    if (omacvm_gp.told) {
++        omacvm_gp_dark = true;  /* the guest paused: its display is off */
++    }
+     gl_scanout_borrow = NULL;
+     gl_dirty = true;
+     cocoa_refresh_activity();
+@@ -9126,6 +9179,7 @@
+                                    uint32_t x, uint32_t y,
+                                    uint32_t w, uint32_t h)
+ {
++    omacvm_gp_guest_frame();    /* the guest's first frames after a pause (guest-pause patch) */
+     gl_dirty = true;
+     omacvm_hold_dirty = true;
+     /* What changed, for the surfaces' next draws (partial present). */
+@@ -10763,6 +10817,8 @@
+                   omacvm_ds_test_locked;
+     double at;
+ 
++    omacvm_gp_update();     /* locked or asleep: nobody sees the window */
++
+     if (locked != omacvm_ds_timer.locked) {
+         omacvm_ds_locked_at = omacvm_ds_clock();
+         fprintf(stderr, "omacvm: displays: %s (%s)\n", locked ?
+@@ -11261,8 +11317,193 @@
+         omacvm_bright_look();
+     }];
+     omacvm_bright_look();
++}
++
++/*
++ * OmacVM: the guest stops drawing while the VM's window cannot be seen
++ * (OmacVM.app's "Pause drawing while hidden", experimental; rules in
++ * ui/omacvm-guest-pause.h). Out of sight = macOS's occlusion says none of
++ * the window is on screen (minimised, wholly covered, on a Space not shown,
++ * closed with Keep running), or the screen is locked, the displays asleep
++ * or another user on the console. Then the guest's display agent is told
++ * {"unseen": ["Virtual-1"]} and turns that output's display off: no frames,
++ * no vblank, so Wayland apps stop drawing, as macOS apps do for a window
++ * nobody sees; sound, downloads and timers go on. Seen again: {"unseen": []}
++ * at once, and the window keeps its last picture until the guest's first
++ * frame. Visible windows are not touched: every frame, at the display's rate.
++ *
++ * The switch is the app's own defaults key pauseWhileHidden (QEMU runs as
++ * the app), watched with KVO so it works at once in a running VM;
++ * OMACVM_GUEST_PAUSE=1 or 0 decides instead (a QEMU not started as the app,
++ * tests). OMACVM_PRESENT_HIDDEN=1 (frames drawn for an unseen window) keeps
++ * the guest drawing too. Only an agent that says "pause": 1 in its hello is
++ * told (older agents would not know the word). Main thread.
++ */
++static int omacvm_gp_switch = -1;       /* -1: not read yet */
++static bool omacvm_gp_able;             /* the display agent can pause (its hello) */
++static unsigned omacvm_gp_gen;          /* the pending "unseen" timer's */
++static unsigned omacvm_gp_again_gen;    /* the next lease or "seen" again */
++
++static void omacvm_gp_read_switch(void)
++{
++    const char *e = getenv("OMACVM_GUEST_PAUSE");
++
++    if (e && (!strcmp(e, "1") || !strcmp(e, "0"))) {
++        omacvm_gp_switch = !strcmp(e, "1");
++    } else if (omacvm_bright_as_app()) {
++        CFPreferencesAppSynchronize((CFStringRef)[[NSBundle mainBundle] bundleIdentifier]);
++        omacvm_gp_switch = [[NSUserDefaults standardUserDefaults] boolForKey:@"pauseWhileHidden"];
++    } else {
++        omacvm_gp_switch = 0;
++    }
++}
++
++static void omacvm_gp_send(OmacVMGpTell tell)
++{
++    if (tell == OMACVM_GP_NONE || omacvm_chan_fd < 0 || !omacvm_guest_ready || !omacvm_gp_able) {
++        return;
++    }
++    omacvm_chan_write(tell == OMACVM_GP_UNSEEN ? @"{\"unseen\":[\"Virtual-1\"]}" : @"{\"unseen\":[]}");
++}
++
++/*
++ * The channel drops a line it cannot write at once (a full socket): the
++ * lease ("unseen" again every 5 s while it holds) and "seen" again until the
++ * guest's first frame, from omacvm_gp_again.
++ */
++static void omacvm_gp_again_arm(void)
++{
++    __block double at = 0;
++    unsigned gen = ++omacvm_gp_again_gen;
++
++    with_bql(^{
++        at = omacvm_gp_again_at(&omacvm_gp);
++    });
++    if (at <= 0) {
++        return;
++    }
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
++                                 (int64_t)(MAX(0.0, at - CACurrentMediaTime()) * NSEC_PER_SEC)),
++                   dispatch_get_main_queue(), ^{
++        __block OmacVMGpTell again = OMACVM_GP_NONE;
++        if (gen != omacvm_gp_again_gen) {
++            return;
++        }
++        with_bql(^{
++            again = omacvm_gp_again(&omacvm_gp, CACurrentMediaTime());
++        });
++        omacvm_gp_send(again);
++        omacvm_gp_again_arm();
++    });
+ }
+ 
++static void omacvm_gp_tell(OmacVMGpTell tell)
++{
++    if (tell == OMACVM_GP_NONE) {
++        return;
++    }
++    omacvm_gp_send(tell);
++    omacvm_gp_again_arm();
++}
++
++static void omacvm_gp_fire(unsigned gen)
++{
++    __block OmacVMGpTell tell = OMACVM_GP_NONE;
++
++    if (gen != omacvm_gp_gen) {
++        return;
++    }
++    with_bql(^{
++        tell = omacvm_gp_due(&omacvm_gp, CACurrentMediaTime());
++    });
++    omacvm_gp_tell(tell);
++}
++
++@interface OmacVMGuestPauseWatch : NSObject
++@end
++
++@implementation OmacVMGuestPauseWatch
++/* Any thread: the app's switch changed (this process or another). */
++- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
++                        change:(NSDictionary *)change context:(void *)context
++{
++    dispatch_async(dispatch_get_main_queue(), ^{
++        int was = omacvm_gp_switch;
++        omacvm_gp_read_switch();
++        if (was != omacvm_gp_switch) {
++            info_report("OmacVM: pause drawing while hidden: %s (the switch)",
++                        omacvm_gp_switch ? "on" : "off");
++            omacvm_gp_update();
++        }
++    });
++}
++@end
++
++static void omacvm_gp_update(void)
++{
++    static int always = -1;
++    __block OmacVMGpTell tell = OMACVM_GP_NONE;
++    __block double due = 0;
++    double now = CACurrentMediaTime();
++
++    if (omacvm_gp_switch < 0) {
++        static OmacVMGuestPauseWatch *watch;
++        const char *e = getenv("OMACVM_GUEST_PAUSE");
++        omacvm_gp_read_switch();
++        if (omacvm_bright_as_app() && !(e && *e)) {
++            watch = [[OmacVMGuestPauseWatch alloc] init];
++            [[NSUserDefaults standardUserDefaults] addObserver:watch
++                                                    forKeyPath:@"pauseWhileHidden"
++                                                       options:0
++                                                       context:NULL];
++        }
++        info_report("OmacVM: pause drawing while hidden: %s (%s)", omacvm_gp_switch ? "on" : "off",
++                    e && *e ? "OMACVM_GUEST_PAUSE" : "the app's switch");
++    }
++    if (always < 0) {
++        always = getenv("OMACVM_PRESENT_HIDDEN") != NULL;
++    }
++    /*
++     * The window's own state now, not only the last occlusion notice: a
++     * window that was never shown (ordered out from the start) sends none.
++     */
++    NSWindow *w = [cocoaView window];
++    bool on_screen = !w || ([w isVisible] && ([w occlusionState] & NSWindowOcclusionStateVisible));
++    bool seen = always || (on_screen && !omacvm_ds_screen_locked &&
++                           !omacvm_ds_asleep && !omacvm_ds_away && !omacvm_ds_test_locked);
++    with_bql(^{
++        tell = omacvm_gp_feed(&omacvm_gp, omacvm_gp_switch == 1 && omacvm_gp_able, seen, now);
++        due = omacvm_gp_due_at(&omacvm_gp);
++    });
++    omacvm_gp_tell(tell);
++    unsigned gen = ++omacvm_gp_gen;
++    if (due > 0) {
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(0.0, due - now) * NSEC_PER_SEC)),
++                       dispatch_get_main_queue(), ^{ omacvm_gp_fire(gen); });
++    }
++}
++
++/* The guest's display agent said hello (again): whether it can pause; it knows nothing yet. */
++static void omacvm_gp_hello(NSDictionary *hello)
++{
++    __block bool told = false;
++    id p = hello[@"pause"];
++    bool able = [p isKindOfClass:[NSNumber class]] && [p intValue] == 1;
++
++    if (able != omacvm_gp_able && omacvm_gp_switch == 1) {
++        info_report("OmacVM: pause drawing while hidden: %s", able ? "the VM's display agent can pause"
++                    : "the VM's display agent cannot pause yet (Update VM)");
++    }
++    omacvm_gp_able = able;
++    omacvm_gp_update();
++    with_bql(^{
++        told = omacvm_gp.told;
++    });
++    if (told) {
++        omacvm_gp_tell(OMACVM_GP_UNSEEN);
++    }
++}
++
+ static void omacvm_send_layout(void)
+ {
+     NSMutableArray *outputs = [NSMutableArray array];
+@@ -11482,6 +11723,7 @@
+             omacvm_last_layout = nil;
+             omacvm_edr_set(omacvm_edr_now());
+             omacvm_edr_watch();
++            omacvm_gp_hello(d);
+             update = true;
+         }
+         if ([d[@"external"] isKindOfClass:[NSNumber class]] &&
+@@ -11511,6 +11753,7 @@
+     }
+     omacvm_chan_fd = -1;
+     omacvm_guest_ready = false;
++    omacvm_gp_able = false;
+     omacvm_chan_tries = 0;
+     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC),
+                    dispatch_get_main_queue(), ^{ omacvm_chan_connect(); });
+@@ -12572,6 +12815,7 @@
+ #endif
+     omacvm_head_delegate = [[OmacVMHeadDelegate alloc] init];
+     omacvm_ds_watch_lock();
++    omacvm_gp_update();     /* reads the switch and says it in qemu.log */
+     /* Another Space: the detached cursor must move there (see omacvm_guard_corners). */
+     [[[NSWorkspace sharedWorkspace] notificationCenter]
+         addObserverForName:NSWorkspaceActiveSpaceDidChangeNotification

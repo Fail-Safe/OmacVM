@@ -25,6 +25,7 @@ enum SettingsDump {
             "vkWindowsNoCopy": Settings.vkWindowsNoCopy,
             "hdr": Settings.hdr,
             "extraBrightness": Settings.extraBrightness,
+            "pauseWhileHidden": Settings.pauseWhileHidden,
             "pointerPlane": Settings.pointerPlane,
             "vsyncLock": Settings.vsyncLock,
             "closeAction": Settings.closeAction.rawValue,

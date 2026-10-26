@@ -3,48 +3,22 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.2 (unreleased)
+## 3.2.3 (unreleased)
 
-- **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has
-  odd characters in its command line.** omacvm reads the Mac's process list to find the VM's
-  QEMU. One line that is not UTF-8 (a file name in an old encoding, binary arguments) made
-  macOS's awk stop there, so omacvm missed the VM after it: a control centre switch then tried to
-  start the running VM and ended with "did not get an address" (#545; found in the 3.2.1 test on
-  a MacBook Air). The same line made `pgrep -f` fail, so `omacvm check` could miss a running
-  Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
-  download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
-  Mac.
-
-- **Control centre switches right after another one are not turned away.** When a switch's job
-  ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
-  switch was refused with "unknown VM" at once and the control centre asked again, so that switch
-  took about 12 s instead of 7-9 s (#528; reproduced in a test VM 3 of 3 times). The Bridge now looks again
-  at once and waits for it (about 1 s), then backs off as before when the VM stays out of reach.
-  Its log also says why it did not take a VM (not running, not set up, the SSH error) and which
-  VM the app named. Needs `omacvm update` (or the app's update) on the Mac.
-
-- **USB devices** (experimental): a device that QEMU took longer than 3 s to add was reported as
-  not connected, but the VM often got it anyway: QEMU finished the add after the app had stopped
-  waiting (#526; 6 of 6 times against a real QEMU). The app now waits up to 15 s for QEMU's
-  answer, and without one asks QEMU which devices the VM has: one QEMU added late counts as
-  connected, one it does not have is removed again. Needs the app update.
-
-- **Mac input methods** (experimental): the Mac's input method stays on while the VM moves the
-  keyboard focus for a moment. Each time a text field in the VM lost the focus, the Mac switched
-  its input method off at once, and on again with the next key; in the debug capture from
-  @Vocllum (#357) the terminal lost and took its focus right after Enter, and WeChat Input typed
-  English from then on without a Shift tap. When only the VM's field goes (the VM keeps the
-  keyboard), the input method now goes off 0.2 s later, and not at all when a field takes the
-  focus again within that time. Keys still go to the VM as keys while no field has the focus, and
-  what was marked is still dropped when the field goes. A Shift tap within those 0.2 s still reaches the
-  input method and can switch its mode. Not tried with WeChat Input itself (no
-  test Mac has it). Needs the app update.
-
-- **HDR costs the Mac's graphics less.** With HDR and 10-bit colour on, Omarchy's compositor drew every
-  window twice per frame: once for the screen and once into an SDR copy it keeps for screen sharing. The
-  copy is now made only while a screenshot or a screen share runs. The screen shows the same pixels and
-  screenshots look the same; the Mac's GPU does 10-19 % less work per frame with HDR on (scrolling, video,
-  a terminal). A `keep_unmodified_copy` you set in your own Hyprland config still wins. Needs Update VM.
+- **Pause drawing while hidden (experimental, off by default).** A new switch in the VM window's
+  Display settings. While none of the VM's window can be seen for 2 seconds (minimised, covered
+  by other windows, on another Space, the screen locked or asleep), the VM turns its display off
+  and stops drawing, as macOS apps do for a window nobody sees. Sound, downloads and everything
+  else in the VM keep running. As soon as any part of the window shows again, the VM draws again;
+  its first new picture comes a few frames later (20-45 ms), and until then you see the last one.
+  A visible window is never touched: every frame, at the display's full rate.
+  Measured for the whole Mac: on a MacBook Air M2 with the VM's window minimised, a 1080p video in
+  the VM 3.5 -> 2.9 W (one clean row without the switch) and a terminal scrolling its output
+  3.6 -> 2.5 W (two rows each; macOS idle: 2.3 W);
+  on a MacBook Pro M4 Max with the VM hidden and the display asleep, the video 5.4-5.6 -> 4.6 W and
+  the terminal 6.4-8.2 -> 2.9-3.0 W (the VM's idle level). It works at once in a running VM;
+  Update VM brings the VM's side, and `omacvm check` says "pause while hidden: ready". Only the
+  main window: in full screen on several displays the other windows keep drawing.
 
 - **Frames in step with the Mac (experimental, off).** A new switch in the VM window's Display
   section. The VM's display clock had its own beat: a frame it drew right after one refresh of
@@ -64,6 +38,37 @@ in more words.
   working; `omacvm check` says so). Needs Update VM (it builds the VM's graphics driver, internet
   once); counts from the next start of the VM.
 
+## 3.2.2
+
+A running VM is no longer taken as stopped when another program has odd characters in its command
+line, control centre switches in a row are not turned away, HDR costs the Mac's graphics less, and a
+new experimental switch puts the pointer on its own layer.
+
+- **A running OmacVM.app VM is no longer taken as stopped when another program on the Mac has
+  odd characters in its command line.** omacvm reads the Mac's process list to find the VM's
+  QEMU. One line that is not UTF-8 (a file name in an old encoding, binary arguments) made
+  macOS's awk stop there, so omacvm missed the VM after it: a control centre switch then tried to
+  start the running VM and ended with "did not get an address" (#545; found in the 3.2.1 test on
+  a MacBook Air). The same line made `pgrep -f` fail, so `omacvm check` could miss a running
+  Bridge, Gestures or Omanotch, and a build could miss another build that still reads a
+  download. These reads now go byte by byte. Needs `omacvm update` (or the app's update) on the
+  Mac.
+
+- **Control centre switches right after another one are not turned away.** When a switch's job
+  ended, the Bridge looks at its VMs again; if that look caught the VM busy for a moment, the next
+  switch was refused with "unknown VM" at once and the control centre asked again, so that switch
+  took about 12 s instead of 7-9 s (#528; reproduced in a test VM 3 of 3 times). The Bridge now looks again
+  at once and waits for it (about 1 s), then backs off as before when the VM stays out of reach.
+  Its log also says why it did not take a VM (not running, not set up, the SSH error) and which
+  VM the app named. Needs `omacvm update` on the Mac (OmacVM.app: the app's update, then Update VM,
+  which installs the new Bridge).
+
+- **HDR costs the Mac's graphics less.** With HDR and 10-bit colour on, Omarchy's compositor drew every
+  window twice per frame: once for the screen and once into an SDR copy it keeps for screen sharing. The
+  copy is now made only while a screenshot or a screen share runs. The screen shows the same pixels and
+  screenshots look the same; the Mac's GPU does 10-19 % less work per frame with HDR on (scrolling, video,
+  a terminal). A `keep_unmodified_copy` you set in your own Hyprland config still wins. Needs Update VM.
+
 - **Pointer on its own layer (experimental, off).** A new switch in the VM window's Display section.
   With it, moving the pointer no longer redraws the VM's screen: the VM puts its pointer on the
   graphics card's cursor layer, and the app shows that layer over the window, the same pointer in
@@ -76,6 +81,23 @@ in more words.
   Not together with the hidden `macPointer` setting. Needs Update VM (it builds the VM's graphics
   driver, internet once); counts from the next start of the VM. With HDR on, Update VM builds that
   driver again too; until it has, an HDR start uses the stock driver and `omacvm check` says so.
+
+- **Mac input methods** (experimental): the Mac's input method stays on while the VM moves the
+  keyboard focus for a moment. Each time a text field in the VM lost the focus, the Mac switched
+  its input method off at once, and on again with the next key; in the debug capture from
+  @Vocllum (#357) the terminal lost and took its focus right after Enter, and WeChat Input typed
+  English from then on without a Shift tap. When only the VM's field goes (the VM keeps the
+  keyboard), the input method now goes off 0.2 s later, and not at all when a field takes the
+  focus again within that time. Keys still go to the VM as keys while no field has the focus, and
+  what was marked is still dropped when the field goes. A Shift tap within those 0.2 s still reaches the
+  input method and can switch its mode. Not tried with WeChat Input itself (no
+  test Mac has it). Needs the app update.
+
+- **USB devices** (experimental): a device that QEMU took longer than 3 s to add was reported as
+  not connected, but the VM often got it anyway: QEMU finished the add after the app had stopped
+  waiting (#526; 6 of 6 times against a real QEMU). The app now waits up to 15 s for QEMU's
+  answer, and without one asks QEMU which devices the VM has: one QEMU added late counts as
+  connected, one it does not have is removed again. Needs the app update.
 
 ## 3.2.1
 
