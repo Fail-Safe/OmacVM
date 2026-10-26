@@ -1135,7 +1135,8 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   for the run. qemu.log:
   `OmacVM: sound: playback buffers: 512 frames (...)`; `omacvm check` shows
   it as "sound buffers". If it still says the output refused every size,
-  restart the VM with the AirPods connected. Before 3.2.5: `defaults write
+  restart the VM with the AirPods connected (a VM started with them
+  connected already has those buffers: pick another output instead). Before 3.2.5: `defaults write
   org.omacvm.app audioThread -bool false` and a restart of the VM (thanks to
   @maxschoenberger for the workaround).
 - **Where:** `app/runtime/patches/qemu-sdl-audio-out-size*.patch`,

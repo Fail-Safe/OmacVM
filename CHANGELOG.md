@@ -5,12 +5,14 @@ in more words.
 
 ## 3.2.5 (unreleased)
 
-- **Sound over AirPods again.** With AirPods (or another Bluetooth or AirPlay output) as the Mac's
-  output, the VM had no sound since 3.1.17: macOS refused to start the small buffers of the sound's own
-  thread (AudioQueueStart -66681). A VM started with a wireless output now gives macOS the same sound
-  buffers as QEMU's main loop path (44.1 kHz, 512 frames), which played; a switch to one while the VM
-  runs reopens it with 512-frame buffers, and any output that refuses a start gets the next size at
-  once. `omacvm check` says which size plays ("sound buffers"). Thanks to @maxschoenberger for the report, the workaround and the cause analysis (#548).
+- **Sound with AirPods.** With AirPods (or another Bluetooth or AirPlay output) as the Mac's output,
+  the VM had no sound since 3.1.17: macOS refused to start the queue of the sound's own thread (48 kHz,
+  256-frame buffers; AudioQueueStart -66681). A VM started with a wireless output now gives macOS the
+  queue of QEMU's main loop path (44.1 kHz, 512-frame buffers), which played for the reporter. A switch
+  to one while the VM runs reopens it with 512-frame buffers; that helps if the buffer size was the
+  cause, else restart the VM with the output connected. Any output that refuses a start gets the next
+  size at once. `omacvm check` says which size plays ("sound buffers"). Not yet confirmed with real
+  AirPods. Thanks to @maxschoenberger for the report, the workaround and the cause analysis (#548).
 
 ## 3.2.4
 
