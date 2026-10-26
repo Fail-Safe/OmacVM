@@ -884,7 +884,8 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
 # The VM's modifier keys from each event's flags (#412; modifier-keys.sh, on the running VM).
 step_keys() {
   log "keys: modifier key cases into the VM (Universal Control's ways included)"
-  perl -e 'alarm 300; exec @ARGV' "$HERE/modifier-keys.sh" --vm "$VM" --out "$OUT/keys" > "$OUT/keys.log" 2>&1
+  # Its own time, and a wait for someone at the Mac between its cases (person.sh) on top.
+  perl -e 'alarm shift; exec @ARGV' $(( 300 + PERSON_WAIT )) "$HERE/modifier-keys.sh" --vm "$VM" --out "$OUT/keys" > "$OUT/keys.log" 2>&1
   local rc=$?
   while IFS=$'\t' read -r st r d; do res "$st" "$r" "$d"; done < "$OUT/keys/summary.tsv" 2>/dev/null
   (( rc == 0 )) || grep -q -E $'\t(FAIL|BLOCKED)\t' "$OUT/keys/summary.tsv" 2>/dev/null ||
@@ -895,7 +896,7 @@ step_keys() {
 step_unplug() {
   if (( HIDDEN )); then res unplug skip "needs windows on this Mac's displays (--hidden)"; return; fi
   log "unplug: the display the VM's window is on unplugged, flapping, locked (limit 45 min)"
-  perl -e 'alarm 2700; exec @ARGV' "$HERE/display-unplug.sh" --vm "$VM" --out "$OUT/unplug" > "$OUT/unplug.log" 2>&1
+  perl -e 'alarm shift; exec @ARGV' $(( 2700 + PERSON_WAIT )) "$HERE/display-unplug.sh" --vm "$VM" --out "$OUT/unplug" > "$OUT/unplug.log" 2>&1
   local rc=$?
   while IFS=$'\t' read -r st r d; do res "$st" "$r" "$d"; done < "$OUT/unplug/summary.tsv" 2>/dev/null
   (( rc == 0 )) || grep -q -E $'\t(FAIL|BLOCKED)\t' "$OUT/unplug/summary.tsv" 2>/dev/null ||
