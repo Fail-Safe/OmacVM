@@ -1380,6 +1380,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-decod
 # OmacVM: a program whose VirglBlock the GL reports too small (or whose size query fails) is
 # refused like a failed link, its draws skipped; an assert aborted QEMU there (#547).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-sysval-block-check.patch"
+# OmacVM: a query result the GL does not answer (never begun, still running, a GL refusing
+# calls) reaches the guest as done with 0; it got host stack bytes, or a wait for ever.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-query-result-unanswered.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.

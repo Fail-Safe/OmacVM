@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.8 (unreleased)
+
+- **An OpenGL query the Mac does not answer reads as 0 in the VM, not as the Mac's memory.** When
+  the Mac's OpenGL did not answer a query's result (a query never started or still running, or a GL
+  that refuses calls, as in #547), the VM got whatever bytes were on QEMU's stack, or the query never
+  finished and the app waited for ever. Now it finishes with 0, and qemu.log says so once (#573).
+
 ## 3.2.6
 
 Two changes: the pointer no longer jumps after a click near a corner of an external display, and
