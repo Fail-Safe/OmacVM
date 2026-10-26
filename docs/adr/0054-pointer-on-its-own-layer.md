@@ -87,6 +87,12 @@ that place the cursor by its hotspot at their own mouse position.
   rounding two pictures of today's setup show too). Extra brightness: on
   the mini, a boosted layer with the patch's pointer image and an HDR
   capture (page 2.00, the new pointer image 2.00, the old 8-bit one 1.00).
+  Two outputs (#554; Mac mini, two Mac displays, the VM in full screen with
+  "Use external displays"): the pointer on each output's cursor plane shows
+  over that display's window, moves between them, comes back after the
+  second display is unplugged and plugged in again, and has the same pixels
+  as Hyprland's own pointer with the switch off (0 differing pixels around
+  it on both displays).
   Not yet checked on screen: HDR at 120 Hz and Extra brightness on an XDR
   panel (queued on the M1 Max, tracks/m1-bench-queue.md). The pointer's soft edge is blended by macOS over the
   frames, not by the guest into them: with Extra brightness on, those few
