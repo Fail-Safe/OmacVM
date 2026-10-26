@@ -8,7 +8,9 @@
  *  - the query fails (a GL error, nothing written): the same;
  *  - then, the GL answering again: new shaders draw (green in the colour buffer), and a
  *    program that was refused stays refused (not linked again for every draw), as for
- *    other refused shaders. */
+ *    other refused shaders;
+ *  - a separable pipeline whose VirglBlock fails at a rebind (its shaders were used by
+ *    another pipeline since): that draw is skipped, the next one binds again and draws. */
 #include <OpenGL/OpenGL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,10 +24,12 @@
 void sysval_block_fault(int mode);
 unsigned long sysval_block_faults(void);
 unsigned long sysval_block_draws(void);
+unsigned long sysval_block_queries(void);
+void gl_pervertex_redeclare(int on);
 
 enum { TEST_SHADER_VERTEX = 0, TEST_SHADER_FRAGMENT = 1, TEST_PRIM_TRIANGLES = 4,
        TEST_TEXTURE_2D = 2, TEST_CLEAR_COLOR0 = 1 << 2 };
-enum { GREEN = 0xff00ff00, GREY = 0xff808080 };
+enum { GREEN = 0xff00ff00, BLUE = 0xffff0000, GREY = 0xff808080 };
 
 static CGLContextObj main_ctx;
 static int failures, refused_lines, block_lines;
@@ -220,18 +224,108 @@ static const char *fs_green =
    "  0: MOV OUT[0], IMM[0]\n"
    "  1: END\n";
 
+/* The same as separable programs (vrend links each stage alone, into a pipeline); linked
+ * with gl_pervertex_redeclare on (sysval-block-gl.c: Apple's GL wants gl_PerVertex). */
+static const char *vs_separable =
+   "VERT\n"
+   "PROPERTY SEPARABLE_PROGRAM 1\n"
+   "DCL SV[0], VERTEXID\n"
+   "DCL OUT[0], POSITION\n"
+   "DCL TEMP[0]\n"
+   "IMM[0] UINT32 {1, 2, 0, 0}\n"
+   "IMM[1] FLT32 {    4.0000,    -1.0000,     0.5000,     1.0000}\n"
+   "  0: AND TEMP[0].x, SV[0].xxxx, IMM[0].xxxx\n"
+   "  1: AND TEMP[0].y, SV[0].xxxx, IMM[0].yyyy\n"
+   "  2: USHR TEMP[0].y, TEMP[0].yyyy, IMM[0].xxxx\n"
+   "  3: U2F TEMP[0].xy, TEMP[0].xyyy\n"
+   "  4: MAD OUT[0].xy, TEMP[0].xyyy, IMM[1].xxxx, IMM[1].yyyy\n"
+   "  5: MOV OUT[0].zw, IMM[1].zzzw\n"
+   "  6: END\n";
+
+static const char *fs_separable_green =
+   "FRAG\n"
+   "PROPERTY SEPARABLE_PROGRAM 1\n"
+   "DCL OUT[0], COLOR\n"
+   "IMM[0] FLT32 {    0.0000,     1.0000,     0.0000,     1.0000}\n"
+   "  0: MOV OUT[0], IMM[0]\n"
+   "  1: END\n";
+
+static const char *fs_separable_blue =
+   "FRAG\n"
+   "PROPERTY SEPARABLE_PROGRAM 1\n"
+   "DCL OUT[0], COLOR\n"
+   "IMM[0] FLT32 {    0.0000,     0.0000,     1.0000,     1.0000}\n"
+   "  0: MOV OUT[0], IMM[0]\n"
+   "  1: END\n";
+
 /* new shader objects (so a new program), three draws, one submit */
-static int draw_with_new_shaders(struct cmds *c, uint32_t handle)
+static int draw_with_new_shaders_in(int ctx_id, struct cmds *c, uint32_t handle,
+                                    const char *vs, const char *fs)
 {
    emit_clear_grey(c);
-   emit_shader(c, handle, TEST_SHADER_VERTEX, vs_text);
+   emit_shader(c, handle, TEST_SHADER_VERTEX, vs);
    emit_bind(c, handle, TEST_SHADER_VERTEX);
-   emit_shader(c, handle + 1, TEST_SHADER_FRAGMENT, fs_green);
+   emit_shader(c, handle + 1, TEST_SHADER_FRAGMENT, fs);
    emit_bind(c, handle + 1, TEST_SHADER_FRAGMENT);
    for (int i = 0; i < 3; i++)
       emit_draw(c);
-   return submit(1, c);
+   return submit(ctx_id, c);
 }
+
+static int draw_with_new_shaders(struct cmds *c, uint32_t handle)
+{
+   return draw_with_new_shaders_in(1, c, handle, vs_text, fs_green);
+}
+
+/* clear, bind the two shaders, one draw, one submit */
+static int draw_with(int ctx_id, struct cmds *c, uint32_t vs, uint32_t fs)
+{
+   emit_clear_grey(c);
+   emit_bind(c, vs, TEST_SHADER_VERTEX);
+   emit_bind(c, fs, TEST_SHADER_FRAGMENT);
+   emit_draw(c);
+   return submit(ctx_id, c);
+}
+
+/* A separable pipeline's rebind (vrend_select_program): its shaders were bound into
+ * another pipeline since, so vrend binds its blocks again, VirglBlock included. When the
+ * GL's answer fails there, that draw is skipped and the pipeline stays usable: the next
+ * draw binds again and draws. */
+static void separable_rebind(struct cmds *c)
+{
+   gl_pervertex_redeclare(1);
+   emit_shader(c, 50, TEST_SHADER_VERTEX, vs_separable);
+   emit_shader(c, 51, TEST_SHADER_FRAGMENT, fs_separable_green);
+   emit_shader(c, 52, TEST_SHADER_FRAGMENT, fs_separable_blue);
+   check(submit(1, c) == 0, "separable: shaders");
+   unsigned long draws = sysval_block_draws(), queries = sysval_block_queries();
+   refused_lines = 0;
+   check(draw_with(1, c, 50, 51) == 0 && sysval_block_draws() == draws + 1 &&
+         sysval_block_queries() > queries && refused_lines == 0 && read_middle() == GREEN,
+         "separable: the first pipeline links, binds its VirglBlock and draws (green)");
+   check(draw_with(1, c, 50, 52) == 0 && sysval_block_draws() == draws + 2 &&
+         read_middle() == BLUE, "separable: a second pipeline with the same vertex shader (blue)");
+
+   unsigned long faults = sysval_block_faults();
+   sysval_block_fault(2);
+   int r = draw_with(1, c, 50, 51);
+   sysval_block_fault(0);
+   check(r == 0 && sysval_block_faults() > faults,
+         "separable: back to the first pipeline, its rebind gets 16 bytes: no abort");
+   check(sysval_block_draws() == draws + 2 && read_middle() == GREY,
+         "separable: that draw is skipped");
+   check(refused_lines == 0, "separable: not refused as a link (the pipeline stays)");
+
+   queries = sysval_block_queries();
+   emit_clear_grey(c);
+   emit_draw(c);
+   check(submit(1, c) == 0 && sysval_block_queries() > queries,
+         "separable: the next draw binds the pipeline's blocks again");
+   check(sysval_block_draws() == draws + 3 && read_middle() == GREEN,
+         "separable: and draws (green)");
+   gl_pervertex_redeclare(0);
+}
+
 
 int main(void)
 {
@@ -295,6 +389,8 @@ int main(void)
    check(submit(1, &c) == 0 && sysval_block_draws() == draws + 3 &&
          sysval_block_faults() == faults && read_middle() == GREY,
          "the refused program is not linked again, its draws stay skipped");
+
+   separable_rebind(&c);
 
    virgl_renderer_ctx_detach_resource(1, 5);
    virgl_renderer_context_destroy(1);
