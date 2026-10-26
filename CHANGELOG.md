@@ -18,6 +18,13 @@ in more words.
   button asks macOS. A grant you gave stays through updates: macOS keeps it for OmacVM's bundle id
   and its Developer ID team, not for one build.
 
+- **Pointer on its own layer: the pointer on every display (#554, reported by the user).** With
+  the switch on and the VM in full screen on the built-in display and an external one ("Use
+  external displays"), the external display showed no pointer at all. Only the main window's
+  display had the pointer's layer, and the VM drew no pointer of its own on the others. Now every
+  display the VM uses has its own pointer layer, shown over that display's window. The VM needs
+  Update VM for it; until then it draws the pointer itself, as with the switch off.
+
 ## 3.2.4
 
 A new experimental switch in the VM window's Display settings: the Mac redraws only the parts of the
