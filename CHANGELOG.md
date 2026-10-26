@@ -5,6 +5,9 @@ in more words.
 
 ## 3.2.6 (unreleased)
 
+Two changes: the pointer no longer jumps after a click near a corner of an external display, and
+with HDR or Extra brightness the window's frames take fewer bytes on macOS 27 (same pixels).
+
 - QEMU window (macOS 27): with HDR or Extra brightness on, the window's frames go into the Mac's
   lossless-compressed half-float format, like the SDR ones since 3.2.1: fewer bytes for every frame,
   the same pixels, brightness and frame rates. On a MacBook Pro M1 Max at 120 Hz with HDR on: a video
