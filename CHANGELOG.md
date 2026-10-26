@@ -5,6 +5,10 @@ in more words.
 
 ## 3.2.3 (unreleased)
 
+Two new experimental switches in the VM window's Display settings: the VM stops drawing while its
+window cannot be seen, and its frames can follow the refresh of the Mac's display. A tiled present
+is built in, off for now.
+
 - **Pause drawing while hidden (experimental, off by default).** A new switch in the VM window's
   Display settings. While none of the VM's window can be seen for 2 seconds (minimised, covered
   by other windows, on another Space, the screen locked or asleep), the VM turns its display off
