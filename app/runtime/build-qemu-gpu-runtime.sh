@@ -918,6 +918,11 @@ grep -q 'eventsTap = CGEventTapCreate(kCGHIDEventTap, place, kCGEventTapOptionDe
   die "ui/cocoa.m: the full-grab tap ignores OMACVM_KEYS_LAST (keys-last patch)"
 "$native_dir/Tests/keys/test-keys-last.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the full-grab tap's place is not as tested (test-keys-last.sh)"
+# The full-grab tap only when OmacVM may already control the computer: else
+# macOS showed "... would like to control this Mac" at every VM start.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-tap-no-ask.patch"
+"$native_dir/Tests/keys/test-tap-no-ask.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the full-grab tap is made (and asked for) without the permission (test-tap-no-ask.sh)"
 # OmacVM.app's "Closing the window" (#358): Shut down, Keep running (the app
 # hidden, the Dock icon brings it back), Ask. Its rules' test, then the wiring.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-close-logic.patch"
@@ -1042,6 +1047,18 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-tiles
   die "the tiled present's rules fail their test (test-present-tiles.sh)"
 "$native_dir/Tests/display/test-present-tiles.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the tiled present is not wired as tested (test-present-tiles.sh)"
+# OmacVM (#554): the guest's pointer layer over every display's window, not
+# only the main one (with "Pointer on its own layer" every output has a
+# cursor plane and the guest draws no pointer into its frames). Its rules'
+# test, a check that the wiring checks fail on the code before, the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-heads-logic.patch"
+"$native_dir/Tests/display/test-pointer-heads.sh" || \
+  die "the pointer's place over other displays' windows fails its test (test-pointer-heads.sh)"
+"$native_dir/Tests/display/test-pointer-heads.sh" --self-test "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a pointer-layer wiring check passes without the patch (test-pointer-heads.sh)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-heads.patch"
+"$native_dir/Tests/display/test-pointer-heads.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the pointer is not on every display's window as tested (test-pointer-heads.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
@@ -1354,6 +1371,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-video-picture-size
 # OmacVM: decoded pictures finish beside QEMU's GPU thread (it waited for the media engine on every
 # picture: Chrome's 4K hardware decoding dropped frames); planes and fences wait for their pictures.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-decode-async.patch"
+# OmacVM: a program whose VirglBlock the GL reports too small (or whose size query fails) is
+# refused like a failed link, its draws skipped; an assert aborted QEMU there (#547).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-sysval-block-check.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.

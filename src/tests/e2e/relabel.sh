@@ -9,12 +9,18 @@
 # picks the test port (47930) from its relabeled bundle id from 3.1.16 on; an
 # older release's Gestures listens on 47830, beside the installed one, and
 # cannot (the gate's VM then has no Gestures; nothing else changes).
-#   src/tests/e2e/relabel.sh ZIP OUT_DIR [ID]  -> OUT_DIR/OmacVM Test.app
-# ID: a lane's own copy (org.omacvm.app.test.<lane>): its own settings and VMs folder, so another
-# test app on the same Mac keeps its own (onscreen.sh on a shared test Mac).
+#   src/tests/e2e/relabel.sh ZIP OUT_DIR [org.omacvm.app.test]  -> OUT_DIR/OmacVM Test.app
+# Only the test identity's own id: macOS keeps its permissions for that id and
+# the Developer ID team, so every copy and build of it has them. A lane's own
+# id (org.omacvm.app.test.<lane>) has none: the QEMU of 3.2.4 and older asked
+# "would like to control this Mac" at every VM start (54 dialogs in 36 hours
+# on the test Mac mini), and Local Network asks for each new id. Local Network
+# also asks again for each new build of org.omacvm.app.test, so one id does not
+# stop that prompt. Another test app's settings are kept apart by the test
+# identity's lock instead.
 set -euo pipefail
 ZIP=${1:?usage: relabel.sh ZIP OUT_DIR [ID]}; O=${2:?usage: relabel.sh ZIP OUT_DIR [ID]}; ID=${3:-org.omacvm.app.test}
-[[ $ID == org.omacvm.app.test || $ID == org.omacvm.app.test.* ]] || { echo "relabel.sh: $ID is not a test identity id" >&2; exit 2; }
+[[ $ID == org.omacvm.app.test ]] || { echo "relabel.sh: $ID: only org.omacvm.app.test (a lane's own id has no macOS permissions: a dialog at every VM start)" >&2; exit 2; }
 SIGN=${OMACVM_SIGN_ID:?OMACVM_SIGN_ID: a Developer ID Application identity}
 PB=/usr/libexec/PlistBuddy
 rm -rf "$O"; mkdir -p "$O/x"

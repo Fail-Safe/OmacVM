@@ -1,0 +1,339 @@
+From: OmacVM
+Subject: [PATCH] cocoa: the guest's pointer layer over every display's window
+
+What: with "Pointer on its own layer" (ADR 0054) each window of another
+display (OmacVMHeadView) gets a pointer layer, as the main window has its
+cursor layer: the image of that output's cursor plane (copied,
+premultiplied as virtio-gpu sends it), at the plane's top left, scaled as
+the window stretches the output's frames (ui/omacvm-pointer-heads.h),
+above the frames, shown while the guest shows the plane and hidden by the
+main cursor layer's rule (omacvm_hwc_layer_hidden: while the hidden
+macPointer shows the image as the Mac's cursor). Kept per output on the
+main thread, so a window made again shows the pointer as it is; an output
+the guest turns off drops its pointer.
+
+Cost: nothing per frame. With virgl every page flip is a SET_SCANOUT;
+QEMU's thread keeps the size it last sent per output and wakes the main
+thread only when it changed. Of several queued images of an output only
+the newest takes the lock on the main thread.
+
+Why: the guest's driver now gives every output a cursor plane and the
+guest draws no pointer into any output's frames. Before, only output 0
+had a plane and QEMU only showed the main window's; the other outputs
+were meant to keep Hyprland's software pointer, but aquamarine 0.15.1
+takes a cursor for an output without a plane without an error, so
+Hyprland drew none there either: no pointer at all on an external display
+(#554). The cursor commands already carry the output (scanout id): each
+output's console gets its own.
+
+Upstream: not applicable (OmacVM's display windows).
+Test: app/runtime/Tests/display/test-pointer-heads.sh (the rules; the
+wiring on the patched ui/cocoa.m; --self-test: every wiring check fails on
+the code without it).
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -57,6 +57,7 @@
+ #include "ui/omacvm-edr.h"
+ #include "ui/omacvm-bright.h"
+ #include "ui/omacvm-pointer-bright.h"
++#include "ui/omacvm-pointer-heads.h"
+ #include "ui/omacvm-present-tiles.h"
+ #include "ui/omacvm-present-damage.h"
+ #include "ui/omacvm-guest-pause.h"
+@@ -568,6 +569,7 @@
+ - (bool) handleEventLocked:(NSEvent *)event;
+ - (void) notifyMouseModeChange;
+ - (BOOL) isMouseGrabbed;
++- (BOOL) omacvmAbsolute;
+ - (BOOL) isKeyboardCaptured;
+ - (void) reenableEventTap;
+ - (BOOL) omacvmTapAllowed;
+@@ -2970,6 +2972,8 @@
+     [self omacvmTakePointer:nil why:"absolute pointer"];
+ }
+ - (BOOL) isMouseGrabbed {return isMouseGrabbed;}
++/* OmacVM: for the other displays' pointer layers (#554). */
++- (BOOL) omacvmAbsolute {return isAbsoluteEnabled;}
+ 
+ /*
+  * Keyboard capture is deliberately independent of the mouse grab. An
+@@ -10122,6 +10126,7 @@
+     bool want_full;                 /* waiting for macOS full screen */
+     bool full;                      /* in macOS full screen */
+     uint32_t key;                   /* the display's key (omacvm_ds_key) */
++    OmacVMHeadPointerSize ptr_size; /* QEMU's thread: last size sent to its pointer layer */
+ } OmacVMHead;
+ 
+ static OmacVMHead omacvm_heads[OMACVM_MAX_OUTPUTS];   /* [0] = the main window */
+@@ -10870,11 +10875,17 @@
+         });
+     }
+ }
++
++static void omacvm_head_pointer_size(DisplayChangeListener *dcl);
++static void omacvm_head_pointer_off(DisplayChangeListener *dcl);
+ 
+ static void omacvm_head_scanout_disable(DisplayChangeListener *dcl)
+ {
+     OmacVMHead *hd = (OmacVMHead *)dcl;
+ 
++    if (hd->borrow) {
++        omacvm_head_pointer_off(dcl);   /* the output is off: its pointer too */
++    }
+     hd->borrow = NULL;
+     hd->dirty = true;
+     cocoa_refresh_activity();
+@@ -10891,6 +10902,7 @@
+     hd->scanout_id = backing_id;
+     hd->borrow = backing_borrow;
+     hd->dirty = true;
++    omacvm_head_pointer_size(dcl);
+     cocoa_refresh_activity();
+ }
+ 
+@@ -10902,36 +10914,135 @@
+     cocoa_refresh_activity();
+ }
+ 
+-/* The guest's pointer on this output (hardware cursor only, see omacvm_hwc_take). */
+-static void omacvm_head_mouse_set(DisplayChangeListener *dcl, int x, int y, bool on)
+-{
+-    int output = ((OmacVMHead *)dcl)->output;
++/*
++ * OmacVM (#554): the guest's pointer over the window of this output, as the
++ * main window's cursor layer shows it over the main one. With "Pointer on
++ * its own layer" every output has a cursor plane and the guest draws no
++ * pointer into its frames: without this layer the other displays showed
++ * none. Per output, main thread only; kept while the output has no window,
++ * for its next one.
++ */
++typedef struct OmacVMHeadPointer {
++    CGImageRef image;   /* the guest's image (a copy), premultiplied */
++    int w, h;           /* its size, guest pixels */
++    int x, y;           /* its top left on the output, from the guest */
++    bool on;            /* the guest shows the plane */
++    int ow, oh;         /* the output's size */
++} OmacVMHeadPointer;
+ 
+-    if (!omacvm_hwc.on) {
++static OmacVMHeadPointer omacvm_head_ptr[OMACVM_MAX_OUTPUTS];
++static void omacvm_head_pointer_apply(int output);
++
++/* Main thread, BQL: the guest's new image for this output (NULL: none). */
++static void omacvm_head_pointer_image(int output, QEMUCursor *c)
++{
++    OmacVMHeadPointer *p = &omacvm_head_ptr[output];
++    CGImageRef image = NULL;
++
++    if (c && c->width > 0 && c->height > 0) {
++        /* copied: virtio-gpu writes the next image into the same buffer */
++        CFDataRef data = CFDataCreate(NULL, (const UInt8 *)c->data,
++                                      (CFIndex)c->width * c->height * 4);
++        CGDataProviderRef provider = CGDataProviderCreateWithCFData(data);
++        CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
++
++        /* premultiplied, as virtio-gpu sends it (as the main window's layer) */
++        image = CGImageCreate(c->width, c->height, 8, 32, c->width * 4, space,
++                              kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst,
++                              provider, NULL, false, kCGRenderingIntentDefault);
++        CGColorSpaceRelease(space);
++        CGDataProviderRelease(provider);
++        CFRelease(data);
++    }
++    CGImageRelease(p->image);
++    p->image = image;
++    p->w = image ? c->width : 0;
++    p->h = image ? c->height : 0;
++    omacvm_head_pointer_apply(output);
++}
++
++/*
++ * QEMU's thread: the output's size for its window's pointer layer, sent to
++ * the main thread only when it changed. With virgl every page flip is a
++ * SET_SCANOUT of the same size: a send each time would wake the main
++ * thread at the frame rate, also with the switch off.
++ */
++static void omacvm_head_pointer_size(DisplayChangeListener *dcl)
++{
++    OmacVMHead *hd = (OmacVMHead *)dcl;
++    int output = hd->output;
++    int ow = qemu_console_get_width(dcl->con, 0);
++    int oh = qemu_console_get_height(dcl->con, 0);
++
++    if (!omacvm_head_pointer_size_changed(&hd->ptr_size, ow, oh)) {
+         return;
+     }
+     dispatch_async(dispatch_get_main_queue(), ^{
+-        omacvm_hwc_show(&omacvm_hwc, output, on);
+-        [cocoaView omacvmUpdateMacCursor];
++        omacvm_head_ptr[output].ow = ow;
++        omacvm_head_ptr[output].oh = oh;
++        omacvm_head_pointer_apply(output);
+     });
+ }
+ 
++/* QEMU's thread: the output is off, so is its pointer (a window made again shows none). */
++static void omacvm_head_pointer_off(DisplayChangeListener *dcl)
++{
++    int output = ((OmacVMHead *)dcl)->output;
++
++    dispatch_async(dispatch_get_main_queue(), ^{
++        omacvm_head_ptr[output].on = false;
++        omacvm_head_pointer_apply(output);
++    });
++}
++
++/*
++ * The guest's pointer on this output: the window's pointer layer, and with
++ * the hidden macPointer also the Mac's own cursor (see omacvm_hwc_take),
++ * as for the main window (cocoa_mouse_set).
++ */
++static void omacvm_head_mouse_set(DisplayChangeListener *dcl, int x, int y, bool on)
++{
++    int output = ((OmacVMHead *)dcl)->output;
++    bool hwc = omacvm_hwc.on;
++
++    omacvm_head_pointer_size(dcl);
++    dispatch_async(dispatch_get_main_queue(), ^{
++        OmacVMHeadPointer *p = &omacvm_head_ptr[output];
++
++        p->x = x;
++        p->y = y;
++        p->on = on;
++        if (hwc) {
++            omacvm_hwc_show(&omacvm_hwc, output, on);
++            [cocoaView omacvmUpdateMacCursor];
++        }
++        omacvm_head_pointer_apply(output);
++    });
++}
++
++/*
++ * Only the newest queued image of an output takes the lock on the main
++ * thread (atomic; QEMU's thread counts), as for the hidden macPointer.
++ */
++static unsigned omacvm_head_ptr_seq[OMACVM_MAX_OUTPUTS];
++
+ static void omacvm_head_cursor_define(DisplayChangeListener *dcl, QEMUCursor *cursor)
+ {
+     int output = ((OmacVMHead *)dcl)->output;
+     QemuConsole *con = dcl->con;
+-    unsigned seq;
++    unsigned seq = qatomic_fetch_inc(&omacvm_head_ptr_seq[output]) + 1;
++    unsigned hwc = omacvm_hwc.on ? qatomic_fetch_inc(&omacvm_hwc_seq) + 1 : 0;
+ 
+-    if (!omacvm_hwc.on) {
+-        return;
+-    }
+-    seq = qatomic_fetch_inc(&omacvm_hwc_seq) + 1;
+     dispatch_async(dispatch_get_main_queue(), ^{
++        if (qatomic_read(&omacvm_head_ptr_seq[output]) != seq) {
++            return;   /* a newer image of this output follows */
++        }
+         BQL_LOCK_GUARD();
+-        if (qatomic_read(&omacvm_hwc_seq) == seq) {
++        if (hwc && qatomic_read(&omacvm_hwc_seq) == hwc) {
+             omacvm_hwc_take(output, qemu_console_get_cursor(con),
+                             omacvm_heads[output].view, qemu_console_get_width(con, 0));
+         }
++        omacvm_head_pointer_image(output, qemu_console_get_cursor(con));
+     });
+ }
+ 
+@@ -11043,12 +11154,17 @@
+ 
+ #endif /* CONFIG_OPENGL */
+ 
+-/* The view of an extra output: the pointer goes to the guest through the main view. */
++/*
++ * The view of an extra output: the pointer goes to the guest through the
++ * main view; the guest's pointer shows on its pointer layer (#554).
++ */
+ @interface OmacVMHeadView : NSView
+ {
+ @public
+     int output;
++    CALayer *pointerLayer;
+ }
++- (void)omacvmPointerLayout;
+ @end
+ 
+ @implementation OmacVMHeadView
+@@ -11072,10 +11188,52 @@
+         [self setLayer:layer];
+         [layer release];
+ #endif
++        /* Above the frames, as the main window's cursor layer: top left at the plane's. */
++        pointerLayer = [[CALayer alloc] init];
++        [pointerLayer setAnchorPoint:CGPointMake(0, 1)];
++        [pointerLayer setZPosition:1];
++        [pointerLayer setHidden:YES];
++        [[self layer] addSublayer:pointerLayer];
+     }
+     return self;
++}
++
++- (void)dealloc
++{
++    [pointerLayer release];
++    [super dealloc];
++}
++
++/* Main thread: the guest's pointer on this output, placed as its frames are stretched. */
++- (void)omacvmPointerLayout
++{
++    OmacVMHeadPointer *p = &omacvm_head_ptr[output];
++    NSSize v = [self bounds].size;
++    /* hidden while the Mac's cursor shows it, as the main window's cursor layer */
++    bool mac = omacvm_hwc_layer_hidden(&omacvm_hwc, [cocoaView omacvmAbsolute]);
++    OmacVMHeadPointerFrame f = omacvm_head_pointer_frame(p->on && p->image && !mac,
++                                                         p->x, p->y, p->w, p->h,
++                                                         p->ow, p->oh, v.width, v.height);
++
++    [CATransaction begin];
++    [CATransaction setDisableActions:YES];
++    if ((CGImageRef)[pointerLayer contents] != p->image) {
++        [pointerLayer setContents:(id)p->image];
++    }
++    if (f.shown) {
++        [pointerLayer setBounds:CGRectMake(0, 0, f.w, f.h)];
++        [pointerLayer setPosition:CGPointMake(f.x, f.y)];
++    }
++    [pointerLayer setHidden:!f.shown];
++    [CATransaction commit];
+ }
+ 
++- (void)setFrameSize:(NSSize)size
++{
++    [super setFrameSize:size];
++    [self omacvmPointerLayout];
++}
++
+ - (BOOL)isOpaque { return YES; }
+ - (BOOL)wantsUpdateLayer { return YES; }
+ - (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
+@@ -11324,6 +11482,16 @@
+ 
+ #pragma clang diagnostic pop
+ 
++/* Main thread: the stored pointer onto this output's window, if it has one. */
++static void omacvm_head_pointer_apply(int output)
++{
++    OmacVMHeadView *v = (OmacVMHeadView *)omacvm_heads[output].view;
++
++    if (v) {
++        [v omacvmPointerLayout];
++    }
++}
++
+ static void omacvm_head_on(OmacVMHead *hd, NSScreen *s)
+ {
+     NSRect frame = [s frame];
+@@ -11346,6 +11514,7 @@
+         [hd->window setContentView:hd->view];
+         [hd->window setBackgroundColor:[NSColor blackColor]];
+         [hd->window setDelegate:omacvm_head_delegate];
++        omacvm_head_pointer_apply(hd->output);   /* a new window: the guest's pointer as it is */
+     }
+     [hd->window setTitle:title];
+     if (omacvm_test_mode()) {
