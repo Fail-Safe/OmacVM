@@ -129,6 +129,41 @@ same "watch: a child harness uses the caller's watcher" "$PERSON_DIR " "$(bash "
 d=$PERSON_DIR; person_watch_stop
 [[ ! -d $d ]] && ! kill -0 "${WATCHERS[0]}" 2>/dev/null && ok "watch: stopped, its folder gone" || bad "watch: still there"
 
+# ---- person_span and person_overlap_row: the rows a visit touched; a FAIL among them is BLOCKED
+S=$T/sum.tsv
+printf 'a\tok\t-\nb\tok\t-\n' > "$S"
+same "span: the rows after FROM, none failed" "a b$TAB" "$(person_span "$S" 0 1 2)"
+r=$(person_overlap_row "HID input at 10:00:00" "a b" "")
+same "overlap: only ok rows -> a skip row" "skip" "${r%%$TAB*}"
+has "overlap: ... that names them and the visit" "rows a b ran while someone was at the Mac (HID input at 10:00:00)" "$r"
+same "overlap: no rows since the last gate -> a skip row" "skip" "$(person_overlap_row ev "" "" | cut -f1)"
+printf 'x\tFAIL\tbefore\nc\tok\t-\nd\tFAIL\twrong\ne\tskip\t-\n' > "$S"
+same "span: rows before the gate's line are not blamed" "c d e${TAB}d" "$(person_span "$S" 1 1 2)"
+r=$(person_overlap_row "vnc-5900" "c d e" "d")
+same "overlap: a FAIL row -> a BLOCKED row" "BLOCKED" "${r%%$TAB*}"
+has "overlap: ... that names it" "FAIL rows d ran while someone was at the Mac (vnc-5900)" "$r"
+# The harnesses' own res and person_overlap (taken from each file): the FAIL row stays a FAIL.
+E=$R/src/tests/e2e
+harness_rows() {   # FILE: a FAIL before the last gate, an ok and a FAIL after it, then a visit
+  sed -n '/^res() {/,/^}/p; /^person_overlap() {/,/^}/p' "$1" > "$T/h.sh"
+  ( OUT=$T/h; rm -rf "$OUT"; mkdir -p "$OUT"; : > "$OUT/summary.tsv"; PFX=""
+    n_ok=0; n_fail=0; n_blocked=0; n_skip=0
+    source "$T/h.sh"
+    res x FAIL before > /dev/null; GATE_LINE=1
+    res c ok - > /dev/null; res d FAIL wrong > /dev/null
+    person_overlap "HID input at 10:00:00" next > /dev/null
+    echo "fail=$n_fail blocked=$n_blocked"; cut -f1-2 "$OUT/summary.tsv" | tr '\t\n' ': '; echo
+    grep -c 'FAIL rows.*x' "$OUT/summary.tsv" )
+}
+h=$(harness_rows "$E/cc-switches.sh")
+has "cc-switches: a visit over a FAIL row adds a BLOCKED person row" "x:FAIL c:ok d:FAIL person:BLOCKED" "$h"
+has "cc-switches: ... the FAIL rows stay (pass stays false)" "fail=2 blocked=1" "$h"
+same "cc-switches: ... the row before the gate is not blamed" 0 "${h##*$'\n'}"
+h=$(harness_rows "$E/modifier-keys.sh")
+has "modifier-keys: a visit over a FAIL case adds a BLOCKED person row" "keys-x:FAIL keys-c:ok keys-d:FAIL keys-person:BLOCKED" "$h"
+has "modifier-keys: ... the FAIL rows stay" "fail=2 blocked=1" "$h"
+same "modifier-keys: ... the case before the gate is not blamed" 0 "${h##*$'\n'}"
+
 # ---- ci-runners.sh with a fake launchctl and pgrep
 B=$T/bin; L=$T/loaded; W=$T/busy; A=$T/agents; mkdir -p "$B" "$L" "$W" "$A"
 cat > "$B/launchctl" <<EOF
@@ -184,7 +219,6 @@ CR resume --holder $$ > /dev/null
 
 # ---- the harnesses ask between rows, not only at their start (3.2.4: two Screen Sharing connects
 # inside a run that looked only at its start)
-E=$R/src/tests/e2e
 wired() {   # NAME FILE PATTERN...: every pattern in the file
   local n=$1 f=$2 p; shift 2
   for p in "$@"; do grep -qE -- "$p" "$f" || { bad "wiring: $n: no /$p/"; return; }; done
