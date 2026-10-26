@@ -11,8 +11,11 @@ in more words.
   With the switch, only the 256x256 squares the VM changed get a new picture. For that the VM needs
   to say what changed in each frame: with the switch on, it loads OmacVM's own build of its graphics
   driver (the standard one with Linux 7.4's fix that passes this on; Update VM builds it, internet
-  once). With the switch off, or in GPU safe mode, nothing changes: the standard driver loads as
-  before. MacBook Air M2, the VM full screen at 60 Hz, the pointer moving: 3.13-3.17 W instead of
+  once). With the switch off, or in GPU safe mode, the Mac draws whole frames as before, and the VM
+  loads the driver it loaded in 3.2.3: the standard one, or OmacVM's own when HDR and 10-bit colour,
+  Pointer on its own layer or Frames in step with the Mac is on. OmacVM's own now always has the
+  fix, so those starts tell the Mac what changed even with this switch off; the Mac does not use
+  it then. MacBook Air M2, the VM full screen at 60 Hz, the pointer moving: 3.13-3.17 W instead of
   3.55-3.75 W for the whole Mac (-11 to -17 %, two sets); scrolling and typing the same. The same
   pixels and frame rate, checked at 60 Hz so far. `omacvm check` has a "Changed parts" line.
 - **Guest driver patches must fit exactly.** Update VM applied the VM driver's patches with up to

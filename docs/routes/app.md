@@ -522,8 +522,11 @@ the VM's SSH on `127.0.0.1:<port>`.
   layers over it, so macOS redraws only those. It needs the VM to say what
   changed: with the switch on the VM loads OmacVM's virtio-gpu driver for
   Linux 7.4's damage fix (SMBIOS `omacvm.damage=1`; Update VM builds it;
-  `omacvm check`, "Changed parts"); off, or in GPU safe mode, the standard
-  driver as before. MacBook Air M2, full screen at 60 Hz, the pointer moving:
+  `omacvm check`, "Changed parts"); off, or in GPU safe mode, QEMU draws
+  whole frames and the VM loads the driver it would without this switch:
+  the standard one, or OmacVM's own for HDR, the pointer layer or frames in
+  step (which now always has the fix; QEMU then only collects the changed
+  parts). MacBook Air M2, full screen at 60 Hz, the pointer moving:
   11-17 % less power for the whole Mac, the same pictures and frame rate
   (checked at 60 Hz, 8-bit and HDR; 120 Hz not yet).
 - Mac pointer for the VM (experimental, off, no switch in the window yet:

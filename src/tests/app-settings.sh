@@ -260,5 +260,14 @@ expect "Runner: QEMU's tiles and the guest's omacvm.damage=1 from the same start
 grep -q 'a += \["-smbios", "type=11,value=omacvm.damage=1"\]' "$RUNNER" && grep -q 'env\["OMACVM_GL_PRESENT_TILES"\] = env\["OMACVM_GL_PRESENT_TILES"\] == "check" ? "check" : "1"' "$RUNNER" &&
   ! grep -q 'Settings.presentTiles && ' "$RUNNER" && echo "ok   Runner: both under tiles.on, not the bare switch" ||
   { echo "FAIL Runner: omacvm.damage=1 / OMACVM_GL_PRESENT_TILES not from Settings.presentTilesStart()"; fail=1; }
+# The (i): with the switch off, HDR, the pointer layer and frames in step still load OmacVM's
+# driver, and it carries the damage fix; only the Mac's tiles are off. Not "the standard driver".
+info=$(sed -n '/^struct PresentTilesRow/,/static let info/p' "$R/app/app/Sources/OmacVM/SettingsRows.swift" | tail -n1)
+if [[ $info == *"HDR and 10-bit colour, Pointer on its own layer or Frames in step with the Mac"* &&
+      $info == *"draws whole frames"* && $info != *"keeps its standard driver"* ]]; then
+  echo "ok   Draw only what changed (i): off = the driver the other switches ask for, whole frames on the Mac"
+else
+  echo "FAIL Draw only what changed (i): says off = the standard driver, but HDR / pointer layer / frames in step load OmacVM's (with the damage fix)"; fail=1
+fi
 
 exit $fail
