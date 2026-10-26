@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.5 (unreleased)
+
+- **Notifications sit under the bar with Full screen including notch.** There the bar is as
+  tall as the strip beside the notch (34 points on a 16-inch MacBook Pro), but Omarchy's notifications
+  kept only the normal bar's room (26 points and the gap), so their top ran 3 points into the bar.
+  They now keep the strip's height and Omarchy's normal gap. Window, Full screen with Omanotch's
+  strip and displays without a notch stay as they were. Update VM brings it.
+
 ## 3.2.4
 
 A new experimental switch in the VM window's Display settings: the Mac redraws only the parts of the
