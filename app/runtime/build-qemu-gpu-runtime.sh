@@ -1054,6 +1054,18 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-vsync-follow-logic.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-vsync-follow.patch"
 "$native_dir/Tests/display/test-vsync-follow.sh" "$source_dir" || \
   die "the guest's vblanks are not wired to the Mac's refresh as tested (test-vsync-follow.sh)"
+# OmacVM (#554): the guest's pointer layer over every display's window, not
+# only the main one (with "Pointer on its own layer" every output has a
+# cursor plane and the guest draws no pointer into its frames). Its rules'
+# test, a check that the wiring checks fail on the code before, the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-heads-logic.patch"
+"$native_dir/Tests/display/test-pointer-heads.sh" || \
+  die "the pointer's place over other displays' windows fails its test (test-pointer-heads.sh)"
+"$native_dir/Tests/display/test-pointer-heads.sh" --self-test "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a pointer-layer wiring check passes without the patch (test-pointer-heads.sh)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-heads.patch"
+"$native_dir/Tests/display/test-pointer-heads.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the pointer is not on every display's window as tested (test-pointer-heads.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
