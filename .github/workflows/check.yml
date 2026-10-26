@@ -64,6 +64,14 @@ jobs:
           command -v shellcheck >/dev/null || brew install shellcheck
           tr '\n' '\0' < "$RUNNER_TEMP/shell-files" | xargs -0 shellcheck -S error -s bash
 
+      - name: CHANGELOG, a pull request adds nothing to a released version
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch -q --no-tags --depth=1 origin "$BASE_SHA"
+          src/tests/changelog-released.sh "$BASE_SHA"
+
       - name: Python compiles
         run: |
           git ls-files -z '*.py' | xargs -0 python3 -m py_compile
