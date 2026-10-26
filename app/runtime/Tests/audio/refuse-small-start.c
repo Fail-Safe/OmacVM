@@ -16,6 +16,11 @@
  *   AQREFUSE_RATE=48000  also refuse playback queues at this rate, whatever
  *                        their buffers (the other way the AirPods could
  *                        tell the two sound paths apart)
+ *   AQREFUSE_HANG_CLOSE=S  the first close of a playback queue that
+ *                        started hangs S seconds (a wedged coreaudiod), for
+ *                        the time limit on a resize's close
+ *   AQREFUSE_HANG_CLOSE_FILE=F  read S from this file at each close instead
+ *                        (missing file: 0), to hang only a later close
  *   AQREFUSE_LOG=FILE    one line per playback queue start: its format,
  *                        buffers and what the start returned, and one when
  *                        it is disposed: buffers played, how many had sound
@@ -29,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define DYLD_INTERPOSE(_replacement, _replacee)                              \
     __attribute__((used)) static struct {                                    \
@@ -52,6 +58,7 @@ typedef struct {
 
 static Queue queues[MAX_QUEUES];
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static int close_hung;          /* AQREFUSE_HANG_CLOSE: only the first close */
 
 static Queue *find(AudioQueueRef q, int add)
 {
@@ -201,8 +208,23 @@ DYLD_INTERPOSE(my_enqueue, AudioQueueEnqueueBuffer)
 
 static OSStatus my_dispose(AudioQueueRef q, Boolean immediate)
 {
+    const char *hang_text = getenv("AQREFUSE_HANG_CLOSE");
+    const char *hang_file = getenv("AQREFUSE_HANG_CLOSE_FILE");
+    unsigned hang = hang_text ? (unsigned)strtoul(hang_text, NULL, 10) : 0;
     Queue e = { 0 };
     char line[160];
+
+    if (hang_file && *hang_file) {
+        FILE *hf = fopen(hang_file, "r");
+
+        hang = 0;
+        if (hf) {
+            if (fgets(line, sizeof(line), hf)) {
+                hang = (unsigned)strtoul(line, NULL, 10);
+            }
+            fclose(hf);
+        }
+    }
 
     pthread_mutex_lock(&lock);
     Queue *p = find(q, 0);
@@ -217,6 +239,18 @@ static OSStatus my_dispose(AudioQueueRef q, Boolean immediate)
                  e.fmt.mBytesPerFrame ? (unsigned)(e.smallest / e.fmt.mBytesPerFrame) : 0,
                  e.played, e.loud);
         say(line);
+        pthread_mutex_lock(&lock);
+        if (close_hung) {
+            hang = 0;
+        }
+        close_hung |= hang > 0;
+        pthread_mutex_unlock(&lock);
+        if (hang) {
+            snprintf(line, sizeof(line), "aqrefuse: playback close hangs %u s\n", hang);
+            say(line);
+            sleep(hang);
+            say("aqrefuse: playback close returns\n");
+        }
     }
     return AudioQueueDispose(q, immediate);
 }

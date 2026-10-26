@@ -29,6 +29,10 @@ grep -q 'omacvm_sdl_out_start_refused(' <<<"$open" && grep -q 'omacvm_sdl_out_ne
 # The old device is closed before the new size opens (SDL3 shares an open physical device).
 awk '/SDL_CloseAudioDevice\(op->close_first\)/ && !c {c = NR} /sdl_open\(/ && !o {o = NR} END {exit !(c && o && c < o)}' <<<"$open" ||
   fail "a resize opens before the old device is closed"
+# A resize's close of the old device is timed too: a close that hangs (coreaudiod wedged) makes the
+# voice drop the sound and say so, as a hung open does.
+awk '/op->started = g_get_monotonic_time\(\);/ && !t {t = NR} /SDL_CloseAudioDevice\(op->close_first\)/ && !c {c = NR}
+     END {exit !(t && c && t < c)}' <<<"$open" || fail "a resize's close of the old device is not timed"
 # Every open is sized from the voice's size, the launcher's and a refused one.
 grep -q 'omacvm_sdl_out_frames(' <<<"$want" && grep -q 'op->spec.samples = sdl_out_want(sdl);' <<<"$start" ||
   fail "the open is not sized"
