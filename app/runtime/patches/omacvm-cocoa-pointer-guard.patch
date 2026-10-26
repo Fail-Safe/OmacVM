@@ -16,10 +16,10 @@ Test: app/runtime/Tests/display/test-pointer-guard.c.
 
 diff --git a/ui/omacvm-pointer-guard.h b/ui/omacvm-pointer-guard.h
 new file mode 100644
-index 0000000..52f1f61
+index 0000000..d179f5b
 --- /dev/null
 +++ b/ui/omacvm-pointer-guard.h
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,394 @@
 +/*
 + * OmacVM: the pointer maths of the full-screen guard (Dock and hot corners).
 + *
@@ -42,6 +42,13 @@ index 0000000..52f1f61
 + * do on macOS). 2.8.0 to 2.9.0 RC4 warped the detached cursor along on every
 + * event without that, so each delta carried all the earlier ones and the
 + * pointer raced away near the corners.
++ *
++ * The let-go's warp too: when a button event (no motion, so it carries no
++ * warp) takes hold again first, as the button's release does after a click
++ * on another display's window (ui/cocoa.m lets go and grabs again when that
++ * window becomes key), the next motion still carries it. 3.2.3 added it to
++ * the pointer there: after each click near a corner of an external display
++ * the pointer jumped by the way from the last click (reported by the user).
 + *
 + * When the guest draws its own pointer the detached cursor (hidden) stays
 + * where it is; the only warp then is the one that takes it off an outer edge
@@ -85,6 +92,9 @@ index 0000000..52f1f61
 +    double ox, oy;      /* ... are still at this place */
 +    bool let_go;        /* let go; events made before that are still ... */
 +    double fx[2], fy[2];/* ... at one of the held cursor's places */
++    bool let_go_warp;   /* no motion since the let-go's warp: the next one ... */
++    double lwdx, lwdy;  /* ... carries this distance; the warp went ... */
++    double lwx, lwy;    /* ... here (the pointer's place, the gap off edges) */
 +    bool seen;          /* an event was handled ... */
 +    double last_time;   /* ... with this time stamp ... */
 +    bool last_place;    /* ... and the guest got (x, y) for it */
@@ -251,6 +261,12 @@ index 0000000..52f1f61
 +            g->fx[1] = g->ox;
 +            g->fy[1] = g->oy;
 +        }
++        /* A warp still in flight comes in the same next motion. */
++        g->let_go_warp = true;
++        g->lwdx = x - (g->warp_pending ? g->ox : g->cx);
++        g->lwdy = y - (g->warp_pending ? g->oy : g->cy);
++        g->lwx = x;
++        g->lwy = y;
 +    }
 +    g->held = false;
 +    g->warp_pending = false;
@@ -307,6 +323,10 @@ index 0000000..52f1f61
 +        }
 +        g->let_go = false;
 +    }
++    /* A motion made after the let-go's warp carried it (its place is the cursor's). */
++    if (g->let_go_warp && (dx != 0 || dy != 0)) {
++        g->let_go_warp = false;
++    }
 +
 +    if (g->held) {
 +        /* Made after the warp (it is at the warp's place): carries its distance. */
@@ -330,6 +350,11 @@ index 0000000..52f1f61
 +    } else {
 +        px = lx;
 +        py = ly;
++        if (g->let_go_warp && fabs(lx - g->lwx) < 0.5 && fabs(ly - g->lwy) < 0.5) {
++            /* A button at the let-go's warp: where the pointer is, not the gap off an edge. */
++            px = g->x;
++            py = g->y;
++        }
 +        d = omacvm_guard_display_at(s, px, py);
 +        if (d < 0) {
 +            return;
@@ -360,6 +385,18 @@ index 0000000..52f1f61
 +        if (fx != cur_x || fy != cur_y) {
 +            /* Got onto an outer edge in one go: off it. */
 +            omacvm_guard_warp(g, step, fx, fy);
++        }
++        if (g->let_go_warp) {
++            /* Taken by a button event: the next motion carries the let-go's warp too. */
++            if (!g->warp_pending) {
++                g->wdx = g->wdy = 0;
++                g->ox = g->cx;
++                g->oy = g->cy;
++                g->warp_pending = true;
++            }
++            g->wdx += g->lwdx;
++            g->wdy += g->lwdy;
++            g->let_go_warp = false;
 +        }
 +    }
 +    g->x = px;
