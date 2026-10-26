@@ -10,7 +10,9 @@ AirPlay outputs) and to a size that played after a refused one. When
 CoreAudio's queue does not start ("CoreAudio error (AudioQueueStart): N"),
 the same open tries the next size at once (512, then 1024, ...), up to
 what the voice's ring can feed; the size that played stays for the run,
-a refused one is not tried again. While a device runs, a new launcher
+a refused one is not tried again; when every size was refused, no new
+start for 30 s unless the Mac's output changes (failed starts in a row
+may leave coreaudiod silent). While a device runs, a new launcher
 size (the Mac's output changed to or from AirPods) opens the same device
 again with it: the old device is closed first on the open's thread (SDL3
 shares an open physical device, so the new size would not take), the
@@ -53,7 +55,7 @@ lane's runs are in the PR).
  
  #define TYPE_AUDIO_SDL "audio-sdl"
  OBJECT_DECLARE_SIMPLE_TYPE(AudioSdl, AUDIO_SDL)
-@@ -71,6 +72,11 @@ typedef struct SDLVoiceOut {
+@@ -71,6 +72,13 @@ typedef struct SDLVoiceOut {
      bool silent;                /* the Mac's audio device does not answer */
      bool dropping;              /* no device: the sound goes nowhere */
      RateCtl drop_rate;
@@ -62,11 +64,21 @@ lane's runs are in the PR).
 +    unsigned out_hint;          /* the launcher's size for the Mac's output */
 +    unsigned out_logged;        /* the size qemu.log named last */
 +    struct stat hint_stat;      /* of the launcher's size file, last read */
++    gint64 refused_until;       /* every size refused: no open before this */
++    unsigned refused_hint;      /* ... unless the launcher's size changes */
  } SDLVoiceOut;
  
  typedef struct SDLCapture SDLCapture;
-@@ -389,9 +395,13 @@ static void sdl_callback_in(void *opaque, Uint8 *buf, int len)
+@@ -387,11 +395,21 @@ static void sdl_callback_in(void *opaque, Uint8 *buf, int len)
+  */
+ #define SDL_OUT_OPEN_TIMEOUT_US (3 * G_USEC_PER_SEC)
  #define SDL_OUT_RETRY_US (5 * G_USEC_PER_SEC)
++/*
++ * After the Mac's output refused every size: no new start for this long
++ * (the guest starts streams often), unless the Mac's output changes.
++ * Failed starts in a row may leave coreaudiod itself silent (#548).
++ */
++#define SDL_OUT_REFUSED_US (30 * G_USEC_PER_SEC)
  
  struct SDLOutOpen {
 -    /* Set before the thread starts. */
@@ -80,7 +92,7 @@ lane's runs are in the PR).
      /* Under sdl_out_lock. */
      gint64 started;             /* when SDL got it, 0 while it waits */
      bool done;
-@@ -438,6 +448,16 @@ static void *sdl_out_open_thread(void *opaque)
+@@ -438,6 +456,16 @@ static void *sdl_out_open_thread(void *opaque)
      SDL_AudioDeviceID devid;
      bool route_matches = false;
      bool abandoned;
@@ -97,7 +109,7 @@ lane's runs are in the PR).
  
      /*
       * A recording open may hold sdl_open_lock for minutes (a pending
-@@ -450,12 +470,41 @@ static void *sdl_out_open_thread(void *opaque)
+@@ -450,12 +478,41 @@ static void *sdl_out_open_thread(void *opaque)
      op->started = g_get_monotonic_time();
      qemu_mutex_unlock(&sdl_out_lock);
  
@@ -145,7 +157,7 @@ lane's runs are in the PR).
      }
      if (devid) {
          SDL_PauseAudioDevice(devid, 1);
-@@ -482,23 +531,76 @@ static void *sdl_out_open_thread(void *opaque)
+@@ -482,23 +539,81 @@ static void *sdl_out_open_thread(void *opaque)
      return NULL;
  }
  
@@ -219,6 +231,11 @@ lane's runs are in the PR).
      }
  
 +    sdl_out_hint_read(sdl);
++    if (!close_first && g_get_monotonic_time() < sdl->refused_until &&
++        sdl->out_hint == sdl->refused_hint) {
++        g_free(device_name);
++        return;
++    }
      op = g_new0(SDLOutOpen, 1);
      op->spec = sdl->reopen_spec;
 +    op->spec.samples = sdl_out_want(sdl);
@@ -227,7 +244,7 @@ lane's runs are in the PR).
      op->device_name = device_name;
      sdl->opening = op;
      sdl->opening_late = false;
-@@ -507,6 +609,11 @@ static void sdl_out_start_open(SDLVoiceOut *sdl, char *device_name)
+@@ -507,6 +622,11 @@ static void sdl_out_start_open(SDLVoiceOut *sdl, char *device_name)
                         QEMU_THREAD_DETACHED);
  }
  
@@ -239,7 +256,7 @@ lane's runs are in the PR).
  /* The device the route file names, else the one last used. */
  static void sdl_out_open_route(SDLVoiceOut *sdl)
  {
-@@ -563,6 +670,11 @@ static void sdl_out_poll(SDLVoiceOut *sdl)
+@@ -563,13 +683,25 @@ static void sdl_out_poll(SDLVoiceOut *sdl)
  
      sdl->opening = NULL;
      devid = op->devid;
@@ -248,10 +265,26 @@ lane's runs are in the PR).
 +        sdl->out_floor = MAX(sdl->out_floor, op->refused_all ?
 +                             op->refused : op->spec.samples);
 +    }
++    if (op->refused_all) {
++        sdl->refused_until = now + SDL_OUT_REFUSED_US;
++        sdl->refused_hint = sdl->out_hint;
++    }
      if (!devid) {
          /*
           * sdl_open() said why. A device that failed fast is tried again when
-@@ -588,6 +700,21 @@ static void sdl_out_poll(SDLVoiceOut *sdl)
+          * the guest starts its next stream; one that hung before it failed
+-         * (coreaudiod restarted) right away.
++         * (coreaudiod restarted) right away; one that refused every size
++         * every few seconds while the guest plays, which opens it only once
++         * the Mac's output changed or the wait ran out (refused_until).
+          */
+-        sdl->next_open = sdl->opening_late ? now + SDL_OUT_RETRY_US : INT64_MAX;
++        sdl->next_open = sdl->opening_late || op->refused_all ?
++                         now + SDL_OUT_RETRY_US : INT64_MAX;
+         sdl_out_free_open(op);
+         return;
+     }
+@@ -588,6 +720,21 @@ static void sdl_out_poll(SDLVoiceOut *sdl)
          sdl->silent = false;
          info_report("OmacVM: sound: the Mac's audio device works again");
      }
@@ -273,7 +306,7 @@ lane's runs are in the PR).
      SDL_PauseAudioDevice(devid, 0);
      if (old) {
          sdl_out_close_later(old);
-@@ -605,10 +732,17 @@ static void sdl_release_out(SDLVoiceOut *sdl)
+@@ -605,10 +752,17 @@ static void sdl_release_out(SDLVoiceOut *sdl)
      sdl->devid = 0;
  }
  
@@ -292,7 +325,7 @@ lane's runs are in the PR).
      bool present;
  
      if (!sdl->devid || sdl->opening) {
-@@ -617,6 +751,17 @@ static void sdl_refresh_route_Out(SDLVoiceOut *sdl)
+@@ -617,6 +771,17 @@ static void sdl_refresh_route_Out(SDLVoiceOut *sdl)
      if (!sdl_route_check_due(&sdl->next_route_check)) {
          return;
      }

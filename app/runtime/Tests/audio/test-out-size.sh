@@ -32,6 +32,9 @@ awk '/SDL_CloseAudioDevice\(op->close_first\)/ && !c {c = NR} /sdl_open\(/ && !o
 # Every open is sized from the voice's size, the launcher's and a refused one.
 grep -q 'omacvm_sdl_out_frames(' <<<"$want" && grep -q 'op->spec.samples = sdl_out_want(sdl);' <<<"$start" ||
   fail "the open is not sized"
+# After every size was refused, no start for a while unless the Mac's output changes.
+grep -q 'sdl->refused_until = now + SDL_OUT_REFUSED_US;' <<<"$(body 'static void sdl_out_poll(SDLVoiceOut *sdl)')" &&
+  grep -q 'sdl->refused_until' <<<"$start" || fail "a refusing output is started again at every stream"
 # The launcher's size is followed while the device runs.
 grep -q 'sdl_out_hint' <<<"$route" || fail "a change of the Mac's output is not followed"
 echo "test-out-size: wiring ok"
