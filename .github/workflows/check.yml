@@ -484,6 +484,8 @@ jobs:
           app/runtime/Tests/display/test-present-damage.sh
           app/runtime/Tests/display/test-present-damage.sh --self-test
 
+      - name: Pause drawing while hidden (when the guest is told, the last picture kept; the old code fails it)
+        run: app/runtime/Tests/display/test-guest-pause.sh
       - name: The pointer's layer as bright as the boosted frames (ADR 0054; the checks catch code without it)
         run: |
           app/runtime/Tests/display/test-pointer-bright.sh
