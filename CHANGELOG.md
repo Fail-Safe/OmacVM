@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.7 (unreleased)
+
+- **A click on an external display no longer lets go of the pointer for a moment (#563).** In
+  full screen with the VM on more than one display, each click on another display's VM window gave
+  the pointer and keyboard back to macOS and took them again: the Mac's cursor was shown and hidden
+  again, and a key held during the click (Shift for a Shift-click) was let go in the VM. The VM now
+  keeps both through such a click. Command-Tab, the escape combo and swipes let go as before.
+
 ## 3.2.5 (unreleased)
 
 - **The pointer no longer jumps after a click near a corner of an external display (reported by
