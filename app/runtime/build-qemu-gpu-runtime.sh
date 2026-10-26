@@ -1037,6 +1037,13 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-guest-pause.p
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
 grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
+# OmacVM: a guest that asks (its virtio-gpu driver with vsync_lock=1) gets the
+# Mac display's refresh grid for its vblank timer. Its rules' test, then the
+# wiring (virtio-gpu, hvf, the present).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-vsync-follow-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-vsync-follow.patch"
+"$native_dir/Tests/display/test-vsync-follow.sh" "$source_dir" || \
+  die "the guest's vblanks are not wired to the Mac's refresh as tested (test-vsync-follow.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

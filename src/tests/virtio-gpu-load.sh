@@ -6,7 +6,9 @@
 # did. The modprobe rule falls back to the stock driver without the loader.
 # The builder skips current builds and kernels without headers, drops the old
 # by-hand install and builds of removed kernels, writes the rule only once a
-# build is there, and builds as its own user id. A made-up file system
+# build is there, and builds as its own user id; an experimental patch that
+# does not apply or build is left out of the build (and the loader passes only
+# the options a build has), deep colour stays. A made-up file system
 # (OMACVM_VIRTIO_GPU_TEST_ROOT) and stand-ins for modprobe, insmod, modinfo,
 # uname, depmod, chown, timeout and curl: no root, no network, no kernel.
 #   src/tests/virtio-gpu-load.sh
@@ -46,6 +48,7 @@ echo "modinfo $*" >> "$CALLS"
 case "$1 $2" in
   "-F depends") echo "drm,virtio_dma_buf" ;;
   "-F vermagic") echo "$FAKE_KERNEL SMP preempt mod_unload aarch64" ;;
+  "-F parm") for p in ${FAKE_PARMS-deep_color cursor_plane vsync_lock}; do echo "$p:an option (bool)"; done ;;
 esac
 EOF
 printf '#!/bin/bash\necho "$FAKE_KERNEL"\n' > "$T/bin/uname"
@@ -61,7 +64,7 @@ command -v sha256sum >/dev/null || printf '#!/bin/bash\nexec shasum -a 256 "$@"\
 chmod +x "$T/bin"/*
 export PATH=$T/bin:$PATH
 
-PATCH_SUM=$(cat "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" | sha256sum | cut -d' ' -f1)
+PATCH_SUM=$(cat "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" | sha256sum | cut -d' ' -f1)
 
 # One SMBIOS type 11 structure (OEM strings): type, length 5, handle, count,
 # then the strings. The count byte runs straight into the first string.
@@ -78,7 +81,7 @@ PY
 # A guest with the driver built for $K, the strings given.
 guest() {   # STRING...
   rm -rf "$T/root" && mkdir -p "$T/root/$VG/$K"
-  cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$T/root/$VG/"
+  cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" "$T/root/$VG/"
   echo "not a real module" > "$T/root/$VG/$K/virtio-gpu.ko"
   echo "$PATCH_SUM $K" > "$T/root/$VG/$K/stamp"
   smbios "$T/root" "$@"
@@ -127,7 +130,7 @@ guest omacvm.deepcolor=1 omacvm.vkwindows=1
 load; expect "asked (the first string), built: exit 0" 0 $?
 expect "asked, built: ours" "omacvm" "$(said)"
 expect "asked, built: its dependencies first, then ours with the options and deep_color=1" \
-  "modinfo -F depends $KO;modprobe -q drm;modprobe -q virtio_dma_buf;insmod $KO opt=1 deep_color=1;" "$(calls)"
+  "modinfo -F parm $KO;modinfo -F depends $KO;modprobe -q drm;modprobe -q virtio_dma_buf;insmod $KO opt=1 deep_color=1;" "$(calls)"
 
 guest omacvm.screen=3024x1964 omacvm.hdr=1
 load; expect "an older app's omacvm.hdr=1: ours" "omacvm" "$(said)"
@@ -154,6 +157,33 @@ has "10-bit only: insmod with the given options and deep_color=1" "insmod $KO op
 
 guest omacvm.pointerplane=0
 load; expect "pointer plane switch off (=0): stock" "stock not asked for this start" "$(said)"
+
+guest omacvm.vsynclock=1 omacvm.screen=3024x1964
+load; expect "frames in step (omacvm.vsynclock=1): ours at 8 bits, its option said" "omacvm 8-bit vsync_lock=1" "$(said)"
+has "omacvm.vsynclock=1: insmod with vsync_lock=1, then the given options, no deep_color" "insmod $KO vsync_lock=1 opt=1;" "$(calls)"
+
+guest omacvm.deepcolor=1 omacvm.pointerplane=1 omacvm.vsynclock=1
+load; expect "all three switches: ours with both options" "omacvm cursor_plane=1 vsync_lock=1" "$(said)"
+has "all three: insmod with all three options" "insmod $KO cursor_plane=1 vsync_lock=1 opt=1 deep_color=1;" "$(calls)"
+
+guest omacvm.vsynclock=0
+load; expect "frames in step off (=0): stock" "stock not asked for this start" "$(said)"
+
+# A build without an experimental patch (it did not fit the kernel): only the options it has.
+guest omacvm.deepcolor=1 omacvm.pointerplane=1 omacvm.vsynclock=1
+FAKE_PARMS="deep_color cursor_plane" load
+expect "build without vsync_lock: ours, the others' options, and it says so" "omacvm cursor_plane=1 without vsync_lock" "$(said)"
+has "build without vsync_lock: insmod without it" "insmod $KO cursor_plane=1 opt=1 deep_color=1;" "$(calls)"
+guest omacvm.vsynclock=1
+FAKE_PARMS="deep_color cursor_plane" load
+expect "only frames in step asked, the build has no vsync_lock: stock, and why" "stock built without vsync_lock for $K" "$(said)"
+expect "only frames in step asked, no vsync_lock: no insmod" "modinfo -F parm $KO;$STOCK" "$(calls)"
+guest omacvm.deepcolor=1 omacvm.vsynclock=1
+FAKE_PARMS="deep_color" load
+expect "HDR + frames in step on a build with deep colour only: HDR stays ours" "omacvm without vsync_lock" "$(said)"
+guest omacvm.pointerplane=1 omacvm.vsynclock=1
+FAKE_PARMS="" load
+expect "modinfo lists no options: all asked, as before" "omacvm 8-bit cursor_plane=1 vsync_lock=1" "$(said)"
 
 guest omacvm.deepcolor=0 omacvm.hdr=0
 load; expect "switch off (=0): stock" "stock not asked for this start" "$(said)"
@@ -184,7 +214,7 @@ load; expect "no SMBIOS strings at all: stock" "stock not asked for this start" 
 
 guest omacvm.deepcolor=1
 OMACVM_VIRTIO_GPU_TEST_ROOT=$T/root "$LOAD" 2>> "$T/load.err"
-expect "no module options: only deep_color=1" "modinfo -F depends $KO;modprobe -q drm;modprobe -q virtio_dma_buf;insmod $KO deep_color=1;" "$(calls)"
+expect "no module options: only deep_color=1" "modinfo -F parm $KO;modinfo -F depends $KO;modprobe -q drm;modprobe -q virtio_dma_buf;insmod $KO deep_color=1;" "$(calls)"
 expect "the loader writes nothing to stderr" "" "$(cat "$T/load.err")"
 
 # ---------- the modprobe rule, as modprobe runs it (sh -c, $CMDLINE_OPTS filled in) ----------
@@ -192,7 +222,7 @@ mkdir -p "$T/r"
 OMACVM_VIRTIO_GPU_TEST_ROOT=$T/r "$BUILD" --remove > /dev/null   # nothing there: fine
 rule_line=$(sed -n 's/^install virtio_gpu //p' "$BUILD")
 expect "the rule: the loader if it is there; without it (the initramfs) nothing for a start that asks for ours, else the stock driver" \
-  'if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi' \
+  'if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=1 -e omacvm.vsynclock=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi' \
   "$rule_line"
 run_rule() {   # LOADER (a path) SMBIOS-ROOT: runs the rule with the loader, modprobe and SMBIOS swapped for stand-ins
   local cmd=${rule_line//\$CMDLINE_OPTS/opt=1}
@@ -205,9 +235,11 @@ run_rule() {   # LOADER (a path) SMBIOS-ROOT: runs the rule with the loader, mod
 smbios "$T/rs" omacvm.notchskip=1 omacvm.deepcolor=1
 smbios "$T/rn" omacvm.notchskip=1
 smbios "$T/ro" omacvm.pointerplane=1
+smbios "$T/rv" omacvm.vsynclock=1
 run_rule "$T/r/missing" "$T/rn"; expect "rule: no loader (the initramfs), an 8-bit start: the stock driver" "0 $STOCK" "$? $(calls)"
 run_rule "$T/r/missing" "$T/rs"; expect "rule: no loader (the initramfs), a 10-bit start: nothing yet (the real root loads it)" "0 " "$? $(calls)"
 run_rule "$T/r/missing" "$T/ro"; expect "rule: no loader (the initramfs), a pointer-plane start: nothing yet" "0 " "$? $(calls)"
+run_rule "$T/r/missing" "$T/rv"; expect "rule: no loader (the initramfs), a frames-in-step start: nothing yet" "0 " "$? $(calls)"
 run_rule "$T/r/missing" "$T/none"; expect "rule: no loader, no SMBIOS: the stock driver" "0 $STOCK" "$? $(calls)"
 printf '#!/bin/sh\necho "loader $*" >> "$CALLS"\n' > "$T/r/ok"; chmod +x "$T/r/ok"
 run_rule "$T/r/ok" "$T/rs"; expect "rule: the loader, and nothing else when it loaded a driver" "0 loader opt=1;" "$? $(calls)"
@@ -219,7 +251,7 @@ B=$T/b
 builder() { OMACVM_VIRTIO_GPU_TEST_ROOT=$B "$BUILD" "$@" 2>&1; }
 mkdir -p "$B/tmp" "$B/$VG/$K" "$B/lib/modules/$K/build" "$B/lib/modules/$K/kernel" "$B/lib/modules/$K/updates" \
   "$B/lib/modules/7.1.4-1-aarch64-ARCH/kernel" "$B/$VG/7.0.9-1-aarch64-ARCH" "$B/etc/omacvm"
-cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$B/$VG/"
+cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" "$B/$VG/"
 echo "module" > "$B/$VG/$K/virtio-gpu.ko"; echo "$PATCH_SUM $K" > "$B/$VG/$K/stamp"
 echo "old" > "$B/lib/modules/$K/updates/virtio-gpu.ko"; : > "$B/etc/omacvm/virtio-gpu-deep-color"
 : > "$CALLS"
@@ -245,6 +277,10 @@ expect "hook: nothing fetched" "" "$(grep -E '^(curl|timeout|chown)' "$CALLS")"
 mkdir -p "$B/run/omacvm"; echo omacvm > "$B/run/omacvm/virtio-gpu"
 out=$(builder --status); rc=$?
 expect "status: built (exit 0)" "0 built for $K (this start: omacvm)" "$rc $out"
+echo "vsync_lock: vsync_lock does not apply to 7.2.9" > "$B/$VG/$K/without"
+out=$(builder --status); rc=$?
+expect "status: built, and what it left out" "0 built for $K without vsync_lock: vsync_lock does not apply to 7.2.9 (this start: omacvm)" "$rc $out"
+rm "$B/$VG/$K/without"
 out=$(FAKE_KERNEL=7.1.4-1-aarch64-ARCH builder --status); rc=$?
 expect "status: no headers (exit 1)" "1 not built for 7.1.4-1-aarch64-ARCH: no kernel headers (this start: omacvm)" "$rc $out"
 
@@ -272,13 +308,59 @@ has "a .0 kernel: fetched from tag v7.3" "--unprivileged 7.3.0-1-aarch64-ARCH 7.
 out=$(builder --kernel ../x); expect "not a kernel name: exit 1" "1 omacvm-virtio-gpu: not a kernel name: ../x" "$? $out"
 
 out=$(builder --remove); expect "remove: exit 0" 0 $?
-expect "remove: builds and rule go, the scripts' folder stays" "linux-virtio-gpu-cursor-plane.patch linux-virtio-gpu-deep-color.patch -" \
+expect "remove: builds and rule go, the scripts' folder stays" "linux-virtio-gpu-cursor-plane.patch linux-virtio-gpu-deep-color.patch linux-virtio-gpu-vsync-lock.patch -" \
   "$(ls "$B/$VG" | tr '\n' ' ')$([[ -e $RULE ]] && echo rule || echo -)"
 
 rm -rf "$B" && mkdir -p "$B/$VG" "$B/lib/modules/$K/kernel"
-cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$B/$VG/"
+cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" "$B/$VG/"
 builder --hook > /dev/null
 expect "no build anywhere: no modprobe rule" "-" "$([[ -e $RULE ]] && echo rule || echo -)"
+
+# The unprivileged step (fetch, patch, build) with stand-ins: an experimental patch that does not
+# apply or build is left out and said; deep colour alone failing is no build.
+U=$T/u; mkdir -p "$U/bin" "$U/root/$VG" "$U/lib/modules/$K/build"
+cp "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch" "$G/virtio-gpu/linux-virtio-gpu-cursor-plane.patch" "$G/virtio-gpu/linux-virtio-gpu-vsync-lock.patch" "$U/root/$VG/"
+cat > "$U/bin/curl" <<'EOS'
+#!/bin/bash
+while (( $# )); do [[ $1 == -o ]] && { echo "src" > "$2"; }; shift; done
+EOS
+cat > "$U/bin/patch" <<'EOS'
+#!/bin/bash
+d="" i=""
+while (( $# )); do case $1 in -d) d=$2; shift ;; -i) i=$2; shift ;; esac; shift; done
+n=${i##*/linux-virtio-gpu-}; n=${n%.patch}
+[[ " ${FAKE_PATCH_FAIL:-} " == *" $n "* ]] && { echo "1 out of 3 hunks FAILED -- saving rejects" >&2; exit 1; }
+echo "$n" >> "$d/drivers/gpu/drm/virtio/.applied"
+EOS
+cat > "$U/bin/make" <<'EOS'
+#!/bin/bash
+m=""; for a; do [[ $a == M=* ]] && m=${a#M=}; done
+for n in ${FAKE_MAKE_FAIL:-}; do grep -qx "$n" "$m/.applied" && { echo "error: implicit declaration of function" >&2; exit 2; }; done
+tr '\n' ' ' < "$m/.applied" > "$m/virtio-gpu.ko"
+EOS
+printf '#!/bin/bash\n[[ $1 == -i ]] && exit 0\nexec /usr/bin/sed "$@"\n' > "$U/bin/sed"
+printf '#!/bin/bash\necho 4\n' > "$U/bin/nproc"
+chmod +x "$U/bin"/*
+unpriv() {   # runs the build's unprivileged step; stdout: the module, stderr to $U/err
+  rm -rf "$U/w" && mkdir "$U/w"
+  PATH=$U/bin:$PATH OMACVM_VIRTIO_GPU_TEST_ROOT=$U/root "$BUILD" --unprivileged "$K" 7.2.9 "$U/w" 2> "$U/err"
+}
+out=$(unpriv); expect "unprivileged: all three fit: built with all three" "0 deep-color cursor-plane vsync-lock " "$? $out"
+expect "unprivileged: all three fit: nothing left out" "" "$(grep 'built without' "$U/err")"
+out=$(FAKE_PATCH_FAIL=vsync-lock unpriv)
+expect "vsync patch does not apply: built with the other two" "0 deep-color cursor-plane " "$? $out"
+expect "vsync patch does not apply: says so" "omacvm-virtio-gpu: built without vsync_lock: vsync_lock does not apply to 7.2.9" "$(grep 'built without' "$U/err")"
+out=$(FAKE_MAKE_FAIL=vsync-lock unpriv)
+expect "vsync patch does not build: built with the other two" "0 deep-color cursor-plane " "$? $out"
+expect "vsync patch does not build: says so" "omacvm-virtio-gpu: built without vsync_lock: vsync_lock does not build on 7.2.9" "$(grep 'built without' "$U/err")"
+out=$(FAKE_PATCH_FAIL=cursor-plane unpriv)
+expect "cursor patch does not apply: deep colour alone" "0 deep-color " "$? $out"
+expect "cursor patch does not apply: both experimental ones left out" \
+  "omacvm-virtio-gpu: built without cursor_plane: cursor_plane does not apply to 7.2.9;omacvm-virtio-gpu: built without vsync_lock: cursor_plane does not apply to 7.2.9;" \
+  "$(grep 'built without' "$U/err" | tr '\n' ';')"
+out=$(FAKE_PATCH_FAIL=deep-color unpriv); rc=$?
+expect "deep colour does not apply: no build (exit 1, no module)" "1 " "$rc $out"
+expect "deep colour does not apply: the last line says why" "omacvm-virtio-gpu: no build: deep_color does not apply to 7.2.9" "$(tail -n1 "$U/err")"
 
 # The 10-bit formats only with deep_color=1: a pointer-layer start offers the stock formats.
 DEEP=$(cat "$G/virtio-gpu/linux-virtio-gpu-deep-color.patch")
@@ -287,8 +369,9 @@ has "deep colour: the primary plane's 10-bit formats only with it" "} else if (v
 has "deep colour: a 10-bit framebuffer only with it" "!(vgdev->has_virgl_3d && virtio_gpu_deep_color &&" "$DEEP"
 
 # The build patches deep colour first, then the cursor plane (that patch's hunks sit on the first one's).
-has "build: the cursor-plane patch after the deep-colour one" "$(printf '  patch -s -d "$3" -p1 -f -i "$patch_file"\n  patch -s -d "$3" -p1 -f -i "$cursor_file"')" "$(cat "$BUILD")"
-has "build: a stale stamp when either patch changes" 'cat "$patch_file" "$cursor_file" 2>/dev/null | sha256sum' "$(cat "$BUILD")"
+has "build: deep colour, then the cursor plane, then the vsync lock" 'local -a files=("$patch_file" "$cursor_file" "$vsync_file")' "$(cat "$BUILD")"
+has "build: a stale stamp when any patch changes" 'cat "$patch_file" "$cursor_file" "$vsync_file" 2>/dev/null | sha256sum' "$(cat "$BUILD")"
+has "install.sh installs the vsync-lock patch" 'install -Dm644 virtio-gpu/linux-virtio-gpu-vsync-lock.patch $VG/linux-virtio-gpu-vsync-lock.patch' "$(cat "$G/install.sh")"
 has "install.sh installs the cursor-plane patch" 'install -Dm644 virtio-gpu/linux-virtio-gpu-cursor-plane.patch $VG/linux-virtio-gpu-cursor-plane.patch' "$(cat "$G/install.sh")"
 
 exit $fail
