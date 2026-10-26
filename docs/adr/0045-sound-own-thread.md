@@ -84,5 +84,5 @@ says which ("sound timing").
   A start with a wireless output now uses the main loop's queue on this
   path (`AudioPath.threadWirelessOptions`, ring 4 x 512); a switch to one
   while the VM runs reopens it with 512 frames (the app's size file), and
-  a refused start tries 512, then 1024, at once
-  (`qemu-sdl-audio-out-size*.patch`).
+  a refused start tries 512, then 1024, at once, each only while QEMU's
+  ring holds twice that (`qemu-sdl-audio-out-size*.patch`).

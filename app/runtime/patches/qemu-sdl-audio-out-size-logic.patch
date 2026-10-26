@@ -4,9 +4,10 @@ Subject: [PATCH] audio/sdl: the rules for the playback buffer size (#548)
 What: audio/omacvm-sdl-out-size.h, pure functions with no QEMU or SDL in
 them: the frames per callback to open the Mac's output with (the voice's
 own, raised to the launcher's size for that output or to a size that
-played after a refusal; a power of two, never more than the ring holds or
-2048), the next size after a refused start (twice as large, at least 512),
-which SDL errors a larger size may get past (only "CoreAudio error
+played after a refusal; a power of two, at most half the ring and 2048:
+a callback as large as the ring would need it full at every call), the
+next size after a refused start (twice as large, at least 512), which SDL
+errors a larger size may get past (only "CoreAudio error
 (AudioQueueStart): N"), and the launcher's size file.
 
 Why: with AirPods (A2DP) as the Mac's output the VM had no sound on the
@@ -22,7 +23,7 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 
 --- /dev/null
 +++ b/audio/omacvm-sdl-out-size.h
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,129 @@
 +/*
 + * OmacVM: the size of the buffers QEMU's SDL backend asks the Mac's output
 + * for (#548). SDL3 opens CoreAudio's AudioQueue at QEMU's rate (at least
@@ -48,6 +49,16 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 +/* Never more per callback: 43 ms at 48 kHz. */
 +#define OMACVM_SDL_OUT_MAX_FRAMES 2048u
 +
++/*
++ * The largest callback a ring of RING frames feeds: half of it, so the ring
++ * still holds a callback's worth while the guest writes the next one. A
++ * callback as large as the ring would need it full at every call: gaps.
++ */
++static inline unsigned omacvm_sdl_out_ring_cap(unsigned ring)
++{
++    return ring / 2;
++}
++
 +/* The largest power of two <= n (0 for 0). */
 +static inline unsigned omacvm_sdl_out_pow2_floor(unsigned n)
 +{
@@ -65,14 +76,16 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 +/*
 + * The frames per callback to open with: the voice's own (BASE), raised to
 + * WANT (the launcher's size for this output, or a size that worked after a
-+ * refusal), rounded up to a power of two; never more than the ring holds
-+ * (RING frames, the callback reads from it) or OMACVM_SDL_OUT_MAX_FRAMES.
++ * refusal), rounded up to a power of two; never more than half the ring
++ * (RING frames, the callback reads from it) or OMACVM_SDL_OUT_MAX_FRAMES,
++ * and never less than BASE.
 + */
 +static inline unsigned omacvm_sdl_out_frames(unsigned base, unsigned want,
 +                                             unsigned ring)
 +{
-+    unsigned cap = omacvm_sdl_out_pow2_floor(ring < OMACVM_SDL_OUT_MAX_FRAMES ?
-+                                             ring : OMACVM_SDL_OUT_MAX_FRAMES);
++    unsigned half = omacvm_sdl_out_ring_cap(ring);
++    unsigned cap = omacvm_sdl_out_pow2_floor(half < OMACVM_SDL_OUT_MAX_FRAMES ?
++                                             half : OMACVM_SDL_OUT_MAX_FRAMES);
 +    unsigned f = base;
 +
 +    if (want > f) {
@@ -81,8 +94,8 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 +            f *= 2;
 +        }
 +    }
-+    if (cap && f > cap && cap >= base) {
-+        f = cap;
++    if (cap && f > cap) {
++        f = cap > base ? cap : base;
 +    }
 +    return f;
 +}
@@ -90,7 +103,7 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 +/*
 + * After the Mac's output refused to start at FRAMES: the next size to try,
 + * twice as large and at least the main loop path's, or 0 when the ring
-+ * (RING frames) cannot feed a larger one.
++ * (RING frames) cannot feed a larger one (more than half of it).
 + */
 +static inline unsigned omacvm_sdl_out_next(unsigned frames, unsigned ring)
 +{
@@ -99,7 +112,8 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 +    if (next < OMACVM_SDL_OUT_MAIN_LOOP_FRAMES) {
 +        next = OMACVM_SDL_OUT_MAIN_LOOP_FRAMES;
 +    }
-+    if (next > ring || next > OMACVM_SDL_OUT_MAX_FRAMES) {
++    if (next > omacvm_sdl_out_ring_cap(ring) ||
++        next > OMACVM_SDL_OUT_MAX_FRAMES) {
 +        return 0;
 +    }
 +    return next;

@@ -89,7 +89,7 @@ lane's runs are in the PR).
 +    /* Set before the thread starts; the thread may raise spec.samples. */
      SDL_AudioSpec spec;
      char *device_name;
-+    unsigned ring;              /* the voice's ring: no larger callback */
++    unsigned ring;              /* the voice's ring: callbacks up to half */
 +    SDL_AudioDeviceID close_first;  /* the voice's device, quiesced */
 +    unsigned refused;           /* the largest size the output refused */
 +    bool refused_all;           /* ... and the ring takes no larger one */

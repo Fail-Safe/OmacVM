@@ -1130,8 +1130,9 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   (Bluetooth, AirPlay) gives CoreAudio the main loop's queue from the own
   thread (44.1 kHz, 512 frames). When you switch to such an output while
   the VM runs, QEMU opens it again with 512-frame buffers. Any output that
-  still refuses a start gets the next size at once (512, then 1024), and a
-  size that played stays for the run. qemu.log:
+  still refuses a start gets the next size at once (512, then 1024, each
+  only while QEMU's ring holds twice that), and a size that played stays
+  for the run. qemu.log:
   `OmacVM: sound: playback buffers: 512 frames (...)`; `omacvm check` shows
   it as "sound buffers". If it still says the output refused every size,
   restart the VM with the AirPods connected. Before 3.2.5: `defaults write
