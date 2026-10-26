@@ -190,12 +190,14 @@ wired "cc-switches waits before its first row and before each step" "$E/cc-switc
 wired "cc-switches: a visit's row, the watcher stopped, CI runners back" "$E/cc-switches.sh" \
   'person_overlap "\$ev" end' 'person_watch_stop' 'ci-runners.sh" resume --holder \$\$' 'ci-runners.sh" pause --wait'
 # No question to the Mac's state left that looks only once (the old start-only checks).
-if grep -nE 'HIDIdleTime|screensharingd|JumpConnect' "$E/cc-switches.sh" "$E/modifier-keys.sh" "$E/display-unplug.sh"; then
+if grep -nE 'HIDIdleTime|screensharingd|JumpConnect' "$E/cc-switches.sh" "$E/onscreen.sh" "$E/modifier-keys.sh" "$E/display-unplug.sh"; then
   bad "wiring: a harness asks HID idle or remote sessions itself (person.sh does)"
 else ok "wiring: HID idle and remote sessions only through person.sh"; fi
 wired "modifier-keys waits before each case and stamps its own events" "$E/modifier-keys.sh" \
   '^source "\$HERE/person.sh"' 'person_gate "keys-\$name"' 'person_posted 3; "\$KS" --pid "\$PID" \$evs; person_posted' 'exit 3'
 wired "display-unplug waits before each case" "$E/display-unplug.sh" \
   '^source "\$HERE/person.sh"' 'gate full && case_run' 'gate fullpanel && case_run' 'gate window && case_run' '&& gate head; then'
+wired "onscreen waits instead of stopping at once, stamps its events" "$E/onscreen.sh" \
+  '^source "\$E/person.sh"' 'PAUSE on screen' 'RESUME on screen' 'posted\(\) \{ person_posted' 'ci-runners.sh" pause'
 
 exit $fail

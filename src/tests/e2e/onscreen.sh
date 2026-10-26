@@ -20,12 +20,17 @@
 # does nothing (macOS 15, tried): they get Accessibility's press; switches, the sidebar and the pointer
 # get real events.
 # On screen only while nobody uses the Mac (no input for 300 s but ours, no
-# Jump Desktop or Screen Sharing session, the screen unlocked); it stops when someone comes back.
-# Without that (or with --headless) the on-screen rows are BLOCKED, and
+# Jump Desktop or Screen Sharing session, also one left alone, the screen
+# unlocked: person.sh). Before each step it looks again: while someone is
+# there it waits (at most PERSON_WAIT s, default 1800) and goes on when the
+# Mac is quiet; a visit between two steps gets a "person" row (BLOCKED when a
+# row failed meanwhile). Someone who stays: the rest is BLOCKED, and
 # update-vm (update-vm.sh, as the window runs it) and leftovers (a start
-# without a window) run headless.
+# without a window) run headless; also with --headless.
+# --pause-ci (or OMACVM_E2E_PAUSE_CI=1): this Mac's CI runners stopped for the
+# run (ci-runners.sh), started again at the end.
 #   src/tests/e2e/onscreen.sh --app "PATH/OmacVM Test.app" --vm NAME [--out DIR]
-#       [--only ROW,...] [--headless]
+#       [--only ROW,...] [--headless] [--pause-ci]
 # NAME: a stopped test VM in the test app's VMs folder (e2e_vm_guard). The
 # caller holds the Mac's VM lock. The app's settings this changes are put back.
 # Results: OUT/summary.tsv, OUT/result.json (kind omacvm-e2e-onscreen, pass),
@@ -35,9 +40,10 @@ set -uo pipefail
 E=$(cd "$(dirname "$0")" && pwd)
 source "$E/test-vms.sh"
 source "$E/onscreen-lib.sh"
+source "$E/person.sh"
 ALL="window update-vm switch-stopped vm-size pointer leftovers"
-APP=""; VM=""; OUT=""; ONLY=""; HEADLESS=0
-usage() { sed -n '24,25s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+APP=""; VM=""; OUT=""; ONLY=""; HEADLESS=0; PAUSE_CI=${OMACVM_E2E_PAUSE_CI:-0}
+usage() { sed -n '32,33s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 while (( $# )); do
   case $1 in
     --app) APP=${2%/}; shift 2 ;;
@@ -45,6 +51,7 @@ while (( $# )); do
     --out) OUT=$2; shift 2 ;;
     --only) ONLY=" ${2//,/ } "; shift 2 ;;
     --headless) HEADLESS=1; shift ;;
+    --pause-ci) PAUSE_CI=1; shift ;;
     *) usage ;;
   esac
 done
@@ -69,26 +76,40 @@ res() { printf '%s\t%s\t%s\t%s\n' "$(date +%T)" "$1" "$2" "$3" >> "$S"; printf '
 want() { [[ -z $ONLY || $ONLY == *" $1 "* ]]; }
 
 # --- the Mac and its user
-hid_idle() { ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'; }
-# Remote sessions: Jump Desktop, and a macOS Screen Sharing session unless nobody used it for 30 min (left open).
-jump() {
-  local j s; j=$(LC_ALL=C pgrep -f 'JumpConnect.*(rtcproxy|desktopproxy)' | wc -l | tr -d ' ')
-  s=$(pmset -g assertions 2>/dev/null | grep -c 'screensharingd.*Remote user is connected')
-  (( s > 0 && $(hid_idle) >= 1800 )) && s=0
-  echo $(( j + s ))
-}
+hid_idle() { person_hid_idle; }
+# Remote sessions (Screen Sharing, port 5900, Jump Desktop; also one left alone) and input that was
+# not ours (the watcher's view too): person.sh.
+remote() { local r; r=$(person_remote); echo "${r:-none}"; }
 # No `ioreg | grep -q`: grep ends ioreg early, and under pipefail its SIGPIPE always made it No.
 locked() { [[ $(ioreg -n Root -d1 -k IOConsoleUsers 2>/dev/null) == *'"CGSSessionScreenIsLocked"=Yes'* ]] && echo Yes || echo No; }
-away() { os_away "$(hid_idle)" "$(jump)" "$(locked)" "$LAST" "$(date +%s)"; }
-who() { echo "HID idle $(hid_idle) s, Jump sessions $(jump), screen locked $(locked)"; }
-# Our own last event, also of a run before (HID idle counts ours as input): LASTF keeps it.
-LASTF=$HOME/Library/Caches/omacvm-e2e-last-input
-posted() { LAST=$(date +%s); echo "$LAST" > "$LASTF" 2>/dev/null; }
-# On screen from here on only while nobody else uses the Mac; else remembers why and says no.
+away() { [[ $(locked) != Yes && -z $(person_check) ]]; }
+who() { echo "HID idle $(hid_idle) s, remote sessions $(remote), screen locked $(locked)"; }
+# Our own events, also of a run before (HID idle counts ours as input): person.sh's stamp
+# (~/Library/Caches/omacvm-e2e-last-input) says until when the input was ours.
+posted() { person_posted 3; }
+# A visit between two steps: its row, with the rows that ran meanwhile (summary.tsv: time row result what).
+GATE_LINE=0
+person_overlap() {   # EVENTS NEXT
+  local span r
+  span=$(person_span "$S" "$GATE_LINE" 2 3)
+  r=$(person_overlap_row "$1" "${span%%$'\t'*}" "${span#*$'\t'}")
+  res person "${r%%$'\t'*}" "${r#*$'\t'}"
+}
+# On screen from here on only while nobody else uses the Mac: someone there -> wait for them to go (at
+# most PERSON_WAIT s); someone who stays -> remembers why and says no from then on.
 onscreen_ok() {
   [[ -z $GONE ]] || return 1
-  away && return 0
-  GONE="someone uses the Mac since $(date +%H:%M:%S) ($(who))"; log "STOP on screen: $GONE"; return 1
+  local ev t0; ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" next
+  if ! away; then
+    t0=$(date +%s); log "PAUSE on screen: someone uses the Mac ($(who)); waiting up to $(( PERSON_WAIT / 60 )) min"
+    while :; do
+      (( $(date +%s) - t0 >= PERSON_WAIT )) && { GONE="someone uses the Mac since $(date -r "$t0" +%H:%M:%S) ($(who))"; log "STOP on screen: $GONE"; return 1; }
+      sleep "$PERSON_POLL"; _person_new >/dev/null
+      away && { log "RESUME on screen after $(( $(date +%s) - t0 )) s ($(who))"; break; }
+    done
+  fi
+  GATE_LINE=$(wc -l < "$S" | tr -d ' ')
+  return 0
 }
 # A picture of the screen, and the words of the app's window (a picture needs Screen Recording for this shell).
 CAPTURE=$("$T" can-capture)
@@ -154,11 +175,14 @@ cleanup() {
   # shellcheck disable=SC2086
   e2e_settings_restore "$DOM" "$OUT/saved" $KEYS || log "settings: not all put back"
   [[ -f $OUT/saved/omacvm-version ]] && ! grep -q "^$VER\$" "$VMD/omacvm-version" 2>/dev/null && cp "$OUT/saved/omacvm-version" "$VMD/omacvm-version"
+  local ev; ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" end
+  person_watch_stop
+  (( ${CI_PAUSED:-0} )) && "$E/ci-runners.sh" resume --holder $$
+  return 0
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-LAST=$(cat "$LASTF" 2>/dev/null || echo 0); [[ $LAST =~ ^[0-9]+$ ]] || LAST=0
 log "onscreen: $APP ($VER, $COMMIT, $DOM), VM $VMD, macOS $(sw_vers -productVersion), $(who), pictures: $([[ $CAPTURE == yes ]] && echo yes || echo "no (no Screen Recording for this shell: the window's words only)")"
 [[ -z $(qemu_pid) ]] || { echo "onscreen: $VM runs: shut it down first"; exit 2; }
 [[ -z $(launcher_pid) ]] || { echo "onscreen: $APP runs: quit it first"; exit 2; }
@@ -376,7 +400,18 @@ headless_leftovers() {
 }
 
 # --- the run
-if (( HEADLESS )); then GONE="--headless"; elif ! away; then GONE="someone uses the Mac ($(who))"; fi
+CI_PAUSED=0
+if (( HEADLESS )); then GONE="--headless"
+else
+  # The CI runners first (their jobs start VMs and load the Mac), then someone coming between two steps
+  # is written down with the time (person.log).
+  if (( PAUSE_CI )); then
+    CI_PAUSED=1; log "CI runners: each stopped once its job ends (<= 50 min)"
+    "$E/ci-runners.sh" pause --wait 3000 --holder $$ || log "CI runners still on jobs after 50 min: on screen anyway"
+  fi
+  PERSON_KEEP_LOG=$OUT/person.log; person_watch_start
+  onscreen_ok
+fi
 if [[ -z $GONE ]]; then
   log "on screen: nobody uses the Mac ($(who))"
   want update-vm && echo 3.0.0 > "$VMD/omacvm-version"   # older than the app: the window offers Update VM
