@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.5 (unreleased)
+## 3.2.5
 
 Five fixes: no "would like to control this Mac" dialog at every VM start, the pointer on every
 display with Pointer on its own layer, notifications under the bar with Full screen including notch,
