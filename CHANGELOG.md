@@ -17,9 +17,9 @@ in more words.
   fix, so those starts tell the Mac what changed even with this switch off; the Mac does not use
   it then. MacBook Air M2, the VM full screen at 60 Hz, the pointer moving: 3.13-3.17 W instead of
   3.55-3.75 W for the whole Mac (-11 to -17 %, two sets); scrolling and typing the same. MacBook
-  Pro M1 Max, HDR at 120 Hz full screen: 19.8-20.2 W instead of 22.0-22.1 W with the pointer moving
-  (-9 %), 13.5 W instead of 16.9 W with a spinner (-20 %). The same pixels and frame rate at 60 Hz
-  (8-bit and HDR) and 120 Hz (HDR). `omacvm check` has a "Changed parts" line.
+  Pro M1 Max, HDR at 120 Hz full screen: macOS's WindowServer used less GPU time with the pointer
+  moving or a spinner; the whole Mac's power there is measured again before we give a number. The
+  same pixels and frame rate at 60 Hz (8-bit and HDR) and 120 Hz (HDR). `omacvm check` has a "Changed parts" line.
 - **Guest driver patches must fit exactly.** Update VM applied the VM driver's patches with up to
   two lines of fuzz, so a part could land in the wrong place of a newer Linux kernel and still
   build. Now each part must fit exactly; if one does not, the driver is built without that patch

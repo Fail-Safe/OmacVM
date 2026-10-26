@@ -275,5 +275,13 @@ if [[ $info == *"M1 Max"* && $info == *"120 Hz"* && $info != *"not tested yet"* 
 else
   echo "FAIL Draw only what changed (i): still says 120 Hz is not tested (td2 passed on the M1 Max)"; fail=1
 fi
+# td2's M1 Max watts had a macOS prompt over the VM on both sides: no M1 Max percentages in the (i)
+# until td2b runs without it (the Air's measured -11..-17 % stays).
+m1=${info#*M1 Max}; m1=${m1%%(*}
+if [[ $m1 != *"%"* ]]; then
+  echo "ok   Draw only what changed (i): no M1 Max power figures before td2b"
+else
+  echo "FAIL Draw only what changed (i): gives M1 Max percentages from td2 (prompt over the VM, re-run pending)"; fail=1
+fi
 
 exit $fail
