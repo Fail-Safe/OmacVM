@@ -16,10 +16,10 @@ Test: app/runtime/Tests/display/test-pointer-guard.c.
 
 diff --git a/ui/omacvm-pointer-guard.h b/ui/omacvm-pointer-guard.h
 new file mode 100644
-index 0000000..d179f5b
+index 0000000..5e8c564
 --- /dev/null
 +++ b/ui/omacvm-pointer-guard.h
-@@ -0,0 +1,394 @@
+@@ -0,0 +1,404 @@
 +/*
 + * OmacVM: the pointer maths of the full-screen guard (Dock and hot corners).
 + *
@@ -49,6 +49,8 @@ index 0000000..d179f5b
 + * window becomes key), the next motion still carries it. 3.2.3 added it to
 + * the pointer there: after each click near a corner of an external display
 + * the pointer jumped by the way from the last click (reported by the user).
++ * Only a motion takes it out, never a button. When the next event is not at
++ * the let-go's warp, a motion the guard did not see (ungrabbed) carried it.
 + *
 + * When the guest draws its own pointer the detached cursor (hidden) stays
 + * where it is; the only warp then is the one that takes it off an outer edge
@@ -329,8 +331,12 @@ index 0000000..d179f5b
 +    }
 +
 +    if (g->held) {
-+        /* Made after the warp (it is at the warp's place): carries its distance. */
-+        if (g->warp_pending && fabs(lx - g->cx) < 0.5 && fabs(ly - g->cy) < 0.5) {
++        /*
++         * A motion made after the warp (it is at the warp's place) carries
++         * its distance; a button does not (it has no motion).
++         */
++        if (g->warp_pending && (dx != 0 || dy != 0) &&
++            fabs(lx - g->cx) < 0.5 && fabs(ly - g->cy) < 0.5) {
 +            dx -= g->wdx;
 +            dy -= g->wdy;
 +            g->warp_pending = false;
@@ -350,7 +356,11 @@ index 0000000..d179f5b
 +    } else {
 +        px = lx;
 +        py = ly;
-+        if (g->let_go_warp && fabs(lx - g->lwx) < 0.5 && fabs(ly - g->lwy) < 0.5) {
++        if (g->let_go_warp && (fabs(lx - g->lwx) >= 0.5 || fabs(ly - g->lwy) >= 0.5)) {
++            /* Not at the let-go's warp: a motion we did not see (ungrabbed) carried it. */
++            g->let_go_warp = false;
++        }
++        if (g->let_go_warp) {
 +            /* A button at the let-go's warp: where the pointer is, not the gap off an edge. */
 +            px = g->x;
 +            py = g->y;

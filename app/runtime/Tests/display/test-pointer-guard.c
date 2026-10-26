@@ -442,6 +442,79 @@ int main(void)
         }
     }
 
+    /*
+     * The let-go's warp is taken out of a motion only, never out of a button
+     * (it carries none): a click after another kind of let-go (another
+     * Space, Command-Tab and back) without moving, and a second click right
+     * after a hold taken by a button (no let-go, the main window stays key),
+     * land where the pointer is, and so does the motion after them.
+     */
+    for (int run = 0; run < 4; run++) {
+        static const OmacVMRect beside[2] = { { 0, 0, 1512, 982 }, { 1512, 0, 1352, 845 } };
+        int follow = run & 1, second = run >> 1;
+        double x0, y0;
+        Ev down, up;
+
+        memset(&g, 0, sizeof(g));
+        g.follow = follow;
+        m = mac_at(beside, 2, beside, 2, 1512 + 400, 300);
+        run_steps(&m, &g, 130, -2, -2, 0, "button: up into the external's top-left zone");
+        run_steps(&m, &g, 10, 1, 0, 0, "button: to a button");
+        if (second) {
+            /* A click on the external's window: let go, taken again by the release. */
+            down = mac_button(&m);
+            mac_let_go(&m, &g);
+            handle(&m, &g, &down, &gx, &gy);
+            up = mac_button(&m);
+            handle(&m, &g, &up, &gx, &gy);
+        } else {
+            mac_let_go(&m, &g);
+        }
+        for (int k = 0; k < 2; k++) {
+            x0 = g.x;
+            y0 = g.y;
+            down = mac_button(&m);
+            handle(&m, &g, &down, &gx, &gy);
+            CHECK(fabs(gx - x0) < 0.5 && fabs(gy - y0) < 0.5,
+                  "button %d (follow %d, second %d): pressed at %.1f,%.1f, the pointer was at "
+                  "%.1f,%.1f", k, follow, second, gx, gy, x0, y0);
+            up = mac_button(&m);
+            handle(&m, &g, &up, &gx, &gy);
+            CHECK(fabs(gx - x0) < 0.5 && fabs(gy - y0) < 0.5,
+                  "button %d (follow %d, second %d): let go at %.1f,%.1f, the pointer was at "
+                  "%.1f,%.1f", k, follow, second, gx, gy, x0, y0);
+        }
+        run_steps(&m, &g, 5, 1, 0, 0, "button: on after the clicks");
+    }
+
+    /*
+     * Let go (Ctrl+Alt+G, another app) while held, then the mouse moves where
+     * the guard does not see it (ungrabbed): that motion carried the let-go's
+     * warp. A click back into the VM in a corner zone takes hold at the click,
+     * and the motion after it is the mouse's own.
+     */
+    for (int follow = 0; follow < 2; follow++) {
+        memset(&g, 0, sizeof(g));
+        g.follow = follow;
+        m = mac_at(&macbook, 1, &macbook, 1, 100, 100);
+        run_steps(&m, &g, 1, -5, -5, 0, "unseen: into the top-left zone");
+        run_steps(&m, &g, 5, 10, 0, 0, "unseen: held");
+        mac_let_go(&m, &g);
+        for (int i = 0; i < 30; i++) {
+            mac_motion(&m, -3, -1.5);
+        }
+        for (int k = 0; k < 2; k++) {
+            Ev e = mac_button(&m);
+            double x0 = e.lx, y0 = e.ly;
+
+            handle(&m, &g, &e, &gx, &gy);
+            CHECK(fabs(gx - x0) < 0.5 && fabs(gy - y0) < 0.5,
+                  "unseen (follow %d): button %d at %.1f,%.1f, clicked at %.1f,%.1f",
+                  follow, k, gx, gy, x0, y0);
+        }
+        run_steps(&m, &g, 5, 1, 0, 0, "unseen: on after the click");
+    }
+
     /* The Mac's cursor shown (show-cursor=on): it follows, at the same speed. */
     memset(&g, 0, sizeof(g));
     g.follow = true;
