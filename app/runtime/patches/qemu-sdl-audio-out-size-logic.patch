@@ -10,7 +10,9 @@ next size after a refused start (twice as large, at least 512), which SDL
 errors a larger size may get past (only "CoreAudio error
 (AudioQueueStart): N"), the launcher's size file, and how long no new
 start is made after every size was refused (until the size file changes;
-30 s without one).
+30 s without one). The app writes the file anew when the Mac's output
+changes and after a coreaudiod restart (AudioLatencyWatch.swift), so
+`sudo killall coreaudiod` also ends that wait.
 
 Why: with AirPods (A2DP) as the Mac's output the VM had no sound on the
 sound's own thread (default since 3.1.17): AudioQueueStart returned -66681
@@ -136,9 +138,9 @@ app/runtime/Tests/audio/test-out-size.c against this header.
 + * After the Mac's output refused every size: until when (monotonic, NOW and
 + * WAIT in the caller's unit) no new start is made. Each failed start may
 + * leave coreaudiod silent (#548). The launcher writes its size file anew at
-+ * every change of the Mac's output, and a new file ends the wait: with that
-+ * file (SIZE_FILE) the wait lasts until it changes; without one (QEMU not
-+ * started by the app) for WAIT.
++ * every change of the Mac's output and after a coreaudiod restart, and a new
++ * file ends the wait: with that file (SIZE_FILE) the wait lasts until it
++ * changes; without one (QEMU not started by the app) for WAIT.
 + */
 +static inline long long omacvm_sdl_out_hold_until(bool size_file, long long now,
 +                                                  long long wait)
