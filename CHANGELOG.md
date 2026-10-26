@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.5 (unreleased)
+
+- **Sound over AirPods again.** With AirPods (or another Bluetooth or AirPlay output) as the Mac's
+  output, the VM had no sound since 3.1.17: macOS refused to start the small buffers of the sound's own
+  thread (AudioQueueStart -66681). A VM started with a wireless output now gives macOS the same sound
+  buffers as QEMU's main loop path (44.1 kHz, 512 frames), which played; a switch to one while the VM
+  runs reopens it with 512-frame buffers, and any output that refuses a start gets the next size at
+  once. `omacvm check` says which size plays ("sound buffers"). Thanks to @maxschoenberger for the report, the workaround and the cause analysis (#548).
+
 ## 3.2.4
 
 A new experimental switch in the VM window's Display settings: the Mac redraws only the parts of the

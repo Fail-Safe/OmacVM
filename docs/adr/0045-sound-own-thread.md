@@ -78,3 +78,11 @@ says which ("sound timing").
   cost. Not done.
 - CoreAudio direct (option 3) would save SDL's AudioQueue as well (about
   25 ms more); it needs recording and the no-hang start first.
+- 3.2.5 (#548): AirPods (A2DP) refused to start SDL's AudioQueue of this
+  path (48 kHz, 6 x 256 frames; AudioQueueStart -66681) and played the
+  main loop's (44.1 kHz, 4 x 512; SDL3 opens the queue at QEMU's rate).
+  A start with a wireless output now uses the main loop's queue on this
+  path (`AudioPath.threadWirelessOptions`, ring 4 x 512); a switch to one
+  while the VM runs reopens it with 512 frames (the app's size file), and
+  a refused start tries 512, then 1024, at once
+  (`qemu-sdl-audio-out-size*.patch`).

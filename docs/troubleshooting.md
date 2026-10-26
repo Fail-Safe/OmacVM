@@ -1112,3 +1112,34 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `app/app/Sources/OmacVMFeatures/MacSetup.swift` (the words),
   `app/app/Sources/OmacVM/MacSetupAsk.swift` and `main.swift`
   (`askMacHelpers`); tests `src/tests/mac-setup.sh`, `swift run features-tests`.
+
+## 41. app: no sound with AirPods (or another Bluetooth output) as the Mac's output
+
+- **Symptom:** with AirPods as the Mac's output the VM is silent, while Mac
+  apps play over them (#548). `qemu.log` has `SDL_OpenAudioDevice for
+  playback failed: CoreAudio error (AudioQueueStart): -66681` at each sound.
+  Afterwards the Mac's speakers sometimes stayed silent too, until
+  `sudo killall coreaudiod`. 3.1.17 to 3.2.4, with Sound on its own thread
+  (the default).
+- **Cause:** SDL3 opens CoreAudio's AudioQueue at QEMU's rate with QEMU's
+  buffer size: on the sound's own thread 48 kHz and 6 x 256 frames, on
+  QEMU's main loop 44.1 kHz and 4 x 512 frames. The AirPods (A2DP) refused
+  to start the own thread's queue (-66681, kAudioQueueErr_CannotStart) and
+  played the main loop's. The thread itself never talks to CoreAudio.
+- **Fix (3.2.5):** a VM started while the Mac's output is wireless
+  (Bluetooth, AirPlay) gives CoreAudio the main loop's queue from the own
+  thread (44.1 kHz, 512 frames). When you switch to such an output while
+  the VM runs, QEMU opens it again with 512-frame buffers. Any output that
+  still refuses a start gets the next size at once (512, then 1024), and a
+  size that played stays for the run. qemu.log:
+  `OmacVM: sound: playback buffers: 512 frames (...)`; `omacvm check` shows
+  it as "sound buffers". If it still says the output refused every size,
+  restart the VM with the AirPods connected. Before 3.2.5: `defaults write
+  org.omacvm.app audioThread -bool false` and a restart of the VM (thanks to
+  @maxschoenberger for the workaround).
+- **Where:** `app/runtime/patches/qemu-sdl-audio-out-size*.patch`,
+  `app/app/Sources/OmacVMAudio/AudioOutputSize.swift`,
+  `app/app/Sources/OmacVM/AudioLatencyWatch.swift` (the size file,
+  `OMACVM_AUDIO_OUT_FRAMES_FILE`); tests `Tests/audio/test-out-size.sh`,
+  `Tests/audio/refuse-small-start.c` (fakes the refusal),
+  `swift run audio-tests`, `src/tests/audio-timing.sh`.
