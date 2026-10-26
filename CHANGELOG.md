@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.5 (unreleased)
+
+- **A refused shader no longer ends the VM.** Seen once in about 30 test starts on a Mac mini. QEMU
+  stopped the whole VM at the desktop's start: right after the Mac's OpenGL had refused calls of Omarchy's
+  bar, virglrenderer checked the size of its own uniform block with an assertion and aborted (#547).
+  Now such a program is refused like any other shader the Mac does not take: the draws that need it
+  are skipped and the VM keeps running.
+
 ## 3.2.4
 
 A new experimental switch in the VM window's Display settings: the Mac redraws only the parts of the
