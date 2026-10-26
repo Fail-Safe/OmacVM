@@ -65,6 +65,24 @@ int main(void)
     check("x at INT_MIN: hidden", !omacvm_head_pointer_frame(true, INT_MIN, 10, 24, 24, 2560, 1440, 2560, 1440).shown);
     check("y at INT_MIN: hidden", !omacvm_head_pointer_frame(true, 10, INT_MIN, 24, 24, 2560, 1440, 2560, 1440).shown);
 
+    /* QEMU's thread sends the output's size only when it changed, not at every page flip. */
+    {
+        OmacVMHeadPointerSize last = { 0, 0 };
+        int sends = 0;
+
+        check("no size yet (0 x 0): nothing to send", !omacvm_head_pointer_size_changed(&last, 0, 0));
+        check("the first size: sent", omacvm_head_pointer_size_changed(&last, 2560, 1440));
+        for (int i = 0; i < 1000; i++) {
+            sends += omacvm_head_pointer_size_changed(&last, 2560, 1440);
+        }
+        check("1000 page flips at the same size: nothing sent", sends == 0);
+        check("a new width: sent", omacvm_head_pointer_size_changed(&last, 1920, 1440));
+        check("a new height: sent", omacvm_head_pointer_size_changed(&last, 1920, 1080));
+        check("the new size again: nothing sent", !omacvm_head_pointer_size_changed(&last, 1920, 1080));
+        check("the output off (0 x 0): sent", omacvm_head_pointer_size_changed(&last, 0, 0));
+        check("kept: the last size sent", last.w == 0 && last.h == 0);
+    }
+
     printf("%s\n", fails ? "FAIL test-pointer-heads" : "ok   test-pointer-heads: all");
     return fails ? 1 : 0;
 }

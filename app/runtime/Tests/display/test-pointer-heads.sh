@@ -6,7 +6,9 @@
 #   - with a patched ui/cocoa.m: the wiring (each other display's window has
 #     a pointer layer above its frames; the guest's image and place for that
 #     output go there, not only to the hidden macPointer; a window made again
-#     shows the pointer as it is);
+#     shows the pointer as it is; hidden by the main cursor layer's rule; the
+#     output's size sent to the main thread only when it changed, not at each
+#     page flip; an output turned off drops its pointer);
 #   - with --self-test [<ui/cocoa.m without the patch>]: every wiring check
 #     fails on that code (CI: a stub; the runtime build: the real cocoa.m
 #     before the patch).
@@ -20,8 +22,11 @@ body() { awk -v h="$2" 'index($0, h) == 1 && $0 !~ /;$/ {on=1} on {print} on && 
 # One line per check: "ok WHAT" or "FAIL WHAT".
 chk() { local what=$1; shift; if "$@"; then echo "ok $what"; else echo "FAIL $what"; fi; }
 has() { grep -qF -- "$2" <<<"$1"; }
+# In TEXT, the first line with A comes before the first line with B (both there).
+line() { grep -nF -- "$2" <<<"$1" | head -1 | cut -d: -f1; }
+before() { local a b; a=$(line "$1" "$2"); b=$(line "$1" "$3"); [[ -n $a && -n $b ]] && (( a < b )); }
 checks() {
-  local m=$1 mouse define init layout on tex img
+  local m=$1 mouse define init layout on tex img size dis off
   mouse=$(body "$m" 'static void omacvm_head_mouse_set(DisplayChangeListener *dcl')
   define=$(body "$m" 'static void omacvm_head_cursor_define(DisplayChangeListener *dcl')
   init=$(body "$m" '- (id)initWithFrame:(NSRect)frame output:(int)index')
@@ -29,6 +34,9 @@ checks() {
   on=$(body "$m" 'static void omacvm_head_on(OmacVMHead *hd, NSScreen *s)')
   tex=$(body "$m" 'static void omacvm_head_scanout_texture(DisplayChangeListener *dcl')
   img=$(body "$m" 'static void omacvm_head_pointer_image(int output, QEMUCursor *c)')
+  size=$(body "$m" 'static void omacvm_head_pointer_size(DisplayChangeListener *dcl)')
+  dis=$(body "$m" 'static void omacvm_head_scanout_disable(DisplayChangeListener *dcl)')
+  off=$(body "$m" 'static void omacvm_head_pointer_off(DisplayChangeListener *dcl)')
   chk "the rules are included" grep -q '#include "ui/omacvm-pointer-heads.h"' "$m"
   chk "each other display's view has a pointer layer" has "$init" 'pointerLayer = [[CALayer alloc] init];'
   chk "the layer sits above the frames, as the main window's" has "$init" '[pointerLayer setZPosition:1];'
@@ -37,10 +45,20 @@ checks() {
   chk "the guest's image for that output goes to the layer (not only to macPointer)" \
     has "$define" 'omacvm_head_pointer_image(output, qemu_console_get_cursor(con));'
   chk "its place and on/off for that output go to the layer" has "$mouse" 'p->on = on;'
-  chk "the output's size goes along with the place" has "$mouse" 'p->ow = ow;'
+  chk "the output's size goes along with the place" has "$mouse" 'omacvm_head_pointer_size(dcl);'
   chk "a new scanout of the output: its size again" has "$tex" 'omacvm_head_pointer_size(dcl);'
+  chk "QEMU's thread keeps the size it sent, per output" grep -qF 'OmacVMHeadPointerSize ptr_size;' "$m"
+  chk "a SET_SCANOUT of the same size wakes no main thread" \
+    before "$size" 'if (!omacvm_head_pointer_size_changed(&hd->ptr_size, ow, oh)) {' 'dispatch_async('
+  chk "an output turned off: its pointer too" has "$dis" 'omacvm_head_pointer_off(dcl);'
+  chk "its pointer off, on the main thread" has "$off" 'omacvm_head_ptr[output].on = false;'
+  chk "only the newest queued image of an output takes the lock" \
+    before "$define" 'if (qatomic_read(&omacvm_head_ptr_seq[output]) != seq) {' 'BQL_LOCK_GUARD();'
   chk "placed by the tested rules" has "$layout" 'omacvm_head_pointer_frame('
-  chk "never with macPointer (the Mac's cursor shows it then)" has "$layout" '!omacvm_hwc.on'
+  chk "hidden while the Mac's cursor shows it, as the main window's layer" \
+    has "$layout" 'omacvm_hwc_layer_hidden(&omacvm_hwc, [cocoaView omacvmAbsolute]);'
+  chk "the main view says whether the pointer is absolute" \
+    grep -qF -- '- (BOOL) omacvmAbsolute {return isAbsoluteEnabled;}' "$m"
   chk "shown only while the rules say so" has "$layout" '[pointerLayer setHidden:!f.shown];'
   chk "the image is copied (virtio-gpu reuses its buffer)" has "$img" 'CFDataRef data = CFDataCreate(NULL, (const UInt8 *)c->data,'
   chk "the image premultiplied, as virtio-gpu sends it" has "$img" 'kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst,'

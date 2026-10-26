@@ -6,7 +6,9 @@ pointer image over the window of an output other than the main one, from
 the cursor plane's top left and the image's size in the output's pixels,
 stretched as that window stretches the output's frames (each axis on its
 own); hidden while a size is unknown or the image lies wholly off the
-output. Used by omacvm-cocoa-pointer-heads.patch (which explains the why).
+output. And when QEMU's thread sends an output's size to the main thread:
+only when it changed (not at every page flip). Used by
+omacvm-cocoa-pointer-heads.patch (which explains the why).
 
 Why its own file: so the rules are tested without QEMU or a window
 (app/runtime/Tests/display/test-pointer-heads.sh applies this patch to an
@@ -17,7 +19,7 @@ Test: app/runtime/Tests/display/test-pointer-heads.c.
 
 --- a/ui/omacvm-pointer-heads.h
 +++ b/ui/omacvm-pointer-heads.h
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,77 @@
 +/*
 + * OmacVM: the guest's pointer over the windows of the other displays
 + * (#554, ADR 0054).
@@ -72,6 +74,26 @@ Test: app/runtime/Tests/display/test-pointer-heads.c.
 +    f.w = cw * sx;
 +    f.h = ch * sy;
 +    return f;
++}
++
++/*
++ * The output's size as QEMU's thread last sent it to the main thread (per
++ * output). true, and stored, when w x h differs from it: only then is it
++ * sent. With virgl every page flip sets the scanout again at the same size.
++ */
++typedef struct OmacVMHeadPointerSize {
++    int w, h;
++} OmacVMHeadPointerSize;
++
++static inline bool
++omacvm_head_pointer_size_changed(OmacVMHeadPointerSize *last, int w, int h)
++{
++    if (last->w == w && last->h == h) {
++        return false;
++    }
++    last->w = w;
++    last->h = h;
++    return true;
 +}
 +
 +#endif /* OMACVM_POINTER_HEADS_H */
