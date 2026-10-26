@@ -1,6 +1,7 @@
 import CoreAudio
 import Foundation
 import OmacVMAudio
+import OmacVMUpdate
 
 /// Tells the VM how late the Mac plays its sound (AudioDelay: QEMU's buffers
 /// plus the Mac's output device), so Chromium, Firefox and mpv in the VM hold
@@ -82,7 +83,7 @@ final class AudioLatencyWatch: @unchecked Sendable {
         let id = Self.defaultOutput()
         watchDevice(id)
         let info = id == Self.unknown ? nil : Self.device(id)
-        let minimum = id == Self.unknown ? 0 : AudioOutputSize.minimumFrames(transport: Self.transport(id))
+        let minimum = Self.minimumFrames(id)
         followSize(minimum, id)
         let outFrames = AudioOutputSize.frames(thread: thread, wireless: wireless, minimum: minimum)
         let ms = AudioDelay.total(deviceMs: info?.ms, extraMs: Settings.audioDelayExtraMs, thread: thread, wireless: wireless,
@@ -148,8 +149,14 @@ final class AudioLatencyWatch: @unchecked Sendable {
     }
 
     /// The frames the Mac's default output needs now (0: the path's own).
-    static func minimumFramesNow() -> Int {
-        let id = defaultOutput()
+    /// A test build may stand in a wireless output (OMACVM_TEST_AUDIO_WIRELESS=1):
+    /// no test Mac has AirPods.
+    static func minimumFramesNow() -> Int { minimumFrames(defaultOutput()) }
+
+    static func minimumFrames(_ id: AudioObjectID) -> Int {
+        if TestHooks.value("OMACVM_TEST_AUDIO_WIRELESS", bundleID: Bundle.main.bundleIdentifier) == "1" {
+            return AudioOutputSize.wirelessFrames
+        }
         return id == unknown ? 0 : AudioOutputSize.minimumFrames(transport: transport(id))
     }
 
