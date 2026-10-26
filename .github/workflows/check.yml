@@ -434,6 +434,11 @@ jobs:
       - name: The VM takes the pointer without a click; the Mac's cursor hides once the guest draws its own
         run: app/runtime/Tests/display/test-pointer-start.sh
 
+      - name: A click on another display's window keeps the pointer and keys (the checks catch code without it)
+        run: |
+          app/runtime/Tests/display/test-key-handback.sh
+          app/runtime/Tests/display/test-key-handback.sh --self-test
+
       - name: Mac pointer for the VM (experimental hardware cursor rules, guest image checks)
         run: app/runtime/Tests/display/test-hw-cursor.sh
       - name: One pointer between the VM and Omanotch's strip (the guest's goes into NOTCH)

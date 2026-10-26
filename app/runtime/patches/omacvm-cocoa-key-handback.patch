@@ -1,0 +1,120 @@
+From: OmacVM
+Subject: [PATCH] ui/cocoa: a click on another display keeps the pointer and keys
+
+What: the main window's windowDidResignKey: no longer lets go of the
+pointer and the keyboard when the resign comes from a click in a head
+window (the window of another display) that its mouseDown: hands straight
+back (handKeyBack's rule: the main window on screen, its Space shown, QEMU
+in front; ui/omacvm-key-handback.h). On the next turn of the main loop the
+main window must be key again; if it is not, the let-go runs then. Every
+other resign lets go as before: the escape combo and swipes (no click, the
+main window's Space not shown), Command-Tab and other apps, Mission
+Control, a hidden main window. handKeyBack uses the same rule.
+OMACVM_POINTER_DEBUG=1 logs "omacvm-pointer: key to another display's
+window at a click: pointer and keys kept".
+
+Why: every click on an external display's VM window let go of the pointer
+and took it again (#563): ungrabMouse showed the Mac's cursor and the
+click's grab hid it again, the full-screen guard let go of its hold (a
+warp of the Mac's cursor, which #561 makes up for), and raiseAllKeys
+released held keys in the guest (a Shift-click there arrived as a plain
+click: only a key going down presses a modifier again). The key comes back
+within the same event, so nothing needs letting go.
+
+Upstream: not applicable (OmacVM's omacvm-cocoa-displays.patch).
+Test: Tests/display/test-key-handback.sh (the rules; with ui/cocoa.m the
+wiring, --self-test: the wiring checks fail on the code before) at build
+time and in CI. Applies after omacvm-cocoa-head-key-same-space.patch.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -2209,6 +2209,58 @@ - (void) omacvmHeadEvent:(NSEvent *)event view:(NSView *)view output:(int)output
+ }
+ @end
+ 
++/*
++ * OmacVM (#563): a click in another display's window (a head window) makes
++ * it key for a moment, and its mouseDown: hands the key straight back
++ * (handKeyBack). The main window keeps the pointer and the keyboard across
++ * that: no let-go of the grab and the full-screen guard (the Mac's cursor
++ * was shown and hidden again at every click, with a warp), no held key
++ * released in the guest. ui/omacvm-key-handback.h decides. Main thread.
++ */
++#include "ui/omacvm-key-handback.h"
++
++static OmacVMHandback omacvm_handback;
++
++/* The main window stopped being key: let go of the pointer and the keyboard. */
++static void omacvm_key_let_go(void)
++{
++    omacvm_pointer_left(&omacvm_ptr);
++    [cocoaView ungrabMouse];
++    [cocoaView raiseAllKeys];
++}
++
++/* The main window resigned key: a click's hand-back (keep everything)? */
++static bool omacvm_resign_kept(void)
++{
++    NSWindow *main = [cocoaView window];
++    NSEvent *e = [NSApp currentEvent];
++    NSEventType t = e ? [e type] : (NSEventType)0;
++    OmacVMResignIn in = {
++        .click = t == NSEventTypeLeftMouseDown || t == NSEventTypeRightMouseDown ||
++                 t == NSEventTypeOtherMouseDown,
++        .in_head = e && [e window] != main && omacvm_is_our_window([e window]),
++        .main_visible = [main isVisible],
++        .main_space = [main isOnActiveSpace],
++        .active = [NSApp isActive],
++    };
++
++    if (!omacvm_handback_keep(&omacvm_handback, &in)) {
++        return false;
++    }
++    if (omacvm_pointer_debug) {
++        info_report("omacvm-pointer: key to another display's window at a click: pointer and keys kept");
++    }
++    /* After the click's mouseDown: (same event) the key is back; if not, let go now. */
++    dispatch_async(dispatch_get_main_queue(), ^{
++        if (omacvm_handback_settle(&omacvm_handback, [[cocoaView window] isKeyWindow])) {
++            if (omacvm_pointer_debug) {
++                info_report("omacvm-pointer: the key did not come back from the click: let go");
++            }
++            omacvm_key_let_go();
++        }
++    });
++    return true;
++}
+ 
+ 
+ /*
+@@ -2571,9 +2623,11 @@ - (NSApplicationPresentationOptions) window:(NSWindow *)window
+ - (void) windowDidResignKey: (NSNotification *)aNotification
+ {
+     COCOA_DEBUG("%s\n", __func__);
+-    omacvm_pointer_left(&omacvm_ptr);
+-    [cocoaView ungrabMouse];
+-    [cocoaView raiseAllKeys];
++    /* OmacVM: not at a click in another display's window (the key comes straight back). */
++    if (omacvm_resign_kept()) {
++        return;
++    }
++    omacvm_key_let_go();
+ }
+ 
+ /*
+@@ -6555,11 +6609,14 @@ - (void)otherMouseDragged:(NSEvent *)e { [self send:e button:-1 down:false]; }
+  * combo or a swipe moves the main window's display to another Space, and
+  * making the main window key then switched that display straight back).
+  * Only while the main window's Space shows. The click still goes to the VM.
++ * The main window kept the pointer and the keys meanwhile: its resign at
++ * this click used the same rule (omacvm_resign_kept, #563).
+  */
+ - (void)handKeyBack
+ {
+     NSWindow *main = [cocoaView window];
+-    if ([main isVisible] && [main isOnActiveSpace] && [NSApp isActive] && ![main isKeyWindow]) {
++    if (omacvm_handback_ok([main isVisible], [main isOnActiveSpace], [NSApp isActive],
++                           [main isKeyWindow])) {
+         [main makeKeyWindow];
+     }
+ }
