@@ -11,6 +11,13 @@ in more words.
   assertion and aborted QEMU. Now a program whose block size is too small or unknown is refused like any
   other shader the Mac does not take: the draws that need it are skipped and the VM keeps running.
 
+- **No "would like to control this Mac" dialog at every VM start.** When OmacVM was not allowed to
+  control the computer (Accessibility), each VM start made macOS show that dialog, also with nobody
+  at the Mac, because the VM's keyboard tap was tried anyway (and refused). Now the tap is made only
+  when macOS already allows it; otherwise the VM's window shows its note with Allow…, and only that
+  button asks macOS. A grant you gave stays through updates: macOS keeps it for OmacVM's bundle id
+  and its Developer ID team, not for one build.
+
 ## 3.2.4
 
 A new experimental switch in the VM window's Display settings: the Mac redraws only the parts of the

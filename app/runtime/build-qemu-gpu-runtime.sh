@@ -918,6 +918,11 @@ grep -q 'eventsTap = CGEventTapCreate(kCGHIDEventTap, place, kCGEventTapOptionDe
   die "ui/cocoa.m: the full-grab tap ignores OMACVM_KEYS_LAST (keys-last patch)"
 "$native_dir/Tests/keys/test-keys-last.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the full-grab tap's place is not as tested (test-keys-last.sh)"
+# The full-grab tap only when OmacVM may already control the computer: else
+# macOS showed "... would like to control this Mac" at every VM start.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-tap-no-ask.patch"
+"$native_dir/Tests/keys/test-tap-no-ask.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the full-grab tap is made (and asked for) without the permission (test-tap-no-ask.sh)"
 # OmacVM.app's "Closing the window" (#358): Shut down, Keep running (the app
 # hidden, the Dock icon brings it back), Ask. Its rules' test, then the wiring.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-close-logic.patch"
