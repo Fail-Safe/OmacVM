@@ -133,9 +133,12 @@ final class Runner {
         }
         // Pointer on its own layer (experimental): the guest loads its virtio-gpu
         // driver with the cursor plane shown and Hyprland puts the pointer there
-        // (omacvm-virtio-gpu-load, omacvm_app.lua). QEMU's cursor layer shows it.
+        // (omacvm-virtio-gpu-load, omacvm_app.lua). QEMU's pointer layers show it
+        // over every display's window. 2: this QEMU does (3.2.3's sent 1 and
+        // showed it over the main window only; a guest from then would leave the
+        // other displays without a pointer, #554, so it gets 2 and draws its own).
         if Settings.pointerPlane {
-            a += ["-smbios", "type=11,value=omacvm.pointerplane=1"]
+            a += ["-smbios", "type=11,value=omacvm.pointerplane=2"]
         }
         // Frames in step with the Mac (experimental): the guest's virtio-gpu driver
         // asks QEMU for the display's refresh and its vblank timer follows it
