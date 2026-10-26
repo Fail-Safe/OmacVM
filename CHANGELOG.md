@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.5 (unreleased)
+
+- **Pointer on its own layer: the pointer on every display (#554, reported by the user).** With
+  the switch on and the VM in full screen on the built-in display and an external one ("Use
+  external displays"), the external display showed no pointer at all. Only the main window's
+  display had the pointer's layer, and the VM drew no pointer of its own on the others. Now every
+  display the VM uses has its own pointer layer, shown over that display's window. The VM needs
+  Update VM for it; until then it draws the pointer itself, as with the switch off.
+
 ## 3.2.4
 
 A new experimental switch in the VM window's Display settings: the Mac redraws only the parts of the
@@ -24,12 +33,6 @@ exactly.
   Pro M1 Max, HDR at 120 Hz full screen: macOS's WindowServer used less GPU time with the pointer
   moving or a spinner; the whole Mac's power there is measured again before we give a number. The
   same pixels and frame rate at 60 Hz (8-bit and HDR) and 120 Hz (HDR). `omacvm check` has a "Changed parts" line.
-- **Pointer on its own layer: the pointer on every display (#554, reported by the user).** With
-  the switch on and the VM in full screen on the built-in display and an external one ("Use
-  external displays"), the external display showed no pointer at all. Only the main window's
-  display had the pointer's layer, and the VM drew no pointer of its own on the others. Now every
-  display the VM uses has its own pointer layer, shown over that display's window. The VM needs
-  Update VM for it; until then it draws the pointer itself, as with the switch off.
 - **Guest driver patches must fit exactly.** Update VM applied the VM driver's patches with up to
   two lines of fuzz, so a part could land in the wrong place of a newer Linux kernel and still
   build. Now each part must fit exactly; if one does not, the driver is built without that patch
