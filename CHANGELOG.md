@@ -5,6 +5,12 @@ in more words.
 
 ## 3.2.5 (unreleased)
 
+- **A failed OpenGL query at desktop start no longer ends the VM.** Seen once in about 30 test starts
+  on a Mac mini (#547). While the Mac's OpenGL was failing calls of Omarchy's bar, virglrenderer read the
+  size of its own uniform block without checking that the query worked, then checked it with an
+  assertion and aborted QEMU. Now a program whose block size is too small or unknown is refused like any
+  other shader the Mac does not take: the draws that need it are skipped and the VM keeps running.
+
 - **No "would like to control this Mac" dialog at every VM start.** When OmacVM was not allowed to
   control the computer (Accessibility), each VM start made macOS show that dialog, also with nobody
   at the Mac, because the VM's keyboard tap was tried anyway (and refused). Now the tap is made only
