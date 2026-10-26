@@ -98,6 +98,8 @@ case $cmd in
     unlock_state
     t0=$(date +%s)
     while :; do
+      # The holder gone (killed): its guard resumes; this pause waits for nothing more.
+      [[ -e $STATE/holder.$HOLDER ]] && holder_alive "$HOLDER" || { log "holder $HOLDER gone: pause ends"; exit 4; }
       left=0
       while IFS=$'\t' read -r l p d; do
         loaded "$l" || continue

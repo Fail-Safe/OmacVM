@@ -259,7 +259,16 @@ upto 5 [ ! -e "$L/actions.runner.o-r.mini-1" ] || bad "ci: runner 1 not stopped"
 wait $h 2>/dev/null
 upto 5 [ -e "$L/actions.runner.o-r.mini-1" ] || bad "ci: the guard did not start runner 1"
 rm -f "$W/actions-runner-2"; wait $pz; rc=$?
-same "ci: the holder gone during the pause -> pause stops nothing more (exit 4), both run" "4 actions.runner.o-r.mini-1 actions.runner.o-r.mini-2" "$rc $(running)"
+same "ci: the holder gone during its pause -> exit 4, nothing stopped again, both run" "4 actions.runner.o-r.mini-1 actions.runner.o-r.mini-2" "$rc $(running)"
+upto 5 [ ! -e "$T/ci-state" ] || bad "ci: state left after the holder died: $(ls "$T/ci-state" | tr '\n' ' ')"
+# ... and a pause that waits only for jobs ends with its holder, not after --wait.
+touch "$W/actions-runner-1" "$W/actions-runner-2"
+sleep 1 & h=$!
+CR pause --wait 30 --holder $h > /dev/null & pz=$!
+wait $h 2>/dev/null
+gone() { ! kill -0 "$1" 2>/dev/null; }
+upto 5 gone $pz && ok "ci: the holder gone -> its pause ends while jobs still run" || { bad "ci: pause still waits for a dead holder"; kill $pz; }
+rm -f "$W/actions-runner-1" "$W/actions-runner-2"
 upto 5 [ ! -e "$T/ci-state" ] || bad "ci: state left after the holder died: $(ls "$T/ci-state" | tr '\n' ' ')"
 
 # ---- the harnesses ask between rows, not only at their start (3.2.4: two Screen Sharing connects
