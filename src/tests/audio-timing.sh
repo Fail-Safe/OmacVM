@@ -6,6 +6,8 @@
 #  - a Mac audio device that does not answer: the playback-thread patch is built in, its
 #    log lines match omacvm check's "sound" line, the test stub builds
 #  - the sound's own thread: patch pinned and placed, launcher switch, log lines and check.sh agree
+#  - playback buffers the Mac's output takes (#548): the size rules pass, patches placed, the
+#    launcher's size file, log lines and check.sh's "sound buffers" line agree, the stub builds
 #  - the guest: RTKit's drop-in without the canary is installed, and omacvm check tells a
 #    real-time PipeWire from a demoted one
 # Exit 0 when every check passes.
@@ -108,6 +110,45 @@ check "check.sh: a device that does not answer warns with the fix" grep -q "^war
 check "check.sh: one that works again is ok" grep -q "^ok:.*works again" <<<"$(sound "$NA" "$WA")"
 check "check.sh: stuck again after that warns" grep -q "^warn:" <<<"$(sound "$NA" "$WA" "$NA")"
 check "check.sh: a run without either line prints nothing" test -z "$(sound "OmacVM: HDA sound pacing on")"
+# Playback buffers the Mac's output takes (#548: AirPods refused the own thread's 256-frame queue).
+SP=$R/app/runtime/patches/qemu-sdl-audio-out-size.patch
+SL=$R/app/runtime/patches/qemu-sdl-audio-out-size-logic.patch
+for f in qemu-sdl-audio-out-size-logic.patch qemu-sdl-audio-out-size.patch; do
+  check "$f is pinned in SHA256SUMS" grep -q " $f\$" "$R/app/runtime/patches/SHA256SUMS"
+done
+size_line=$(grep -n 'patches/qemu-sdl-audio-out-size.patch"' "$BUILD" | cut -d: -f1)
+logic_line=$(grep -n 'patches/qemu-sdl-audio-out-size-logic.patch"' "$BUILD" | cut -d: -f1)
+check "runtime build applies the size rules, then their wiring, after the playback-thread patch" \
+  test -n "$size_line" -a -n "$logic_line" -a "${logic_line:-0}" -gt "${play_line:-0}" -a "${size_line:-0}" -gt "${logic_line:-0}"
+check "runtime build checks the wiring" grep -qF 'Tests/audio/test-out-size.sh" "$source_dir/audio/sdlaudio.c"' "$BUILD"
+check "the size rules pass their test" "$R/app/runtime/Tests/audio/test-out-size.sh"
+check "QEMU reads the launcher's size file" grep -qF 'g_getenv("OMACVM_AUDIO_OUT_FRAMES_FILE")' "$SP"
+check "the launcher hands QEMU the size file" grep -qF 'env["OMACVM_AUDIO_OUT_FRAMES_FILE"] = audioFramesFile' "$RUNNER"
+check "the launcher picks the sound options for a wireless output at the start" \
+  grep -qF 'Runner.audiodev(thread: audioThread, wireless: audioWireless, mic: Runner.micAllowed)' "$RUNNER"
+for line in "playback buffers: %u frames" "the Mac's output did not start with" "the Mac's output refused every buffer" "the Mac's output changed: playback"; do
+  check "out-size patch logs '$line'" grep -qF "OmacVM: sound: $line" "$SP"
+done
+stub=$(mktemp -d)
+check "the refusing-start test stub builds" clang -dynamiclib -Wall -Werror -o "$stub/aqrefuse.dylib" \
+  "$R/app/runtime/Tests/audio/refuse-small-start.c" -framework AudioToolbox
+rm -rf "$stub"
+buffers() {   # QEMU's log lines -> the status of check.sh's "sound buffers" line
+  local miclog TYPE=app out
+  miclog=$(mktemp); printf '%s\n' "$@" > "$miclog"
+  ok() { echo "ok:$2"; }; warn() { echo "warn:$2"; }
+  out=$(eval "$(sed -n "/^# Playback buffers the Mac's output takes/,/^fi$/p" "$CHECK")")
+  rm -f "$miclog"; echo "$out"
+}
+OWN="qemu-system-aarch64: info: OmacVM: sound: playback buffers: 256 frames (the sound path's own)"
+REF="qemu-system-aarch64: OmacVM: sound: the Mac's output did not start with 256-frame buffers (CoreAudio error (AudioQueueStart): -66681); trying 512 frames"
+GOT="qemu-system-aarch64: info: OmacVM: sound: playback buffers: 512 frames (the Mac's output refused 256)"
+ALL="qemu-system-aarch64: OmacVM: sound: the Mac's output refused every buffer size up to 1024 frames; the VM goes on without sound"
+check "check.sh: the path's own size is ok" grep -q "^ok:256 frames (the sound path's own)" <<<"$(buffers "$OWN")"
+check "check.sh: a refused size that played larger is ok and says so" grep -q "^ok:512 frames (the Mac's output refused 256)" <<<"$(buffers "$OWN" "$REF" "$GOT")"
+check "check.sh: every size refused warns with the way out" grep -q "^warn:.*restart the VM while this output is connected" <<<"$(buffers "$OWN" "$REF" "$ALL")"
+check "check.sh: playing again after that is ok" grep -q "^ok:512" <<<"$(buffers "$ALL" "$GOT")"
+check "check.sh: a run without the lines prints nothing" test -z "$(buffers "OmacVM: HDA sound pacing on")"
 # The guest: RTKit keeps PipeWire real-time after the VM was stopped (src/guest/sound/rtkit-no-canary.conf).
 NC=$R/src/guest/sound/rtkit-no-canary.conf
 GI=$R/src/guest/install.sh

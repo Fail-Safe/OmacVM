@@ -602,6 +602,17 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     *"works again"*) ok "sound" "the Mac's audio device stopped answering earlier in this run and works again" ;;
   esac
 fi
+# Playback buffers the Mac's output takes (#548): AirPods refused the sound's
+# own thread's 256-frame queue (AudioQueueStart -66681). QEMU opens wireless
+# outputs with more, and tries a larger size when a start is refused.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  sb=$(grep -oE "OmacVM: sound: (playback buffers: .*|the Mac's output refused every buffer size up to [0-9]+ frames)" "$miclog" | tail -1)
+  case $sb in
+    "") ;;   # an app from before 3.2.5, or no sound yet
+    *"refused every buffer size"*) warn "sound buffers" "the Mac's output would not start at any buffer size (${sb##* up to }), the VM has no sound; fix: restart the VM while this output is connected (it then gets the buffers of QEMU's main loop path), or pick another output in System Settings > Sound" ;;
+    *) ok "sound buffers" "${sb#OmacVM: sound: playback buffers: }" ;;
+  esac
+fi
 # Disk flushes (3.2.1): each guest flush is a write barrier on the Mac's drive,
 # so a power cut leaves the VM's file system whole; qemu.log says which call
 # this start used (at the guest's first flush).
