@@ -101,7 +101,7 @@ on CGL, not on ANGLE.
 | Present on each flush | built: `gpu-native` | `qemu-cocoa-gl-present-on-flush.patch` |
 | IOSurface present | built: `gpu-native` | `qemu-cocoa-gl-present-iosurface.patch` |
 | Partial present (only the box the guest changed; needs Linux 7.4 or OmacVM's driver for real rects) | built: `frame-path`, off by default (`OMACVM_GL_PRESENT_DAMAGE=1`) | `omacvm-cocoa-present-damage*.patch`, ADR 0051 |
-| Tiled present (a frame that changed little goes to WindowServer as a few tile layers over the last whole frame; the same guest rects) | built: `window-draw`, off by default (`OMACVM_GL_PRESENT_TILES=1`; an app switch comes with #520's driver) | `omacvm-cocoa-present-tiles*.patch`, ADR 0055 |
+| Tiled present (a frame that changed little goes to WindowServer as a few tile layers over the last whole frame; the same guest rects) | built: `window-draw`, off by default (experimental switch "Draw only what changed", `presentTiles`, which also has the VM load OmacVM's driver for its damage fix, SMBIOS `omacvm.damage=1`; `OMACVM_GL_PRESENT_TILES=1`; Linux 7.4 has the fix itself) | `omacvm-cocoa-present-tiles*.patch`, ADR 0055 |
 | Blob alignment for 16 KiB pages | built: `gpu-native`, `gpu-venus` | `qemu-virtio-gpu-blob-alignment.patch` |
 | Venus on MoltenVK | built: `gpu-venus`, merged into `gpu-native`, hidden switch | see section 6 |
 | KosmicKrisp on macOS 26 | built, in release builds (3.0.0, ADR 0035) | `virgl-darwin-vulkan-beside.patch` + `virgl-darwin-kosmickrisp-fallback.patch` |

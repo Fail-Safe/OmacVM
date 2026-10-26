@@ -3,6 +3,28 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.4 (unreleased)
+
+- **Draw only what changed (experimental, off by default).** A new switch in the VM window's Display
+  section for the tiled present built into 3.2.3. OmacVM.app shows every frame of the VM as a new
+  whole picture, so macOS redraws the whole window for each one, also when only the pointer moved.
+  With the switch, only the 256x256 squares the VM changed get a new picture. For that the VM needs
+  to say what changed in each frame: with the switch on, it loads OmacVM's own build of its graphics
+  driver (the standard one with Linux 7.4's fix that passes this on; Update VM builds it, internet
+  once). With the switch off, or in GPU safe mode, the Mac draws whole frames as before, and the VM
+  loads the driver it loaded in 3.2.3: the standard one, or OmacVM's own when HDR and 10-bit colour,
+  Pointer on its own layer or Frames in step with the Mac is on. OmacVM's own now always has the
+  fix, so those starts tell the Mac what changed even with this switch off; the Mac does not use
+  it then. MacBook Air M2, the VM full screen at 60 Hz, the pointer moving: 3.13-3.17 W instead of
+  3.55-3.75 W for the whole Mac (-11 to -17 %, two sets); scrolling and typing the same. MacBook
+  Pro M1 Max, HDR at 120 Hz full screen: macOS's WindowServer used less GPU time with the pointer
+  moving or a spinner; the whole Mac's power there is measured again before we give a number. The
+  same pixels and frame rate at 60 Hz (8-bit and HDR) and 120 Hz (HDR). `omacvm check` has a "Changed parts" line.
+- **Guest driver patches must fit exactly.** Update VM applied the VM driver's patches with up to
+  two lines of fuzz, so a part could land in the wrong place of a newer Linux kernel and still
+  build. Now each part must fit exactly; if one does not, the driver is built without that patch
+  (as when it does not apply at all), down to the standard driver.
+
 ## 3.2.3
 
 Two new experimental switches in the VM window's Display settings: the VM stops drawing while its

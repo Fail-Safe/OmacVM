@@ -1,15 +1,17 @@
 #!/bin/bash
-# OmacVM.app, 10-bit colour (HDR), the pointer on its own layer and vblanks
-# in step with the Mac's refresh: the guest's virtio-gpu driver with three
-# module options: deep_color (10-bit scanout formats,
-# linux-virtio-gpu-deep-color.patch), cursor_plane
-# (linux-virtio-gpu-cursor-plane.patch) and vsync_lock
-# (linux-virtio-gpu-vsync-lock.patch); without them it is the stock
-# driver. Built for each kernel
-# into /usr/local/lib/omacvm/virtio-gpu/<kernel>/, where depmod does not see
-# it. It stays dormant: the modprobe rule written here hands virtio_gpu to
-# omacvm-virtio-gpu-load, which loads it only for a VM start with one of the
-# app's switches on. omacvm apply runs this on every app VM, the pacman hook after
+# OmacVM.app: the guest's virtio-gpu driver with three module options:
+# deep_color (10-bit scanout formats for HDR, linux-virtio-gpu-deep-color.patch),
+# cursor_plane (the pointer on its own layer,
+# linux-virtio-gpu-cursor-plane.patch) and vsync_lock (vblanks in step with
+# the Mac's refresh, linux-virtio-gpu-vsync-lock.patch), and Linux 7.4's damage fix
+# (linux-virtio-gpu-damage-clips.patch, only on a kernel without it): the
+# compositor's damage reaches QEMU, which then redraws only what changed.
+# Without the options it is the stock driver plus that fix. Built for each
+# kernel into /usr/local/lib/omacvm/virtio-gpu/<kernel>/, where depmod does
+# not see it. The modprobe rule written here hands virtio_gpu to
+# omacvm-virtio-gpu-load, which loads it only for a start with one of the
+# app's switches on (it asks over SMBIOS), else the stock one.
+# omacvm apply runs this on every app VM, the pacman hook after
 # kernel updates. Needs the kernel's headers. The driver's sources are the
 # upstream stable release of the kernel's version, from kernel.org; download,
 # patch and build run as a user id of their own (no account, nothing else
@@ -23,10 +25,10 @@
 #                                       or why not (exit 1), and this start's driver
 #   omacvm-virtio-gpu-build --remove    the builds and the modprobe rule go
 # A kernel without headers is skipped; a build whose stamp (the patches'
-# sha256 and the kernel) is current is not built again. The pointer layer and
-# the vsync lock are experimental: one whose patch does not apply or build on
-# a kernel is left out of that kernel's build (its file "without" and
-# --status say which), and HDR keeps OmacVM's driver.
+# sha256 and the kernel) is current is not built again. Deep colour is the
+# base; the cursor plane, the vsync lock and the damage fix go on top: one
+# that does not apply or build on a kernel is left out of that kernel's build
+# (its file "without" and --status say which), and the others stay.
 set -euo pipefail
 # Tests only: a made-up file system under this folder, stand-ins on the PATH.
 P=${OMACVM_VIRTIO_GPU_TEST_ROOT:-}
@@ -37,6 +39,7 @@ rule=$P/etc/modprobe.d/omacvm-virtio-gpu.conf
 patch_file=$root/linux-virtio-gpu-deep-color.patch
 cursor_file=$root/linux-virtio-gpu-cursor-plane.patch
 vsync_file=$root/linux-virtio-gpu-vsync-lock.patch
+damage_file=$root/linux-virtio-gpu-damage-clips.patch
 # The build's own user id: no account, no other process runs as it (nobody
 # is shared by other services, which could change the sources mid-build).
 builder=64917
@@ -46,7 +49,7 @@ trap 'rm -rf ${work:+"$work"} ${stage:+"$stage"}' EXIT
 
 say() { echo "omacvm-virtio-gpu: $*"; }
 
-stamp_for() { echo "$(cat "$patch_file" "$cursor_file" "$vsync_file" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1) $1"; }
+stamp_for() { echo "$(cat "$patch_file" "$cursor_file" "$vsync_file" "$damage_file" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1) $1"; }
 
 current() {   # KERNEL: built, and from this patch
   [[ -f $root/$1/virtio-gpu.ko && $(cat "$root/$1/stamp" 2>/dev/null) == "$(stamp_for "$1")" ]]
@@ -72,43 +75,90 @@ fetch_and_make() {   # KERNEL VERSION WORK
       --connect-timeout 10 --max-time 60 --retry 2 -o "$src/$f" "$base/$f?h=v$version"
   done
   cp -R "$3/drivers" "$3/stock"
-  # Deep colour (HDR) is the base; the pointer layer and the vsync lock are
-  # experimental and each goes on top. One that does not apply or build on
-  # this kernel is left out (and said, for --status and the loader), so the
-  # others still get OmacVM's driver: first all three, then without the
-  # vsync lock, then deep colour alone.
-  local -a files=("$patch_file" "$cursor_file" "$vsync_file")
-  local k i why="" first=""
-  for k in 3 2 1; do
-    rm -rf "$3/drivers" && cp -R "$3/stock" "$3/drivers"
-    why=""
-    for ((i = 0; i < k; i++)); do
-      patch -s -d "$3" -p1 -f -i "${files[i]}" ||
-        { why="$(option_of "${files[i]}") does not apply to $version"; break; }
-    done
-    if [[ -z $why ]]; then
-      # Out of tree: the trace header sits next to the sources.
-      sed -i 's|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH .|' "$src/virtgpu_trace.h"
-      echo 'CFLAGS_virtgpu_trace_points.o := -I$(src)' >> "$src/Makefile"
-      if make -s -j"$(nproc)" -C "$mods/$kernel/build" M="$src" CONFIG_DRM_VIRTIO_GPU=m modules; then
-        for ((i = k; i < 3; i++)); do
-          echo "omacvm-virtio-gpu: built without $(option_of "${files[i]}"): $first"
-        done
-        cat "$src/virtio-gpu.ko" >&3
-        return 0
-      fi
-      why="$(option_of "${files[k - 1]}") does not build on $version"
+  # Deep colour (HDR) is the base. On top, in this order: the cursor plane and
+  # the vsync lock (experimental; the second's hunks sit on the first's) and
+  # Linux 7.4's damage fix (only on a kernel with the line it replaces).
+  # One that does not apply or build is left out and said (for --status and
+  # the loader), so a newer kernel never takes HDR or the others down with it.
+  local -a use=("$patch_file") left=() try
+  local p q i damage built=""
+  tree "$3" "${use[@]}" || { echo "omacvm-virtio-gpu: no build: deep_color does not apply to $version"; return 1; }
+  # The line Linux 7.4's fix replaces (ours goes on), or the line it puts in
+  # (the kernel's own); neither: not known, so ours stays out.
+  if grep -q 'new_plane_state->ignore_damage_clips = true;' "$src/virtgpu_plane.c"; then damage=ours
+  elif grep -q 'new_plane_state->fb && bo->dumb;' "$src/virtgpu_plane.c"; then damage=kernel
+  else
+    damage=unknown
+    left+=("damage_clips: $version's virtgpu_plane.c has neither the line it replaces nor Linux 7.4's fix")
+  fi
+  for p in "$cursor_file" "$vsync_file" "$damage_file"; do
+    [[ $p != "$damage_file" || $damage == ours ]] || continue
+    if [[ $p == "$vsync_file" && " ${use[*]} " != *" $cursor_file "* ]]; then
+      left+=("vsync_lock: it needs cursor_plane, which is left out"); continue
     fi
-    first=${first:-$why}
+    if tree "$3" "${use[@]}" "$p"; then use+=("$p")
+    else left+=("$(option_of "$p"): $(option_of "$p") does not apply to $version"); fi
   done
-  echo "omacvm-virtio-gpu: no build: $why"
-  return 1
+  # All that apply; when that build fails, without one extra patch at a time
+  # (the last first; the vsync lock goes with the cursor plane it sits on),
+  # then deep colour alone.
+  if make_with "$kernel" "$3" "${use[@]}"; then built=1
+  else
+    for (( i = ${#use[@]} - 1; i >= 1; i-- )); do
+      p=${use[i]} try=()
+      for q in "${use[@]}"; do
+        [[ $q == "$p" || ( $p == "$cursor_file" && $q == "$vsync_file" ) ]] || try+=("$q")
+      done
+      make_with "$kernel" "$3" "${try[@]}" || continue
+      left+=("$(option_of "$p"): $(option_of "$p") does not build on $version")
+      [[ $p != "$cursor_file" || " ${use[*]} " != *" $vsync_file "* ]] ||
+        left+=("vsync_lock: it needs cursor_plane, which is left out")
+      use=("${try[@]}") built=1
+      break
+    done
+  fi
+  if [[ -z $built ]] && (( ${#use[@]} > 2 )) && make_with "$kernel" "$3" "$patch_file"; then
+    for p in "${use[@]:1}"; do
+      left+=("$(option_of "$p"): left out, the build on $version failed with two or more of the extra patches")
+    done
+    use=("$patch_file") built=1
+  fi
+  [[ -n $built ]] || { echo "omacvm-virtio-gpu: no build: deep_color does not build on $version"; return 1; }
+  for p in ${left[@]+"${left[@]}"}; do echo "omacvm-virtio-gpu: built without $p"; done
+  # The word goes as it is into the build's file "damage" (the loader and
+  # omacvm check read it): ours, kernel (the kernel's own), unknown.
+  if [[ $damage != ours ]]; then echo "omacvm-virtio-gpu: damage fix: $damage"
+  elif [[ " ${use[*]} " == *" $damage_file "* ]]; then echo "omacvm-virtio-gpu: damage fix: ours"; fi
+  cat "$src/virtio-gpu.ko" >&3
 }
 
-option_of() {   # PATCH FILE: its module option
+make_with() {   # KERNEL WORK PATCH...: those patches on the stock sources, built; 1 if one does not apply or it does not build
+  local kernel=$1 src=$2/drivers/gpu/drm/virtio
+  shift
+  tree "$@" || return 1
+  # Out of tree: the trace header sits next to the sources.
+  sed -i 's|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH .|' "$src/virtgpu_trace.h"
+  echo 'CFLAGS_virtgpu_trace_points.o := -I$(src)' >> "$src/Makefile"
+  make -s -j"$(nproc)" -C "$mods/$kernel/build" M="$src" CONFIG_DRM_VIRTIO_GPU=m modules
+}
+
+tree() {   # WORK PATCH...: the stock sources again, these patches on them; 1 if one does not apply
+  local w=$1 p; shift
+  rm -rf "$w/drivers" && cp -R "$w/stock" "$w/drivers" || return 1
+  # No fuzz: each hunk's context must fit exactly (a shift in lines is fine).
+  # With patch's default fuzz a hunk can land in the wrong place of a newer
+  # kernel and still build; this way it does not apply, and the patch is left out.
+  # Each hunk needs as many context lines before its change as after: GNU
+  # patch with -F 0 pins an uneven hunk to the start or end of the file
+  # (src/tests/virtio-gpu-patches.sh checks it).
+  for p; do patch -s -d "$w" -p1 -f -F 0 -i "$p" || return 1; done
+}
+
+option_of() {   # PATCH FILE: its name in the build's "without" list
   case $1 in
     "$cursor_file") echo cursor_plane ;;
     "$vsync_file") echo vsync_lock ;;
+    "$damage_file") echo damage_clips ;;
     *) echo deep_color ;;
   esac
 }
@@ -125,8 +175,8 @@ build() {   # KERNEL: 0 = built, current or no headers; 1 = failed
   version=${kernel%%-*}
   [[ $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { failed "$kernel" "unexpected kernel version"; return 1; }
   if [[ $version == *.*.0 ]]; then version=${version%.0}; fi   # tag v7.2, not v7.2.0
-  [[ -f $patch_file && -f $cursor_file && -f $vsync_file ]] ||
-    { failed "$kernel" "no $patch_file, $cursor_file or $vsync_file"; return 1; }
+  [[ -f $patch_file && -f $cursor_file && -f $vsync_file && -f $damage_file ]] ||
+    { failed "$kernel" "no $patch_file, $cursor_file, $vsync_file or $damage_file"; return 1; }
   left=$((budget - SECONDS))
   (( left > 10 )) || { failed "$kernel" "no time left in this run (${budget} s for all kernels)"; return 1; }
   if ! { work=$(mktemp -d "$P/tmp/omacvm-virtio-gpu.XXXXXX") && stage=$(mktemp -d "$P/tmp/omacvm-virtio-gpu.XXXXXX") &&
@@ -149,17 +199,24 @@ build() {   # KERNEL: 0 = built, current or no headers; 1 = failed
   elif [[ $(modinfo -F vermagic "$stage/virtio-gpu.ko" 2>/dev/null) != "$kernel "* ]]; then
     failed "$kernel" "the build is not a module for $kernel"; rc=1
   # The stamp last: a module without its stamp is never loaded.
-  # What the build left out (an experimental patch that does not fit this kernel): kept for --status.
+  # What the build left out (a patch that does not fit this kernel) and whose
+  # damage fix it has ("ours", "kernel", "unknown"): kept for --status, the loader, omacvm check.
   elif ! { install -d -o root -g root -m 0755 "$root/$kernel" &&
-           rm -f "$root/$kernel/stamp" "$root/$kernel/error" "$root/$kernel/without" &&
+           rm -f "$root/$kernel/stamp" "$root/$kernel/error" "$root/$kernel/without" "$root/$kernel/damage" &&
            install -o root -g root -m 0644 "$stage/virtio-gpu.ko" "$root/$kernel/virtio-gpu.ko" &&
            { sed -n 's/^omacvm-virtio-gpu: built without //p' "$stage/log" > "$stage/without"; true; } &&
            { [[ ! -s $stage/without ]] || install -o root -g root -m 0644 "$stage/without" "$root/$kernel/without"; } &&
+           { sed -n 's/^omacvm-virtio-gpu: damage fix: //p' "$stage/log" > "$stage/damage"; true; } &&
+           { [[ ! -s $stage/damage ]] || install -o root -g root -m 0644 "$stage/damage" "$root/$kernel/damage"; } &&
            stamp_for "$kernel" | install -o root -g root -m 0644 /dev/stdin "$root/$kernel/stamp"; }; then
     failed "$kernel" "could not install it into $root/$kernel"; rc=1
   else
     say "$kernel: built (loaded only when one of the app's switches starts the VM)"
     while IFS= read -r v; do say "$kernel: without $v"; done < "$stage/without"
+    case $(cat "$stage/damage") in
+      kernel) say "$kernel: the damage fix is the kernel's own" ;;
+      unknown) say "$kernel: not known whether the kernel keeps the damage (no damage fix added)" ;;
+    esac
   fi
   rm -rf "$work" "$stage"; work="" stage=""
   return $(( rc != 0 ))
@@ -184,11 +241,12 @@ rule_text() {
 # OmacVM.app (omacvm-virtio-gpu-build): virtio_gpu goes through
 # omacvm-virtio-gpu-load, which loads OmacVM's driver only for a start with
 # one of the app's switches on (10-bit colour, the pointer on its own
-# layer, frames in step with the Mac), else the stock one (and the stock one if it fails). In the
-# initramfs (no loader there; mkinitcpio's kms hook puts virtio_gpu in it) such
-# a start loads nothing yet: udev loads it again from the real root, through
-# the loader. Every other start: the stock one, as before.
-install virtio_gpu if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=1 -e omacvm.vsynclock=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi
+# layer, frames in step with the Mac, draw only what changed), else the stock
+# one (and the stock one if it fails). In the initramfs (no loader there;
+# mkinitcpio's kms hook puts virtio_gpu in it) such a start loads nothing yet:
+# udev loads it again from the real root, through the loader. Every other
+# start: the stock one, as before.
+install virtio_gpu if [ -x /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load ]; then /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-load $CMDLINE_OPTS || /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; elif grep -qs -e omacvm.deepcolor=1 -e omacvm.hdr=1 -e omacvm.pointerplane=1 -e omacvm.vsynclock=1 -e omacvm.damage=1 /sys/firmware/dmi/entries/11-*/raw; then :; else /sbin/modprobe --ignore-install virtio_gpu $CMDLINE_OPTS; fi
 EOF
 }
 
@@ -205,7 +263,7 @@ write_rule() {
 }
 
 # An initramfs made before the rule (or before it changed) that has
-# virtio_gpu in it loads the stock driver for every start: made again, once
+# virtio_gpu in it loads the stock driver at boot: made again, once
 # (mkinitcpio -P; a kernel update makes them anyway, after this rule).
 refresh_initramfs() {
   local img stale=""
@@ -217,7 +275,7 @@ refresh_initramfs() {
   [[ -n $stale ]] || return 0
   say "the initramfs has virtio_gpu but not the rule yet: mkinitcpio -P"
   timeout 300 mkinitcpio -P > "$P/var/log/omacvm-virtio-gpu-mkinitcpio.log" 2>&1 ||
-    say "mkinitcpio -P failed (log: /var/log/omacvm-virtio-gpu-mkinitcpio.log); those starts get the stock driver until the next one"
+    say "mkinitcpio -P failed (log: /var/log/omacvm-virtio-gpu-mkinitcpio.log); the stock driver loads at boot until the next one"
 }
 
 status() {

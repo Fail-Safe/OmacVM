@@ -54,7 +54,12 @@ every 30th partial frame in full beside it and compares them pixel for pixel
 
 - Guests before Linux 7.4 send whole-plane rects for a compositor's frames
   (page flips): those stay full draws until their kernel (or OmacVM's
-  driver) sends real damage. A buffer flushed again (the boot console, a
+  driver) sends real damage. OmacVM's driver carries the fix
+  (`linux-virtio-gpu-damage-clips.patch`, the two upstream commits squashed);
+  it loads for a start with "Draw only what changed" on (SMBIOS
+  `omacvm.damage=1`, 0055) and for the other switches that load it (HDR,
+  the pointer layer, frames in step; amended in 0049). `omacvm check`'s
+  "Changed parts" line says whether the damage reaches QEMU. A buffer flushed again (the boot console, a
   TTY) carries real rects on any kernel, so once on, partial draws happen
   there on today's 7.2 guests too.
 - The watt numbers are an offscreen bench (no VM); there is no A/B in a VM

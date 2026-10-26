@@ -314,6 +314,25 @@ struct VsyncLockRow: View {
     }
 }
 
+/// Draw only what changed (Settings.presentTiles, experimental, off by
+/// default): QEMU's tiled present, read by each start of the VM.
+struct PresentTilesRow: View {
+    var tick = 0
+    @State private var on = Settings.presentTiles
+
+    static let info = "When only a small part of the VM's screen changes (the pointer, a blinking cursor, a clock, a spinner), only that part goes to macOS as new pixels, in squares of 256 x 256; macOS then redraws only those squares of the window instead of all of it. Less GPU work and battery, measured for the whole Mac: a MacBook Air M2 at 60 Hz with the pointer moving 11-17 % less power. On a MacBook Pro M1 Max with HDR at 120 Hz, macOS used less GPU time to draw the window with the pointer moving or a spinner (its power is still being measured). The same picture and the same frame rate in the tests (60 Hz 8-bit and HDR, 120 Hz HDR). Pages that scroll or play video change most of the screen and stay as before. With the switch on, the VM loads OmacVM's own build of its graphics driver, which tells the Mac what changed in each frame: Update VM builds it (needs internet once). Off, the Mac draws whole frames as before, and the VM loads the driver it would without this switch: the standard one, or OmacVM's own when HDR and 10-bit colour, Pointer on its own layer or Frames in step with the Mac is on (that one now always says what changed, but the Mac does not use it). A window that scales the VM's picture (not shown pixel for pixel) draws whole frames as before. Counts from the next start of the VM. Experimental: it may use up to about 130 MB more memory on large displays while parts change (the squares' own pictures and what macOS keeps of them). GPU safe mode turns it off."
+
+    var body: some View {
+        SettingRow(title: "Draw only what changed", badge: "experimental",
+                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Small changes go to macOS as small squares, not as a whole new picture. From the next start of the VM.",
+                   info: Self.info, probe: "present-tiles") {
+            RowSwitch(title: "Draw only what changed", isOn: $on, enabled: !Settings.gpuSafeMode)
+        }
+        .onChange(of: on) { _, v in if v != Settings.presentTiles { Settings.presentTiles = v } }
+        .onChange(of: tick) { _, _ in on = Settings.presentTiles }
+    }
+}
+
 /// The sound on its own thread (Settings.audioThread, on by default from
 /// 3.1.17): read by each start of the VM, so a change counts from the next one.
 struct SoundThreadRow: View {

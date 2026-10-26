@@ -74,6 +74,7 @@ expect "fresh: Extra brightness off" false "$(val app.extraBrightness)"
 expect "fresh: Pause drawing while hidden off" false "$(val app.pauseWhileHidden)"
 expect "fresh: Pointer on its own layer off" false "$(val app.pointerPlane)"
 expect "fresh: Frames in step with the Mac off" false "$(val app.vsyncLock)"
+expect "fresh: Draw only what changed off" false "$(val app.presentTiles)"
 expect "fresh: Closing the window shuts down" shutdown "$(val app.closeAction)"
 expect "fresh: OmacVM's own icon" default "$(val app.appIconTheme)"
 expect "fresh: escape combo: focused monitor" pointer "$(val app.escapeSwipe)"
@@ -101,7 +102,7 @@ done
 
 # (b) Changes as the window makes them, read by the next launches; (c) per VM.
 mkdir -p "$H/Shared"
-for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pauseWhileHidden true" "pointerPlane true" "vsyncLock true" "closeAction ask" "appIconTheme flexoki-light" \
+for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pauseWhileHidden true" "pointerPlane true" "vsyncLock true" "presentTiles true" "closeAction ask" "appIconTheme flexoki-light" \
           "escapeSwipe all" "mouseSwipeFingers 3" "swipeOut true" "updateChecks false"; do
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
@@ -122,6 +123,7 @@ for launch in 1 2; do
   expect "launch $launch: Pause drawing while hidden on" true "$(val app.pauseWhileHidden)"
   expect "launch $launch: Pointer on its own layer on" true "$(val app.pointerPlane)"
   expect "launch $launch: Frames in step with the Mac on" true "$(val app.vsyncLock)"
+  expect "launch $launch: Draw only what changed on" true "$(val app.presentTiles)"
   expect "launch $launch: Closing the window asks" ask "$(val app.closeAction)"
   expect "launch $launch: icon Flexoki Light" flexoki-light "$(val app.appIconTheme)"
   expect "launch $launch: escape combo: all monitors" all "$(val app.escapeSwipe)"
@@ -229,5 +231,57 @@ for want in false true; do
     "$(defaults read "$D" extraBrightness)"
 done
 expect "Extra brightness: HDR's own switch as set last" false "$(val app.hdr)"
+
+# (g) Draw only what changed: a start asks the VM for its driver's damage fix (SMBIOS
+# omacvm.damage=1) and QEMU for tiles (OMACVM_GL_PRESENT_TILES=1) only with the switch on and
+# GPU safe mode off; GPU safe mode leaves the switch as set. Runner takes both from one answer.
+for want in false true; do
+  run set presentTiles $want || { echo "FAIL set presentTiles $want"; fail=1; }
+  for step in "plain" "GPU safe mode on" "GPU safe mode off" "layer present"; do
+    case $step in
+      "GPU safe mode on") defaults write "$D" gpuSafeMode -bool true ;;
+      "GPU safe mode off") defaults delete "$D" gpuSafeMode ;;
+    esac
+    if [[ $step == "layer present" ]]; then s=$(OMACVM_GL_PRESENT=layer run start); else s=$(run start); fi
+    case $want/$step in
+      false/*) w="tiles false (switch off)" ;;
+      true/"GPU safe mode on") w="tiles false (GPU safe mode)" ;;
+      true/"layer present") w="tiles false (OMACVM_GL_PRESENT=layer: frames in a CAOpenGLLayer)" ;;
+      true/*) w="tiles true (the VM's driver says what changed, QEMU shows it in tiles)" ;;
+    esac
+    expect "Draw only what changed $want, $step: the start's answer" "$w" "tiles ${s##*, tiles }"
+    dump
+    expect "Draw only what changed $want, $step: the switch still $want" $want "$(val app.presentTiles)"
+  done
+done
+RUNNER=$R/app/app/Sources/OmacVM/Runner.swift
+expect "Runner: QEMU's tiles and the guest's omacvm.damage=1 from the same start answer" "2" \
+  "$(grep -c 'if tiles.on {' "$RUNNER")"
+grep -q 'a += \["-smbios", "type=11,value=omacvm.damage=1"\]' "$RUNNER" && grep -q 'env\["OMACVM_GL_PRESENT_TILES"\] = env\["OMACVM_GL_PRESENT_TILES"\] == "check" ? "check" : "1"' "$RUNNER" &&
+  ! grep -q 'Settings.presentTiles && ' "$RUNNER" && echo "ok   Runner: both under tiles.on, not the bare switch" ||
+  { echo "FAIL Runner: omacvm.damage=1 / OMACVM_GL_PRESENT_TILES not from Settings.presentTilesStart()"; fail=1; }
+# The (i): with the switch off, HDR, the pointer layer and frames in step still load OmacVM's
+# driver, and it carries the damage fix; only the Mac's tiles are off. Not "the standard driver".
+info=$(sed -n '/^struct PresentTilesRow/,/static let info/p' "$R/app/app/Sources/OmacVM/SettingsRows.swift" | tail -n1)
+if [[ $info == *"HDR and 10-bit colour, Pointer on its own layer or Frames in step with the Mac"* &&
+      $info == *"draws whole frames"* && $info != *"keeps its standard driver"* ]]; then
+  echo "ok   Draw only what changed (i): off = the driver the other switches ask for, whole frames on the Mac"
+else
+  echo "FAIL Draw only what changed (i): says off = the standard driver, but HDR / pointer layer / frames in step load OmacVM's (with the damage fix)"; fail=1
+fi
+# The M1 Max's HDR 120 Hz set (td2) passed: the (i) says 120 Hz is tested, with its numbers.
+if [[ $info == *"M1 Max"* && $info == *"120 Hz"* && $info != *"not tested yet"* ]]; then
+  echo "ok   Draw only what changed (i): tested at 120 Hz (HDR, M1 Max)"
+else
+  echo "FAIL Draw only what changed (i): still says 120 Hz is not tested (td2 passed on the M1 Max)"; fail=1
+fi
+# td2's M1 Max watts had a macOS prompt over the VM on both sides: no M1 Max percentages in the (i)
+# until td2b runs without it (the Air's measured -11..-17 % stays).
+m1=${info#*M1 Max}; m1=${m1%%(*}
+if [[ $m1 != *"%"* ]]; then
+  echo "ok   Draw only what changed (i): no M1 Max power figures before td2b"
+else
+  echo "FAIL Draw only what changed (i): gives M1 Max percentages from td2 (prompt over the VM, re-run pending)"; fail=1
+fi
 
 exit $fail

@@ -1,11 +1,13 @@
 # 0055: Tiled present: only the changed tiles of a frame go to WindowServer
 
 Status: accepted, built (`omacvm-cocoa-present-tiles*.patch`), off by default:
-`OMACVM_GL_PRESENT_TILES=1` (`=check` for tests). It acts only when the guest
-says what changed: Linux 7.4, or OmacVM's virtio-gpu driver with the damage
-fix ([0051](0051-partial-present.md), #520); the app gets an experimental
-switch for it together with that driver (a switch that does nothing on
-today's 7.2 guests would mislead). Notes and numbers:
+the experimental switch "Draw only what changed" (`presentTiles`, the VM
+window's Display section) or `OMACVM_GL_PRESENT_TILES=1` (`=check` for tests).
+It acts only when the guest says what changed: Linux 7.4, or OmacVM's
+virtio-gpu driver with the damage fix ([0051](0051-partial-present.md), #520),
+which the switch asks the VM to load (SMBIOS `omacvm.damage=1`; not in GPU
+safe mode); the switch ships with that driver (on a stock 7.2 guest it would
+do nothing). Notes and numbers:
 work/tracks/window-draw.md.
 
 ## Context
@@ -72,6 +74,20 @@ same VM): 3.16 / 3.16 / 3.17 W with tiles, 3.55 / 3.56 / 3.55 W without
 pointer moving costs 0.39-0.62 W (11-17 %) less. Pictures of the window,
 tiles on vs off: 0 pixels differ; the check mode never found a differing tile
 (0 of 524 checks in the second set).
+
+MacBook Pro M1 Max, HDR at 120 Hz (3024x1896, XRGB2101010, EDR headroom
+11.43 on both sides), the VM full screen on the built-in panel at brightness
+0.50, OmacVM's driver on both sides (an HDR start loads it), only QEMU's
+tiles on or off, 180 s rows on/off/on/off (2026-10-26, m1-bench set td2):
+WindowServer 129 vs 198-209 GPU ms/s with the pointer moving, 47 vs 216 with
+a spinner. Whole-Mac power, a first measurement only: 19.83 / 20.18 W with
+tiles, 21.98 / 22.09 W without (pointer), 13.48 vs 16.89 W (spinner, one
+pair). A macOS prompt (Local Network) was on screen over the VM on both
+sides and the two pointer rounds do not agree well, so these watts are not
+counted until the set is run again without it (td2b). Guest 119-120 flushes and 120 vblanks a second either
+way; about half of the ~7170 frames a minute went in tiles. HDR pictures,
+tiles on vs off from fresh starts: the same within a step; the check mode
+0 of 601 differed.
 
 ## Consequences
 

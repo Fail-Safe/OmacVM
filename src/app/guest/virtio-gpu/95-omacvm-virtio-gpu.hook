@@ -1,5 +1,5 @@
-# OmacVM.app, 10-bit colour: build the 10-bit virtio-gpu driver for new kernels
-# (it stays dormant until the app's switch starts the VM); a failed build
+# OmacVM.app: build OmacVM's virtio-gpu driver for new kernels (it stays
+# dormant until one of the app's switches starts the VM); a failed build
 # never fails the update.
 [Trigger]
 Operation = Install
@@ -12,6 +12,6 @@ Target = linux-aarch64-thp
 Target = linux-aarch64-thp-headers
 
 [Action]
-Description = OmacVM: 10-bit virtio-gpu driver for the new kernel
+Description = OmacVM: virtio-gpu driver for the new kernel
 When = PostTransaction
 Exec = /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-build --hook
