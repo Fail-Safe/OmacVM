@@ -3,7 +3,8 @@
 # of surfaces OmacVM.app's window used this run, from qemu.log's lines (#531, #536): 8-bit
 # and half float, each lossless-compressed or plain, the last line of each kind; plain
 # with the reason when lossless is off; a warning after a failure (plain from then on).
-# The function is taken from check.sh as it is; the log lines are made up as QEMU writes them.
+# The function is taken from check.sh as it is; the log lines are made up as QEMU writes them
+# and checked against the patch's text.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
 check="$here/../cmd/check.sh"
@@ -24,6 +25,15 @@ F8OLD="warning: cocoa: lossless surfaces failed, plain 8-bit surfaces from now o
 FH="warning: cocoa: lossless half-float surfaces failed, plain ones from now on"
 OFF="info: cocoa: lossless surfaces: off (OMACVM_GL_LOSSLESS)"
 OLD="info: cocoa: lossless surfaces: off (checked on macOS 27 and newer only)"
+DMG="info: cocoa: lossless surfaces: off (OMACVM_GL_PRESENT_DAMAGE=check reads them back)"
+# The lines above must be the patch's own words (3.2.6 on), or a new wording would make
+# the check print nothing without a test failing. F8OLD stays: 3.2.1 to 3.2.5's words.
+patch="$here/../../app/runtime/patches/omacvm-cocoa-present-lossless.patch"
+for s in '"cocoa: %s surfaces %s", half ? "half-float" : "8-bit"' 'packed ? "lossless-compressed" : "plain"' \
+    "${F8#warning: }" "${FH#warning: }" "${OFF#info: }" "${OLD#info: }" "${DMG#info: }"; do
+  if grep -qF -- "$s" "$patch"; then echo "ok   patch writes '$s'"
+  else echo "FAIL patch does not write '$s'"; fail=1; fi
+done
 expect() {   # what, want status ("" = no line), want text in the detail, log lines...
   local what=$1 st=$2 text=$3 got; shift 3
   if (( $# )); then q "$@" > "$T/qemu.log"; else : > "$T/qemu.log"; fi
@@ -41,6 +51,7 @@ expect "8-bit failed (3.2.1 to 3.2.5's words): warn" warn "plain from then on" "
 expect "half float failed: warn, names half float" warn "lossless half-float surfaces failed" "$I8" "$IH" "$FH" "$PH"
 expect "off by OMACVM_GL_LOSSLESS: ok, plain and why" ok "lossless off (OMACVM_GL_LOSSLESS)" "$OFF" "$P8"
 expect "off before macOS 27: ok, plain and why" ok "lossless off (checked on macOS 27 and newer only)" "$OLD" "$P8"
+expect "off by OMACVM_GL_PRESENT_DAMAGE=check: ok, plain and why" ok "lossless off (OMACVM_GL_PRESENT_DAMAGE=check" "$DMG" "$P8"
 grep -q 'ok "window surfaces"' "$check" && grep -q 'warn "window surfaces"' "$check" &&
   grep -q 'surfaces_line "$miclog"' "$check" || { echo "FAIL: check.sh does not print the line"; fail=1; }
 (( fail == 0 )) && echo "surfaces-check: all passed"
