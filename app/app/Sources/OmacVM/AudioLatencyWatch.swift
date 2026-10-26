@@ -12,6 +12,10 @@ import OmacVMAudio
 /// output port. Until the VM's agent answers (the VM is still starting) it
 /// tries again every 5 s for 5 minutes; a VM without the program (guest files
 /// before 3.0.2) says no the same way and is left alone until the next change.
+///
+/// It also keeps QEMU's playback buffers right for the Mac's output (#548):
+/// the frames that output needs (AudioOutputSize: 512 for AirPods) go into
+/// the file QEMU reads (OMACVM_AUDIO_OUT_FRAMES_FILE), and into the delay.
 final class AudioLatencyWatch: @unchecked Sendable {
     static let program = "/usr/local/bin/omacvm-audio-latency"
     static let firstSendSeconds = 8
@@ -21,6 +25,8 @@ final class AudioLatencyWatch: @unchecked Sendable {
 
     private let agentSocket: String
     private let thread: Bool
+    private let wireless: Bool
+    private let framesFile: String?
     private let log: (String) -> Void
     private let queue = DispatchQueue(label: "org.omacvm.audio-latency")
     // On queue:
@@ -30,11 +36,19 @@ final class AudioLatencyWatch: @unchecked Sendable {
     private var retry: DispatchSourceTimer?
     private var device = AudioLatencyWatch.unknown
     private var stopped = false
+    private var framesWritten: Int
     private lazy var changed: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.update() }
 
-    init(agentSocket: String, thread: Bool, log: @escaping (String) -> Void) {
+    /// FRAMESFILE: QEMU's size file, holding INITIALFRAMES (written before
+    /// QEMU started: Self.writeFrames).
+    /// WIRELESS: the start's options were made for a wireless output.
+    init(agentSocket: String, thread: Bool, wireless: Bool = false, framesFile: String? = nil, initialFrames: Int = 0,
+         log: @escaping (String) -> Void) {
         self.agentSocket = agentSocket
         self.thread = thread
+        self.wireless = wireless
+        self.framesFile = framesFile
+        self.framesWritten = initialFrames
         self.log = log
     }
 
@@ -68,7 +82,11 @@ final class AudioLatencyWatch: @unchecked Sendable {
         let id = Self.defaultOutput()
         watchDevice(id)
         let info = id == Self.unknown ? nil : Self.device(id)
-        let ms = AudioDelay.total(deviceMs: info?.ms, extraMs: Settings.audioDelayExtraMs, thread: thread)
+        let minimum = id == Self.unknown ? 0 : AudioOutputSize.minimumFrames(transport: Self.transport(id))
+        followSize(minimum, id)
+        let outFrames = AudioOutputSize.frames(thread: thread, wireless: wireless, minimum: minimum)
+        let ms = AudioDelay.total(deviceMs: info?.ms, extraMs: Settings.audioDelayExtraMs, thread: thread, wireless: wireless,
+                                  outFrames: outFrames)
         if ms == sent {   // back to what the VM has: nothing to send
             wanted = nil
             retry?.cancel()
@@ -80,7 +98,7 @@ final class AudioLatencyWatch: @unchecked Sendable {
         tries = 0
         let name = id == Self.unknown ? "none" : Self.name(id)
         let deviceText = info?.ms.map { String(format: "%.1f ms", $0) } ?? "unknown"
-        log("OmacVM: sound delay for the VM: \(ms) ms (QEMU \(AudioDelay.qemuPart(thread: thread)) ms, Mac output '\(name)' \(deviceText)"
+        log("OmacVM: sound delay for the VM: \(ms) ms (QEMU \(AudioDelay.qemuPart(thread: thread, wireless: wireless, outFrames: outFrames)) ms, Mac output '\(name)' \(deviceText)"
             + (Settings.audioDelayExtraMs != 0 ? ", audioDelayExtraMs \(Settings.audioDelayExtraMs)" : "") + ")")
         send()
     }
@@ -105,6 +123,38 @@ final class AudioLatencyWatch: @unchecked Sendable {
         t.setEventHandler { [weak self] in self?.send() }
         t.resume()
         retry = t
+    }
+
+    /// QEMU's size file for the Mac's output now (#548): AirPods and other
+    /// wireless outputs refuse the own thread's 256-frame queue.
+    private func followSize(_ minimum: Int, _ id: AudioObjectID) {
+        guard let path = framesFile, minimum != framesWritten else { return }
+        guard Self.writeFrames(path, minimum) else {
+            log("OmacVM: sound: could not write the playback size for QEMU (\(path))")
+            return
+        }
+        framesWritten = minimum
+        let name = id == Self.unknown ? "none" : Self.name(id)
+        log(minimum > 0
+            ? "OmacVM: sound: Mac output '\(name)' is wireless: playback buffers of at least \(minimum) frames"
+            : "OmacVM: sound: Mac output '\(name)': the sound path's own playback buffers")
+    }
+
+    /// Writes QEMU's size file in one step (a new file each time, which
+    /// QEMU notices by its inode).
+    @discardableResult
+    static func writeFrames(_ path: String, _ frames: Int) -> Bool {
+        (try? AudioOutputSize.fileText(frames: frames).write(toFile: path, atomically: true, encoding: .utf8)) != nil
+    }
+
+    /// The frames the Mac's default output needs now (0: the path's own).
+    static func minimumFramesNow() -> Int {
+        let id = defaultOutput()
+        return id == unknown ? 0 : AudioOutputSize.minimumFrames(transport: transport(id))
+    }
+
+    static func transport(_ id: AudioObjectID) -> UInt32? {
+        get(id, kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal, UInt32(0))
     }
 
     /// Follows the delay of the device in use (Bluetooth changes it while it runs).
