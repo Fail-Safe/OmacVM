@@ -44,7 +44,7 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
    2026-10-25: the switch "Draw only what changed" asks for it too, SMBIOS
    `omacvm.damage=1`, for the Linux 7.4 damage fix the driver carries
    ([0051](0051-partial-present.md), [0055](0055-tiled-present.md)); so do
-   the pointer layer (0054) and frames in step (0056), each with its own
+   the pointer layer (0054) and frames in step (0056, until 3.2.7), each with its own
    module option. The 10-bit formats stay behind `deep_color=1`. A patch
    that does not fit a kernel is left out of that kernel's build (deep
    colour stays; the builder's `without` file and `--status` say which),

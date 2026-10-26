@@ -38,10 +38,11 @@ a new record replaces it and says so.
 | [0049](0049-hdr-guest-tone-maps.md) | HDR and 10-bit colour: the guest tone-maps into the Mac's headroom, its 10-bit driver loaded only per start | accepted, built (`hdr`), off by default |
 | [0050](0050-extra-brightness.md) | Extra brightness: QEMU draws the VM's frames up to 2x on an XDR display, live from the app's switch; it wins over HDR while on | accepted, built (`extraBrightness`), off by default |
 | [0051](0051-partial-present.md) | Partial present: QEMU draws only the box the guest changed since a surface's last draw | accepted, built (`frame-path`), off by default |
-| [0052](0052-lossless-window-surfaces.md) | The VM window's 8-bit surfaces are lossless-compressed: fewer bytes for QEMU's draw and WindowServer's composite | accepted, built (`window-path`), on by default on macOS 27 |
+| [0052](0052-lossless-window-surfaces.md) | The VM window's surfaces are lossless-compressed (8-bit; half float for HDR and Extra brightness): fewer bytes for QEMU's draw and WindowServer's composite | accepted, built (`window-path`, `hdr-surfaces`), on by default on macOS 27 |
 | [0053](0053-disk-flush-barrier.md) | A guest disk flush is a write barrier on the Mac's drive (F_BARRIERFSYNC), so the VM's file system is safer at a power cut | accepted, built (`disk`, 3.2.1) |
 | [0054](0054-pointer-on-its-own-layer.md) | The pointer on its own layer: virtio-gpu's cursor plane shown without hotspots, QEMU draws the image; direct scanout measured, not built | accepted, built (`guest-scanout`), off by default |
 | [0055](0055-tiled-present.md) | Tiled present: only the changed tiles of a frame go to WindowServer | accepted, built (`window-draw`), off by default (experimental switch "Draw only what changed") |
-| [0056](0056-frames-in-step.md) | Frames in step with the Mac: the guest's vblank timer follows a refresh grid QEMU gives (OmacVM's virtio-gpu command), the vblank a measured lead before each commit | accepted, built (`input-vsync`), off by default |
+| [0056](0056-frames-in-step.md) | Frames in step with the Mac: the guest's vblank timer follows a refresh grid QEMU gives (OmacVM's virtio-gpu command), the vblank a measured lead before each commit | replaced by 0057 (removed in 3.2.7) |
+| [0057](0057-frames-in-step-removed.md) | Frames in step removed: no gain worth its cost (input a few ms sooner only while the screen moves, no power saved, our own guest driver patch) | accepted, built (`drop-vsync`, 3.2.7) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

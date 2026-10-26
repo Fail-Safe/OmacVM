@@ -1070,13 +1070,6 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-heads
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
 grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
-# OmacVM: a guest that asks (its virtio-gpu driver with vsync_lock=1) gets the
-# Mac display's refresh grid for its vblank timer. Its rules' test, then the
-# wiring (virtio-gpu, hvf, the present).
-patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-vsync-follow-logic.patch"
-patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-vsync-follow.patch"
-"$native_dir/Tests/display/test-vsync-follow.sh" "$source_dir" || \
-  die "the guest's vblanks are not wired to the Mac's refresh as tested (test-vsync-follow.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -1380,6 +1373,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-decod
 # OmacVM: a program whose VirglBlock the GL reports too small (or whose size query fails) is
 # refused like a failed link, its draws skipped; an assert aborted QEMU there (#547).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-sysval-block-check.patch"
+# OmacVM: info logs and a pipeline's validate status start set: a GL that refuses calls writes
+# nothing, and the log lines printed stack bytes, a false pipeline error stopped the app's context.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-query-results-init.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
