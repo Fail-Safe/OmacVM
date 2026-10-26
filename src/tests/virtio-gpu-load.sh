@@ -215,6 +215,14 @@ old=$(awk '/^## / { v = $2; if (hit) { print v; exit } } /\(#554/ { hit = 1 }' "
 for f in "$LOAD" "$R/src/guest/check.sh" "$R/app/app/Sources/OmacVM/Runner.swift" "$R/AGENTS.md"; do
   has "${f#"$R"/}: omacvm.pointerplane=1 comes from $old and older" "$old and older" "$(cat "$f")"
 done
+# The route doc says it too: every display, and what a VM or app from before #554 gets.
+new=$(awk '/^## / { v = $2 } /\(#554/ { print v; exit }' "$R/CHANGELOG.md")
+doc=$(tr -s '\n ' ' ' < "$R/docs/routes/app.md")
+lacks "docs/routes/app.md: no 'only the main window's output' left" "Only the main window's output gets the plane" "$doc"
+has "docs/routes/app.md: a VM before $new draws its own pointer until Update VM" \
+  "a VM before $new draws its own pointer until Update VM" "$doc"
+has "docs/routes/app.md: an app of $old or older gets Hyprland's own pointer" \
+  "an app of $old or older (\`=1\`, layer over the main window only) gets Hyprland's own pointer" "$doc"
 
 guest omacvm.vsynclock=1 omacvm.screen=3024x1964
 load; expect "frames in step (omacvm.vsynclock=1): ours at 8 bits, its option said" "omacvm 8-bit vsync_lock=1" "$(said)"
