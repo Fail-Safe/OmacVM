@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.6 (unreleased)
+
+- QEMU window (macOS 27): with HDR or Extra brightness on, the window's frames go into the Mac's
+  lossless-compressed half-float format, like the SDR ones since 3.2.1: fewer bytes for every frame,
+  the same pixels, brightness and frame rates. On a MacBook Pro M1 Max at 120 Hz with HDR on: a video
+  -0.6 W (-3 %), scrolling -0.5 W (-4.5 %), about the same with Extra brightness. To turn it off
+  (SDR's too): `launchctl setenv OMACVM_GL_LOSSLESS 0`, then quit and reopen the app
+  (`launchctl unsetenv OMACVM_GL_LOSSLESS` turns it on again).
+
 ## 3.2.5
 
 Five fixes: no "would like to control this Mac" dialog at every VM start, the pointer on every
