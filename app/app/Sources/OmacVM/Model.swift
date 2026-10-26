@@ -565,7 +565,7 @@ enum Settings {
         }
     }
     /// Show directly on the display (experimental, off by default): QEMU
-    /// draws the VM's frames into a CAMetalLayer's drawables
+    /// copies the VM's frames into a CAMetalLayer's drawables
     /// (omacvm-cocoa-present-direct.patch, OMACVM_GL_DIRECT=1), so macOS can
     /// show the full-screen window itself, without WindowServer's composite,
     /// while no other window covers it. GPU safe mode keeps it off. Read at

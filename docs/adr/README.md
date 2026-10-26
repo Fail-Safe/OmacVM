@@ -41,6 +41,6 @@ a new record replaces it and says so.
 | [0052](0052-lossless-window-surfaces.md) | The VM window's 8-bit surfaces are lossless-compressed: fewer bytes for QEMU's draw and WindowServer's composite | accepted, built (`window-path`), on by default on macOS 27 |
 | [0053](0053-disk-flush-barrier.md) | A guest disk flush is a write barrier on the Mac's drive (F_BARRIERFSYNC), so the VM's file system is safer at a power cut | accepted, built (`disk`, 3.2.1) |
 | [0054](0054-pointer-on-its-own-layer.md) | The pointer on its own layer: virtio-gpu's cursor plane shown without hotspots, QEMU draws the image; direct scanout measured, not built | accepted, built (`guest-scanout`), off by default |
-| [0056](0056-direct-to-display.md) | Direct to display: the VM's frames in a CAMetalLayer's drawables, so macOS can show the full-screen window itself (no composite) | proposed, built (`direct-display`, branch), off: no watt gain on an M2 |
+| [0056](0056-direct-to-display.md) | Direct to display: the VM's frames copied into a CAMetalLayer's drawables, so macOS can show the full-screen window itself (no composite) | proposed, built (`direct-display`), off by default: no watt gain measured yet |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).
