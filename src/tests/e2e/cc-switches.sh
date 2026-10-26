@@ -506,13 +506,27 @@ read_features() {
 }
 # Omanotch: the test identity's VMs reach only a test Omanotch on 47911 (never the person's).
 test_omanotch() { lsof -nP -iTCP:47911 -sTCP:LISTEN >/dev/null 2>&1; }
-# The VM's package list matches the mirrors: a file it names is there (a 404 = older than the mirrors).
+# The VM's package list matches the mirrors: each package list (sync database) the VM has is
+# the one its first mirror serves now. pkg-add never syncs, so a package the mirror has a newer
+# version of is a 404. One package's file is not enough: in 3.2.3's gate jq's was still there,
+# Mesa's build tools were not (src/tests/e2e-mirrors.sh). Prints why when it is not current.
 mirrors_current() {
-  gssh 'u=$(pacman -Sp --noconfirm jq 2>/dev/null | grep -m1 "^http"); [ -n "$u" ] && curl -fsIL --max-time 20 "$u" >/dev/null' >/dev/null 2>&1
+  gssh 'd=$(pacman-conf DBPath 2>/dev/null); d=${d:-/var/lib/pacman/}; d=${d%/}/sync; n=0; t=$(mktemp) || exit 1
+    for db in "$d"/*.db; do
+      [ -f "$db" ] || continue
+      r=$(basename "$db" .db); s=$(pacman-conf -r "$r" Server 2>/dev/null | head -1)
+      if [ -z "$s" ] || ! curl -fsL --max-time 60 -o "$t" "$s/$r.db"; then
+        echo "$r: no answer from its mirror ${s:-(none)}"; rm -f "$t"; exit 1
+      fi
+      cmp -s "$t" "$db" || { echo "$r: the mirror has a newer list ($s)"; rm -f "$t"; exit 1; }
+      n=$((n + 1))
+    done
+    rm -f "$t"; [ "$n" -gt 0 ] || { echo "no package lists in $d"; exit 1; }' 2>&1
 }
 prepare_system() {   # a kept VM older than the mirrors: OmacVM cannot install its packages (pkg-add refuses a partial update)
-  mirrors_current && return 0
-  log "the VM's packages are older than the mirrors: omarchy update -y, then omacvm apply (limit 45 min)"
+  local why
+  why=$(mirrors_current) && return 0
+  log "the VM's packages are older than the mirrors ($(tail -1 <<<"$why" | cut -c1-120)): omarchy update -y, then omacvm apply (limit 45 min)"
   local t0 rc
   t0=$(date +%s)
   # As the desktop user, as the control centre's "o" runs it; sudo without a password only meanwhile
