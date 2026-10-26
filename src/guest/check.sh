@@ -582,7 +582,10 @@ app)
     skip "every Mac display" "no display port: an OmacVM.app from before external displays (omacvm update)"
   elif user_active omacvm-displays.service; then
     n=$(as_user hyprctl monitors -j 2>/dev/null | jq '[.[] | select(.name | test("^Virtual-"))] | length' 2>/dev/null || echo "?")
-    ok "every Mac display" "external displays $(as_user omacvm-displays state 2>/dev/null || echo "?"), $n output(s) now"
+    # Pause drawing while hidden (the app's switch): whether the agent can, and what it turned off now.
+    pz=$(as_user omacvm-displays pause 2>/dev/null)
+    pz=$(jq -r 'if .able then "pause while hidden: ready" + (if (.paused | length) > 0 then " (drawing paused on " + (.paused | join(", ")) + ": its Mac window is out of sight)" else "" end) else empty end' <<<"$pz" 2>/dev/null)
+    ok "every Mac display" "external displays $(as_user omacvm-displays state 2>/dev/null || echo "?"), $n output(s) now${pz:+, $pz}"
     # What each display really shows (a small screenshot): only Hyprland's grey
     # where the desktop should be means no wallpaper and no bar were drawn.
     desk=$(as_user omacvm-displays desktop 2>/dev/null)

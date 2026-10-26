@@ -5,8 +5,11 @@
 """
 import importlib.machinery
 import importlib.util
+import json
 import pathlib
+import shutil
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -326,6 +329,223 @@ class Agent(unittest.TestCase):
                 a.look_in(1)
                 self.run_for(a, od.REPAIR_EVERY)
         self.assertEqual(self.started, [])
+
+
+class FakeHypr:
+    """Hyprland's outputs with their DPMS, for Pause."""
+
+    def __init__(self, *names, off=()):
+        self.dpms = {n: n not in off for n in names}
+        self.calls = []
+        self.refuse = False
+
+    def monitors(self):
+        return [{"name": n, "dpmsStatus": on} for n, on in self.dpms.items()]
+
+    def set(self, name, on):
+        self.calls.append((name, on))
+        if self.refuse or name not in self.dpms:
+            return False
+        self.dpms[name] = on
+        return True
+
+
+class PauseTest(unittest.TestCase):
+    """Pause drawing while hidden: the Mac's "unseen" list -> DPMS of those outputs."""
+
+    def make(self, *names, off=()):
+        self.h = FakeHypr(*names, off=off)
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.path = self.tmp / "omacvm/paused-displays"
+        self.t = [1000.0]
+        p = od.Pause(set_dpms=self.h.set, monitors=self.h.monitors, path=self.path, clock=lambda: self.t[0])
+        patcher = mock.patch.object(od, "log", lambda m: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.t[0] += od.CAST_SETTLE   # past the start's share settle
+        return p
+
+    def test_unseen_off_seen_on(self):
+        p = self.make("Virtual-1", "NOTCH")
+        p.mac(["Virtual-1"])
+        p.apply()
+        self.assertEqual(self.h.dpms, {"Virtual-1": False, "NOTCH": True})
+        self.assertEqual(json.loads(self.path.read_text()), ["Virtual-1"])
+        p.mac([])
+        p.apply()
+        self.assertEqual(self.h.dpms, {"Virtual-1": True, "NOTCH": True})
+        self.assertFalse(self.path.exists())
+
+    def test_only_mac_outputs_and_only_known_ones(self):
+        # Not a Virtual-N name: never touched; an output Hyprland does not have: no call at all
+        # (Hyprland's dpms with an unknown monitor would turn every display off).
+        p = self.make("Virtual-1", "NOTCH")
+        p.mac(["NOTCH", "Virtual-2", 3, None, 'Virtual-1" })'])
+        p.apply()
+        self.assertEqual(self.h.calls, [])
+        self.assertEqual(self.h.dpms, {"Virtual-1": True, "NOTCH": True})
+
+    def test_the_guests_own_dpms_off_is_left_alone(self):
+        # Omarchy's idle turned the display off before: the agent did not, so it never turns it on.
+        p = self.make("Virtual-1", off=("Virtual-1",))
+        p.mac(["Virtual-1"])
+        p.apply()
+        p.mac([])
+        p.apply()
+        self.assertEqual(self.h.calls, [])
+        self.assertFalse(self.h.dpms["Virtual-1"])
+
+    def test_turned_on_by_someone_else_while_unseen_goes_off_again(self):
+        p = self.make("Virtual-1")
+        p.mac(["Virtual-1"])
+        p.apply()
+        self.h.dpms["Virtual-1"] = True        # a key press (key_press_enables_dpms)
+        p.apply()                              # the next look
+        self.assertFalse(self.h.dpms["Virtual-1"])
+        p.mac([])
+        p.apply()
+        self.assertTrue(self.h.dpms["Virtual-1"])
+
+    def test_seen_again_after_someone_turned_it_on(self):
+        p = self.make("Virtual-1")
+        p.mac(["Virtual-1"])
+        p.apply()
+        self.h.dpms["Virtual-1"] = True
+        p.mac([])
+        p.apply()
+        self.assertEqual(self.h.calls, [("Virtual-1", False)])
+        self.assertEqual(p.paused, set())
+
+    def test_a_share_of_the_output_keeps_it_drawing(self):
+        p = self.make("Virtual-1", "Virtual-2")
+        for on, kind, name in od.screencasts(b"screencast>>1,monitor\nscreencastv2>>1,monitor,Virtual-1\n"):
+            p.cast(on, kind, name)
+        p.mac(["Virtual-1", "Virtual-2"])
+        p.apply()
+        self.assertEqual(self.h.dpms, {"Virtual-1": True, "Virtual-2": False})
+        for on, kind, name in od.screencasts(b"screencastv2>>0,monitor,Virtual-1\n"):
+            p.cast(on, kind, name)
+        p.apply()
+        self.assertEqual(self.h.dpms, {"Virtual-1": False, "Virtual-2": False})
+
+    def test_a_share_starting_while_paused_turns_it_on(self):
+        p = self.make("Virtual-1")
+        p.mac(["Virtual-1"])
+        p.apply()
+        p.cast(True, "monitor", "Virtual-1")
+        p.apply()
+        self.assertTrue(self.h.dpms["Virtual-1"])
+
+    def test_a_window_share_keeps_every_output_drawing(self):
+        p = self.make("Virtual-1", "Virtual-2")
+        p.cast(True, "window", "5a3b1c")
+        p.mac(["Virtual-1", "Virtual-2"])
+        p.apply()
+        self.assertEqual(self.h.calls, [])
+        p.cast(False, "window", "5a3b1c")
+        p.apply()
+        self.assertEqual(self.h.dpms, {"Virtual-1": False, "Virtual-2": False})
+
+    def test_shares_lost_with_the_event_socket(self):
+        # The share's end may be lost with the socket: forgotten, but nothing goes off for CAST_SETTLE
+        # (a share that runs on announces nothing new).
+        p = self.make("Virtual-1")
+        p.cast(True, "monitor", "Virtual-1")
+        p.casts_lost()
+        p.mac(["Virtual-1"])
+        p.apply()
+        self.assertTrue(self.h.dpms["Virtual-1"])
+        self.t[0] += od.CAST_SETTLE
+        p.apply()
+        self.assertFalse(self.h.dpms["Virtual-1"])
+
+    def test_nothing_off_right_after_a_start(self):
+        h = FakeHypr("Virtual-1")
+        t = [50.0]
+        p = od.Pause(set_dpms=h.set, monitors=h.monitors, path=pathlib.Path("/nonexistent/omacvm-test/p"),
+                     clock=lambda: t[0])
+        with mock.patch.object(od, "log", lambda m: None):
+            p.mac(["Virtual-1"])
+            p.apply()
+            self.assertTrue(h.dpms["Virtual-1"])
+            self.assertEqual(p.due_at(), 50.0 + od.CAST_SETTLE)
+            t[0] += od.CAST_SETTLE
+            p.tick()
+        self.assertFalse(h.dpms["Virtual-1"])
+
+    def test_the_lease_runs_out(self):
+        # The Mac says "unseen" again every 5 s; a lost "seen" (or a QEMU gone) must not leave it dark.
+        p = self.make("Virtual-1")
+        p.mac(["Virtual-1"])
+        p.apply()
+        self.assertEqual(p.due_at(), self.t[0] + od.LEASE)
+        self.t[0] += od.LEASE - 1
+        p.mac(["Virtual-1"])           # renewed
+        self.t[0] += od.LEASE - 1
+        p.tick()
+        self.assertFalse(self.h.dpms["Virtual-1"])
+        self.t[0] += 2
+        p.tick()
+        self.assertTrue(self.h.dpms["Virtual-1"])
+        self.assertEqual(p.unseen, set())
+        self.assertIsNone(p.due_at())
+
+    def test_the_agent_says_it_can_pause(self):
+        with mock.patch("sys.stdout", new_callable=__import__("io").StringIO) as out, \
+             mock.patch.object(od, "PAUSED", pathlib.Path("/nonexistent/omacvm-test/paused")):
+            self.assertEqual(od.main(["omacvm-displays", "pause"]), 0)
+        self.assertEqual(json.loads(out.getvalue()), {"able": True, "paused": []})
+        src = (HERE.parent / "omacvm-displays").read_text()
+        self.assertEqual(src.count('self.send({"hello": 1, "external": self.external, "pause": 1})'), 2)
+
+    def test_screenshots_count_up_and_down(self):
+        p = self.make("Virtual-1")
+        p.cast(True, "monitor", "Virtual-1")
+        p.cast(True, "monitor", "Virtual-1")
+        p.cast(False, "monitor", "Virtual-1")
+        self.assertIn(("monitor", "Virtual-1"), p.casts)
+        p.cast(False, "monitor", "Virtual-1")
+        p.cast(False, "monitor", "Virtual-1")   # an end without a start: not below zero
+        self.assertEqual(p.casts, {})
+
+    def test_a_restarted_agent_turns_its_displays_on(self):
+        p = self.make("Virtual-1", "Virtual-2")
+        p.mac(["Virtual-1"])
+        p.apply()
+        q = od.Pause(set_dpms=self.h.set, monitors=self.h.monitors, path=self.path)
+        q.restore()
+        self.assertTrue(self.h.dpms["Virtual-1"])
+        self.assertFalse(self.path.exists())
+
+    def test_refused_turn_on_is_tried_again(self):
+        p = self.make("Virtual-1")
+        p.mac(["Virtual-1"])
+        p.apply()
+        self.h.refuse = True
+        p.mac([])
+        p.apply()
+        self.assertEqual(p.paused, {"Virtual-1"})
+        self.h.refuse = False
+        p.apply()
+        self.assertTrue(self.h.dpms["Virtual-1"])
+        self.assertEqual(p.paused, set())
+
+    def test_no_hyprland_nothing_happens(self):
+        p = od.Pause(set_dpms=lambda n, o: self.fail("called"), monitors=lambda: None,
+                     path=pathlib.Path("/nonexistent/omacvm-test/paused"))
+        p.mac(["Virtual-1"])
+        p.apply()
+
+    def test_the_agent_takes_the_message(self):
+        a = od.Agent.__new__(od.Agent)
+        a.pause = mock.Mock()
+        with mock.patch.object(od, "write_state") as ws, mock.patch.object(od, "run_sync") as rs:
+            a.on_line(b'{"unseen": ["Virtual-1"]}')
+        a.pause.mac.assert_called_once_with(["Virtual-1"])
+        a.pause.apply.assert_called_once_with()
+        ws.assert_not_called()
+        rs.assert_not_called()
 
 
 class Idle(unittest.TestCase):

@@ -1023,6 +1023,15 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-brigh
   die "the pointer's brightness rules fail their test (test-pointer-bright.sh)"
 "$native_dir/Tests/display/test-pointer-bright.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the pointer's brightness is not wired as tested (test-pointer-bright.sh)"
+# OmacVM: "Pause drawing while hidden" (experimental, off by default): the
+# guest's display agent is told when the main window has been out of sight
+# for 2 s and turns that display off, so the guest stops drawing; seen again,
+# at once, the last picture kept until the guest's first frame. Its rules'
+# test, then the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-guest-pause-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-guest-pause.patch"
+"$native_dir/Tests/display/test-guest-pause.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: pausing the guest's drawing is not wired as tested (test-guest-pause.sh)"
 # OmacVM: tiled present: a frame that changed little goes to WindowServer as
 # a few tile layers over the last whole frame (OMACVM_GL_PRESENT_TILES=1).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-present-tiles-logic.patch"

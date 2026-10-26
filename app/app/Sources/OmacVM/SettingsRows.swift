@@ -256,6 +256,26 @@ struct ExtraBrightnessRow: View {
     }
 }
 
+/// Pause drawing while hidden (Settings.pauseWhileHidden, experimental, off
+/// by default): QEMU reads the key itself, so a running VM follows the
+/// switch at once.
+struct PauseWhileHiddenRow: View {
+    var tick = 0
+    @State private var on = Settings.pauseWhileHidden
+
+    static let info = "Saves battery while you work in macOS with the VM in the background. When none of the VM's window can be seen for 2 seconds (minimised, covered by other windows, on another Space, the screen locked or asleep), the VM turns its display off and stops drawing, as macOS apps do for a window nobody sees: Linux apps get no new frames and stop drawing too. Sound, videos' sound, downloads, timers and everything else in the VM keep running. As soon as any part of the window shows again, the VM draws again; the first new picture comes a few frames later, until then you see the last one. A visible window is never touched: every frame, at the display's full rate. Only the VM's main window: in full screen on several displays, the other displays' windows keep drawing. Screen sharing or recording of the VM's screen from inside the VM keeps it drawing. Works at once in a running VM. Experimental: it switches the VM's display off and on (DPMS), as Omarchy's own screen blanking does."
+
+    var body: some View {
+        SettingRow(title: "Pause drawing while hidden", badge: "experimental",
+                   subtitle: "Less battery while the VM's window cannot be seen. Sound and downloads keep running.",
+                   info: Self.info, probe: "pause-while-hidden") {
+            RowSwitch(title: "Pause drawing while hidden", isOn: $on)
+        }
+        .onChange(of: on) { _, v in if v != Settings.pauseWhileHidden { Settings.pauseWhileHidden = v } }
+        .onChange(of: tick) { _, _ in on = Settings.pauseWhileHidden }
+    }
+}
+
 /// Pointer on its own layer (Settings.pointerPlane, experimental, off by
 /// default): read by each start of the VM.
 struct PointerPlaneRow: View {

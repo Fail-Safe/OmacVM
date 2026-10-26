@@ -962,7 +962,15 @@ bench lock and are indications only):
   A frame kept for a window out of sight (`omacvm-cocoa-present-unseen.patch`)
   is no tick work: it is drawn when the window shows again
   (`omacvm-cocoa-idle-refresh-unseen.patch`; before, any frame that came while
-  the window was away kept the tick at the display's rate). In the guest,
+  the window was away kept the tick at the display's rate). The guest still
+  drew every frame then (its vblank is its own timer); with "Pause drawing
+  while hidden" (experimental, `pauseWhileHidden`,
+  `omacvm-cocoa-guest-pause*.patch`) QEMU tells the display agent after 2 s
+  out of sight (or locked, asleep) and it turns that output off with
+  Hyprland's DPMS: no vblank, no frame callbacks, no virgl work; seen again,
+  on at once, the window keeping its last picture until the first new
+  frame (QEMU would draw the console's "display not active" one while the
+  scanout is off). In the guest,
   virtio-gpu's vblank (a kernel timer at the mode's rate) stops 100 ms after
   the last frame instead of DRM's 5 s (`drm.vblankoffdelay`, app VMs:
   `src/app/guest/90-omacvm-vblank.tmpfiles`).
@@ -1282,8 +1290,12 @@ At 120 Hz: key 15-18, keys while the pointer moves 22-24, pointer 14-16.
 - The fence answers bunched on a ladder: QEMU's trace of fence asked ->
   answered had peaks at 1.1-1.2, 1.8-1.9, 2.6-2.7 and 3.6-3.7 ms and almost
   nothing between, the sync thread's doubled naps after the first
-  millisecond. PR #530 (`virgl-darwin-fence-wait-proportional.patch`) also
-  wakes the thread an eighth of the time waited after each test.
+  millisecond. Waking the thread also an eighth of the time waited after
+  each test (PR #530, closed) took the ladder away and made a frame loop
+  that waits for every frame 13-27 % faster, but Chromium's Aquarium and
+  MotionMark (median of 3: 39.6 vs 38.5 fps, 3007 vs 3016) and the key and
+  pointer rows stayed the same, for 5-19 % more wake-ups. The doubled naps
+  stay.
 - The Mac pointer setting (`macPointer`) still gives nothing: no cursor
   command reaches QEMU with Hyprland 0.56.2 and aquamarine 0.15.1.
 

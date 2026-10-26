@@ -3,18 +3,40 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.3 (unreleased)
+## 3.2.4 (unreleased)
 
 - **Draw only what changed (experimental, off by default).** A new switch in the VM window's Display
-  section. OmacVM.app shows every frame of the VM as a new whole picture, so macOS redraws the whole
-  window for each one, also when only the pointer moved. With the switch, only the 256x256 squares
-  the VM changed get a new picture. For that the VM needs to say what changed in each frame: with
-  the switch on, it loads OmacVM's own build of its graphics driver (the standard one with Linux
-  7.4's fix that passes this on; Update VM builds it, internet once). With the switch off, or in
-  GPU safe mode, nothing changes: the standard driver loads as before. MacBook Air M2, the VM full
-  screen at 60 Hz, the pointer moving: 3.13-3.17 W instead of 3.55-3.75 W for the whole Mac (-11 to
-  -17 %, two sets); scrolling and typing the same. The same pixels and frame rate, checked at 60 Hz
-  so far. `omacvm check` has a "Changed parts" line.
+  section for the tiled present built into 3.2.3. OmacVM.app shows every frame of the VM as a new
+  whole picture, so macOS redraws the whole window for each one, also when only the pointer moved.
+  With the switch, only the 256x256 squares the VM changed get a new picture. For that the VM needs
+  to say what changed in each frame: with the switch on, it loads OmacVM's own build of its graphics
+  driver (the standard one with Linux 7.4's fix that passes this on; Update VM builds it, internet
+  once). With the switch off, or in GPU safe mode, nothing changes: the standard driver loads as
+  before. MacBook Air M2, the VM full screen at 60 Hz, the pointer moving: 3.13-3.17 W instead of
+  3.55-3.75 W for the whole Mac (-11 to -17 %, two sets); scrolling and typing the same. The same
+  pixels and frame rate, checked at 60 Hz so far. `omacvm check` has a "Changed parts" line.
+
+## 3.2.3
+
+Two new experimental switches in the VM window's Display settings: the VM stops drawing while its
+window cannot be seen, and its frames can follow the refresh of the Mac's display. A tiled present
+is built in, off for now.
+
+- **Pause drawing while hidden (experimental, off by default).** A new switch in the VM window's
+  Display settings. While none of the VM's window can be seen for 2 seconds (minimised, covered
+  by other windows, on another Space, the screen locked or asleep), the VM turns its display off
+  and stops drawing, as macOS apps do for a window nobody sees. Sound, downloads and everything
+  else in the VM keep running. As soon as any part of the window shows again, the VM draws again;
+  its first new picture comes a few frames later (20-45 ms), and until then you see the last one.
+  A visible window is never touched: every frame, at the display's full rate.
+  Measured for the whole Mac: on a MacBook Air M2 with the VM's window minimised, a 1080p video in
+  the VM 3.5 -> 2.9 W (one clean row without the switch) and a terminal scrolling its output
+  3.6 -> 2.5 W (two rows each; macOS idle: 2.3 W);
+  on a MacBook Pro M4 Max with the VM hidden and the display asleep, the video 5.4-5.6 -> 4.6 W and
+  the terminal 6.4-8.2 -> 2.9-3.0 W (the VM's idle level). It works at once in a running VM;
+  Update VM brings the VM's side, and `omacvm check` says "pause while hidden: ready". Only the
+  main window: in full screen on several displays the other windows keep drawing.
+
 - **Frames in step with the Mac (experimental, off).** A new switch in the VM window's Display
   section. The VM's display clock had its own beat: a frame it drew right after one refresh of
   the Mac's display waited for the next one, anywhere up to a whole refresh, while the screen was
@@ -32,6 +54,16 @@ in more words.
   a newer Linux kernel, Update VM builds the driver without it (HDR and the pointer layer keep
   working; `omacvm check` says so). Needs Update VM (it builds the VM's graphics driver, internet
   once); counts from the next start of the VM.
+
+- **Tiled present, built, off for now.** OmacVM.app shows every frame of the VM as a new whole
+  picture, so macOS redraws the whole window for each one, also when only the pointer moved. With
+  tiles, only the 256x256 squares the VM changed get a new picture. MacBook Air M2, the VM full
+  screen at 60 Hz with a driver that says what changed, the pointer moving: 3.13-3.17 W instead of
+  3.55-3.75 W for the whole Mac (-11 to -17 %, two sets), the same pixels and frame rate; scrolling
+  and typing the same.
+  It needs a VM that says what changed in its frames (Linux 7.4, or OmacVM's own driver with that
+  fix, #520), so there is no switch yet. `OMACVM_GL_PRESENT_TILES=1` in the app's environment
+  turns it on for tests.
 
 ## 3.2.2
 
