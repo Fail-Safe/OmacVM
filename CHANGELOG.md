@@ -3,7 +3,11 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.4 (unreleased)
+## 3.2.4
+
+A new experimental switch in the VM window's Display settings: the Mac redraws only the parts of the
+VM's picture that changed. Update VM now builds the VM's graphics driver only from patches that fit
+exactly.
 
 - **Draw only what changed (experimental, off by default).** A new switch in the VM window's Display
   section for the tiled present built into 3.2.3. OmacVM.app shows every frame of the VM as a new
