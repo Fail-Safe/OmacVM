@@ -148,6 +148,9 @@ tree() {   # WORK PATCH...: the stock sources again, these patches on them; 1 if
   # No fuzz: each hunk's context must fit exactly (a shift in lines is fine).
   # With patch's default fuzz a hunk can land in the wrong place of a newer
   # kernel and still build; this way it does not apply, and the patch is left out.
+  # Each hunk needs as many context lines before its change as after: GNU
+  # patch with -F 0 pins an uneven hunk to the start or end of the file
+  # (src/tests/virtio-gpu-patches.sh checks it).
   for p; do patch -s -d "$w" -p1 -f -F 0 -i "$p" || return 1; done
 }
 

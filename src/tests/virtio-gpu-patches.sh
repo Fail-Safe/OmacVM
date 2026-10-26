@@ -5,7 +5,10 @@
 # patch --dry-run first and no fuzz. A patch that stops fitting a kernel shows
 # here, not first in a VM (where the builder leaves it out of that kernel's
 # build). The order is checked against omacvm-virtio-gpu-build, and its own
-# patch step must refuse a hunk that fits only with fuzz.
+# patch step must refuse a hunk that fits only with fuzz, still apply every mix
+# of patches it can fall back to, and every hunk has as many context lines
+# before its change as after (GNU patch with -F 0 pins an uneven hunk to the
+# start or end of the file, so it would fail on every kernel).
 #   src/tests/virtio-gpu-patches.sh
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -42,6 +45,22 @@ for d in "$S"/v*/; do
 done
 (( n >= 2 )) || { echo "FAIL fewer than two kernel versions in $S"; fail=1; }
 
+# Even context: as many lines before each hunk's change as after it.
+for p in "${order[@]}"; do
+  odd=$(awk '
+    /^@@ / { split($2, o, ","); split($3, m, ","); ol = (o[2] == "" ? 1 : o[2]); nl = (m[2] == "" ? 1 : m[2])
+             hdr = $0; lead = 0; trail = 0; seen = 0; inh = 1; next }
+    inh { c = substr($0, 1, 1)
+          if (c == "\\") next
+          if (c == " " || $0 == "") { ol--; nl--; if (seen) trail++; else lead++ }
+          else if (c == "-") { ol--; seen = 1; trail = 0 }
+          else if (c == "+") { nl--; seen = 1; trail = 0 }
+          if (ol <= 0 && nl <= 0) { inh = 0; if (lead != trail) print hdr " (" lead " before, " trail " after)" } }
+  ' "$G/$p")
+  if [[ -z $odd ]] && grep -q '^@@ ' "$G/$p"; then echo "ok   $p: every hunk has even context"
+  else printf 'FAIL %s: uneven context (GNU patch -F 0 would refuse it): %s\n' "$p" "${odd:-no hunks}"; fail=1; fi
+done
+
 # The builder's own patch step (its tree function, as it is): a hunk must fit
 # exactly. One that fits only with fuzz (a context line differs) could land in
 # the wrong place of a newer kernel, so it must fail: the builder then leaves
@@ -69,6 +88,19 @@ if grep -q '^tree() {' "$T/tree.sh"; then
   if tree "$F" "$T/exact.patch" > /dev/null 2>&1 && grep -qx 'line six' "$F/$V/f.c"; then
     echo "ok   builder: an exact hunk two lines further down still applies"
   else echo "FAIL builder: an exact hunk two lines further down does not apply"; fail=1; fi
+  # Every mix the builder can fall back to (deep colour first; the vsync lock
+  # only with the cursor plane), on each kernel, through its own tree().
+  deep=$G/${order[0]} cur=$G/${order[1]} vs=$G/${order[2]} dmg=$G/${order[3]}
+  for d in "$S"/v*/; do
+    v=$(basename "$d") M=$T/mix-$v
+    mkdir -p "$M" && rm -rf "${M:?}/stock" && cp -R "$d/drivers" "$M/stock"
+    for mix in "deep" "deep cur" "deep cur vs" "deep dmg" "deep cur dmg" "deep cur vs dmg"; do
+      files=()
+      for k in $mix; do files+=("${!k}"); done
+      if tree "$M" "${files[@]}" > /dev/null 2>&1; then echo "ok   builder on $v: $mix"
+      else echo "FAIL builder on $v: $mix does not apply"; fail=1; fi
+    done
+  done
 else
   echo "FAIL no tree() in omacvm-virtio-gpu-build (update this test)"; fail=1
 fi
