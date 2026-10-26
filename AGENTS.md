@@ -620,7 +620,9 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   before every start.
   Before every publish a release runs the on-screen test `src/tests/e2e/onscreen.sh` on each test Mac's macOS
   (window size, Update VM, a switch with the VM stopped, full screen, the Mac's cursor over the VM, leftovers;
-  docs/releasing.md); it moves the pointer and clicks only while nobody uses that Mac.
+  docs/releasing.md); it moves the pointer and clicks only while nobody uses that Mac. It and the other e2e
+  harnesses ask again before every step (`src/tests/e2e/person.sh`: a remote session, input not theirs) and wait
+  while someone is there; `--pause-ci` stops the test Mac's CI runners for the run (`ci-runners.sh`).
 - **Logs**: `~/Library/Logs/omacvm-{bridge,gestures}.log`; guest
   `journalctl --user -u omacvm-bridge-osd` (and `-u omacvm-bridge-events`, the shared event stream), `journalctl -u omacvm-gestures`,
   Omarchy shell `/run/user/1000/quickshell/by-id/*/log.log`.

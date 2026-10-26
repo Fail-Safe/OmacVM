@@ -57,10 +57,44 @@ fail the gate; a skip says why the step does not apply here (Omanotch on a
 Mac without a notch, or on a Mac with a notch but no test Omanotch on port
 47911: the person's own is never used).
 
+## Someone at the Mac, CI jobs
+
+A row is only worth something on a Mac nobody uses: a person's key or click,
+or a Screen Sharing viewer that loads the Mac, can move what a row measures
+(the 3.2.4 gate: a Shift key 20 ms early while a Screen Sharing session
+connected in the middle of the run). So `cc-switches.sh`, `modifier-keys.sh`,
+`display-unplug.sh` and `onscreen.sh` ask before each step and each case,
+not only at their start (`person.sh`):
+
+- Someone is there while a remote session is open (Screen Sharing: its
+  "Remote user is connected", screensharingd, an established connection on
+  port 5900; Jump Desktop: its rtcproxy or desktopproxy), also one nobody
+  touches, or when input that was not ours came in the last 5 minutes. Our
+  own events (keys posted to QEMU, the on-screen test's moves and clicks)
+  reset macOS's HID idle time too: the harness stamps them
+  (`~/Library/Caches/omacvm-e2e-last-input`).
+- Then the run waits (at most 30 minutes each time, `PERSON_WAIT`) and goes
+  on when the Mac is quiet again; someone who stays: the rest is BLOCKED.
+- A watcher looks every 2 seconds and writes each foreign input and each
+  remote session that opens or ends with its time (`person.log` in the
+  results). Rows that ran while someone came and went get a `person` row:
+  skip when they passed, BLOCKED when one failed (run it again on a quiet
+  Mac).
+
+`--pause-ci` (or `OMACVM_E2E_PAUSE_CI=1`) on `cc-switches.sh` and
+`onscreen.sh` stops this Mac's self-hosted GitHub Actions runners for the
+run (`ci-runners.sh pause`: `launchctl bootout` of each runner's LaunchAgent
+once its job is over; queued jobs wait on GitHub) and starts them again at
+the end, also when the run fails (`ci-runners.sh resume`, from the EXIT
+trap). A kit that runs several harnesses pauses once around all of them
+with its own holder pid. By hand: `src/tests/e2e/ci-runners.sh status`, and
+`resume --holder <pid>` after a run that was killed (what was stopped is
+written down in `~/.omacvm-ci-paused`).
+
 ## The test Mac, once
 
 - Apple Silicon, nobody working on it (it refuses with a battery unless
-  `OMACVM_E2E_LAPTOP=1`, and when it was used in the last 5 minutes).
+  `OMACVM_E2E_LAPTOP=1`, and waits while someone is at it: above).
 - The test identity, granted once (Accessibility, Input Monitoring for its
   Bridge and Gestures; Accessibility for the shell that runs the test, for
   the window steps).
