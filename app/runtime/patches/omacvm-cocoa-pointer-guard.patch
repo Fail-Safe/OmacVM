@@ -16,10 +16,10 @@ Test: app/runtime/Tests/display/test-pointer-guard.c.
 
 diff --git a/ui/omacvm-pointer-guard.h b/ui/omacvm-pointer-guard.h
 new file mode 100644
-index 0000000..5e8c564
+index 0000000..ba9fbf7
 --- /dev/null
 +++ b/ui/omacvm-pointer-guard.h
-@@ -0,0 +1,404 @@
+@@ -0,0 +1,405 @@
 +/*
 + * OmacVM: the pointer maths of the full-screen guard (Dock and hot corners).
 + *
@@ -46,9 +46,10 @@ index 0000000..5e8c564
 + * The let-go's warp too: when a button event (no motion, so it carries no
 + * warp) takes hold again first, as the button's release does after a click
 + * on another display's window (ui/cocoa.m lets go and grabs again when that
-+ * window becomes key), the next motion still carries it. 3.2.3 added it to
-+ * the pointer there: after each click near a corner of an external display
-+ * the pointer jumped by the way from the last click (reported by the user).
++ * window becomes key), the next motion still carries it. 3.0.0 to 3.2.5
++ * added it to the pointer there (since that let-go and grab at the click):
++ * after each click near a corner of an external display the pointer jumped
++ * by the way from the last click (reported by the user).
 + * Only a motion takes it out, never a button. When the next event is not at
 + * the let-go's warp, a motion the guard did not see (ungrabbed) carried it.
 + *
