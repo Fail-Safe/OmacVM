@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.7 (unreleased)
+
+- **A refused OpenGL call no longer writes memory bytes into qemu.log or stops an app's drawing.**
+  Follow-up to #547: when the Mac's OpenGL refuses calls, the log of a shader it did not compile or
+  link is now empty instead of whatever was in memory, and a pipeline check the Mac did not answer no
+  longer counts as a failed one (that stopped all drawing of the app).
+
 ## 3.2.5
 
 Five fixes: no "would like to control this Mac" dialog at every VM start, the pointer on every
