@@ -455,25 +455,6 @@ hdr_copy_note() {
     *) echo "; SDR copy: Hyprland's default" ;;
   esac
 }
-# The "Frames in step" line (the app's experimental switch): from the loader's
-# word (/run/omacvm/virtio-gpu) and the driver's last kernel log line about it
-# (each said once a start): "STATUS<TAB>DETAIL". src/tests/vsync-lock-check.sh.
-vsync_lock_line() {   # LOADER-WORD KERNEL-LOG-LINE
-  local st=$1 k=$2
-  if [[ $st == *"without vsync_lock"* ]]; then
-    printf 'warn\t%s\n' "the switch is on, but this kernel's build of OmacVM's driver has no vsync lock (its patch did not fit the kernel; omacvm-virtio-gpu-build --status)"
-  elif [[ $st != *vsync_lock=1* ]]; then
-    printf 'warn\t%s\n' "the switch is on, but the stock driver runs: ${st#stock }$( [[ -z $st ]] && echo "no word from omacvm-virtio-gpu-load (omacvm apply, then restart the VM)")"
-  elif [[ $k == *"does not know it"* ]]; then
-    printf 'warn\t%s\n' "the driver asks, but QEMU does not answer it (GPU safe mode's 2D display, or an older app): the VM's vblanks run on their own"
-  elif [[ $k == *"is not the mode"* ]]; then
-    printf 'skip\t%s\n' "the Mac's refresh is not the VM's display rate: the VM's vblanks run on their own (${k#*vsync_lock: })"
-  elif [[ $k == *"in step with"* ]]; then
-    printf 'ok\t%s\n' "the VM's vblanks were in step with the Mac's refresh in this start (experimental)"
-  else
-    printf 'skip\t%s\n' "the driver is ready, not in step yet in this start (no moving frames yet, the window not on screen, or GPU safe mode)"
-  fi
-}
 # mpv's defaults in app and UTM VMs (app/guest/venus/mpv.sh): vo=gpu (gpu-next leaks a file per
 # frame on virgl and stops drawing after ~17 s), and OpenGL while the VM has Venus (on Vulkan mpv
 # shows no video yet).
@@ -691,21 +672,6 @@ app)
     else
       ok "Pointer layer" "on the cursor plane (experimental): pointer moves do not redraw the screen"
     fi
-  fi
-  # Frames in step with the Mac (the app's experimental switch): this start
-  # asked for it (omacvm.vsynclock=1); the driver's loader says whether the
-  # driver has the option, and the driver's kernel log lines (each once a
-  # start) whether its vblanks were in step with the Mac's refresh.
-  if grep -qx 'OMACVM_VSYNCLOCK=1' /run/omacvm/host.env 2>/dev/null; then
-    st=$(cat /run/omacvm/virtio-gpu 2>/dev/null)
-    klog=$( { journalctl -k -b -q -o cat 2>/dev/null || dmesg 2>/dev/null; } |
-      grep -F 'vsync_lock: ' | grep -e 'in step with' -e 'is not the mode' -e 'does not know it' | tail -n1)
-    IFS=$'\t' read -r vs vd < <(vsync_lock_line "$st" "$klog")
-    case $vs in
-      ok) ok "Frames in step" "$vd" ;;
-      warn) warn "Frames in step" "$vd" ;;
-      *) skip "Frames in step" "$vd" ;;
-    esac
   fi
   # Video decoding on the Mac's media engine (an app with it lists decoders).
   drv=virtio_gpu; [[ -f /usr/local/lib/dri/omacvm_drv_video.so ]] && drv=omacvm

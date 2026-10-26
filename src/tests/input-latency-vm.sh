@@ -19,7 +19,7 @@
 # app's Contents/Resources/runtime (with --firmware: its firmware's
 # edk2-aarch64-code.fd). --env passes settings to QEMU for an A/B run
 # (e.g. OMACVM_GL_VSYNC=0), --smbios a string to the guest as the app sends it
-# (e.g. omacvm.vsynclock=1). --display builtin: the MacBook's own panel (its
+# (e.g. omacvm.pointerplane=1). --display builtin: the MacBook's own panel (its
 # own refresh, ProMotion) instead of a virtual display: the window shows there,
 # so only while nobody uses that Mac. --no-breakdown: no python3 here (the M1
 # Max's opens an install dialog); --parse OUT on another Mac does it later.
@@ -348,7 +348,7 @@ RUN=$W/run; mkdir -p "$RUN"
 TRACE=(-trace 'input_event_key_qcode' -trace 'input_event_abs' -trace 'virtio_gpu_cmd_res_flush'
        -trace 'virtio_gpu_update_cursor' -trace 'cocoa_present_direct' -trace 'cocoa_present_frame'
        -trace 'virtio_gpu_cmd_ctx_create' -trace 'virtio_gpu_cmd_ctx_submit'
-       -trace 'cocoa_present_second' -trace 'cocoa_present_skips' -trace 'cocoa_present_follow'
+       -trace 'cocoa_present_second' -trace 'cocoa_present_skips'
        -trace 'virtio_gpu_fence_ctrl' -trace 'virtio_gpu_fence_resp')
 SMB=()
 ((HWC)) && { QENV+=(OMACVM_HW_CURSOR=1); SMB=(-smbios type=11,value=omacvm.hwcursor=1); }
@@ -432,7 +432,7 @@ done
 cat /tmp/inputlat-term.log 2>/dev/null | head -5
 echo "guest: $(hc -j clients | python3 -c 'import json,sys; print([c["class"] for c in json.load(sys.stdin)])')"
 echo "guest: no_hardware_cursors $(hc getoption cursor:no_hardware_cursors 2>/dev/null | head -1)"
-echo "guest: virtio-gpu driver: $(cat /run/omacvm/virtio-gpu 2>/dev/null || echo stock), vsync_lock $(cat /sys/module/virtio_gpu/parameters/vsync_lock 2>/dev/null || echo -)"
+echo "guest: virtio-gpu driver: $(cat /run/omacvm/virtio-gpu 2>/dev/null || echo stock)"
 GUEST
 sleep 2
 # --pause: S seconds with the VM up before the runs (to look at it by hand).
@@ -464,7 +464,7 @@ for m in $MODES; do
 done
 
 # The guest kernel's word on its GPU driver (warnings from the vblank timer show here).
-gssh 'dmesg | grep -iE "virtio.gpu|vsync_lock|vblank|\[drm\]" | tail -40' > "$OUT/guest-dmesg.txt" 2>&1
+gssh 'dmesg | grep -iE "virtio.gpu|vblank|\[drm\]" | tail -40' > "$OUT/guest-dmesg.txt" 2>&1
 # Where the time goes: QEMU's trace against each event's post time and screen time.
 # Stages (medians, ms): mac_to_qemu (the event posted -> QEMU's input layer),
 # qemu_to_compositor (-> Hyprland's first GPU work after it: the terminal took

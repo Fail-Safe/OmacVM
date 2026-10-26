@@ -1,6 +1,6 @@
 # Kernel sources for the driver patch test
 
-The six files of `drivers/gpu/drm/virtio` that OmacVM's guest driver patches
+The four files of `drivers/gpu/drm/virtio` that OmacVM's guest driver patches
 change (`src/app/guest/virtio-gpu/linux-virtio-gpu-*.patch`), as kernel.org's
 stable tree has them at the tags named by the folders: v7.2.11 (the app VMs'
 kernel in October 2026) and v7.3 (the next one). `src/tests/virtio-gpu-patches.sh`

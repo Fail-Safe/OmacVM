@@ -51,7 +51,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
  #include "hw/core/boards.h"
  #include "system/system.h"
  #include "system/runstate.h"
-@@ -7427,6 +7428,124 @@
+@@ -7427,6 +7428,126 @@
   */
  static bool present_deep_failed;
  static unsigned present_next;
@@ -84,15 +84,16 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
 +static bool present_pd_unflushed;
 +static GLuint present_pd_check_tex, present_pd_check_fbo;
 +static uint32_t present_pd_check_w, present_pd_check_h;
-+static bool present_pd_check_deep;
++static bool present_pd_check_half;
 +static uint64_t present_pd_checks, present_pd_bad, present_pd_frames_part;
 +
 +/*
 + * OMACVM_GL_PRESENT_DAMAGE=check (tests): every 30th frame drawn in part is
 + * also drawn in full into a texture of its own, and the two are compared
 + * pixel for pixel (colour only: the window ignores alpha). The texture has
-+ * the surfaces' format (half-float for deep colour), so both round alike
-+ * when read back. qemu.log gets each frame that differs and every 100th
++ * the format of surface N, read from it (half float for 'RGhA': deep colour
++ * and extra brightness; else 8-bit; the check mode keeps surfaces plain), so
++ * both round alike when read back. qemu.log gets each frame that differs and every 100th
 + * check. Reads back two whole frames: for tests, not for use. QEMU thread, present_ctx current, SRC bound as the
 + * present left it.
 + */
@@ -101,8 +102,9 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
 +{
 +    uint32_t w = present_w, h = present_h;
 +    size_t bytes = (size_t)w * h * 4;
++    bool half = IOSurfaceGetPixelFormat(present_surf[n]) == 'RGhA';
 +    if (present_pd_check_w != w || present_pd_check_h != h ||
-+        present_pd_check_deep != present_deep) {
++        present_pd_check_half != half) {
 +        if (present_pd_check_tex) {
 +            glDeleteTextures(1, &present_pd_check_tex);
 +        }
@@ -112,14 +114,14 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
 +        glGenTextures(1, &present_pd_check_tex);
 +        glBindTexture(GL_TEXTURE_RECTANGLE, present_pd_check_tex);
 +        glTexImage2D(GL_TEXTURE_RECTANGLE, 0,
-+                     present_deep ? GL_RGBA16F : GL_RGBA8, w, h, 0,
-+                     present_deep ? GL_RGBA : GL_BGRA,
-+                     present_deep ? GL_HALF_FLOAT : GL_UNSIGNED_INT_8_8_8_8_REV,
++                     half ? GL_RGBA16F : GL_RGBA8, w, h, 0,
++                     half ? GL_RGBA : GL_BGRA,
++                     half ? GL_HALF_FLOAT : GL_UNSIGNED_INT_8_8_8_8_REV,
 +                     NULL);
 +        glBindTexture(GL_TEXTURE_RECTANGLE, 0);
 +        present_pd_check_w = w;
 +        present_pd_check_h = h;
-+        present_pd_check_deep = present_deep;
++        present_pd_check_half = half;
 +    }
 +    uint8_t *a = g_try_malloc(bytes), *b = g_try_malloc(bytes);
 +    if (!a || !b) {
@@ -176,7 +178,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
  static dispatch_queue_t present_queue;
  static QEMUTimer *present_timer;
  static int64_t present_last_ns;
-@@ -7988,6 +8107,7 @@
+@@ -7988,6 +8109,7 @@
      present_deep = deep;
      present_linear = linear;
      present_next = 0;
@@ -184,7 +186,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
      return true;
  }
  
-@@ -8124,6 +8244,50 @@
+@@ -8124,6 +8246,50 @@
      unsigned n = (present_next + i) % present_nsurf;
      present_next = (n + 1) % present_nsurf;
  
@@ -235,7 +237,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
      glBindFramebuffer(GL_FRAMEBUFFER, present_fbo);
      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                             GL_TEXTURE_RECTANGLE, present_tex[n], 0);
-@@ -8132,8 +8296,18 @@
+@@ -8132,8 +8298,18 @@
      glDisable(GL_SCISSOR_TEST);
      /* The guest's alpha means nothing here: the window is opaque. */
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -256,7 +258,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
      glActiveTexture(GL_TEXTURE0);
      if (splash) {
-@@ -8151,6 +8325,10 @@
+@@ -8151,6 +8327,10 @@
          }
      }
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -267,7 +269,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
      glBindTexture(GL_TEXTURE_2D, 0);
      glBindFramebuffer(GL_FRAMEBUFFER, 0);
      GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-@@ -8855,6 +9033,8 @@
+@@ -8855,6 +9035,8 @@
                                       uint32_t x, uint32_t y,
                                       uint32_t w, uint32_t h)
  {
@@ -276,7 +278,7 @@ console) with 0 differing pixels, and whole-Mac power on the MacBook Air.
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
      gl_scanout_x = x;
-@@ -8875,6 +9055,9 @@
+@@ -8875,6 +9057,9 @@
  {
      gl_dirty = true;
      omacvm_hold_dirty = true;
