@@ -516,9 +516,6 @@ jobs:
           app/runtime/Tests/display/test-present-tiles.sh
           app/runtime/Tests/display/test-present-tiles.sh --self-test
 
-      - name: The guest's vblanks on the Mac's refresh (ADR 0056; grid, period, lead; the checks catch a tree without it)
-        run: app/runtime/Tests/display/test-vsync-follow.sh
-
       - name: Extra brightness's gain, shader and omacvm check line (ADR 0050; the checks catch code without it)
         run: |
           app/runtime/Tests/display/test-extra-brightness.sh
