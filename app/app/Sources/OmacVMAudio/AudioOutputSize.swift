@@ -60,3 +60,39 @@ public enum AudioOutputSize {
     /// The file's text: the frames and a newline (0: no wish).
     public static func fileText(frames: Int) -> String { "\(frames)\n" }
 }
+
+/// When the app writes QEMU's size file anew (#548). A new file (a new
+/// inode) also tells QEMU to forget what the last output refused: after
+/// every size was refused, QEMU makes no new start until the file changes.
+/// So the file is written for every other output, also with the same size,
+/// and once more after coreaudiod restarted (`sudo killall coreaudiod`, the
+/// known way out of a silent output), even when the same output comes back
+/// with the same ID.
+public struct AudioSizeFile: Equatable {
+    /// The size in the file now.
+    public private(set) var frames: Int
+    /// The output it was written for; nil: none known (forgotten).
+    public private(set) var device: UInt32?
+
+    public init(frames: Int, device: UInt32) {
+        self.frames = frames
+        self.device = device
+    }
+
+    /// Whether the file needs writing for output DEVICE, which needs MINIMUM.
+    public func needsWrite(minimum: Int, device: UInt32) -> Bool {
+        minimum != frames || device != self.device
+    }
+
+    /// The file now holds MINIMUM for DEVICE.
+    public mutating func written(minimum: Int, device: UInt32) {
+        frames = minimum
+        self.device = device
+    }
+
+    /// coreaudiod restarted: the next look writes the file whatever output
+    /// it finds.
+    public mutating func serviceRestarted() {
+        device = nil
+    }
+}
