@@ -542,6 +542,48 @@ int main(void)
               g.lwdx, g.lwdy, m.wdx, m.wdy);
     }
 
+    /*
+     * The external click again, but the mouse moves on before the button's
+     * release is handled (a busy main thread): two motions are queued behind
+     * it, made after the let-go's warp, with the cursor attached. The first
+     * carries the warp. Neither may jump: the release does not take hold,
+     * the motions come at the cursor's place (at most the gap off the top
+     * edge) and the first of them takes hold.
+     */
+    for (int run = 0; run < 4; run++) {
+        static const OmacVMRect beside[2] = { { 0, 0, 1512, 982 }, { 1512, 0, 1352, 845 } };
+        int follow = run & 1, top = run >> 1;
+        double x0, y0;
+        Ev down, up, mv[2];
+
+        memset(&g, 0, sizeof(g));
+        g.follow = follow;
+        m = mac_at(beside, 2, beside, 2, 1512 + 400, 300);
+        run_steps(&m, &g, top ? 160 : 130, -2, -2, 0, "queued: up into the external's top-left zone");
+        run_steps(&m, &g, 10, 1, 0, 0, "queued: to a button");
+        x0 = g.x;
+        y0 = g.y;
+        down = mac_button(&m);
+        mac_let_go(&m, &g);
+        handle(&m, &g, &down, &gx, &gy);
+        up = mac_button(&m);
+        mv[0] = mac_motion(&m, 2, 1);
+        mv[1] = mac_motion(&m, 2, 1);
+        handle(&m, &g, &up, &gx, &gy);
+        CHECK(fabs(gx - x0) < 0.5 && fabs(gy - y0) < 0.5,
+              "queued (follow %d, top %d): let go at %.1f,%.1f, the pointer was at %.1f,%.1f",
+              follow, top, gx, gy, x0, y0);
+        for (int k = 0; k < 2; k++) {
+            double ex = x0 + 2 * (k + 1), ey = y0 + (k + 1);
+
+            handle(&m, &g, &mv[k], &gx, &gy);
+            CHECK(fabs(gx - ex) < 0.5 && fabs(gy - ey) <= OMACVM_GUARD_GAP + 0.5,
+                  "queued (follow %d, top %d): motion %d to %.1f,%.1f, expected %.1f,%.1f",
+                  follow, top, k, gx, gy, ex, ey);
+        }
+        run_steps(&m, &g, 5, 1, 0, 0, "queued: on after the motions");
+    }
+
     /* The Mac's cursor shown (show-cursor=on): it follows, at the same speed. */
     memset(&g, 0, sizeof(g));
     g.follow = true;
