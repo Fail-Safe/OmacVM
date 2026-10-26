@@ -8,7 +8,9 @@ CAMetalLayer. QEMU draws each frame into its own surfaces as before
 thread copies the frame's surface with a Metal blit into one of the
 layer's drawables (lossless-compressed where the 8-bit surfaces are: Core
 Animation's private wantsIOSurfaceCompression, checked with
-respondsToSelector, macOS 27 as the lossless surfaces) instead of setting
+respondsToSelector, macOS 27 as the lossless surfaces; half-float ones
+only with OMACVM_GL_DIRECT_COMPRESS=all, a knob to measure them until
+lossless half float is proven) instead of setting
 it as a plain CALayer's contents. The vsync queue, pacing, colour tags,
 EDR settings, the band below a guest a few rows shorter than the window
 and the sublayers stay as they are; the vsync queue holds a frame's
@@ -88,10 +90,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
              [layer setOpaque:YES];
              [layer setBackgroundColor:CGColorGetConstantColor(kCGColorBlack)];
              [layer setContentsGravity:kCAGravityResize];
-@@ -7735,6 +7744,405 @@
+@@ -7733,6 +7742,420 @@
+ static void cocoa_gl_present_queue_frame(IOSurfaceRef surf, GLint filter,
+                                          double flushed, bool linear);
  static void cocoa_gl_present_request(void);
- 
- /*
++
++/*
 + * OmacVM, direct to display (OMACVM_GL_DIRECT=1: the app's experimental
 + * switch "Show directly on the display"): the view's layer is a
 + * CAMetalLayer. QEMU draws each frame into its own surfaces as before
@@ -249,14 +253,29 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +/*
 + * QEMU thread, after new surfaces: the drawables follow their size, kind
-+ * and colours (lossless-compressed where the 8-bit surfaces are; Core
-+ * Animation's private switch, macOS 27). On direct_queue, never while a
++ * and colours, lossless-compressed where the 8-bit surfaces are (packed;
++ * Core Animation's private switch, macOS 27). Half-float drawables only
++ * with OMACVM_GL_DIRECT_COMPRESS=all, a knob to measure them until lossless
++ * half float is proven (as the surfaces). On direct_queue, never while a
 + * nextDrawable runs there; drawables made before are dropped when taken.
 + */
 +static void omacvm_direct_alloc(uint32_t w, uint32_t h, bool deep, bool linear,
-+                                bool compressed)
++                                bool packed)
 +{
++    static int all = -1;
++    static int logged = -1;
 +    bool half = deep || linear;
++    if (all < 0) {
++        const char *e = getenv("OMACVM_GL_DIRECT_COMPRESS");
++        all = e && !strcmp(e, "all");
++    }
++    bool compressed = packed || (half && all && present_lossless == 1);
++    if (logged != half * 2 + compressed) {
++        logged = half * 2 + compressed;
++        info_report("cocoa: direct to display: %s drawables %s",
++                    half ? "half-float" : "8-bit",
++                    compressed ? "lossless-compressed" : "plain");
++    }
 +    CGColorSpaceRef cs = cocoa_gl_present_colorspace(deep, linear);
 +    MTLPixelFormat pf = half ? MTLPixelFormatRGBA16Float : MTLPixelFormatBGRA8Unorm;
 +    CGSize size = CGSizeMake(w, h);
@@ -489,12 +508,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        [layer release];
 +    });
 +}
-+
-+/*
+ 
+ /*
   * OmacVM, extra brightness (ADR 0050, ui/omacvm-bright.h): with the app's
-  * switch (extraBrightness, read live) the guest's frames go through a
-  * shader into half-float surfaces in extended linear sRGB, times a gain
-@@ -8234,6 +8642,9 @@
+@@ -8234,6 +8657,9 @@
      present_linear = linear;
      present_next = 0;
      omacvm_pd_reset(&present_pd, present_nsurf, present_pd.fw, present_pd.fh);
@@ -504,10 +521,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      return true;
  }
  
-@@ -8354,6 +8765,23 @@
+@@ -8352,7 +8778,24 @@
+         unsigned n = (present_next + i) % present_nsurf;
+         if (!IOSurfaceIsInUse(present_surf[n])) {
              break;
-         }
-     }
++        }
++    }
 +    id<CAMetalDrawable> drawable = nil;
 +    if (i < present_nsurf && omacvm_direct_on()) {
 +        /*
@@ -520,15 +539,14 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                                            present_deep || present_linear)) {
 +            [drawable release];
 +            drawable = nil;
-+        }
+         }
 +        if (!drawable) {
 +            i = present_nsurf;
 +        }
-+    }
+     }
      if (i == present_nsurf) {
          /* All busy: try again after the next refresh. */
-         CGLSetCurrentContext(prev);
-@@ -8465,6 +8893,9 @@
+@@ -8465,6 +8908,9 @@
      IOSurfaceRef surf = present_surf[n];
      double flushed = CACurrentMediaTime();
      CFRetain(surf);
@@ -538,7 +556,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      if (present_vsync) {
          os_unfair_lock_lock(&present_lock);
          present_sync.inflight++;
-@@ -8592,6 +9023,7 @@
+@@ -8592,6 +9038,7 @@
  
  static void surface_put(IOSurfaceRef surf)
  {
@@ -546,7 +564,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      IOSurfaceDecrementUseCount(surf);
      CFRelease(surf);
  }
-@@ -8609,8 +9041,15 @@
+@@ -8609,8 +9056,15 @@
      [layer setMinificationFilter:f];
      cocoa_gl_layer_follow(layer, surf, linear);
      omacvm_present_gravity(layer, surf);

@@ -64,6 +64,9 @@ problems() {
   grep -q 'NSSelectorFromString(@"setWantsIOSurfaceCompression:")' <<<"$dalloc" && grep -q 'respondsToSelector:sel' <<<"$dalloc" ||
     echo "no lossless-compressed drawables (or a private selector called unchecked)"
   grep -q 'qatomic_inc(&direct_gen);' <<<"$dalloc" || echo "Metal textures of old surfaces are kept after new ones are made"
+  grep -q 'bool compressed = packed || (half && all && present_lossless == 1);' <<<"$dalloc" &&
+    grep -q 'getenv("OMACVM_GL_DIRECT_COMPRESS")' <<<"$dalloc" ||
+    echo "the drawables are not compressed as the surfaces are (8-bit by default, half float only when asked)"
   # The draw: a frame needs a drawable that fits (else all busy); partial draws stay.
   grep -q 'drawable = omacvm_direct_take();' <<<"$present" && grep -q 'omacvm_direct_fits(drawable' <<<"$present" &&
     grep -q 'i = present_nsurf;' <<<"$present" && grep -q '\[t width\] == w' <<<"$fits" ||
@@ -131,6 +134,7 @@ old=$(problems "$work/old.m")
 for want in "never a CAMetalLayer" "OMACVM_GL_DIRECT is not read" "without the vsync present" "no Metal device and queue" \
   "framebufferOnly" "capped at three" "fetched on a queue" "spare drawable is not taken" "a frame that waited" \
   "do not follow them" "outside the drawables' queue" "no lossless-compressed drawables" "Metal textures of old surfaces" \
+  "compressed as the surfaces are" \
   "without a drawable that fits" "not kept with its surface" "is not presented" "not copied into the drawables" \
   "still copying" "no Metal texture per surface" "no way back to the plain layer" "never let go" \
   "fallback does not bring back" "is not logged"; do
