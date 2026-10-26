@@ -1,0 +1,109 @@
+From: OmacVM
+Subject: [PATCH] ui: a click in another display's window keeps the pointer and keys
+
+What: a header with no AppKit in it: when the main window's resign of the
+key is a click's hand-back (a button going down in a head window, while
+the head window's mouseDown: will give the key straight back: the main
+window on screen, its Space shown, QEMU in front), so the pointer and the
+keyboard are kept; and, on the next turn of the main loop, whether the key
+came back (else the let-go runs then). handKeyBack's rule is here too, so
+both sides use the same one. Used by omacvm-cocoa-key-handback.patch (which
+explains the why).
+
+Why its own file: so the rules are tested against the click, escape combo,
+swipe, Command-Tab and hidden-window sequences without QEMU or a display
+(app/runtime/Tests/display/test-key-handback.sh applies this patch to an
+empty folder; at build time and in CI).
+
+Upstream: not applicable (OmacVM's displays).
+Test: app/runtime/Tests/display/test-key-handback.c.
+
+diff --git a/ui/omacvm-key-handback.h b/ui/omacvm-key-handback.h
+new file mode 100644
+index 0000000..7a998ba
+--- /dev/null
++++ b/ui/omacvm-key-handback.h
+@@ -0,0 +1,83 @@
++/*
++ * OmacVM: a click in another display's window keeps the pointer and the
++ * keyboard with the VM (#563).
++ *
++ * No AppKit in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-key-handback.c); ui/cocoa.m feeds it.
++ *
++ * With "Use external displays" every other display shows the VM in a window
++ * of its own (a head window). A click there makes that window key for a
++ * moment: the main window resigns key, and the head window's mouseDown:
++ * hands the key straight back (handKeyBack, since 3.0.0). The main window's
++ * windowDidResignKey: let go of everything each time (the grab, the
++ * full-screen guard's hold with a warp of the Mac's cursor, held keys), and
++ * the click took it all again: the Mac's cursor was shown and hidden at
++ * every click, held keys (Shift for a Shift-click) were released in the
++ * guest, and the guard had to make up for its own warp (the jump of #561).
++ *
++ * Now a resign at such a click keeps all of it: the click hands the key back
++ * within the same event. Every other resign lets go as before: the escape
++ * combo or a swipe (macOS makes the head window key when the main window's
++ * Space leaves its display: no click, and that Space is not shown),
++ * Command-Tab and other apps, Mission Control, a hidden main window. If the
++ * key did not come back after all (the click never reached the head view),
++ * the let-go runs on the next turn of the main loop.
++ */
++#ifndef OMACVM_KEY_HANDBACK_H
++#define OMACVM_KEY_HANDBACK_H
++
++#include <stdbool.h>
++
++/*
++ * handKeyBack's rule: give the key back to the main window at a click in a
++ * head window? Only while the main window is on screen, its Space shows
++ * (else macOS would switch that display back to it: the escape combo
++ * bounced back, 2026-10-06) and QEMU is the app in front.
++ */
++static inline bool omacvm_handback_ok(bool main_visible, bool main_space,
++                                      bool active, bool main_key)
++{
++    return main_visible && main_space && active && !main_key;
++}
++
++/* What ui/cocoa.m knows when the main window resigns key. */
++typedef struct OmacVMResignIn {
++    bool click;         /* the event being handled is a button going down */
++    bool in_head;       /* ... in a head window (ours, not the main one) */
++    bool main_visible;  /* the main window is on screen */
++    bool main_space;    /* its Space shows */
++    bool active;        /* QEMU is the app in front */
++} OmacVMResignIn;
++
++typedef struct OmacVMHandback {
++    bool pending;       /* a resign was kept; the key must come back */
++} OmacVMHandback;
++
++/*
++ * The main window resigned key. True: it is a click's hand-back, keep the
++ * pointer and the keyboard (and call omacvm_handback_settle on the next
++ * turn). False: let go now, as always.
++ */
++static inline bool omacvm_handback_keep(OmacVMHandback *h, const OmacVMResignIn *in)
++{
++    if (!in->click || !in->in_head ||
++        !omacvm_handback_ok(in->main_visible, in->main_space, in->active, false)) {
++        return false;
++    }
++    h->pending = true;
++    return true;
++}
++
++/*
++ * The turn after a kept resign: let go now? Only when the main window did
++ * not get the key back. A second call (two clicks in one turn) says no.
++ */
++static inline bool omacvm_handback_settle(OmacVMHandback *h, bool main_key)
++{
++    bool was = h->pending;
++
++    h->pending = false;
++    return was && !main_key;
++}
++
++#endif

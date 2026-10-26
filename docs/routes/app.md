@@ -402,7 +402,10 @@ one VM at a time: the build stops at the start while another one runs.
 
 - The password for Omarchy, typed in the setup.
 - macOS asks whether OmacVM may find devices on local networks the first
-  time the Developer ID build starts a VM: allow it.
+  time it starts a VM: allow it. Omarchy's network runs through OmacVM (its
+  DNS server and devices on your network). Updates keep the answer; another
+  version in another folder is asked again
+  ([troubleshooting 42](../troubleshooting.md#42-app-macos-asks-to-let-omacvm-find-devices-on-local-networks)).
 - The permissions OmacVM's Mac helpers ask for (as on the other routes).
 
 ## Not done yet
@@ -506,19 +509,6 @@ the VM's SSH on `127.0.0.1:<port>`.
   own pointer. With Extra brightness QEMU gives the main window's layer the
   frames' gain, so the pointer is as bright as the page under it. Not with the hidden Mac pointer setting (that one needs the
   hotspot). `omacvm check` says "Pointer layer".
-- Frames in step with the Mac (experimental, off; the VM window's Display
-  section, `defaults write org.omacvm.app vsyncLock -bool true`, from the
-  VM's next start; ADR 0056): the VM loads OmacVM's virtio-gpu driver with
-  `vsync_lock=1` (built by Update VM like the 10-bit one), whose vblank
-  timer then follows the Mac display's refresh as QEMU's present gives it:
-  the guest's vblank comes just early enough before each refresh that the
-  frame Hyprland draws after it is shown at that refresh. While the screen
-  moves (an animation, scrolling, a video, the pointer), input then shows up
-  to a refresh sooner. The same pixels at the same rate; a frame too late
-  for its refresh is skipped for the newer one (at 120 Hz a few more than
-  without). A still screen and frames that come one at a time are as
-  before. `omacvm check` says "Frames in step" (ok once the driver was in
-  step in this start).
 - Draw only what changed (experimental, off; the VM window's Display
   section, `defaults write org.omacvm.app presentTiles -bool true`, from the
   VM's next start; ADR 0055): QEMU keeps the last whole frame on the window

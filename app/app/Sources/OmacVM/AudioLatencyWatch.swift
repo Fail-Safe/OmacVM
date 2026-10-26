@@ -17,6 +17,8 @@ import OmacVMUpdate
 /// It also keeps QEMU's playback buffers right for the Mac's output (#548):
 /// the frames that output needs (AudioOutputSize: 512 for AirPods) go into
 /// the file QEMU reads (OMACVM_AUDIO_OUT_FRAMES_FILE), and into the delay.
+/// After a coreaudiod restart the file is written anew (AudioSizeFile), so
+/// QEMU tries an output that refused every size again.
 final class AudioLatencyWatch: @unchecked Sendable {
     static let program = "/usr/local/bin/omacvm-audio-latency"
     static let firstSendSeconds = 8
@@ -37,9 +39,9 @@ final class AudioLatencyWatch: @unchecked Sendable {
     private var retry: DispatchSourceTimer?
     private var device = AudioLatencyWatch.unknown
     private var stopped = false
-    private var framesWritten: Int
-    private var framesDevice: AudioObjectID
+    private var sizeFile: AudioSizeFile
     private lazy var changed: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.update() }
+    private lazy var restarted: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.serviceRestarted() }
 
     /// FRAMESFILE: QEMU's size file, holding INITIALFRAMES (written before
     /// QEMU started: Self.writeFrames), for INITIALDEVICE.
@@ -50,8 +52,7 @@ final class AudioLatencyWatch: @unchecked Sendable {
         self.thread = thread
         self.wireless = wireless
         self.framesFile = framesFile
-        self.framesWritten = initialFrames
-        self.framesDevice = initialDevice
+        self.sizeFile = AudioSizeFile(frames: initialFrames, device: initialDevice)
         self.log = log
     }
 
@@ -59,6 +60,8 @@ final class AudioLatencyWatch: @unchecked Sendable {
         queue.async {
             var a = Self.address(kAudioHardwarePropertyDefaultOutputDevice)
             AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &a, self.queue, self.changed)
+            var r = Self.address(kAudioHardwarePropertyServiceRestarted)
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &r, self.queue, self.restarted)
         }
         // The first send once the VM had time to start its agent (and before
         // that, GuestAgent.hold gets the agent's one connection).
@@ -74,11 +77,26 @@ final class AudioLatencyWatch: @unchecked Sendable {
             self.retry = nil
             var a = Self.address(kAudioHardwarePropertyDefaultOutputDevice)
             AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &a, self.queue, self.changed)
+            var r = Self.address(kAudioHardwarePropertyServiceRestarted)
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &r, self.queue, self.restarted)
             self.watchDevice(Self.unknown)
         }
     }
 
     // MARK: on queue
+
+    /// coreaudiod restarted (`sudo killall coreaudiod`): the size file is
+    /// written anew even for the same output, which ends QEMU's wait after
+    /// every size was refused, and the device's listeners are set again.
+    /// Once more after 2 s, in case the output was not back yet.
+    private func serviceRestarted() {
+        guard !stopped else { return }
+        log("OmacVM: sound: macOS's sound service restarted")
+        sizeFile.serviceRestarted()
+        watchDevice(Self.unknown)
+        update()
+        queue.asyncAfter(deadline: .now() + .seconds(2)) { [weak self] in self?.update() }
+    }
 
     private func update() {
         guard !stopped else { return }
@@ -130,17 +148,17 @@ final class AudioLatencyWatch: @unchecked Sendable {
 
     /// QEMU's size file for the Mac's output now (#548): AirPods and other
     /// wireless outputs refuse the own thread's 256-frame queue.
-    /// Written anew for every other output, also with the same size: QEMU
-    /// then forgets what the last output refused.
+    /// Written anew for every other output, also with the same size, and
+    /// after a coreaudiod restart: QEMU then forgets what the last output
+    /// refused.
     private func followSize(_ minimum: Int, _ id: AudioObjectID) {
-        guard let path = framesFile, minimum != framesWritten || id != framesDevice else { return }
+        guard let path = framesFile, sizeFile.needsWrite(minimum: minimum, device: id) else { return }
         guard Self.writeFrames(path, minimum) else {
             log("OmacVM: sound: could not write the playback size for QEMU (\(path))")
             return
         }
-        let changed = minimum != framesWritten
-        framesWritten = minimum
-        framesDevice = id
+        let changed = minimum != sizeFile.frames
+        sizeFile.written(minimum: minimum, device: id)
         guard changed else { return }
         let name = id == Self.unknown ? "none" : Self.name(id)
         log(minimum > 0
