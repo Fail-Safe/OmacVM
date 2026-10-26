@@ -1,4 +1,4 @@
-# 0052: The VM window's 8-bit surfaces are lossless-compressed
+# 0052: The VM window's surfaces are lossless-compressed
 
 Status: accepted, built (`window-path`), on by default (`OMACVM_GL_LOSSLESS=0` keeps
 plain surfaces). Notes and numbers: work/tracks/window-path.md.
@@ -47,3 +47,29 @@ back through Core Image: 0 codes off, on an M1 Max, an M2 and an M4).
   (`OMACVM_GL_PRESENT_DAMAGE=check`, ADR 0051) reads the shown surface that way, so it
   keeps the surfaces plain. test-present-lossless.sh checks both: no CPU read, and no
   `glReadPixels` with a present surface attached outside the check mode.
+
+## Update: half float (2026-10-26, PR #536)
+
+- Half-float surfaces of HDR (PQ) and Extra brightness (linear light, with or without
+  HDR) are lossless too ('&RhA', `kCVPixelFormatType_Lossless_64RGBAHalf`); this
+  replaces point 2. A 10-bit scanout without HDR keeps plain half float (not checked on
+  screen; the app turns 10-bit on only with HDR). A failure makes only half-float
+  surfaces plain for the run. GL draws into them exactly within half-float rounding,
+  values above 1 included (M1 Max, M2, M4: work/window-path/lbcheck16.m).
+- Checked on an M1 Max's XDR panel (macOS 27, 120 Hz, brightness 0.50) through
+  WindowServer (ScreenCaptureKit HDR capture, work/hdr-surfaces/kit/hdrcheck.m `cmpq`,
+  in the light the panel gives): HDR PQ and Extra brightness pictures are identical to
+  plain half float (all pixels, Delta E ITP 0, the same EDR headroom; a picture one code
+  up is caught), colours outside Display P3 and highlights up to 6x SDR white included;
+  the VM's own HDR pictures (a BT.2020 PQ clip) identical too. Mac mini (SDR display):
+  identical. Whole Mac, M1 Max, HDR on, A/B twice: a 1080p60 clip -0.62 W (-3.2 %),
+  scrolling -0.53 W (-4.5 %); over Extra brightness -0.55 W (-2.6 %) and -0.56 W
+  (-4.0 %, one round); the same frame rates and EDR headroom. MacBook Air, Extra
+  brightness, scrolling at 60 Hz: -0.19 W (-4 %).
+- Tried and dropped: HDR in plain 10-bit surfaces ('l10r', the guest's codes, half the
+  bytes of half float; CoreVideo has no lossless 10-bit RGB form). On the XDR panel one
+  patch of BT.2020 colour outside Display P3 came out differently from half float (Delta
+  E ITP 13.45 on screen; a VM clip 18.8), though Core Animation's own renderer offscreen
+  showed them within a code. It saved no more than lossless half float (M1 Max: clip
+  the same, scrolling 0.18 W more), so only the lossless half-float part ships. Notes:
+  work/tracks/hdr-surfaces.md.
