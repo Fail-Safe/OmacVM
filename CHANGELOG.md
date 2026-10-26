@@ -21,7 +21,11 @@ in more words.
   display's window lets go of the cursor for a moment and puts it where the pointer is; the motion
   macOS reports next includes that move, and OmacVM added it to the pointer. Now it takes it out.
 
-## 3.2.5 (unreleased)
+## 3.2.5
+
+Five fixes: no "would like to control this Mac" dialog at every VM start, the pointer on every
+display with Pointer on its own layer, notifications under the bar with Full screen including notch,
+sound with AirPods, and a VM that ended at desktop start.
 
 - **A failed OpenGL query at desktop start no longer ends the VM.** Seen once in about 30 test starts
   on a Mac mini (#547). While the Mac's OpenGL was failing calls of Omarchy's bar, virglrenderer read the
