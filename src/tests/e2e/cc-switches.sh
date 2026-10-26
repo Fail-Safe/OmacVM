@@ -174,6 +174,9 @@ launcher_pid() { LC_ALL=C pgrep -f "OmacVM Test.app/Contents/MacOS/OmacVM( |$)" 
 SERVER=""
 cleanup() {
   local rc=$?
+  # Nothing stops the cleanup half way (a second Ctrl-C, a hangup, a lost stdout after an ssh drop):
+  # the CI runners come back at its end.
+  trap '' INT TERM HUP PIPE
   log "cleanup"
   local ev; ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" end
   # Stopped for someone at the Mac: not a product failure (the person row says which row was next).
@@ -201,7 +204,7 @@ cleanup() {
   if diff -q "$OUT/fp-before.txt" "$OUT/fp-after.txt" >/dev/null; then res cleanup ok "the person's helpers, app and VM unchanged"
   else res cleanup FAIL "the person's helpers, app or VM changed: diff $OUT/fp-before.txt $OUT/fp-after.txt"; fi
   person_watch_stop
-  (( ${CI_PAUSED:-0} )) && "$HERE/ci-runners.sh" resume --holder $$
+  (( ${CI_PAUSED:-0} )) && "$HERE/ci-runners.sh" resume --holder $$ >> "$OUT/ci-runners.log" 2>&1
   for l in ${LOCKS[@]+"${LOCKS[@]}"}; do rm -rf "$l"; done
   write_result
   echo; echo "$n_ok ok, $n_fail FAIL, $n_blocked BLOCKED, $n_skip skip in $(( ($(date +%s) - T0) / 60 )) min: $OUT/summary.tsv"

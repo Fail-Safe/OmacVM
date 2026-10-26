@@ -191,7 +191,10 @@ for n in 1 2; do
   touch "$L/actions.runner.o-r.mini-$n"
 done
 touch "$W/actions-runner-2"   # runner 2 has a job
-CR() { PATH=$B:$PATH CI_AGENTS=$A CI_STATE=$T/ci-state "$R/src/tests/e2e/ci-runners.sh" "$@"; }
+CR() { PATH=$B:$PATH CI_AGENTS=$A CI_STATE=$T/ci-state CI_GUARD_TICK=0.2 CI_POLL=0.5 "$R/src/tests/e2e/ci-runners.sh" "$@"; }
+upto() { local i; for ((i = 0; i < $1 * 10; i++)); do "${@:2}" && return 0; sleep 0.1; done; return 1; }
+running() { ls "$L" | tr '\n' ' ' | sed 's/ $//'; }
+both_back() { [[ $(running) == "actions.runner.o-r.mini-1 actions.runner.o-r.mini-2" && ! -e $T/ci-state ]]; }
 CR pause --wait 0 --holder $$ > "$T/ci1.txt"; rc=$?
 same "ci: a runner on a job is not stopped (exit 4 after --wait)" 4 "$rc"
 [[ ! -e $L/actions.runner.o-r.mini-1 && -e $L/actions.runner.o-r.mini-2 ]] && ok "ci: the idle runner stopped, the busy one kept" || bad "ci: $(ls "$L" | tr '\n' ' ')"
@@ -206,16 +209,40 @@ CR resume --holder $$ > "$T/ci3.txt"
 same "ci: another gate still holds the pause: nothing started" "" "$(ls "$L")"
 has "ci: ... and says so" "other holder" "$(cat "$T/ci3.txt")"
 kill $other; wait $other 2>/dev/null
-CR resume --holder 999999 > "$T/ci4.txt"; rc=$?
-same "ci: the last holder gone -> resume starts both" "actions.runner.o-r.mini-1 actions.runner.o-r.mini-2" "$(ls "$L" | tr '\n' ' ' | sed 's/ $//')"
-same "ci: ... exit 0, state gone" "0 gone" "$rc $([[ -e $T/ci-state ]] && echo there || echo gone)"
+upto 5 both_back && ok "ci: the last holder ended without its resume -> its guard starts both, state gone" ||
+  bad "ci: guard: running '$(running)', state '$(ls "$T/ci-state" 2>/dev/null | tr '\n' ' ')'"
 CR resume > /dev/null; rc=$?
 same "ci: resume with nothing paused does nothing" "0" "$rc"
 has "ci: status lists the runners" "actions.runner.o-r.mini-1	running	idle" "$(CR status)"
 # bootout returns before the service is gone: pause says "no runner runs" only once it is.
 FAKE_ASYNC=1 CR pause --wait 0 --holder $$ > "$T/ci5.txt"; rc=$?
 same "ci: an asynchronous bootout: pause waits until the runners are gone" "0 none" "$rc $(ls "$L" | grep -c . | sed 's/^0$/none/')"
-CR resume --holder $$ > /dev/null
+CR resume --holder $$ > "$T/ci4.txt"; rc=$?
+both_back && ok "ci: resume by the last holder starts both, state gone" || bad "ci: resume: '$(running)' rc $rc"
+# The gate killed with no cleanup at all (kill -9; an ssh drop that kills its EXIT trap): the guard resumes.
+sleep 30 & h=$!
+CR pause --wait 0 --holder $h > /dev/null
+same "ci: paused for a gate" "" "$(running)"
+kill -9 $h; wait $h 2>/dev/null
+upto 5 both_back && ok "ci: the gate killed (kill -9) -> its guard starts both, state gone" ||
+  bad "ci: after kill -9: running '$(running)', state '$(ls "$T/ci-state" 2>/dev/null | tr '\n' ' ')'"
+has "ci: ... and logs it" "ended without a resume" "$(cat "$T/ci-state.log" 2>/dev/null)"
+# The holder's pid now belongs to another process (its start time differs): no pause kept for it.
+sleep 30 & h=$!
+CR pause --wait 0 --holder $h > /dev/null
+echo "Thu Jan  1 00:00:00 1970" > "$T/ci-state/holder.$h"
+upto 5 both_back && ok "ci: a holder pid used again by another process keeps no pause" || bad "ci: pid reuse: '$(running)'"
+kill $h; wait $h 2>/dev/null
+# The holder dies while its pause still waits for a job: what the guard started again is not stopped again.
+touch "$W/actions-runner-2"
+sleep 1 & h=$!
+CR pause --wait 30 --holder $h > "$T/ci6.txt" & pz=$!
+upto 5 [ ! -e "$L/actions.runner.o-r.mini-1" ] || bad "ci: runner 1 not stopped"
+wait $h 2>/dev/null
+upto 5 [ -e "$L/actions.runner.o-r.mini-1" ] || bad "ci: the guard did not start runner 1"
+rm -f "$W/actions-runner-2"; wait $pz; rc=$?
+same "ci: the holder gone during the pause -> pause stops nothing more (exit 4), both run" "4 actions.runner.o-r.mini-1 actions.runner.o-r.mini-2" "$rc $(running)"
+upto 5 [ ! -e "$T/ci-state" ] || bad "ci: state left after the holder died: $(ls "$T/ci-state" | tr '\n' ' ')"
 
 # ---- the harnesses ask between rows, not only at their start (3.2.4: two Screen Sharing connects
 # inside a run that looked only at its start)
@@ -236,6 +263,13 @@ if grep -nE 'HIDIdleTime|screensharingd|JumpConnect' "$E/cc-switches.sh" "$E/ons
 else ok "wiring: HID idle and remote sessions only through person.sh"; fi
 wired "modifier-keys waits before each case and stamps its own events" "$E/modifier-keys.sh" \
   '^source "\$HERE/person.sh"' 'person_gate "keys-\$name"' 'person_posted 3; "\$KS" --pid "\$PID" \$evs; person_posted' 'exit 3'
+# The cleanup goes to its end whatever comes (a second Ctrl-C, a hangup, a lost stdout): first thing in it.
+for f in cc-switches onscreen; do
+  first=$(awk '/^cleanup\(\) \{/ { c = 1; next } c && !/^ *#/ && !/^  local rc=\$\?$/ { print; exit }' "$E/$f.sh")
+  same "cleanup: $f ignores signals first" "  trap '' INT TERM HUP PIPE" "$first"
+done
+wired "cc-switches: the resume's output in the results" "$E/cc-switches.sh" 'resume --holder \$\$ >> "\$OUT/ci-runners.log" 2>&1'
+wired "onscreen: the resume's output in the results" "$E/onscreen.sh" 'resume --holder \$\$ >> "\$OUT/ci-runners.log" 2>&1'
 wired "display-unplug waits before each case" "$E/display-unplug.sh" \
   '^source "\$HERE/person.sh"' 'gate full && case_run' 'gate fullpanel && case_run' 'gate window && case_run' '&& gate head; then'
 wired "onscreen waits instead of stopping at once, stamps its events" "$E/onscreen.sh" \

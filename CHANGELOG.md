@@ -11,7 +11,7 @@ in more words.
   theirs pauses the run until the Mac is quiet again, and rows that ran while someone came by get
   a `person` row with the times (3.2.4's gate had two Screen Sharing connects inside a run). With
   `--pause-ci` the test Mac's own CI runners stop for the run (each after its job) and start again
-  at its end (`src/tests/e2e/ci-runners.sh`).
+  at its end, also when the run is killed or its ssh connection drops (`src/tests/e2e/ci-runners.sh`).
 
 ## 3.2.5
 

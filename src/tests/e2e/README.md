@@ -86,10 +86,13 @@ not only at their start (`person.sh`):
 run (`ci-runners.sh pause`: `launchctl bootout` of each runner's LaunchAgent
 once its job is over; queued jobs wait on GitHub) and starts them again at
 the end, also when the run fails (`ci-runners.sh resume`, from the EXIT
-trap). A kit that runs several harnesses pauses once around all of them
-with its own holder pid. By hand: `src/tests/e2e/ci-runners.sh status`, and
-`resume --holder <pid>` after a run that was killed (what was stopped is
-written down in `~/.omacvm-ci-paused`).
+trap, which no further Ctrl-C, hangup or lost ssh can stop half way). A run
+that dies without its cleanup (`kill -9`) is covered as well: the pause starts
+a guard in its own session that resumes once the run's process is gone (within
+10 s; its log `~/.omacvm-ci-paused.log`). A kit that runs several harnesses
+pauses once around all of them with its own holder pid. By hand:
+`src/tests/e2e/ci-runners.sh status` (what was stopped is written down in
+`~/.omacvm-ci-paused`).
 
 ## The test Mac, once
 

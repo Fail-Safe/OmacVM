@@ -167,6 +167,9 @@ pending() { cat "$VMD/$1-pending" 2>/dev/null | tr -d '\n'; }
 KEYS="startFullScreen gpuOffMainLoop closeAction skipInstallPaths"
 helpers() { psall | awk -v h="$APP/Contents/Helpers/" '{ p = $1; a = $0; sub(/^ *[0-9]+ +/, "", a); if (index(a, h) == 1) print p }'; }
 cleanup() {
+  # Nothing stops the cleanup half way (a second Ctrl-C, a hangup, a lost stdout after an ssh drop):
+  # the CI runners come back at its end.
+  trap '' INT TERM HUP PIPE
   local p
   # Helpers of this copy the run started (the app starts its Bridge): stopped, as the copy goes away.
   for p in $(helpers); do [[ " $HELPERS0 " == *" $p "* ]] || kill "$p" 2>/dev/null; done
@@ -177,7 +180,7 @@ cleanup() {
   [[ -f $OUT/saved/omacvm-version ]] && ! grep -q "^$VER\$" "$VMD/omacvm-version" 2>/dev/null && cp "$OUT/saved/omacvm-version" "$VMD/omacvm-version"
   local ev; ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" end
   person_watch_stop
-  (( ${CI_PAUSED:-0} )) && "$E/ci-runners.sh" resume --holder $$
+  (( ${CI_PAUSED:-0} )) && "$E/ci-runners.sh" resume --holder $$ >> "$OUT/ci-runners.log" 2>&1
   return 0
 }
 trap cleanup EXIT
