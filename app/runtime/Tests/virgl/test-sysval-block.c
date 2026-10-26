@@ -10,7 +10,12 @@
  *    program that was refused stays refused (not linked again for every draw), as for
  *    other refused shaders;
  *  - a separable pipeline whose VirglBlock fails at a rebind (its shaders were used by
- *    another pipeline since): that draw is skipped, the next one binds again and draws. */
+ *    another pipeline since): that draw is skipped, the next one binds again and draws.
+ * Status queries that write nothing on such a GL (virgl-query-results-init.patch), in a
+ * second context, with the stack filled first so an unset value shows:
+ *  - a shader's compile status and info log: the "Shader failed to compile" line has an
+ *    empty log, not stack bytes; the same for a program's link;
+ *  - a pipeline's validate status: no ILLEGAL_PROGRAM_PIPELINE, the context draws on. */
 #include <OpenGL/OpenGL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,14 +30,23 @@ void sysval_block_fault(int mode);
 unsigned long sysval_block_faults(void);
 unsigned long sysval_block_draws(void);
 unsigned long sysval_block_queries(void);
+void gl_status_fault(int mode);
 void gl_pervertex_redeclare(int on);
+unsigned long gl_status_faults(void);
 
 enum { TEST_SHADER_VERTEX = 0, TEST_SHADER_FRAGMENT = 1, TEST_PRIM_TRIANGLES = 4,
        TEST_TEXTURE_2D = 2, TEST_CLEAR_COLOR0 = 1 << 2 };
 enum { GREEN = 0xff00ff00, BLUE = 0xffff0000, GREY = 0xff808080 };
 
 static CGLContextObj main_ctx;
-static int failures, refused_lines, block_lines;
+static int failures, refused_lines, block_lines, ctx_error_lines;
+static char compile_line[256], link_line[256];
+
+static void keep_first(char *dst, size_t size, const char *message, const char *start)
+{
+   if (!dst[0] && !strncmp(message, start, strlen(start)))
+      snprintf(dst, size, "%s", message);
+}
 
 static void count_log(enum virgl_log_level_flags level, const char *message, void *data)
 {
@@ -40,7 +54,19 @@ static void count_log(enum virgl_log_level_flags level, const char *message, voi
    (void)data;
    refused_lines += strstr(message, "refused a shader (link)") != NULL;
    block_lines += strstr(message, "VirglBlock") != NULL;
+   ctx_error_lines += strstr(message, "context error reported") != NULL;
+   keep_first(compile_line, sizeof(compile_line), message, "Shader failed to compile");
+   keep_first(link_line, sizeof(link_line), message, "Error linking program");
    fputs(message, stderr);
+}
+
+/* Fills the stack below main with one byte, so a value vrend leaves unset in a frame
+ * there reads as that byte, not as whatever an earlier call left. */
+static void __attribute__((noinline)) fill_stack(int byte)
+{
+   volatile char junk[512 * 1024];
+   for (size_t i = 0; i < sizeof(junk); i++)
+      junk[i] = (char)byte;
 }
 
 static void check(int ok, const char *what)
@@ -326,6 +352,53 @@ static void separable_rebind(struct cmds *c)
    gl_pervertex_redeclare(0);
 }
 
+/* Status queries that write nothing, in their own context (a context logs the details
+ * only of its first refused shader). */
+static void unwritten_status(void)
+{
+   check(!virgl_renderer_context_create(2, 6, "statusq"), "status queries: context");
+   virgl_renderer_ctx_attach_resource(2, 5);
+   struct cmds c = { .n = 0 };
+   emit_setup(&c);
+   check(submit(2, &c) == 0, "status queries: framebuffer");
+
+   unsigned long faults = gl_status_faults(), draws = sysval_block_draws();
+   gl_status_fault(1);
+   fill_stack('X');
+   int r = draw_with_new_shaders_in(2, &c, 10, vs_text, fs_green);
+   gl_status_fault(0);
+   check(r == 0 && gl_status_faults() > faults && sysval_block_draws() == draws,
+         "compile status unwritten: taken as a failed compile, no draw");
+   check(!strcmp(compile_line, "Shader failed to compile\n\n"),
+         "compile status unwritten: \"Shader failed to compile\" with an empty log");
+
+   faults = gl_status_faults();
+   gl_status_fault(3);
+   fill_stack('X');
+   r = draw_with_new_shaders_in(2, &c, 20, vs_text, fs_green);
+   gl_status_fault(0);
+   check(r == 0 && gl_status_faults() > faults && sysval_block_draws() == draws,
+         "link status unwritten: taken as a failed link, no draw");
+   check(!strcmp(link_line, "Error linking program:\n\n"),
+         "link status unwritten: \"Error linking program\" with an empty log");
+
+   faults = gl_status_faults();
+   ctx_error_lines = 0;
+   gl_pervertex_redeclare(1);
+   gl_status_fault(2);
+   fill_stack(0);
+   r = draw_with_new_shaders_in(2, &c, 30, vs_separable, fs_separable_green);
+   gl_status_fault(0);
+   gl_pervertex_redeclare(0);
+   check(gl_status_faults() > faults, "validate status unwritten: the pipeline was validated");
+   check(r == 0 && ctx_error_lines == 0,
+         "validate status unwritten: no context error (ILLEGAL_PROGRAM_PIPELINE)");
+   check(sysval_block_draws() == draws + 3 && read_middle() == GREEN,
+         "validate status unwritten: the pipeline draws (green)");
+
+   virgl_renderer_ctx_detach_resource(2, 5);
+   virgl_renderer_context_destroy(2);
+}
 
 int main(void)
 {
@@ -391,6 +464,7 @@ int main(void)
          "the refused program is not linked again, its draws stay skipped");
 
    separable_rebind(&c);
+   unwritten_status();
 
    virgl_renderer_ctx_detach_resource(1, 5);
    virgl_renderer_context_destroy(1);
