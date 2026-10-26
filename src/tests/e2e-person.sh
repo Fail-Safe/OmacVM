@@ -176,4 +176,26 @@ CR resume > /dev/null; rc=$?
 same "ci: resume with nothing paused does nothing" "0" "$rc"
 has "ci: status lists the runners" "actions.runner.o-r.mini-1	running	idle" "$(CR status)"
 
+# ---- the harnesses ask between rows, not only at their start (3.2.4: two Screen Sharing connects
+# inside a run that looked only at its start)
+E=$R/src/tests/e2e
+wired() {   # NAME FILE PATTERN...: every pattern in the file
+  local n=$1 f=$2 p; shift 2
+  for p in "$@"; do grep -qE -- "$p" "$f" || { bad "wiring: $n: no /$p/"; return; }; done
+  ok "wiring: $n"
+}
+wired "cc-switches waits before its first row and before each step" "$E/cc-switches.sh" \
+  '^source "\$HERE/person.sh"' '^person_gate start' 'person_watch_start' 'gate "switch-\$n"' '    gate "\$st"' \
+  '\{ gate keys; step_keys; \}' '\{ gate window; step_window; \}' '\{ gate unplug; step_unplug; \}' '^  gate update' '^    gate prepare'
+wired "cc-switches: a visit's row, the watcher stopped, CI runners back" "$E/cc-switches.sh" \
+  'person_overlap "\$ev" end' 'person_watch_stop' 'ci-runners.sh" resume --holder \$\$' 'ci-runners.sh" pause --wait'
+# No question to the Mac's state left that looks only once (the old start-only checks).
+if grep -nE 'HIDIdleTime|screensharingd|JumpConnect' "$E/cc-switches.sh" "$E/modifier-keys.sh" "$E/display-unplug.sh"; then
+  bad "wiring: a harness asks HID idle or remote sessions itself (person.sh does)"
+else ok "wiring: HID idle and remote sessions only through person.sh"; fi
+wired "modifier-keys waits before each case and stamps its own events" "$E/modifier-keys.sh" \
+  '^source "\$HERE/person.sh"' 'person_gate "keys-\$name"' 'person_posted 3; "\$KS" --pid "\$PID" \$evs; person_posted' 'exit 3'
+wired "display-unplug waits before each case" "$E/display-unplug.sh" \
+  '^source "\$HERE/person.sh"' 'gate full && case_run' 'gate fullpanel && case_run' 'gate window && case_run' '&& gate head; then'
+
 exit $fail

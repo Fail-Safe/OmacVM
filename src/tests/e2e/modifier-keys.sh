@@ -15,9 +15,15 @@
 #   src/tests/e2e/modifier-keys.sh --vm NAME [--out DIR]
 #     --out DIR     summary.tsv and each case's guest trace (default ~/omacvm-e2e/keys-<time>)
 # Needs: NAME running from ~/Applications/"OmacVM Test.app" (org.omacvm.app.test),
-# clang (builds keyseq.c). Exit 0 only when every case passed.
+# clang (builds keyseq.c). Between cases it waits while someone is at the Mac
+# (person.sh: a remote session, input not ours): a key of theirs or a loaded
+# remote session can move the timing the cases check. A case that failed while
+# someone came and went gets a BLOCKED "person" row. Our own events are stamped
+# (person_posted), so they never count as someone's.
+# Exit 0 only when every case passed; 3 when someone stayed (BLOCKED).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+source "$HERE/person.sh"
 
 VM=""; OUT=""
 while (( $# )); do
@@ -35,13 +41,24 @@ KEY=$HOME/.ssh/omacvm
 OUT=${OUT:-$HOME/omacvm-e2e/keys-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 : > "$OUT/summary.tsv"
-n_fail=0
-res() {   # STEP ok|FAIL DETAIL
+n_fail=0; n_blocked=0
+res() {   # STEP ok|FAIL|BLOCKED|skip DETAIL
   printf '%s\t%s\t%s\n' "keys-$1" "$2" "$3" >> "$OUT/summary.tsv"
   printf '%-34s %-7s %s\n' "keys-$1" "$2" "$3"
   [[ $2 == FAIL ]] && n_fail=$((n_fail + 1))
+  [[ $2 == BLOCKED ]] && n_blocked=$((n_blocked + 1))
   return 0
 }
+# Someone at the Mac between two cases (person.sh; the caller's watcher when cc-switches.sh runs this).
+GATE_LINE=0
+person_overlap() {   # EVENTS NEXT
+  local span r
+  span=$(person_span "$OUT/summary.tsv" "$GATE_LINE" 1 2)
+  r=$(person_overlap_row "$1" "${span%%$'\t'*}" "${span#*$'\t'}")
+  res person "${r%%$'\t'*}" "${r#*$'\t'}"
+}
+person_watch_start
+trap 'person_watch_stop' EXIT
 
 VMD=$( (source "$HERE/test-vms.sh" && e2e_vm_guard "$APPID" "$VM") 2>&1) || { echo "modifier-keys: $VMD" >&2; exit 2; }
 QPAT='(runtime/bin/OmacVM|MacOS/OmacVM-VM) -name'
@@ -100,6 +117,9 @@ held-repeat|fc:0x38:0x20102 kd:0x13:0x20102 kd:0x13:0x20102 kd:0x13:0x20102 ku:0
 # Command reaches the VM only while it has the keyboard: the nocap cases need it in the background.
 front=$(osascript -e 'tell application "System Events" to get unix id of first process whose frontmost is true' 2>/dev/null)
 while IFS='|' read -r name evs want; do
+  [[ -n $PERSON_WHY ]] && { res "$name" BLOCKED "not run: $PERSON_WHY"; continue; }
+  person_gate "keys-$name" || { res "$name" BLOCKED "not run: $PERSON_WHY"; continue; }
+  GATE_LINE=$(wc -l < "$OUT/summary.tsv" | tr -d ' ')
   if [[ $name == command-nocap-* && $front == "$PID" ]]; then
     res "$name" skip "the VM has the keyboard (in front)"; continue
   fi
@@ -108,7 +128,7 @@ while IFS='|' read -r name evs want; do
   rp=$!
   for _ in 1 2 3 4 5 6 7 8 9 10; do grep -q '^ready' "$f" 2>/dev/null && break; sleep 0.3; done
   # shellcheck disable=SC2086  # one word per event
-  "$KS" --pid "$PID" $evs
+  person_posted 3; "$KS" --pid "$PID" $evs; person_posted 2
   wait $rp
   got=$(awk '$1 ~ /^[0-9]+$/ && $3 != 2 {printf "%s%s:%s", (n++ ? " " : ""), $2, $3}' "$f")
   times=$(awk '$1 ~ /^[0-9]+$/ && $3 != 2 {if (!t0) t0 = $1; printf "%s%s:%s@%d", (n++ ? " " : ""), $2, $3, $1 - t0}' "$f")
@@ -116,6 +136,9 @@ while IFS='|' read -r name evs want; do
   else res "$name" FAIL "got [${times:-nothing}] want [${want:-nothing}]"; fi
 done <<< "$CASES"
 # Nothing at all would also pass the nocap cases: the others must have arrived.
-grep -q $'^keys-mac-shift2\tok' "$OUT/summary.tsv" || res delivery FAIL "no key reached the VM"
+ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" end
+grep -q $'^keys-mac-shift2\tok' "$OUT/summary.tsv" || (( n_blocked )) || res delivery FAIL "no key reached the VM"
 gssh "rm -f /root/omacvm-evread.py" < /dev/null
-exit $(( n_fail > 0 ))
+(( n_fail > 0 )) && exit 1
+(( n_blocked > 0 )) && exit 3
+exit 0
