@@ -24,6 +24,49 @@ t "changed" "$(bash "$N" on "$T/$MAC-Service.qml")" "$MAC: the notification serv
 t "" "$(bash "$N" on "$T/$MAC-Service.qml")" "  again: nothing"
 t "changed" "$(bash "$N" off "$T/$MAC-Service.qml")" "  off: back"
 t "" "$(diff "$O/$MAC/shell/plugins/notifications/Service.qml" "$T/$MAC-Service.qml")" "  as Omarchy shipped it"
+# The patched room, run: parked bar none, FullPanel's bar (barSizeFor 34)
+# the strip, other displays and a hidden bar Omarchy's own (26 + the gap 5).
+room() {  # Service.qml -> the top margins of the cases below
+  node -e '
+var s = require("fs").readFileSync(process.argv[1], "utf8")
+var a = s.indexOf("service.barPosition,\n") + "service.barPosition,\n".length
+var expr = s.slice(a, s.indexOf(",\n        Style.gapsOut)", a))
+var Style = { gapsOut: 5 }, out = []
+;[["Virtual-1", true, false, 1], ["Virtual-1", false, false, 1], ["Virtual-2", false, false, 1],
+  ["Virtual-1", false, true, 1], ["Virtual-1", false, false, 0]].forEach(function (c) {
+  var bar = { notchParked: c[1], notchParkedScreen: "Virtual-1", barHidden: c[2], barSize: 26 }
+  if (c[3]) bar.barSizeFor = function (n) { return n === "Virtual-1" && !c[1] ? 34 : 26 }
+  var service = { shell: { bar: bar }, barClearance: 26 + 5 }
+  var modelData = { name: c[0] }
+  out.push(eval("(" + expr + ")"))
+})
+console.log(out.join(" "))' "$1"
+}
+if command -v node >/dev/null; then
+  bash "$N" on "$T/$MAC-Service.qml" >/dev/null
+  t "5 39 31 31 31" "$(room "$T/$MAC-Service.qml")" \
+    "  parked: the gap; FullPanel: under the strip; else the bar's room (an old bar: Omarchy's)"
+  bash "$N" off "$T/$MAC-Service.qml" >/dev/null
+fi
+# 3.2.4's patch (the parked bar only) is replaced, and taken off as well.
+python3 - "$T/$MAC-Service.qml" "$T/v1-Service.qml" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+old = "NotificationLogic.popupPlacement(\n        service.barPosition, service.barClearance, Style.gapsOut)"
+v1 = ("NotificationLogic.popupPlacement(\n        service.barPosition,\n"
+      "        // omacvm-omanotch: the bar is parked in the notch strip on this display\n"
+      "        service.shell && service.shell.bar && service.shell.bar.notchParked\n"
+      "          && String(modelData && modelData.name) === String(service.shell.bar.notchParkedScreen)\n"
+      "          ? Style.gapsOut : service.barClearance,\n"
+      "        Style.gapsOut)")
+open(sys.argv[2], "w").write(s.replace(old, v1))
+PY
+cp "$T/v1-Service.qml" "$T/v1b-Service.qml"
+cp "$T/$MAC-Service.qml" "$T/now-Service.qml"; bash "$N" on "$T/now-Service.qml" >/dev/null
+t "changed" "$(bash "$N" on "$T/v1-Service.qml")" "  3.2.4's patch: replaced"
+t "" "$(diff "$T/now-Service.qml" "$T/v1-Service.qml")" "  as this patch has it"
+t "changed" "$(bash "$N" off "$T/v1b-Service.qml")" "  3.2.4's patch, off: back"
+t "" "$(diff "$O/$MAC/shell/plugins/notifications/Service.qml" "$T/v1b-Service.qml")" "  as Omarchy shipped it"
 out=$(bash "$N" on "$T/$UP-Service.qml" 2>&1); rc=$?
 t "0 " "$rc $out" "$UP: nothing to patch, no error (the bar's barSizeFor answers)"
 t "" "$(diff "$O/$UP/shell/plugins/notifications/Service.qml" "$T/$UP-Service.qml")" "  the service as Omarchy shipped it"

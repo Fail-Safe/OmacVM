@@ -282,7 +282,7 @@ struct PointerPlaneRow: View {
     var tick = 0
     @State private var on = Settings.pointerPlane
 
-    static let info = "Moving the pointer no longer redraws the VM's screen. Linux puts the pointer on a layer of its own, and the Mac shows that layer over the VM's window: the same pointer in the same place (with Extra brightness as bright as the picture), but the VM's picture is not drawn again for each move. Less GPU work and battery while you move the pointer. The pointer moves on its own, like the Mac's own pointer: while you drag something it can be a frame ahead of it. Only in the VM's main window; on other displays the VM draws the pointer as before. Counts from the next start of the VM; the VM gets the driver for it with Update VM (needs internet once). Experimental."
+    static let info = "Moving the pointer no longer redraws the VM's screen. Linux puts the pointer on a layer of its own, and the Mac shows that layer over the VM's window: the same pointer in the same place (with Extra brightness as bright as the picture), but the VM's picture is not drawn again for each move. Less GPU work and battery while you move the pointer. The pointer moves on its own, like the Mac's own pointer: while you drag something it can be a frame ahead of it. On every display the VM uses. Counts from the next start of the VM; the VM gets the driver for it with Update VM (needs internet once). Experimental."
 
     var body: some View {
         SettingRow(title: "Pointer on its own layer", badge: "experimental",

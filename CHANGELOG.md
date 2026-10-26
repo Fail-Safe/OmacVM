@@ -12,6 +12,47 @@ in more words.
   (SDR's too): `launchctl setenv OMACVM_GL_LOSSLESS 0`, then quit and reopen the app
   (`launchctl unsetenv OMACVM_GL_LOSSLESS` turns it on again).
 
+## 3.2.5
+
+Five fixes: no "would like to control this Mac" dialog at every VM start, the pointer on every
+display with Pointer on its own layer, notifications under the bar with Full screen including notch,
+sound with AirPods, and a VM that ended at desktop start.
+
+- **A failed OpenGL query at desktop start no longer ends the VM.** Seen once in about 30 test starts
+  on a Mac mini (#547). While the Mac's OpenGL was failing calls of Omarchy's bar, virglrenderer read the
+  size of its own uniform block without checking that the query worked, then checked it with an
+  assertion and aborted QEMU. Now a program whose block size is too small or unknown is refused like any
+  other shader the Mac does not take: the draws that need it are skipped and the VM keeps running.
+
+- **No "would like to control this Mac" dialog at every VM start (reported by the user).** When OmacVM
+  was not allowed to control the computer (Accessibility), each VM start made macOS show that dialog,
+  also with nobody at the Mac, because the VM's keyboard tap was tried anyway (and refused). Now the tap
+  is made only when macOS already allows it; otherwise the VM's window shows its note with Allow…, and
+  only that button asks macOS. A grant you gave stays through updates: macOS keeps it for OmacVM's bundle
+  id and its Developer ID team, not for one build.
+
+- **Pointer on its own layer: the pointer on every display (#554, reported by the user).** With
+  the switch on and the VM in full screen on the built-in display and an external one ("Use
+  external displays"), the external display showed no pointer at all. Only the main window's
+  display had the pointer's layer, and the VM drew no pointer of its own on the others. Now every
+  display the VM uses has its own pointer layer, shown over that display's window. The VM needs
+  Update VM for it; until then it draws the pointer itself, as with the switch off.
+
+- **Notifications sit under the bar with Full screen including notch (reported by the user).** There the
+  bar is as tall as the strip beside the notch (34 points on a 16-inch MacBook Pro), but Omarchy's
+  notifications kept only the normal bar's room (26 points and the gap), so their top ran 3 points into
+  the bar. They now keep the strip's height and Omarchy's normal gap. Window, Full screen with Omanotch's
+  strip and displays without a notch stay as they were. Update VM brings it.
+
+- **Sound with AirPods.** With AirPods (or another Bluetooth or AirPlay output) as the Mac's output,
+  the VM had no sound since 3.1.17: macOS refused to start the queue of the sound's own thread (48 kHz,
+  256-frame buffers; AudioQueueStart -66681). A VM started with a wireless output now gives macOS the
+  queue of QEMU's main loop path (44.1 kHz, 512-frame buffers), which played for the reporter. A switch
+  to one while the VM runs reopens it with 512-frame buffers; that helps if the buffer size was the
+  cause, else restart the VM with the output connected. Any output that refuses a start gets the next
+  size at once. `omacvm check` says which size plays ("sound buffers"). Not yet confirmed with real
+  AirPods. Thanks to @maxschoenberger for the report, the workaround and the cause analysis (#548).
+
 ## 3.2.4
 
 A new experimental switch in the VM window's Display settings: the Mac redraws only the parts of the

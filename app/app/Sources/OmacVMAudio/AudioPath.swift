@@ -16,4 +16,18 @@ public enum AudioPath {
     public static let threadOptions = "out.frequency=48000,in.frequency=48000,out.buffer-length=5334,out.buffer-count=6,in.buffer-length=10667"
     /// The main loop's (up to 3.1.14, and audioMainLoop).
     public static let mainLoopOptions = "out.buffer-count=8"
+    /// The sound's own thread with a wireless output at the start (#548):
+    /// AirPods refused the queue of threadOptions (48 kHz, 6 x 256 frames,
+    /// AudioQueueStart -66681) and played the main loop's (44.1 kHz, 4 x 512:
+    /// SDL3 opens a playback queue at the rate QEMU gives, at least 44.1
+    /// kHz). This gives CoreAudio that same queue from the own thread; the
+    /// ring holds 4 of its buffers (46 ms).
+    public static let threadWirelessOptions = "out.frequency=44100,in.frequency=48000,out.buffer-length=11610,out.buffer-count=4,in.buffer-length=10667"
+
+    /// The options for this start: the path, and whether the Mac's output
+    /// is wireless now (AudioOutputSize).
+    public static func options(thread: Bool, wireless: Bool) -> String {
+        guard thread else { return mainLoopOptions }
+        return wireless ? threadWirelessOptions : threadOptions
+    }
 }

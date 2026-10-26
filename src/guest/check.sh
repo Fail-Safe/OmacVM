@@ -674,12 +674,15 @@ app)
     *) skip "Changed parts" "$dd" ;;
   esac
   # Pointer on its own layer (the app's experimental switch): this start asked
-  # for it (omacvm.pointerplane=1); the driver's loader says whether the
+  # for it (omacvm.pointerplane=2; =1 from an app that shows it on its main
+  # display only, 3.2.4 and older); the driver's loader says whether the
   # cursor plane shows, and Hyprland must put the pointer there.
-  if grep -qx 'OMACVM_POINTERPLANE=1' /run/omacvm/host.env 2>/dev/null; then
+  if grep -qxE 'OMACVM_POINTERPLANE=[12]' /run/omacvm/host.env 2>/dev/null; then
     st=$(cat /run/omacvm/virtio-gpu 2>/dev/null)
     hw=$(as_user hyprctl getoption cursor:no_hardware_cursors -j 2>/dev/null | jq -r '.int' 2>/dev/null)
-    if grep -qx 'OMACVM_HWCURSOR=1' /run/omacvm/host.env; then
+    if grep -qx 'OMACVM_POINTERPLANE=1' /run/omacvm/host.env; then
+      warn "Pointer layer" "this app shows the pointer layer on its main display only: Hyprland draws the pointer (update OmacVM.app)"
+    elif grep -qx 'OMACVM_HWCURSOR=1' /run/omacvm/host.env; then
       skip "Pointer layer" "macPointer is on: the Mac's own cursor shows the pointer"
     elif [[ $st != *cursor_plane=1* ]]; then
       warn "Pointer layer" "the switch is on, but the stock driver runs: ${st#stock }$( [[ -z $st ]] && echo "no word from omacvm-virtio-gpu-load (omacvm apply, then restart the VM)")"
