@@ -129,4 +129,51 @@ same "watch: a child harness uses the caller's watcher" "$PERSON_DIR " "$(bash "
 d=$PERSON_DIR; person_watch_stop
 [[ ! -d $d ]] && ! kill -0 "${WATCHERS[0]}" 2>/dev/null && ok "watch: stopped, its folder gone" || bad "watch: still there"
 
+# ---- ci-runners.sh with a fake launchctl and pgrep
+B=$T/bin; L=$T/loaded; W=$T/busy; A=$T/agents; mkdir -p "$B" "$L" "$W" "$A"
+cat > "$B/launchctl" <<EOF
+#!/bin/bash
+# fake: loaded runners are files in $L
+echo "\$*" >> "$T/launchctl.log"
+case \$1 in
+  print) [[ -e "$L/\${2##*/}" ]] ;;
+  bootout) [[ -e "$L/\${2##*/}" ]] && rm -f "$L/\${2##*/}" ;;
+  bootstrap) touch "$L/\$(plutil -extract Label raw -o - "\$3")" ;;
+esac
+EOF
+cat > "$B/pgrep" <<EOF
+#!/bin/bash
+# fake: a runner folder with a job is a file in $W
+p=\${@: -1}; d=\${p%/bin/Runner.Worker}; [[ -e "$W/\${d##*/}" ]]
+EOF
+chmod +x "$B/launchctl" "$B/pgrep"
+for n in 1 2; do
+  plutil -create xml1 "$A/actions.runner.o-r.mini-$n.plist"
+  plutil -insert Label -string "actions.runner.o-r.mini-$n" "$A/actions.runner.o-r.mini-$n.plist"
+  plutil -insert WorkingDirectory -string "/x/actions-runner-$n" "$A/actions.runner.o-r.mini-$n.plist"
+  touch "$L/actions.runner.o-r.mini-$n"
+done
+touch "$W/actions-runner-2"   # runner 2 has a job
+CR() { PATH=$B:$PATH CI_AGENTS=$A CI_STATE=$T/ci-state "$R/src/tests/e2e/ci-runners.sh" "$@"; }
+CR pause --wait 0 --holder $$ > "$T/ci1.txt"; rc=$?
+same "ci: a runner on a job is not stopped (exit 4 after --wait)" 4 "$rc"
+[[ ! -e $L/actions.runner.o-r.mini-1 && -e $L/actions.runner.o-r.mini-2 ]] && ok "ci: the idle runner stopped, the busy one kept" || bad "ci: $(ls "$L" | tr '\n' ' ')"
+rm -f "$W/actions-runner-2"
+CR pause --wait 30 --holder $$ > "$T/ci2.txt"; rc=$?
+same "ci: its job over -> stopped too" 0 "$rc"
+same "ci: no runner runs" "" "$(ls "$L")"
+same "ci: both written down" 2 "$(wc -l < "$T/ci-state/stopped" | tr -d ' ')"
+sleep 60 & other=$!
+CR pause --wait 0 --holder $other > /dev/null
+CR resume --holder $$ > "$T/ci3.txt"
+same "ci: another gate still holds the pause: nothing started" "" "$(ls "$L")"
+has "ci: ... and says so" "other holder" "$(cat "$T/ci3.txt")"
+kill $other; wait $other 2>/dev/null
+CR resume --holder 999999 > "$T/ci4.txt"; rc=$?
+same "ci: the last holder gone -> resume starts both" "actions.runner.o-r.mini-1 actions.runner.o-r.mini-2" "$(ls "$L" | tr '\n' ' ' | sed 's/ $//')"
+same "ci: ... exit 0, state gone" "0 gone" "$rc $([[ -e $T/ci-state ]] && echo there || echo gone)"
+CR resume > /dev/null; rc=$?
+same "ci: resume with nothing paused does nothing" "0" "$rc"
+has "ci: status lists the runners" "actions.runner.o-r.mini-1	running	idle" "$(CR status)"
+
 exit $fail

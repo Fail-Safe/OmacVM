@@ -1,0 +1,97 @@
+#!/bin/bash
+# This Mac's self-hosted GitHub Actions runners, paused while an on-screen
+# gate runs and started again after it. A CI job on the test Mac starts its own
+# VMs and loads the Mac (the 3.2.4 gate: QEMU 100 ms late on a key, a job's VM
+# in the way of an unplug test).
+#   src/tests/e2e/ci-runners.sh pause [--wait SECONDS] [--holder PID]
+#   src/tests/e2e/ci-runners.sh resume [--holder PID]
+#   src/tests/e2e/ci-runners.sh status
+# pause: each runner (a LaunchAgent actions.runner.*.plist in
+#   ~/Library/LaunchAgents) is stopped with `launchctl bootout` as soon as it
+#   runs no job (no Runner.Worker in its folder); a job that runs is never cut
+#   off. Jobs queued meanwhile wait on GitHub. Waits at most --wait seconds
+#   (default 3000) for running jobs to end. Exit 0: no runner runs; 4: some
+#   still had a job at the end (the ones stopped stay stopped until resume).
+# resume: the runners a pause stopped are started again (`launchctl
+#   bootstrap`), once no other holder of the pause is alive.
+# The holder (default: the calling process) keeps the pause: two gates that
+# overlap both pause, and the runners come back after the last one. What is
+# stopped is written down in ~/.omacvm-ci-paused (CI_STATE), so a resume
+# after a crashed gate still finds it. Call resume from the gate's EXIT trap.
+set -uo pipefail
+AGENTS=${CI_AGENTS:-$HOME/Library/LaunchAgents}
+STATE=${CI_STATE:-$HOME/.omacvm-ci-paused}
+DOMAIN=gui/$(id -u)
+cmd=${1:-}; shift || true
+WAIT=3000; HOLDER=$PPID
+while (( $# )); do
+  case $1 in
+    --wait) WAIT=$2; shift 2 ;;
+    --holder) HOLDER=$2; shift 2 ;;
+    *) cmd=usage; break ;;
+  esac
+done
+log() { echo "ci-runners: $(date +%H:%M:%S) $*"; }
+
+runners() {   # LABEL<TAB>PLIST<TAB>FOLDER per runner
+  local p l d
+  for p in "$AGENTS"/actions.runner.*.plist; do
+    [[ -f $p ]] || continue
+    l=$(plutil -extract Label raw -o - "$p" 2>/dev/null) || continue
+    d=$(plutil -extract WorkingDirectory raw -o - "$p" 2>/dev/null) || d=""
+    printf '%s\t%s\t%s\n' "$l" "$p" "$d"
+  done
+}
+loaded() { launchctl print "$DOMAIN/$1" >/dev/null 2>&1; }
+busy() { [[ -n $1 ]] && LC_ALL=C pgrep -f "$1/bin/Runner.Worker" >/dev/null 2>&1; }
+stopped() { cat "$STATE/stopped" 2>/dev/null; }
+alive_holders() {   # holders whose process still runs (others are dropped)
+  local h n=0
+  for h in "$STATE"/holder.*; do
+    [[ -e $h ]] || continue
+    if kill -0 "${h##*.}" 2>/dev/null; then n=$((n + 1)); else rm -f "$h"; fi
+  done
+  echo $n
+}
+
+case $cmd in
+  pause)
+    [[ $WAIT =~ ^[0-9]+$ && $HOLDER =~ ^[0-9]+$ ]] || { echo "ci-runners: --wait SECONDS, --holder PID" >&2; exit 2; }
+    mkdir -p "$STATE"; : > "$STATE/holder.$HOLDER"; touch "$STATE/stopped"
+    t0=$(date +%s)
+    while :; do
+      left=0
+      while IFS=$'\t' read -r l p d; do
+        loaded "$l" || continue
+        if busy "$d"; then left=$((left + 1)); continue; fi
+        # Written down before it goes: a resume finds it even if this gate dies right here.
+        grep -qxF "$l	$p" "$STATE/stopped" || printf '%s\t%s\n' "$l" "$p" >> "$STATE/stopped"
+        if launchctl bootout "$DOMAIN/$l" 2>/dev/null || ! loaded "$l"; then log "$l stopped (no job)"
+        else log "$l: bootout failed"; left=$((left + 1)); fi
+      done < <(runners)
+      (( left == 0 )) && { log "no runner runs (paused for $HOLDER)"; exit 0; }
+      (( $(date +%s) - t0 >= WAIT )) && { log "$left runner(s) still on a job after $WAIT s"; exit 4; }
+      sleep 10
+    done ;;
+  resume)
+    rm -f "$STATE/holder.$HOLDER"
+    n=$(alive_holders)
+    (( n > 0 )) && { log "still paused for $n other holder(s)"; exit 0; }
+    rc=0
+    while IFS=$'\t' read -r l p; do
+      [[ -n $l ]] || continue
+      if loaded "$l"; then log "$l runs already"
+      elif launchctl bootstrap "$DOMAIN" "$p" 2>/dev/null; then log "$l started again"
+      else log "$l: bootstrap failed ($p)"; rc=1; continue; fi
+      grep -vxF "$l	$p" "$STATE/stopped" > "$STATE/stopped.new"; mv "$STATE/stopped.new" "$STATE/stopped"
+    done < <(stopped)
+    (( rc == 0 )) && rm -rf "$STATE"
+    exit $rc ;;
+  status)
+    while IFS=$'\t' read -r l p d; do
+      printf '%s\t%s\t%s\n' "$l" "$(loaded "$l" && echo running || echo stopped)" "$(busy "$d" && echo job || echo idle)"
+    done < <(runners)
+    [[ -s $STATE/stopped ]] && echo "paused by: $(cd "$STATE" && ls holder.* 2>/dev/null | sed 's/holder\.//' | tr '\n' ' ')"
+    exit 0 ;;
+  *) sed -n '6,8s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+esac
