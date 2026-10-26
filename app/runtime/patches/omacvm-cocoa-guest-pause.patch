@@ -35,9 +35,9 @@ omacvm-cocoa-present-unseen.patch and omacvm-cocoa-present-damage.patch.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -57,6 +57,7 @@
- #include "ui/omacvm-edr.h"
+@@ -58,6 +58,7 @@
  #include "ui/omacvm-bright.h"
+ #include "ui/omacvm-pointer-bright.h"
  #include "ui/omacvm-present-damage.h"
 +#include "ui/omacvm-guest-pause.h"
  #include "hw/core/boards.h"
