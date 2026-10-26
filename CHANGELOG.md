@@ -5,6 +5,10 @@ in more words.
 
 ## 3.2.5 (unreleased)
 
+Five fixes: no "would like to control this Mac" dialog at every VM start, the pointer on every
+display with Pointer on its own layer, notifications under the bar with Full screen including notch,
+sound with AirPods, and a VM that ended at desktop start.
+
 - **A failed OpenGL query at desktop start no longer ends the VM.** Seen once in about 30 test starts
   on a Mac mini (#547). While the Mac's OpenGL was failing calls of Omarchy's bar, virglrenderer read the
   size of its own uniform block without checking that the query worked, then checked it with an
