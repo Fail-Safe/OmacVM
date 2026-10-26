@@ -101,7 +101,13 @@ res() {   # STEP ok|FAIL|BLOCKED|skip DETAIL
 }
 log() { echo "== $(date +%H:%M:%S) $*"; }
 CLONES=()   # VMs this run cloned: deleted at the end unless --keep-vm
-remove_clones() { local c; for c in ${CLONES[@]+"${CLONES[@]}"}; do (( KEEP )) || rm -rf "$c"; done; CLONES=(); }
+remove_clones() {   # and the SSH host key each clone was given (use_vm)
+  local c
+  for c in ${CLONES[@]+"${CLONES[@]}"}; do
+    (( KEEP )) || { rm -rf "$c"; (source "$HERE/test-vms.sh" && e2e_pin_drop "$(basename "$c")"); }
+  done
+  CLONES=()
+}
 DIED=""; FINISHED=0   # a run that stops before its end is never a gate result
 die() { DIED=$*; echo "cc-switches: $*" >&2; exit 3; }
 plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null; }
@@ -433,7 +439,15 @@ use_vm() {   # NAME [CLONE_FROM]: the VM of this pass (an APFS clone of a kept o
     local port=$(( 52500 + RANDOM % 400 ))
     # A test VM's size (STANDARDS: at most 8 GB / 6 CPUs), whatever the kept one had.
     sed -i '' "s/^NAME=.*/NAME='$VM'/; s/^SSH_PORT=.*/SSH_PORT=$port/; s/^CPUS=.*/CPUS=${OMACVM_E2E_CPUS:-6}/; s/^MEM_MB=.*/MEM_MB=${OMACVM_E2E_MEM_MB:-8192}/" "$VMD/vm.env"
-    res clone ok "$(basename "$src") -> $VM (APFS clone, SSH port $port, ${OMACVM_E2E_CPUS:-6} CPUs, ${OMACVM_E2E_MEM_MB:-8192} MB)"
+    # The clone is the VM it was cloned from under a new name: set up from this Mac as that one was
+    # (its remembered SSH host key). Without it, a pass with no Update VM (the update pass: a base the
+    # release before made) has a VM that OmacVM never set up, and the Bridge refuses its control centre.
+    local from pin
+    from=$(sed -n "s/^NAME=//p" "$src/vm.env" | head -1); from=${from#\'}; from=${from%\'}
+    if (source "$HERE/test-vms.sh" && e2e_clone_pin "$from" "$VM"); then
+      [[ -s $(source "$HERE/test-vms.sh" && _e2e_pin "$VM") ]] && pin="host key of $from kept" || pin="$from has no host key here: not set up from this Mac"
+    else pin="host key not copied"; fi
+    res clone ok "$(basename "$src") -> $VM (APFS clone, SSH port $port, ${OMACVM_E2E_CPUS:-6} CPUs, ${OMACVM_E2E_MEM_MB:-8192} MB; $pin)"
   fi
   [[ -f $VMD/vm.env && -e $VMD/ready ]] || die "no finished VM $VM in $ROOT"
   [[ -n $(qemu_pid) ]] && die "$VM runs already: shut it down first"
