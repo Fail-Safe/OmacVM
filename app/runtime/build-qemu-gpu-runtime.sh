@@ -918,6 +918,11 @@ grep -q 'eventsTap = CGEventTapCreate(kCGHIDEventTap, place, kCGEventTapOptionDe
   die "ui/cocoa.m: the full-grab tap ignores OMACVM_KEYS_LAST (keys-last patch)"
 "$native_dir/Tests/keys/test-keys-last.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the full-grab tap's place is not as tested (test-keys-last.sh)"
+# The full-grab tap only when OmacVM may already control the computer: else
+# macOS showed "... would like to control this Mac" at every VM start.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-tap-no-ask.patch"
+"$native_dir/Tests/keys/test-tap-no-ask.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the full-grab tap is made (and asked for) without the permission (test-tap-no-ask.sh)"
 # OmacVM.app's "Closing the window" (#358): Shut down, Keep running (the app
 # hidden, the Dock icon brings it back), Ask. Its rules' test, then the wiring.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-close-logic.patch"
@@ -1366,6 +1371,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-video-picture-size
 # OmacVM: decoded pictures finish beside QEMU's GPU thread (it waited for the media engine on every
 # picture: Chrome's 4K hardware decoding dropped frames); planes and fences wait for their pictures.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-decode-async.patch"
+# OmacVM: a program whose VirglBlock the GL reports too small (or whose size query fails) is
+# refused like a failed link, its draws skipped; an assert aborted QEMU there (#547).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-sysval-block-check.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.

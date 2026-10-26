@@ -409,6 +409,9 @@ jobs:
       - name: The on-screen release test's checks, offline (its tool builds; no screen, VM or app)
         run: src/tests/e2e-onscreen.sh
 
+      - name: Test copies only as the test identity (a lane's own id has no macOS permissions)
+        run: src/tests/e2e-relabel-id.sh
+
       - name: Stale-frame check reads the guest's scanout and finds changed pixels below the bar (#167)
         run: src/tests/stale-frames-diff.sh
 
@@ -468,6 +471,9 @@ jobs:
 
       - name: QEMU's full-grab tap at the end of the chain with OMACVM_KEYS_LAST (keyboard sharing apps, issue 350)
         run: app/runtime/Tests/keys/test-keys-last.sh
+
+      - name: No macOS prompt for QEMU's full-grab tap at the VM's start (made only when already allowed)
+        run: app/runtime/Tests/keys/test-tap-no-ask.sh
 
       - name: Modifier keys follow each event's flags (Universal Control, issue 412; the old rules fail it)
         run: app/runtime/Tests/keys/test-modifier-state.sh

@@ -514,7 +514,7 @@ reads them; `src/tests/app-settings.sh` checks defaults, relaunches, two VMs,
 | Draw only what changed (experimental) | `presentTiles` (bool; read at each start, `Settings.presentTilesStart`: not in GPU safe mode or with `OMACVM_GL_PRESENT=layer`; QEMU env `OMACVM_GL_PRESENT_TILES=1` and SMBIOS `omacvm.damage=1`, so the VM's `omacvm-virtio-gpu-load` loads OmacVM's virtio-gpu driver for its Linux 7.4 damage fix (a 7.4 kernel has it: stock); the fix is built into OmacVM's driver, not an option, so HDR, the pointer layer and frames in step send the changed parts with this switch off too, and QEMU without tiles draws whole frames; a frame that changed in at most 12 256x256 tiles goes to WindowServer as those tiles; qemu.log `OmacVM: tiled present: on\|off (why)` and once a minute `tiled present, last minute:`; check line "Changed parts"; `src/tests/app-settings.sh` (g); ADR 0055) | `false` | app |
 | Escape combo | Gestures `EscapeSwipe`: `pointer`, `all` (also the control centre, `omacvm gestures`) | `pointer` (Focused monitor) | app |
 | Magic Mouse swipe (with a Magic Mouse) | Gestures `MouseSwipeFingers`: 3, 4 | 4 | app |
-| Keyboard access | macOS: Accessibility ("control the computer") for the app | asked | Mac |
+| Keyboard access | macOS: Accessibility ("control the computer") for the app; asked only from the window's Allow… (QEMU makes its full-grab tap only when already allowed, `omacvm-cocoa-tap-no-ask.patch`: no macOS dialog at a VM start) | asked | Mac |
 | Mac input | `features` `mac-ime=on` (+ `mac-ime-pending` while stopped) | off | VM |
 | Swipe out to macOS | Gestures `SwipeOut` (bool); hidden `SwipeOutTravel` (trackpad widths per Space, 0.15-1.5) | `false`; 0.5 | app |
 | Keyboard sharing apps | `shareKeyboard` (bool; QEMU's `OMACVM_KEYS_LAST=1` at each start; Gestures and the Bridge read it when they make their taps) | `false` (3.0.18: defaults only; switch from 3.1.23) | app |
@@ -588,13 +588,18 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   tccd: "Failed to match existing code requirement ... kTCCServicePostEvent") refuses it whatever Accessibility shows;
   the app clears its own (`KeyAccess.reset`), by hand `tccutil reset PostEvent org.omacvm.app`.
 - **Test identity (one per Mac, granted once)**: macOS keys a grant on the bundle id and the signing team, so
-  every renamed or ad hoc test copy asks again. Test with only this one:
+  every renamed or ad hoc test copy asks again, while copies of `org.omacvm.app.test` at any path and of any
+  build share its grants (2026-10-26: 8 copies of 3 builds on the mini, all allowed). A lane's own id
+  (`org.omacvm.app.test.<lane>`) is a new app to macOS with no grants (`src/tests/e2e/relabel.sh` refuses it;
+  the release kits' r322-r324 made 54 "would like to control this Mac" dialogs in 36 hours). One id is not enough for
+  Local Network: macOS asks it again for each new build even of `org.omacvm.app.test` (2026-10-26 on the M1 Max), so
+  a new build's first start on a Mac someone uses can show that prompt. Test with only this one:
   `OMACVM_SIGN_ID=<Developer ID> app/scripts/build-app.sh --test-identity --install` builds "OmacVM Test"
   (`org.omacvm.app.test`) and copies it over `~/Applications/OmacVM Test.app`; its helpers in
   `Contents/Helpers` are "OmacVM Test Bridge" (`org.omacvm.test.bridge`, port 47931,
   `~/Library/Application Support/omacvm-test-bridge`) and "OmacVM Test Gestures" (`org.omacvm.test.gestures`,
   port 47930, settings domain `org.omacvm.test.gestures`). The test Bridge and Gestures take only OmacVM
-  Test.app's VMs (and a lane's copy re-signed as `org.omacvm.app.test.<lane>`), the normal ones only the others (the Bridge reads the app a VM runs from, Gestures the VM's
+  Test.app's VMs, the normal ones only the others (the Bridge reads the app a VM runs from, Gestures the VM's
   code signature `<bundle id>.qemu`; a development build's QEMU is every helper's). Its VMs reach Omanotch on 47911 only: a test Omanotch
   (src/omanotch/mac build, launched with `--args -port 47911 -bridgeDir omacvm-test-bridge`; never `defaults write
   ch.gillesgoetsch.omanotch`, which is the person's Omanotch's) on a Mac without the user's. Start a helper with `open` (so macOS checks its own
