@@ -1,7 +1,8 @@
 # 0052: The VM window's surfaces are lossless-compressed
 
-Status: accepted, built (`window-path`), on by default (`OMACVM_GL_LOSSLESS=0` keeps
-plain surfaces). Notes and numbers: work/tracks/window-path.md.
+Status: accepted, built (`window-path`; half float: `hdr-surfaces`), on by default on
+macOS 27 (`OMACVM_GL_LOSSLESS=0` keeps plain surfaces). Notes and numbers:
+work/tracks/window-path.md, work/tracks/hdr-surfaces.md.
 
 ## Context
 
@@ -53,7 +54,8 @@ back through Core Image: 0 codes off, on an M1 Max, an M2 and an M4).
 - Half-float surfaces of HDR (PQ) and Extra brightness (linear light, with or without
   HDR) are lossless too ('&RhA', `kCVPixelFormatType_Lossless_64RGBAHalf`); this
   replaces point 2. A 10-bit scanout without HDR keeps plain half float (not checked on
-  screen; the app turns 10-bit on only with HDR). A half-float failure makes only
+  screen; the app turns 10-bit on only with HDR), and so do frames the layer shows
+  without EDR (`OMACVM_GL_COLOR=native`, a dev setting). A half-float failure makes only
   half-float surfaces plain for the run; an 8-bit failure makes both kinds plain
   (point 3). GL draws into them exactly within half-float rounding,
   values above 1 included (M1 Max, M2, M4: work/window-path/lbcheck16.m).
@@ -67,6 +69,10 @@ back through Core Image: 0 codes off, on an M1 Max, an M2 and an M4).
   scrolling -0.53 W (-4.5 %); over Extra brightness -0.55 W (-2.6 %) and -0.56 W
   (-4.0 %, one round); the same frame rates and EDR headroom. MacBook Air, Extra
   brightness, scrolling at 60 Hz: -0.19 W (-4 %).
+- Not checked: M3 and M5 GPUs (both kinds; GL drawing was read back on an M1 Max, an
+  M2 and an M4 only). A wrong picture without a GL error has no automatic fallback,
+  as for 8-bit since 3.2.1: `launchctl setenv OMACVM_GL_LOSSLESS 0`, then quit and
+  reopen the app, keeps every surface plain.
 - Tried and dropped: HDR in plain 10-bit surfaces ('l10r', the guest's codes, half the
   bytes of half float; CoreVideo has no lossless 10-bit RGB form). On the XDR panel one
   patch of BT.2020 colour outside Display P3 came out differently from half float (Delta
