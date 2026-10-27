@@ -5,8 +5,7 @@
 #  1. 0.56.2/original names the v0.56.2 tag's commit and files (downloaded);
 #     our cm_helpers.glsl differs from the tag's only inside "OmacVM" blocks;
 #     every shader variant that includes it compiles as with Hyprland's own
-#     (hypr-capture-shaders.py, glslangValidator; OMACVM_NEED_GLSLANG=1: fail
-#     without it).
+#     (hypr-capture-shaders.py, glslangValidator).
 #  2. Our SDR white is omacvm-display-sync's sdr_max_luminance (203).
 #  3. hypr-capture.sh in a fake root: in only beside a binary that carries the
 #     tag's files and commit, out on any doubt (a changed byte, no binary, an
@@ -15,7 +14,9 @@
 #     touched (also another file of the five names ours works with), never an
 #     exit code but 0, every --status word.
 #  4. omacvm check's "HDR captures" line (hdr_capture_line, taken from check.sh).
-# Linux (GNU tools, as in the VM). Parts 1 and 3 need github.com (skip without).
+# Linux (GNU tools, as in the VM). Parts 1 and 3 need github.com and part 1
+# glslangValidator: skipped without, unless OMACVM_HC_STRICT=1 (CI), which
+# fails instead.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
 SRC=$here/../app/guest/hypr-capture
@@ -76,7 +77,8 @@ if ! git -c advice.detachedHead=false clone -q --depth 1 --branch "$TAG" --filte
      https://github.com/hyprwm/Hyprland "$G" 2>/dev/null ||
    ! git -C "$G" sparse-checkout set --no-cone /src/render/shaders/glsl/ 2>/dev/null ||
    ! git -C "$G" checkout -q 2>/dev/null; then
-  echo "skip: cannot download Hyprland $TAG (parts 1 and 3)"
+  if [[ ${OMACVM_HC_STRICT:-} == 1 ]]; then bad "cannot download Hyprland $TAG (parts 1 and 3)"
+  else echo "skip: cannot download Hyprland $TAG (parts 1 and 3)"; fi
   (( fail == 0 )) && echo "hypr-capture: all passed (offline parts only)"
   exit $fail
 fi
@@ -115,7 +117,7 @@ expect "our cm_helpers.glsl differs from $TAG's only in OmacVM blocks ($(tail -n
 if command -v glslangValidator >/dev/null; then
   if python3 "$here/hypr-capture-shaders.py" "$GL" "$SRC/0.56.2/cm_helpers.glsl"; then ok "shader variants"
   else bad "shader variants"; fi
-elif [[ ${OMACVM_NEED_GLSLANG:-} == 1 ]]; then bad "glslangValidator missing (glslang-tools)"
+elif [[ ${OMACVM_HC_STRICT:-} == 1 ]]; then bad "glslangValidator missing (glslang-tools)"
 else echo "skip: shader variants (no glslangValidator)"; fi
 
 # --- 3: hypr-capture.sh in a fake root

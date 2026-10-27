@@ -792,7 +792,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -yq --no-install-recommends glslang-tools
-          OMACVM_NEED_GLSLANG=1 src/tests/hypr-capture.sh
+          OMACVM_HC_STRICT=1 src/tests/hypr-capture.sh
 
       - name: Chromium's video decoder builds, and waits for a GPU that is not usable (no render node here)
         run: |
