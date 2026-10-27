@@ -205,6 +205,15 @@ echo "// an older OmacVM fix" > "$OURS"
 echo "0.56.2 $(sha256sum < "$OURS" | cut -d' ' -f1)" > "$R/var/lib/omacvm/hypr-capture"
 run >/dev/null
 expect "an older OmacVM file: replaced by this one" cmp -s "$SRC/0.56.2/cm_helpers.glsl" "$OURS"
+# an older OmacVM file whose record is gone: known by its header, so the pre
+# hook still takes it out and an apply replaces it
+older() { sed 's/OMACVM_SDR_WHITE 203.0/OMACVM_SDR_WHITE 200.0/' "$SRC/0.56.2/cm_helpers.glsl" > "$OURS"; rm -f "$R/var/lib/omacvm/hypr-capture"; }
+older
+expect "an older OmacVM file, no record: status missing" test "$(status)" = missing
+run --hook-pre >/dev/null
+expect "an older OmacVM file, no record: the pre hook takes it out" test ! -e "$OURS"
+older; run >/dev/null
+expect "an older OmacVM file, no record: replaced by this one" cmp -s "$SRC/0.56.2/cm_helpers.glsl" "$OURS"
 # nobody else's file is touched
 echo "// someone's own" > "$OURS"; rm -f "$R/var/lib/omacvm/hypr-capture"
 run >/dev/null; run --hook-pre >/dev/null; run --remove >/dev/null

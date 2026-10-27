@@ -47,11 +47,13 @@ guard() {
   (( ${#d[@]} )) || { echo "no fix folder in $here" >&2; return 1; }
   python3 -I "$here/guard.py" "$BIN" "${d[@]}"
 }
-# is_ours FILE: a file OmacVM put there (one it ships, or the one it recorded).
+# is_ours FILE: a file OmacVM put there: one it ships, the one it recorded, or
+# one with its header (an older OmacVM's, also when the record is lost).
 is_ours() {
   local s f; s=$(sum "$1"); [[ -n $s ]] || return 1
   for f in "$here"/*/cm_helpers.glsl; do [[ $s == "$(sum "$f")" ]] && return 0; done
-  [[ $s == "$(cut -d' ' -f2 "$STATE" 2>/dev/null)" ]]
+  [[ $s == "$(cut -d' ' -f2 "$STATE" 2>/dev/null)" ]] && return 0
+  head -n 12 "$1" 2>/dev/null | grep -q "^// OmacVM begin: Hyprland [0-9][0-9.]*'s src/render/shaders/glsl/cm_helpers.glsl "
 }
 # out: our file goes; true when that changed something. Never anyone else's.
 out() {
