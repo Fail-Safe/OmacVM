@@ -202,7 +202,7 @@ enum MediaKey: Int {
   case keyboardUp = 21, keyboardDown = 22, keyboardToggle = 23
 
   /// The key QEMU types for it in the VM (a QKeyCode): XF86AudioRaiseVolume &
-  /// co. there, which Omarchy binds to its own volume popup and to playerctl.
+  /// co. there, which Omarchy binds to its own volume popup and media keys.
   var qcode: String? {
     switch self {
     case .volumeUp: "volumeup"
@@ -337,7 +337,9 @@ enum MediaRoute {
       return .macOS(vm.omacvm ? "the VM takes no keys from the Bridge (QEMU's control socket not found)"
                               : "the Mac's output has no volume macOS can set, and only OmacVM.app VMs take keys")
     case .play, .next, .previous, .fast, .rewind:
-      // To the VM's players (MPRIS through playerctl), not macOS's Now Playing.
+      // To the VM's players (Omarchy's media keys), not macOS's Now Playing:
+      // with the VM in front the key never reaches macOS, so the app's Now
+      // Playing claim (AirPods and media controls) does not get it twice.
       guard vm.omacvm else { return .macOS(nil) }
       if vm.vmKeys, let q = key.qcode { return .vm(q) }
       return .macOS("the VM takes no keys from the Bridge (QEMU's control socket not found)")
