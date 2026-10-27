@@ -195,6 +195,7 @@ class Agent:
         self.watching = False
         self.pending = 0           # player reads still out at the start
         self.bus = None
+        self.generation = 0        # one per on and off: a reply from before does not count
         self.subs: list[int] = []
         self.glib = None           # GLib's module, once the agent runs on its loop
         self.timer = None
@@ -391,6 +392,7 @@ class Agent:
     def start_watching(self) -> None:
         from gi.repository import Gio, GLib
         self.watching = True
+        self.generation += 1
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         self.subs = [
             self.bus.signal_subscribe("org.freedesktop.DBus", "org.freedesktop.DBus", "NameOwnerChanged",
@@ -411,6 +413,7 @@ class Agent:
         self.subs = []
         self.bus = None
         self.watching = False
+        self.generation += 1
         self.players.clear()
         self.owners.clear()
         self.reported = None
@@ -421,7 +424,7 @@ class Agent:
 
     def call(self, name, path, iface, method, args, reply, done, *extra) -> None:
         from gi.repository import Gio, GLib
-        bus = self.bus
+        generation = self.generation
 
         def finish(conn, result, _):
             try:
@@ -429,11 +432,12 @@ class Agent:
                 error = None
             except GLib.Error as e:
                 value, error = None, e
-            if bus is self.bus:   # not from before an off
+            # Not from before an off (Gio gives the same bus object again after it).
+            if generation == self.generation:
                 done(value, error, *extra)
 
-        bus.call(name, path, iface, method, args, GLib.VariantType(reply) if reply else None,
-                 Gio.DBusCallFlags.NONE, CALL_MS, None, finish, None)
+        self.bus.call(name, path, iface, method, args, GLib.VariantType(reply) if reply else None,
+                      Gio.DBusCallFlags.NONE, CALL_MS, None, finish, None)
 
     def on_names(self, value, error) -> None:
         self.pending -= 1

@@ -20,7 +20,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 AGENT = HERE.parent / "omacvm-media"
@@ -117,6 +119,40 @@ class Pick(unittest.TestCase):
         self.assertEqual(b.since, 6.0, "a new title does not move when it went into Playing")
 
 
+class FakeBus:
+    """Gio's session bus as far as the agent uses it: calls are kept, not sent."""
+
+    def __init__(self):
+        self.calls = []
+        self.subs = 0
+
+    def call(self, name, path, iface, method, args, reply, flags, timeout, cancel, finish, data):
+        self.calls.append((method, finish))
+
+    def call_finish(self, result):
+        return types.SimpleNamespace(unpack=lambda: result)
+
+    def signal_subscribe(self, *args):
+        self.subs += 1
+        return self.subs
+
+    def signal_unsubscribe(self, sub):
+        pass
+
+
+def fake_gi(bus):
+    """gi.repository with Gio and GLib stand-ins, for the agent's D-Bus code without GLib."""
+    flags = types.SimpleNamespace(NONE=0, MATCH_ARG0_NAMESPACE=1)
+    gio = types.SimpleNamespace(bus_get_sync=lambda kind, cancel: bus, BusType=types.SimpleNamespace(SESSION=0),
+                                DBusSignalFlags=flags, DBusCallFlags=flags)
+    glib = types.SimpleNamespace(Error=Exception, VariantType=lambda kind: kind, Variant=lambda kind, value: value)
+    repo = types.ModuleType("gi.repository")
+    repo.Gio, repo.GLib = gio, glib
+    gi_ = types.ModuleType("gi")
+    gi_.repository = repo
+    return mock.patch.dict(sys.modules, {"gi": gi_, "gi.repository": repo})
+
+
 class Port(unittest.TestCase):
     """The agent's port, without GLib: a socket pair, this test as the Mac."""
 
@@ -208,6 +244,18 @@ class Port(unittest.TestCase):
         text = (pathlib.Path(self.tmp) / "media").read_text()
         self.assertNotIn("SECRET", text)
         self.assertEqual((self.status()["player"], self.status()["state"]), ("Chromium", "playing"))
+
+    def test_replies_from_before_an_off_do_not_count(self):
+        bus = FakeBus()
+        with fake_gi(bus):
+            self.agent.start_watching()
+            old = bus.calls[-1]
+            self.agent.stop_watching()
+            self.agent.start_watching()   # the same bus object again (Gio keeps one)
+            n = len(bus.calls)
+            old[1](bus, (["org.mpris.MediaPlayer2.old"],), None)   # ListNames' reply from before the off
+            self.assertEqual(len(bus.calls), n, "the old reply asked nothing")
+            self.assertEqual(self.agent.pending, 1, "only the new ListNames is out")
 
     def test_never_a_toggle(self):
         self.assertEqual(set(om.METHODS.values()), {"Play", "Pause", "Next", "Previous"})
