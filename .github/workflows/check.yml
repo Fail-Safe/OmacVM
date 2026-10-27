@@ -168,6 +168,9 @@ jobs:
       - name: OmacVM.app sound delay for the VM (QEMU's part, the Mac's output, limits)
         working-directory: app/app
         run: swift run audio-tests
+      - name: OmacVM.app AirPods and media controls (the port's lines, when the VM is Now Playing, a fuzz)
+        working-directory: app/app
+        run: swift run media-tests
 
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
