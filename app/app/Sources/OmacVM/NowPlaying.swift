@@ -35,10 +35,12 @@ final class MediaSession {
     }
 
     /// A new connection to QEMU's socket (the reconnect thread, on main).
-    func attach(_ b: NativeMediaBridge) {
-        guard !stopped else { b.close(); return }
+    /// False after QEMU ended: the descriptor is closed, nothing reads it.
+    func attach(_ b: NativeMediaBridge) -> Bool {
+        guard !stopped else { b.close(); return false }
         bridge = b
         claim.connected()
+        return true
     }
 
     /// Its read ended.

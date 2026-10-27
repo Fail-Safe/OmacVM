@@ -1168,7 +1168,8 @@ final class Runner {
                 if FileManager.default.fileExists(atPath: path),
                    let fd = try? NativeBridgeSocket.connectSecure(path: path, label: "media port") {
                     let bridge = NativeMediaBridge(fd: fd)
-                    DispatchQueue.main.sync { MainActor.assumeIsolated { session.attach(bridge) } }
+                    // QEMU ended meanwhile: attach closed the descriptor, so nothing reads it.
+                    guard DispatchQueue.main.sync(execute: { MainActor.assumeIsolated { session.attach(bridge) } }) else { return }
                     bridge.read(message: { session.received($0) }, dropped: { session.dropped($0) })
                     DispatchQueue.main.sync { MainActor.assumeIsolated { session.detach(bridge) } }
                 }
