@@ -422,14 +422,6 @@ check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.
 kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null)
 if [[ -n $kb ]]; then ok "keyboard layout" "$kb"; else bad "keyboard layout" "no layout from Hyprland"; fi
 
-# The "Changed parts" line: whether the compositor's damage reaches QEMU (Linux
-# 7.4's fix: the kernel's own, or OmacVM's driver with it). Without it every
-# frame goes to the Mac whole and "Draw only what changed" (QEMU's tiles) has
-# nothing to work with. From the build's "damage" file (ours, kernel,
-# unknown; none = no build or left out), the loader's word and whether this
-# start asked for it (omacvm.damage=1: the switch on, not in GPU safe mode):
-# with the switch off a missing fix is no fault. "STATUS<TAB>DETAIL".
-# src/tests/damage-check.sh.
 # media_line PORT(1/0) RUNNING(1/0) STATUS: the "media controls" line (AirPods and
 # media controls, OmacVM.app's switch) as "ok|warn|fail|skip<TAB>detail", from whether
 # the org.omacvm.media port is there, whether omacvm-media runs, and its status
@@ -447,6 +439,15 @@ media_line() {
     *) printf 'ok\t%s\n' "waiting for the app to answer" ;;
   esac
 }
+
+# The "Changed parts" line: whether the compositor's damage reaches QEMU (Linux
+# 7.4's fix: the kernel's own, or OmacVM's driver with it). Without it every
+# frame goes to the Mac whole and "Draw only what changed" (QEMU's tiles) has
+# nothing to work with. From the build's "damage" file (ours, kernel,
+# unknown; none = no build or left out), the loader's word and whether this
+# start asked for it (omacvm.damage=1: the switch on, not in GPU safe mode):
+# with the switch off a missing fix is no fault. "STATUS<TAB>DETAIL".
+# src/tests/damage-check.sh.
 damage_line() {   # BUILD-DAMAGE LOADER-WORD ASKED(1/0)
   local d=$1 st=$2 asked=${3:-0}
   if [[ $d == kernel ]]; then
