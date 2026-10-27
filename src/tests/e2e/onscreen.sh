@@ -21,29 +21,33 @@
 # get real events.
 # On screen only while nobody uses the Mac (no input for 300 s but ours, no
 # Jump Desktop or Screen Sharing session, also one left alone, the screen
-# unlocked: person.sh). Before each step it looks again: while someone is
-# there it waits (at most PERSON_WAIT s, default 1800) and goes on when the
-# Mac is quiet; a visit between two steps gets a "person" row (BLOCKED when a
-# row failed meanwhile). Someone who stays: the rest is BLOCKED, and
+# unlocked: person.sh). Before each row it looks again: while someone is
+# there it hides the app's windows (the VM's too), waits (at most PERSON_WAIT
+# s, default 1800) and goes on when the Mac is quiet. Inside a row it only
+# looks: someone there ends that row BLOCKED (no wait with a row's window up),
+# the next row waits. A visit between two rows gets a "person" row (BLOCKED
+# when a row failed meanwhile). Someone who stays: the rest is BLOCKED, and
 # update-vm (update-vm.sh, as the window runs it) and leftovers (a start
 # without a window) run headless; also with --headless.
 # --pause-ci (or OMACVM_E2E_PAUSE_CI=1): this Mac's CI runners stopped for the
-# run (ci-runners.sh), started again at the end.
+# run (ci-runners.sh), started again at the end. A runner still on a job after
+# OMACVM_E2E_CI_WAIT s (default 3000) would start its VMs during the rows: the
+# rows on screen are BLOCKED then (the headless ones run).
 #   src/tests/e2e/onscreen.sh --app "PATH/OmacVM Test.app" --vm NAME [--out DIR]
 #       [--only ROW,...] [--headless] [--pause-ci]
 # NAME: a stopped test VM in the test app's VMs folder (e2e_vm_guard). The
 # caller holds the Mac's VM lock. The app's settings this changes are put back.
 # Results: OUT/summary.tsv, OUT/result.json (kind omacvm-e2e-onscreen, pass),
-# OUT/shots/, OUT/run.log. Exit 0 passed, 1 a check failed, 2 usage, 3 not
-# run in full (BLOCKED).
+# OUT/shots/, OUT/run.log. Exit 0 passed, 1 a check failed, 2 usage, 5 not
+# run in full (BLOCKED rows: someone at the Mac, CI runners on jobs, --headless).
 set -uo pipefail
 E=$(cd "$(dirname "$0")" && pwd)
 source "$E/test-vms.sh"
 source "$E/onscreen-lib.sh"
 source "$E/person.sh"
 ALL="window update-vm switch-stopped vm-size pointer leftovers"
-APP=""; VM=""; OUT=""; ONLY=""; HEADLESS=0; PAUSE_CI=${OMACVM_E2E_PAUSE_CI:-0}
-usage() { sed -n '32,33s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+APP=""; VM=""; OUT=""; ONLY=""; HEADLESS=0; PAUSE_CI=${OMACVM_E2E_PAUSE_CI:-0}; CI_WAIT=${OMACVM_E2E_CI_WAIT:-3000}
+usage() { sed -n '36,37s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 while (( $# )); do
   case $1 in
     --app) APP=${2%/}; shift 2 ;;
@@ -95,20 +99,49 @@ person_overlap() {   # EVENTS NEXT
   r=$(person_overlap_row "$1" "${span%%$'\t'*}" "${span#*$'\t'}")
   res person "${r%%$'\t'*}" "${r#*$'\t'}"
 }
-# On screen from here on only while nobody else uses the Mac: someone there -> wait for them to go (at
-# most PERSON_WAIT s); someone who stays -> remembers why and says no from then on.
+# Between two rows. On screen from here on only while nobody else uses the Mac: someone there -> the
+# app's windows hidden and a wait for them to go (at most PERSON_WAIT s); someone who stays -> remembers
+# why and says no from then on (the windows stay hidden; the cleanup quits the app).
 onscreen_ok() {
   [[ -z $GONE ]] || return 1
   local ev t0; ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" next
   if ! away; then
     t0=$(date +%s); log "PAUSE on screen: someone uses the Mac ($(who)); waiting up to $(( PERSON_WAIT / 60 )) min"
+    hide_ours
     while :; do
       (( $(date +%s) - t0 >= PERSON_WAIT )) && { GONE="someone uses the Mac since $(date -r "$t0" +%H:%M:%S) ($(who))"; log "STOP on screen: $GONE"; return 1; }
       sleep "$PERSON_POLL"; _person_new >/dev/null
       away && { log "RESUME on screen after $(( $(date +%s) - t0 )) s ($(who))"; break; }
     done
+    show_ours
   fi
   GATE_LINE=$(wc -l < "$S" | tr -d ' ')
+  return 0
+}
+# Inside a row: a look, no wait (a wait would keep the row's windows, maybe a full-screen VM, in front of
+# someone). Someone there -> 1 with MID saying why: the row ends BLOCKED, the next row's onscreen_ok waits.
+MID=""
+onscreen_mid() {
+  [[ -z $GONE ]] || { MID=$GONE; return 1; }
+  away && return 0
+  MID="someone came to the Mac during the row ($(who))"
+  return 1
+}
+# The app's windows and the VM's out of sight while someone is at the Mac (as Command-H; no input
+# events), back when the Mac is quiet again. A hide that does not take is only logged.
+HIDDEN=""
+hide_ours() {
+  local p
+  for p in $(launcher_pid) $(qemu_pid); do
+    if "$T" hide "$p" >/dev/null 2>&1; then HIDDEN+=" $p"; else log "could not hide pid $p"; fi
+  done
+  [[ -n $HIDDEN ]] && log "hidden while waiting: pid$HIDDEN"
+  return 0
+}
+show_ours() {
+  local p
+  for p in $HIDDEN; do kill -0 "$p" 2>/dev/null && { "$T" unhide "$p" >/dev/null 2>&1 || log "could not show pid $p again"; }; done
+  HIDDEN=""
   return 0
 }
 # A picture of the screen, and the words of the app's window (a picture needs Screen Recording for this shell).
@@ -208,7 +241,7 @@ row_window() {   # the launcher's window (VM stopped)
   [[ -z $pr ]] && res window ok "frame $f on the display's visible $s" || { res window FAIL "frame $f on the display's visible $s: $pr"; shot window-open; }
   # The green button: the window has no full screen, so it zooms, as a title-bar double-click does when
   # set to Zoom. (A double-click posted as HID events does not reach the title bar on macOS 15: tried.)
-  onscreen_ok || return
+  onscreen_mid || { res window-zoom BLOCKED "$MID"; return; }
   [[ $("$T" front "$p") == front ]] || { res window-zoom FAIL "the window did not come to the front"; return; }
   posted; "$T" zoom "$p" >/dev/null || { res window-zoom FAIL "no zoom button"; return; }
   sleep 2; f2=$(win_of "$p")
@@ -219,10 +252,9 @@ row_window() {   # the launcher's window (VM stopped)
 }
 
 row_update_vm() {   # Update VM in the window: the VM's OmacVM made older first (before the window opened)
-  local p=$LP t0 i asked="" r
+  local p=$LP t0 i asked="" held="" r
   if ! r=$("$T" find "$p" AXButton "Update VM" 2>&1); then res update-vm FAIL "no Update VM button (VM's OmacVM $(cat "$VMD/omacvm-version"))"; shot update-vm; return; fi
   [[ $r == enabled=1* ]] || { res update-vm FAIL "Update VM is disabled: $r"; return; }
-  onscreen_ok || return
   : > "$VMD/update.log" 2>/dev/null
   "$T" front "$p" >/dev/null; posted; r=$("$T" press "$p" AXButton "Update VM")
   t0=$(date +%s)
@@ -230,14 +262,18 @@ row_update_vm() {   # Update VM in the window: the VM's OmacVM made older first 
     grep -q '^UPDATED ' "$VMD/update.log" 2>/dev/null && break
     grep -q '^ERROR' "$VMD/update.log" 2>/dev/null && break
     (( i > 20 )) && ! updating && no_qemu && break   # ended without a word
+    # The kernel question: Later, but only while nobody is at the Mac (asked again 3 s later).
     if [[ -z $asked ]] && "$T" find "$p" AXButton Later >/dev/null 2>&1; then
-      asked="kernel question answered Later"; onscreen_ok && { posted; "$T" press "$p" AXButton Later >/dev/null; }
+      if onscreen_mid; then asked="kernel question answered Later"; posted; "$T" press "$p" AXButton Later >/dev/null
+      else held=$MID; fi
     fi
     sleep 3
   done
   waitfor 60 no_qemu >/dev/null
   if grep -q '^UPDATED ' "$VMD/update.log" 2>/dev/null && [[ $(tr -d '\n' < "$VMD/omacvm-version") == "$VER" ]]; then
     res update-vm ok "$r; UPDATED in $(( $(date +%s) - t0 )) s, the VM's OmacVM $VER${asked:+, $asked}"
+  elif [[ -z $asked && -n $held ]]; then
+    res update-vm BLOCKED "$r; the kernel question stayed open: $held"
   else
     res update-vm FAIL "$r; after $(( $(date +%s) - t0 )) s: $(grep -v '^ *$' "$VMD/update.log" 2>/dev/null | tail -3 | tr '\n' '|' | cut -c1-300)"
     shot update-vm; cp "$VMD/update.log" "$VMD/logs/omacvm-update.log" "$OUT/" 2>/dev/null
@@ -259,7 +295,7 @@ switch_stopped() {   # N: "WebGPU and GPU compute" flipped with the VM stopped
   "$T" front "$p" >/dev/null; posted; "$T" click "$p" AXButton General >/dev/null 2>&1; sleep 1
   r=$("$T" find "$p" AXCheckBox "WebGPU and GPU compute" 2>&1)
   [[ $r == enabled=1* ]] || { res "switch-stopped-$n" FAIL "the switch cannot be used with the VM stopped: $r"; shot "switch-stopped-$n"; return 1; }
-  onscreen_ok || return 1
+  onscreen_mid || { res "switch-stopped-$n" BLOCKED "$MID"; return 1; }
   posted; r=$("$T" click "$p" AXCheckBox "WebGPU and GPU compute")
   waitfor 10 test_eq_feature "$want" >/dev/null
   if [[ $(feature gpu-compute) == "$want" && $(pending gpu-compute) == "$want" ]]; then
@@ -272,7 +308,6 @@ test_eq_feature() { [[ $(feature gpu-compute) == "$1" ]]; }
 
 start_in_window() {   # N: Start clicked in the window; the VM's window up, the guest's pointer drawn
   local n=$1 r
-  onscreen_ok || return 1
   qmark; "$T" front "$LP" >/dev/null; posted; r=$("$T" press "$LP" AXButton Start)
   waitfor 60 has_qemu >/dev/null || { res "start-$n" FAIL "$r; no QEMU after 60 s"; shot "start-$n"; return 1; }
   QP=$(qemu_pid)
@@ -296,7 +331,7 @@ row_vm_size() {
   local f0 f i bad=""
   f0=$(win_of "$QP"); [[ -n $f0 ]] || { res vm-size FAIL "no VM window"; return; }
   for i in 1 2; do
-    onscreen_ok || return
+    onscreen_mid || { res vm-size BLOCKED "$MID${bad:+; before it: $bad}"; return; }
     "$T" full "$QP" on >/dev/null; waitfor 15 is_full "$QP" 1 >/dev/null || bad+="no full screen ($i); "; sleep 2
     "$T" full "$QP" off >/dev/null; waitfor 15 is_full "$QP" 0 >/dev/null || bad+="did not leave full screen ($i); "; sleep 2
     f=$(win_of "$QP"); os_same_size "$f0" "$f" || bad+="after full screen $i: $f; "
@@ -335,25 +370,30 @@ row_pointer() {   # N
   local f x y w h cx cy finder mode
   mode="Graphics without QEMU's lock $(onoff "$(gpu_lock)")"
   finder=$(pgrep -x Finder | head -1)
-  onscreen_ok || return
   [[ $("$T" front "$QP") == front ]] || { res "pointer-$1" FAIL "the VM did not come to the front"; return; }
   spot_in "$QP" || { res "pointer-$1" BLOCKED "another window covers the VM's window ($(cover))"; return; }
   posted; "$T" move $(( x - 12 )) "$cy" "$cx" "$cy" 20 10 >/dev/null; sleep 1.5; look "window: in"
   "$T" bg-show >/dev/null; in_vm "$cx" "$cy" $(( cx + 30 )) $(( cy + 20 )); look "window: a background program showed it"
-  onscreen_ok || return
+  onscreen_mid || { pointer_blocked "$1"; return; }
   [[ -n $finder ]] && { "$T" front "$finder" >/dev/null; sleep 1.5; }
   "$T" front "$QP" >/dev/null; sleep 1; in_vm $(( cx + 30 )) $(( cy + 20 )) "$cx" "$cy"; look "window: Finder and back"
-  onscreen_ok || return
+  onscreen_mid || { pointer_blocked "$1"; return; }
   "$T" full "$QP" on >/dev/null; waitfor 15 is_full "$QP" 1 >/dev/null; sleep 2
   spot_in "$QP" || { res "pointer-$1" BLOCKED "another window covers the VM in full screen ($(cover))"; "$T" full "$QP" off >/dev/null; return; }
   in_vm $(( cx - 40 )) "$cy" "$cx" "$cy"; look "full screen: in"
   "$T" bg-show >/dev/null; in_vm "$cx" "$cy" $(( cx + 30 )) $(( cy + 20 )); look "full screen: a background program showed it"
-  onscreen_ok || return
+  # Out of full screen first: the next row's wait hides a window, not a Space.
+  onscreen_mid || { "$T" full "$QP" off >/dev/null; waitfor 15 is_full "$QP" 0 >/dev/null; pointer_blocked "$1"; return; }
   [[ -n $finder ]] && { "$T" front "$finder" >/dev/null; sleep 2; }
   "$T" front "$QP" >/dev/null; sleep 2; in_vm $(( cx + 30 )) $(( cy + 20 )) "$cx" "$cy"; look "full screen: Finder and back"
   "$T" full "$QP" off >/dev/null; waitfor 15 is_full "$QP" 0 >/dev/null; sleep 2
   if [[ -z $PT_BAD ]]; then res "pointer-$1" ok "$mode: no Mac cursor over the VM at $(echo "$PT_OK" | tr -cd ';' | wc -c | tr -d ' ') checks"
   else res "pointer-$1" FAIL "$mode: the Mac's cursor shows over the VM: $PT_BAD"; fi
+}
+
+pointer_blocked() {   # N: the checks so far; the rest not done (a cursor seen already stays a FAIL)
+  if [[ -n $PT_BAD ]]; then res "pointer-$1" FAIL "$mode: the Mac's cursor shows over the VM: $PT_BAD (then: $MID)"
+  else res "pointer-$1" BLOCKED "$mode: $MID; no Mac cursor at the $(echo "$PT_OK" | tr -cd ';' | wc -c | tr -d ' ') checks before"; fi
 }
 
 stopped_left() {   # ROW HOW: after the VM stopped (HOW), nothing of it runs on
@@ -406,29 +446,32 @@ headless_leftovers() {
 CI_PAUSED=0
 if (( HEADLESS )); then GONE="--headless"
 else
-  # The CI runners first (their jobs start VMs and load the Mac), then someone coming between two steps
-  # is written down with the time (person.log).
+  # The CI runners first (their jobs start VMs and load the Mac; one still on a job after the wait: no
+  # rows on screen), then someone coming between two steps is written down with the time (person.log).
   if (( PAUSE_CI )); then
-    CI_PAUSED=1; log "CI runners: each stopped once its job ends (<= 50 min)"
-    "$E/ci-runners.sh" pause --wait 3000 --holder $$ || log "CI runners still on jobs after 50 min: on screen anyway"
+    CI_PAUSED=1; log "CI runners: each stopped once its job ends (<= $CI_WAIT s)"
+    "$E/ci-runners.sh" pause --wait "$CI_WAIT" --holder $$ ||
+      { GONE="this Mac's CI runners still run jobs after $CI_WAIT s"; log "STOP on screen: $GONE"; }
   fi
-  PERSON_KEEP_LOG=$OUT/person.log; person_watch_start
-  onscreen_ok
+  if [[ -z $GONE ]]; then PERSON_KEEP_LOG=$OUT/person.log; person_watch_start; onscreen_ok; fi
 fi
 if [[ -z $GONE ]]; then
   log "on screen: nobody uses the Mac ($(who))"
   want update-vm && echo 3.0.0 > "$VMD/omacvm-version"   # older than the app: the window offers Update VM
   if open_window; then
-    want window && row_window
+    # Each row starts after onscreen_ok (between rows: it may wait, the windows hidden); inside a row
+    # onscreen_mid only looks.
+    want window && onscreen_ok && row_window
     want update-vm && onscreen_ok && row_update_vm
     for n in 1 2; do
       onscreen_ok || break
       SW_WANT=""
       want switch-stopped && { switch_stopped "$n" || true; }
+      onscreen_ok || break
       start_in_window "$n" || break
       [[ -n $SW_WANT ]] && switch_applied "$n"
-      (( n == 1 )) && want vm-size && row_vm_size
-      want pointer && row_pointer "$n"
+      (( n == 1 )) && want vm-size && onscreen_ok && row_vm_size
+      want pointer && onscreen_ok && row_pointer "$n"
       onscreen_ok || break
       if (( n == 1 )); then
         gssh systemctl poweroff >/dev/null 2>&1
@@ -439,7 +482,7 @@ if [[ -z $GONE ]]; then
         if has_launcher; then LP=$(launcher_pid); waitfor 5 has_start >/dev/null || { open "$APP"; waitfor 20 has_start >/dev/null; }
         else open_window || { res reopen FAIL "the app's window did not open again after the VM stopped"; break; }; fi
         sleep 2
-        want pointer && gpu_lock_switch
+        want pointer && onscreen_ok && gpu_lock_switch
       else
         posted; "$T" close "$QP" >/dev/null
         stopped_left leftovers-close "the VM's window closed (closeAction shutdown)"
@@ -467,5 +510,5 @@ os_result_json "$S" omacvm-e2e-onscreen "$OUT/result.json" app="$APP" version="$
   macos="$(sw_vers -productVersion)" mac="$(sysctl -n hw.model)" seconds=$(( $(date +%s) - T0 )) only="${ONLY:-all}" \
   onscreen="$([[ -z $GONE ]] && echo yes || echo "no: $GONE")" gpuOffMainLoop0="$GPU0"
 cut -f3 "$S" | grep -qx FAIL && exit 1
-cut -f3 "$S" | grep -qx BLOCKED && exit 3
+cut -f3 "$S" | grep -qx BLOCKED && exit 5
 exit 0

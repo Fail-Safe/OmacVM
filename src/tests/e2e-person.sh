@@ -8,7 +8,11 @@ set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d)
 WATCHERS=()
-trap 'for p in ${WATCHERS[@]+"${WATCHERS[@]}"}; do kill "$p" 2>/dev/null; done; rm -rf "$T"' EXIT
+# The made-up app's settings domain (onscreen.sh rows): gone at the end, its file too (in the real home:
+# cfprefsd does not follow HOME).
+DOM=""; PREFS=$HOME/Library/Preferences
+undom() { [[ -n $DOM ]] && { defaults delete "$DOM" >/dev/null 2>&1; rm -f "$PREFS/$DOM.plist"; }; return 0; }
+trap 'for p in ${WATCHERS[@]+"${WATCHERS[@]}"}; do kill "$p" 2>/dev/null; done; undom; rm -rf "$T"' EXIT
 fail=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
@@ -271,6 +275,73 @@ upto 5 gone $pz && ok "ci: the holder gone -> its pause ends while jobs still ru
 rm -f "$W/actions-runner-1" "$W/actions-runner-2"
 upto 5 [ ! -e "$T/ci-state" ] || bad "ci: state left after the holder died: $(ls "$T/ci-state" | tr '\n' ' ')"
 
+# ---- onscreen.sh: waits only between rows, its windows hidden meanwhile; inside a row only a look
+sed -n '/^onscreen_ok() {/,/^}/p; /^onscreen_mid() {/,/^}/p; /^hide_ours() {/,/^}/p; /^show_ours() {/,/^}/p' "$E/onscreen.sh" > "$T/os-gate.sh"
+printf '#!/bin/bash\necho "$*" >> "%s/tool.log"\n' "$T" > "$T/tool"; chmod +x "$T/tool"
+sleep 30 & P1=$!; sleep 30 & P2=$!
+os_gate() {   # CALL [SECONDS SOMEONE STAYS]: one call of the gate in a subshell; prints rc, seconds, GONE/MID
+  ( TD=$T; T=$TD/tool; S=$TD/os-s.tsv; : > "$S"; GONE=""; MID=""; HIDDEN=""; GATE_LINE=0; PERSON_WAIT=${3:-5}; PERSON_POLL=0.2
+    away() { [[ ! -e $F/someone ]]; }; who() { echo "a test"; }; log() { :; }
+    launcher_pid() { echo "$P1"; }; qemu_pid() { echo "$P2"; }
+    _person_new() { :; }; person_overlap() { :; }
+    source "$TD/os-gate.sh"
+    t0=$(date +%s); "$1"; rc=$?; echo "$rc $(( $(date +%s) - t0 )) ${GONE:+gone}${MID:+mid:$MID}" )
+}
+: > "$T/tool.log"; touch "$F/someone"; ( sleep 1; rm -f "$F/someone" ) &
+r=$(os_gate onscreen_ok)
+same "onscreen: someone between rows -> waits, then on" 0 "${r%% *}"
+same "onscreen: ... the app's and the VM's windows hidden while waiting, shown after" "hide $P1|hide $P2|unhide $P1|unhide $P2|" "$(tr '\n' '|' < "$T/tool.log")"
+: > "$T/tool.log"; touch "$F/someone"
+r=$(os_gate onscreen_ok 5 1)
+same "onscreen: someone who stays -> no more rows" "1 gone" "$(echo "$r" | cut -d' ' -f1,3)"
+same "onscreen: ... the windows stay hidden (the cleanup quits the app)" "hide $P1|hide $P2|" "$(tr '\n' '|' < "$T/tool.log")"
+: > "$T/tool.log"
+r=$(os_gate onscreen_mid)
+has "onscreen: someone inside a row -> that row stops at once, no wait" "1 0 mid:someone came to the Mac during the row" "$r"
+same "onscreen: ... nothing hidden or shown" "" "$(cat "$T/tool.log")"
+rm -f "$F/someone"
+same "onscreen: nobody inside a row -> on" "0 0 " "$(os_gate onscreen_mid)"
+kill "$P1" "$P2" 2>/dev/null; wait "$P1" "$P2" 2>/dev/null
+# Inside a row nothing waits (a wait there kept the row's window, maybe a full-screen VM, up for 30 min).
+w=$(awk '/^(row_[a-z_]+|switch_stopped|start_in_window|gpu_lock_switch|switch_applied)\(\) \{/ { f = $1 }
+  f && /onscreen_ok/ { print f } /^}/ { f = "" }' "$E/onscreen.sh" | sort -u | tr '\n' ' ')
+same "onscreen: no wait inside a row (onscreen_ok only between rows)" "" "$w"
+grep -qE 'onscreen_mid \|\| \{ "\$T" full "\$QP" off' "$E/onscreen.sh" && ok "onscreen: the pointer row leaves full screen before it stops for someone" ||
+  bad "onscreen: the pointer row may stop in full screen"
+
+# ---- onscreen.sh's exit code: 1 a FAIL, 5 BLOCKED rows (3 was also the code of other ends); CI runners
+# still on jobs after the wait: no rows on screen (BLOCKED), the runners back at the end
+DOM=org.omacvm.app.test.e2e-person.$$
+OSA=$T/os/Test.app; mkdir -p "$OSA/Contents/Resources/scripts" "$T/os/vms/OmacVM M-e2e"
+for kv in "CFBundleIdentifier string $DOM" "CFBundleShortVersionString string 9.9.9" "OmacVMCommit string 0000000"; do
+  /usr/libexec/PlistBuddy -c "Add :$kv" "$OSA/Contents/Info.plist" >/dev/null
+done
+printf '#!/bin/bash\necho "ERROR made-up update"; exit 1\n' > "$OSA/Contents/Resources/scripts/update-vm.sh"
+echo "NAME='OmacVM M-e2e'" > "$T/os/vms/OmacVM M-e2e/vm.env"
+defaults write "$DOM" vmsRoot "$T/os/vms"
+# Nothing of the app may open here: a made-up open (and screencapture) that only say they were called.
+printf '#!/bin/bash\necho "open $*" >> "%s/os-open.log"; exit 1\n' "$T" > "$B/open"
+printf '#!/bin/bash\necho "screencapture $*" >> "%s/os-open.log"; exit 1\n' "$T" > "$B/screencapture"
+chmod +x "$B/open" "$B/screencapture"
+OS() {   # OUT ARGS...: onscreen.sh with the made-up runners and app (at most 2 min); prints its exit code
+  local o=$T/os/$1; shift
+  PATH=$B:$PATH CI_AGENTS=$A CI_STATE=$T/ci-state CI_GUARD_TICK=0.2 CI_POLL=0.3 OMACVM_E2E_CI_WAIT=1 PERSON_WAIT=2 PERSON_POLL=0.5 \
+    /usr/bin/perl -e 'alarm shift; exec @ARGV' 120 "$E/onscreen.sh" --app "$OSA" --vm "OmacVM M-e2e" --out "$o" "$@" > "$o.txt" 2>&1 < /dev/null
+  echo $?
+}
+same "onscreen exit: BLOCKED rows only -> 5" 5 "$(OS h1 --headless --only window)"
+has "onscreen exit: ... the row says why" "window	BLOCKED	not run on screen: --headless" "$(cat "$T/os/h1/summary.tsv")"
+same "onscreen exit: a FAIL next to BLOCKED rows -> 1" 1 "$(OS h2 --headless --only window,update-vm)"
+has "onscreen exit: ... the FAIL row" "update-vm	FAIL" "$(cat "$T/os/h2/summary.tsv")"
+touch "$W/actions-runner-2"   # runner 2 on a job for the whole run
+same "onscreen --pause-ci: a runner still on a job after the wait -> 5" 5 "$(OS ci --only window --pause-ci)"
+has "onscreen --pause-ci: ... no row on screen, the row says why" "window	BLOCKED	not run on screen: this Mac's CI runners still run jobs" "$(cat "$T/os/ci/summary.tsv")"
+same "onscreen --pause-ci: ... nothing of the app opened" "" "$(cat "$T/os-open.log" 2>/dev/null)"
+rm -f "$W/actions-runner-2"
+upto 5 both_back && ok "onscreen --pause-ci: ... the stopped runner back at the end, state gone" ||
+  bad "onscreen --pause-ci: running '$(running)', state '$(ls "$T/ci-state" 2>/dev/null | tr '\n' ' ')'"
+undom
+
 # ---- the harnesses ask between rows, not only at their start (3.2.4: two Screen Sharing connects
 # inside a run that looked only at its start)
 wired() {   # NAME FILE PATTERN...: every pattern in the file
@@ -298,6 +369,12 @@ for f in modifier-keys display-unplug; do
 done
 wired "cc-switches reads the children's exit codes" "$E/cc-switches.sh" \
   'child_end keys modifier-keys.sh "\$rc"' 'child_end unplug display-unplug.sh "\$rc"'
+# The EXIT trap that stops the watcher is set before the watcher starts (a run stopped in between left its
+# folder and, for cc-switches, ran without its cleanup).
+for f in modifier-keys display-unplug cc-switches onscreen; do
+  same "watcher: $f sets its EXIT trap first" "trap first" "$(awk '/^ *trap .* EXIT$/ && !t { t = NR }
+    /^[^#]*person_watch_start( |;|$)/ && $0 !~ /\(\)/ && !w { w = NR } END { print (t && w && t < w) ? "trap first" : "trap " t ", watcher " w }' "$E/$f.sh")"
+done
 # The cleanup goes to its end whatever comes (a second Ctrl-C, a hangup, a lost stdout): first thing in it.
 for f in cc-switches onscreen; do
   first=$(awk '/^cleanup\(\) \{/ { c = 1; next } c && !/^ *#/ && !/^  local rc=\$\?$/ { print; exit }' "$E/$f.sh")

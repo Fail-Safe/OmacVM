@@ -14,6 +14,8 @@
 //   front PID                PID's app to the front (no input events): front | not front
 //   frontpid                 the pid of the app in front
 //   quit PID                 asks PID's app to quit (as Command-Q)
+//   hide PID, unhide PID     PID's app out of sight and back (as Command-H; no input events): hidden |
+//                            shown, exit 1 when it did not take
 //   texts PID                the static texts of PID's windows, one a line
 //   dump PID                 every element of PID's windows: role, subrole, names, frame
 //   hit X Y                  the element at X,Y: pid, role, subrole, names
@@ -221,6 +223,18 @@ case "quit":
     let ok = NSRunningApplication(processIdentifier: pidArg())?.terminate() ?? false
     say(ok ? "asked to quit" : "not asked")
     exit(ok ? 0 : 1)
+case "hide", "unhide":
+    // AppKit's hide first; Accessibility's AXHidden when that did not take.
+    let pid = pidArg(), want = args[1] == "hide"
+    guard let a = NSRunningApplication(processIdentifier: pid) else { say("no app \(pid)"); exit(1) }
+    _ = want ? a.hide() : a.unhide()
+    for _ in 0..<10 where a.isHidden != want { usleep(100_000) }
+    if a.isHidden != want, AXIsProcessTrusted() {
+        AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXHidden" as CFString, (want ? kCFBooleanTrue : kCFBooleanFalse) as CFTypeRef)
+        for _ in 0..<10 where a.isHidden != want { usleep(100_000) }
+    }
+    say(a.isHidden ? "hidden" : "shown")
+    exit(a.isHidden == want ? 0 : 1)
 case "texts":
     for e in elements(pidArg()) where str(e, kAXRoleAttribute) == kAXStaticTextRole as String {
         let v = str(e, kAXValueAttribute)

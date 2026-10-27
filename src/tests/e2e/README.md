@@ -75,6 +75,9 @@ not only at their start (`person.sh`):
   (`~/Library/Caches/omacvm-e2e-last-input`).
 - Then the run waits (at most 30 minutes each time, `PERSON_WAIT`) and goes
   on when the Mac is quiet again; someone who stays: the rest is BLOCKED.
+  `onscreen.sh` waits only between two rows, with the app's and the VM's
+  windows hidden meanwhile (as Command-H); inside a row it only looks, and
+  someone there ends that row BLOCKED (out of full screen first).
 - A watcher looks every 2 seconds and writes each foreign input and each
   remote session that opens or ends with its time (`person.log` in the
   results). Rows that ran while someone came and went get a `person` row:
@@ -86,7 +89,10 @@ not only at their start (`person.sh`):
 run (`ci-runners.sh pause`: `launchctl bootout` of each runner's LaunchAgent
 once its job is over; queued jobs wait on GitHub) and starts them again at
 the end, also when the run fails (`ci-runners.sh resume`, from the EXIT
-trap, which no further Ctrl-C, hangup or lost ssh can stop half way). A run
+trap, which no further Ctrl-C, hangup or lost ssh can stop half way). A
+runner still on a job after 50 minutes would start its VMs during the rows:
+`cc-switches.sh` stops then, `onscreen.sh` runs no row on screen (BLOCKED;
+update-vm and leftovers headless). A run
 that dies without its cleanup (`kill -9`) is covered as well: the pause starts
 a guard in its own session that resumes once the run's process is gone (within
 10 s; its log `~/.omacvm-ci-paused.log`). A kit that runs several harnesses
@@ -96,7 +102,9 @@ pauses once around all of them with its own holder pid. By hand:
 
 Exit codes of `modifier-keys.sh` and `display-unplug.sh`: 0 every case
 passed, 1 a case failed, 2 a wrong call, 3 it could not run (no VM, another
-VM, a tool), 5 someone stayed at the Mac (BLOCKED rows). `cc-switches.sh`
+VM, a tool), 5 someone stayed at the Mac (BLOCKED rows). `onscreen.sh`: 0
+passed, 1 a row failed, 2 a wrong call, 5 BLOCKED rows and no FAIL (someone
+at the Mac, CI runners on jobs, `--headless`). `cc-switches.sh`
 takes their rows; a code that its rows do not explain (3, a crash, its time
 limit) is a FAIL row of its own, the time limit while it waited for someone
 a BLOCKED one.
@@ -174,11 +182,13 @@ installed: the test runs it without installing. Helpers of the copy that the
 run started (its Bridge) are stopped at the end.
 
 On screen only while nobody uses the Mac: no input for 300 s but the test's
-own (its last event, also a run's before, in `~/Library/Caches/omacvm-e2e-last-input`), no Jump Desktop or Screen Sharing session (one nobody used for 30 min does not count), the screen unlocked; it stops when someone
-comes back. Otherwise (or `--headless`) those rows are BLOCKED and
+own (its last event, also a run's before, in `~/Library/Caches/omacvm-e2e-last-input`), no Jump Desktop or Screen Sharing session (also one left alone), the screen unlocked. Someone
+between two rows: the app's windows hidden, a wait (above); someone inside a
+row: that row BLOCKED. Someone who stays, CI runners still on jobs (with
+`--pause-ci`) or `--headless`: the rows on screen are BLOCKED and
 update-vm (update-vm.sh, as the window runs it) and leftovers (a start
 without a window) run headless. `src/tests/e2e-onscreen.sh` tests the checks
-offline (CI).
+offline (CI), `src/tests/e2e-person.sh` the waits and the exit codes.
 
 ```bash
 # the release zip as the test identity (only org.omacvm.app.test: macOS's permissions are kept for
