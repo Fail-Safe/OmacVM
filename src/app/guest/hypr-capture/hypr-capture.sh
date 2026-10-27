@@ -26,17 +26,34 @@
 # an older binary (updated, not logged in again) keeps the text it read at its
 # start, which was checked then. Never fails a pacman transaction or an apply:
 # on any doubt our file goes out, and it exits 0.
+# Hyprland reads each shader file by name from ~/.config/hypr/shaders, then
+# /usr/share/hypr/shaders, then /usr/local/share/hypr/shaders, before its
+# built-in copy. Another file of a name ours works with (the five in
+# `original`): a package's in /usr/share or one beside ours keeps ours out (no
+# mix of files that were not checked together); a person's own in ~/.config
+# wins in their session, and --status says so.
 # Tests: OMACVM_HC_ROOT (a fake root for every path), OMACVM_HC_HYPRCTL.
 set -uo pipefail
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 R=${OMACVM_HC_ROOT:-}
 BIN=$R/usr/bin/Hyprland
-OURS=$R/usr/local/share/hypr/shaders/cm_helpers.glsl
-PKG=$R/usr/share/hypr/shaders/cm_helpers.glsl     # a package's shader files win over ours
+SHADERS=$R/usr/local/share/hypr/shaders
+OURS=$SHADERS/cm_helpers.glsl
+PKG=$R/usr/share/hypr/shaders                     # a package's shader files win over ours
 STATE=$R/var/lib/omacvm/hypr-capture              # "<release folder> <sha256 of our file>"
 HYPRCTL=${OMACVM_HC_HYPRCTL:-hyprctl}
 
 sum() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
+# names: the shader files ours works with (each release folder's `original`).
+names() { { echo cm_helpers.glsl; grep -h '^file ' "$here"/*/original 2>/dev/null | cut -d' ' -f4; } | sort -u; }
+# found DIR [BUT]: the first of those names in DIR (BUT not counted).
+found() {
+  local n
+  while read -r n; do
+    [[ $n != "${2:-}" ]] && [[ -e $1/$n || -L $1/$n ]] && { echo "$n"; return 0; }
+  done < <(names)
+  return 1
+}
 # guard: the release folder that fits /usr/bin/Hyprland (guard.py), else fails
 # with why on stderr.
 guard() {
@@ -108,10 +125,13 @@ reload() {
 }
 # apply: in place or out, as the installed Hyprland allows.
 apply() {
-  local folder why changed=1
-  if [[ -e $PKG ]]; then
+  local folder why f changed=1
+  if f=$(found "$PKG"); then
     out || changed=0
-    echo "OmacVM: HDR captures: Hyprland's package ships its shader files; they are used"
+    echo "OmacVM: HDR captures: Hyprland's package ships its own shader files ($f); they are used"
+  elif f=$(found "$SHADERS" cm_helpers.glsl); then
+    out || changed=0
+    echo "OmacVM: HDR captures: another $f is in $SHADERS; OmacVM's cm_helpers.glsl stays out"
   elif folder=$(guard 2>/dev/null); then
     put "$folder" || changed=0
     if [[ $(sum "$OURS") == "$(sum "$here/$folder/cm_helpers.glsl")" ]]; then
@@ -127,21 +147,32 @@ apply() {
   (( changed )) && reload
   return 0
 }
+# own USER: the first of the names in USER's ~/.config/hypr/shaders (looked at
+# as that user).
+own() {
+  local h uid n
+  h=$(getent passwd "$1" | cut -d: -f6) && [[ -n $h ]] && uid=$(id -u "$1" 2>/dev/null) || return 1
+  while read -r n; do
+    as_uid "$uid" test -e "$R$h/.config/hypr/shaders/$n" 2>/dev/null && { echo "$n"; return 0; }
+  done < <(names)
+  return 1
+}
 # status [USER]: what omacvm check says.
 status() {
-  local u=${1:-} h folder why
-  if [[ -n $u ]] && h=$(getent passwd "$u" | cut -d: -f6) && [[ -n $h ]] &&
-     as_uid "$(id -u "$u")" test -e "$R$h/.config/hypr/shaders/cm_helpers.glsl" 2>/dev/null; then
-    printf 'own\tyour own ~/.config/hypr/shaders/cm_helpers.glsl is used (it comes before OmacVM'"'"'s)\n'
-  elif [[ -e $PKG ]]; then
-    printf 'pkg\tHyprland'"'"'s package ships its own shader files; they are used\n'
+  local u=${1:-} folder why f
+  if [[ -n $u ]] && f=$(own "$u"); then
+    printf 'own\tyour own ~/.config/hypr/shaders/%s is used (it comes before OmacVM'"'"'s)\n' "$f"
+  elif f=$(found "$PKG"); then
+    printf 'pkg\tHyprland'"'"'s package ships its own shader files (%s); they are used\n' "$f"
+  elif f=$(found "$SHADERS" cm_helpers.glsl); then
+    printf 'other\tanother %s in %s is used; OmacVM'"'"'s fix stays out\n' "$f" "$SHADERS"
   elif ! folder=$(guard 2>/dev/null); then
     why=$(guard 2>&1 >/dev/null | tail -n1)
     printf 'uncovered\tno OmacVM fix for this Hyprland (%s): screenshots and screen sharing of HDR apps (Chrome) come out too bright while HDR is on\n' "${why:-not checked}"
   elif [[ -e $OURS && $(sum "$OURS") == "$(sum "$here/$folder/cm_helpers.glsl")" ]]; then
     printf 'ok\tscreenshots and screen sharing of HDR apps at SDR white (OmacVM'"'"'s cm_helpers.glsl for Hyprland %s)\n' "$folder"
   elif [[ -e $OURS ]] && ! is_ours "$OURS"; then
-    printf 'other\tanother cm_helpers.glsl in %s is used, not OmacVM'"'"'s\n' "$(dirname "$OURS")"
+    printf 'other\tanother cm_helpers.glsl in %s is used, not OmacVM'"'"'s\n' "$SHADERS"
   else
     printf 'missing\tOmacVM'"'"'s fix for Hyprland %s is not in place: omacvm apply (Update VM)\n' "$folder"
   fi

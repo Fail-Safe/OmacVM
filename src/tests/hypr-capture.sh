@@ -12,7 +12,8 @@
 #     tag's files and commit, out on any doubt (a changed byte, no binary, an
 #     unreadable one, no python3, no fix folder), the hooks, a running Hyprland
 #     reloaded only when it runs the installed binary, nobody else's file
-#     touched, never an exit code but 0, every --status word.
+#     touched (also another file of the five names ours works with), never an
+#     exit code but 0, every --status word.
 #  4. omacvm check's "HDR captures" line (hdr_capture_line, taken from check.sh).
 # Linux (GNU tools, as in the VM). Parts 1 and 3 need github.com (skip without).
 set -uo pipefail
@@ -225,11 +226,24 @@ run >/dev/null
 expect "the package ships shader files: ours out" test ! -e "$OURS"
 expect "the package ships shader files: status pkg" test "$(status)" = pkg
 expect "the package's file left" grep -qx "// the package's" "$R/usr/share/hypr/shaders/cm_helpers.glsl"
+rm "$R/usr/share/hypr/shaders/cm_helpers.glsl"
+echo "// the package's" > "$R/usr/share/hypr/shaders/CM.glsl"
+run >/dev/null
+expect "the package ships CM.glsl only: ours out" test ! -e "$OURS"
+expect "the package ships CM.glsl only: status pkg, names it" grep -q "^pkg.*(CM.glsl)" <(run --status)
 rm -r "$R/usr/share/hypr"; run >/dev/null
+echo "// someone's" > "$R/usr/local/share/hypr/shaders/tonemap.glsl"
+expect "another tonemap.glsl beside ours: exit 0" test "$(rc)" = 0
+expect "another tonemap.glsl beside ours: ours out" test ! -e "$OURS"
+expect "another tonemap.glsl beside ours: status other, names it" grep -q "^other.*another tonemap.glsl" <(run --status)
+expect "another tonemap.glsl beside ours: left" grep -qx "// someone's" "$R/usr/local/share/hypr/shaders/tonemap.glsl"
+rm "$R/usr/local/share/hypr/shaders/tonemap.glsl"; run >/dev/null
 me=$(id -un); hm=$(getent passwd "$me" | cut -d: -f6)
 mkdir -p "$R$hm/.config/hypr/shaders"; echo "// mine" > "$R$hm/.config/hypr/shaders/cm_helpers.glsl"
 expect "the user's own file: status own" test "$(status "$me")" = own
 expect "the user's own file: ours stays in place (theirs wins in Hyprland)" test -e "$OURS"
+rm "$R$hm/.config/hypr/shaders/cm_helpers.glsl"; echo "// mine" > "$R$hm/.config/hypr/shaders/constants.h"
+expect "the user's own constants.h: status own, names it" grep -q "^own.*shaders/constants.h is used" <(run --status "$me")
 rm -r "$R$hm/.config"
 : > "$LOG"
 expect "--remove: exit 0" test "$(rc --remove)" = 0
