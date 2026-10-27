@@ -8,8 +8,10 @@ GL 4.4 query buffers, so it does not run on the Mac today).
 Why: the GL writes these only when it answers. GET_QUERY_RESULT for a query that was
 never begun or is still running (any guest can send that), or a GL that refuses calls of a
 context (#547), leaves them as they were, and vrend copied them into the guest's query
-buffer: host stack bytes for the guest (#573). With a 0 there instead, the query
-stayed "not ready" for ever, and the guest's Mesa waits until a query is done.
+buffer: host stack bytes for the guest (#573). Starting `ready` at 0 would leave such a
+query "not ready" for ever, and the guest's Mesa waits until a query is done.
+Trade-off: for an occlusion query 0 means "nothing drawn", so an app may skip an object
+for one frame. Only a guest that breaks the protocol, or a GL that refuses calls, gets here.
 Upstream: the same uninitialised reads are in upstream virglrenderer; not sent.
 Test: Tests/virgl/test-query-result.c with query-result-gl.c (a query never begun, 4 and
 8 bytes, one still running, and the result refused while it is available: done with 0,
@@ -40,8 +42,8 @@ one log line; answered queries still get the GL's sample count).
 +      static bool logged;
 +      if (!logged) {
 +         logged = true;
-+         virgl_warn("query %u: the GL did not answer; the guest gets it as done with 0 "
-+                    "(logged once)\n", query_id);
++         virgl_warn("query result: the GL did not answer (GL query %u); the guest reads it "
++                    "as done with 0 (logged once)\n", query_id);
 +      }
 +      *result = 0;
 +      return true;

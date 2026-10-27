@@ -41,7 +41,7 @@ static void count_log(enum virgl_log_level_flags level, const char *message, voi
 {
    (void)level;
    (void)data;
-   unanswered_lines += strstr(message, "the GL did not answer") != NULL;
+   unanswered_lines += strstr(message, "query result: the GL did not answer (GL query ") != NULL;
    fputs(message, stderr);
 }
 
