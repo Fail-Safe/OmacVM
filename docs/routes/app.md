@@ -639,8 +639,11 @@ the 8-bit path.
 - The VM's 10-bit graphics driver: Update VM builds it (internet once, a
   few seconds); the VM loads it only for a start with the switch on, else
   the standard driver.
-- Which Linux apps send HDR (October 2026): GStreamer does; mpv and
-  Chromium show HDR video as SDR for now.
+- It counts when the VM starts: shut the VM down and start it again. A
+  restart inside the VM (Omarchy's menu) keeps the setting it started with.
+  While the VM runs with the other setting, the switch says so.
+- Which Linux apps send HDR (October 2026): Chrome, Chromium and GStreamer
+  do; mpv shows HDR video as SDR for now.
 - Only the main window; windows on other displays stay 8-bit.
 - Extra brightness (below) wins while it is on: no HDR highlights then.
 - GPU safe mode turns it off. `omacvm check` has an "HDR" line.

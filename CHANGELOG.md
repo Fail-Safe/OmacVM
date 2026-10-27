@@ -3,6 +3,12 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.9 (unreleased)
+
+- **The HDR switch says when it counts.** HDR and 10-bit colour is read when the VM starts; a
+  restart inside the VM (Omarchy's menu) keeps the setting it started with. While the VM runs with
+  the other setting, the switch now says so: shut the VM down and start it again (#579).
+
 ## 3.2.8 (unreleased)
 
 - **An OpenGL query the Mac does not answer reads as 0 in the VM, not as the Mac's memory.** When
