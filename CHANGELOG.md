@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.9 (unreleased)
+
+- Tests: the on-screen release test (`onscreen.sh`) waits for someone at the test Mac only between
+  two rows, with its app's and VM's windows hidden meanwhile; inside a row someone there ends that
+  row BLOCKED, out of full screen first. With `--pause-ci`, a CI runner still on a job after the wait
+  means no rows on screen (BLOCKED), not rows beside the job's VMs. Its exit code for BLOCKED rows is
+  5, as in the other harnesses (3 meant "could not run" there).
+
 ## 3.2.8
 
 An OpenGL query the Mac does not answer now finishes with 0 in the VM: no memory bytes from the Mac,
