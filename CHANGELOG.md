@@ -3,7 +3,21 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.7 (unreleased)
+## 3.2.8 (unreleased)
+
+- **An OpenGL query the Mac does not answer reads as 0 in the VM, not as the Mac's memory.** When
+  the Mac's OpenGL did not answer a query's result (a query never started or still running, or a GL
+  that refuses calls, as in #547), the VM got whatever bytes were on QEMU's stack, or the query never
+  finished and the app waited for ever. Now it finishes with 0, and qemu.log says so once (#573).
+  A query still waiting when the app's GL context is lost on the Mac never finished either; now
+  it finishes with 0.
+
+## 3.2.7
+
+A click on another display's VM window keeps the pointer and keys, `omacvm check` names the
+window's surfaces, and the experimental Frames in step with the Mac is gone (Update VM rebuilds the
+VM's graphics driver once). Also: no memory bytes in qemu.log after a refused OpenGL call, and an
+output that refuses every sound buffer size is left alone until it changes.
 
 - **Frames in step with the Mac is gone.** The experimental switch from 3.2.3 showed typing and
   the pointer 1.5-7 ms sooner at 60 Hz (up to 2.5 ms at 120 Hz), and only while the screen moved.
