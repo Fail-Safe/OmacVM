@@ -189,7 +189,7 @@ struct SettingsSections: View {
                 }
                 KeepDockAwayRow(tick: state.tick)
                 if preview?.hdr ?? Mac.hasHDRDisplay {
-                    HDRRow(tick: state.tick)
+                    HDRRow(tick: state.tick, folder: state.config.folder, running: running)
                 }
                 if preview?.extraBrightness ?? Mac.hasExtraBrightnessDisplay {
                     ExtraBrightnessRow(tick: state.tick)
@@ -218,6 +218,7 @@ struct SettingsSections: View {
             SectionTitle(text: "Output")
             Card {
                 SoundThreadRow(tick: state.tick)
+                MediaControlsRow(tick: state.tick)
             }
         }
         .spySection("output")

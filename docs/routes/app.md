@@ -446,7 +446,8 @@ the VM's SSH on `127.0.0.1:<port>`.
 - The clipboard and the Mac's battery do not use the network: each has its
   own virtio port (`org.omacvm.clipboard`, `org.omacvm.battery`) on a socket
   only the app's user can open. So do the displays (`org.omacvm.display`,
-  below) and, with `mac-ime` on, the Mac's input methods (`org.omacvm.ime`,
+  below), AirPods and media controls (`org.omacvm.media`,
+  [below](#airpods-and-media-controls-on-by-default)) and, with `mac-ime` on, the Mac's input methods (`org.omacvm.ime`,
   [below](#mac-input-methods-experimental-off-by-default)). The battery goes one way; the VM can only ask
   for a fresh reading.
 - Gestures and Bridge also listen on the Mac's 127.0.0.1, where any Mac
@@ -626,6 +627,45 @@ it on, a VM whose window nobody can see stops drawing, as a macOS app does:
 - Only the main window (Virtual-1); the windows on other displays in full
   screen keep drawing.
 
+## AirPods and media controls (on by default)
+
+The VM window's settings have **AirPods and media controls** (Output). While
+something plays in the VM (a video in the browser, music, mpv), the app is
+the Mac's Now Playing app, like Music or Safari:
+
+- Play, pause and skip on AirPods and other Bluetooth headphones and
+  speakers, in Control Center and with the keyboard's play keys go to the
+  VM's player. Control Center shows what plays under the app's name.
+  Volume stays the Mac's.
+- macOS gives the controls to the app that started playing last. A Mac app
+  that starts playing takes them; when the VM's player pauses and plays
+  again, the VM takes them back. A short stop (the next track, a video
+  buffering) changes nothing, and a player that stops and starts again and
+  again (also with longer stops) takes them at most once every 10 s.
+- Paused in the VM, the app keeps the controls, so the next press resumes
+  the VM. Nothing plays for 3 s (the player closed, the video ended), 30
+  minutes paused, the VM stopped, or the switch off: the controls go back to
+  the Mac's apps.
+- With the VM in front, OmacVM Bridge still types the play keys into the VM
+  as keys (Omarchy's own media keys) and macOS never sees them, so a press
+  never counts twice. QEMU's window takes no media keys of its own.
+- The Mac side is the app itself (not QEMU, which macOS would show without a
+  name). It needs no permission. The VM side is `omacvm-media` (a user
+  service, Update VM brings it): it reads the VM's MPRIS players (Chromium,
+  Firefox, mpv) once the switch is on and runs Play, Pause, Next and Previous
+  on the one that played last, never a toggle (AirPods pause when one comes
+  out). Over its own virtio port, `org.omacvm.media`; nothing goes to a VM
+  without the service.
+- It works at once in a running VM (the app watches the setting).
+  `defaults write org.omacvm.app mediaControls -bool false` does the same as
+  the row. The test identity (OmacVM Test) has it off by default, so a test
+  VM never takes your AirPods.
+- QEMU's log: "OmacVM: media controls: on|off" at each start, then a line
+  when the VM becomes Now Playing, for each command from macOS and when it
+  gives the controls up (why). Titles never go into a log. In the VM:
+  `omacvm-media status`, `journalctl --user -u omacvm-media`; `omacvm check`
+  has a "media controls" line.
+
 ## HDR and 10-bit colour (experimental, off by default)
 
 On a Mac with an HDR display (a MacBook Pro's XDR panel, an HDR monitor),
@@ -639,10 +679,21 @@ the 8-bit path.
 - The VM's 10-bit graphics driver: Update VM builds it (internet once, a
   few seconds); the VM loads it only for a start with the switch on, else
   the standard driver.
-- Which Linux apps send HDR (October 2026): GStreamer does; mpv and
-  Chromium show HDR video as SDR for now.
+- It counts when the VM starts: shut the VM down and start it again. A
+  restart inside the VM (Omarchy's menu) keeps the setting it started with.
+  While the VM runs with the other setting, the switch says so.
+- Which Linux apps send HDR (October 2026): Chrome, Chromium and GStreamer
+  do; mpv shows HDR video as SDR for now.
 - Only the main window; windows on other displays stay 8-bit.
 - Extra brightness (below) wins while it is on: no HDR highlights then.
+- Screenshots, colour picks and screen sharing (Teams, Meet, OBS through
+  the desktop portal) show apps that draw HDR, such as Chrome, at normal
+  white; parts brighter than white are cut off there, as captures are SDR.
+  Update VM brings this; `omacvm check` has an "HDR captures" line.
+  Omarchy's screen recordings make SDR of the HDR screen themselves once the
+  VM was shut down and started again after Update VM (white at about 224
+  of 255 at a high headroom; "HDR recordings" in `omacvm check`;
+  [troubleshooting 44](../troubleshooting.md#44-app-screenshots-and-screen-sharing-of-chrome-too-bright-in-an-hdr-vm)).
 - GPU safe mode turns it off. `omacvm check` has an "HDR" line.
 - How it works: [ADR 0049](../adr/0049-hdr-guest-tone-maps.md).
 

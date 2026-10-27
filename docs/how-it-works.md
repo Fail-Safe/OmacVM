@@ -55,6 +55,11 @@ needs a token. OmacVM.app uses QEMU's own network instead
   MacBook): a small kernel module shows it to the VM as a real battery, which
   UPower and Omarchy's bar read; the Bridge (or OmacVM.app itself) sends every
   change. [How it works](../src/battery/README.md).
+- **AirPods and Control Center** (OmacVM.app): AirPods and Control Center send
+  no keys; macOS gives their play and pause to its Now Playing app. While a
+  player in the VM plays, OmacVM.app is that app: `omacvm-media` in the VM
+  reads the players on Linux's MPRIS and tells the app what plays, and the
+  app passes play, pause and skip back. [Details](routes/app.md#airpods-and-media-controls-on-by-default).
 
 <p align="center">
   <img src="images/gestures.svg" alt="Three fingers swipe on a MacBook trackpad and Omarchy's workspaces slide from 1 to 2 to 3; then a pinch zooms." width="100%">

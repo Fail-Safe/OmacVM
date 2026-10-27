@@ -44,5 +44,6 @@ a new record replaces it and says so.
 | [0055](0055-tiled-present.md) | Tiled present: only the changed tiles of a frame go to WindowServer | accepted, built (`window-draw`), off by default (experimental switch "Draw only what changed") |
 | [0056](0056-frames-in-step.md) | Frames in step with the Mac: the guest's vblank timer follows a refresh grid QEMU gives (OmacVM's virtio-gpu command), the vblank a measured lead before each commit | replaced by 0057 (removed in 3.2.7) |
 | [0057](0057-frames-in-step-removed.md) | Frames in step removed: no gain worth its cost (input a few ms sooner only while the screen moves, no power saved, our own guest driver patch) | accepted, built (`drop-vsync`, 3.2.7) |
+| [0058](0058-now-playing.md) | AirPods and media controls: the launcher is the Mac's Now Playing app while the VM plays (own virtio port, the guest's MPRIS players through Gio) | accepted, built (`airpods-media`), on by default |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

@@ -467,7 +467,7 @@ rule, `MediaRoute` in `mac/keys-model.swift` (`mac/test-models.sh`):
   VM as its own keys (XF86AudioRaiseVolume & co.: the VM's volume with
   Omarchy's popup), never to macOS's greyed-out panel;
 - play/pause, next and previous (also an Apple keyboard's track keys) go into
-  an OmacVM.app VM (XF86AudioPlay & co.: Omarchy's playerctl), not to macOS's
+  an OmacVM.app VM (XF86AudioPlay & co.: Omarchy's media keys), not to macOS's
   Now Playing;
 - keys go into the VM through QEMU's control socket (QMP `input-send-event`,
   `mac/vm-keys.swift`): the socket on the VM's QEMU command line, this user's
@@ -504,6 +504,17 @@ not move the rest of it between the keyboard light and the display
 
 Anything else, or any key while no VM is in front, passes through untouched.
 Switch it off in the menu-bar icon or with `"capture_keys": false`.
+
+AirPods and media controls (OmacVM.app's switch, on by default): while
+something plays in an OmacVM.app VM, the app itself is macOS's Now Playing
+app, so play keys that reach macOS (no VM in front, the Bridge off or
+`capture_keys` false) go to the VM's player too, through Now Playing, instead
+of starting Music. With the VM in front the Bridge still types them into the
+VM and macOS never sees them, so a press never counts twice. QEMU's own key
+tap takes no media keys: with the Bridge off and the VM in front, a play key
+reaches the VM only through Now Playing, once. AirPods and Control Center never
+pass this tap; only the app's Now Playing reaches them
+(app/app/Sources/OmacVM/NowPlaying.swift, docs/adr/0058-now-playing.md).
 
 With the VM in front on an external display, the display brightness keys
 set that display instead (see External displays): OmacVM.app's VMs also in a

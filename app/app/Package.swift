@@ -14,7 +14,7 @@ let package = Package(
         .library(name: "OmacVMDockTile", type: .dynamic, targets: ["OmacVMDockTile"]),
     ],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMAuth", "OmacVMBuildProgress", "OmacVMWindow", "OmacVMDesktop", "OmacVMAudio", "OmacVMIcon"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMAuth", "OmacVMBuildProgress", "OmacVMWindow", "OmacVMDesktop", "OmacVMAudio", "OmacVMIcon", "OmacVMMedia"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -66,6 +66,11 @@ let package = Package(
         // Its panel in the VM's window (QEMU loads the dylib): `swift run touchid-panel-tests`.
         .target(name: "OmacVMTouchIDPanel", dependencies: ["OmacVMAuth"]),
         .executableTarget(name: "touchid-panel-tests", dependencies: ["OmacVMTouchIDPanel", "OmacVMAuth"]),
+        // AirPods and media controls: the org.omacvm.media port's lines and
+        // when the app is the Mac's Now Playing app for the VM, without a VM
+        // or MediaPlayer: `swift run media-tests`.
+        .target(name: "OmacVMMedia"),
+        .executableTarget(name: "media-tests", dependencies: ["OmacVMMedia"]),
     ],
     swiftLanguageModes: [.v5]
 )

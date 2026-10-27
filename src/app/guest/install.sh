@@ -15,8 +15,12 @@
 #    (browser-video-encode.py; omacvm-video-encode at apply and each start)
 #  * a hyprpicker that draws the frozen screen of screenshots only when it
 #    changes (hyprpicker/; the package's drew every display on every frame)
+#  * screenshots and screen sharing of HDR apps at SDR white in an HDR VM
+#    (hypr-capture/: a fixed shader file for Hyprland 0.56.2)
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
+#  * AirPods and media controls: the VM's player as the Mac's Now Playing
+#    (omacvm-media, while the app's switch is on)
 #  * OmacVM's virtio-gpu driver (HDR; the pointer on its own layer; Linux
 #    7.4's damage fix for "Draw only what changed"),
 #    built for every kernel but dormant: loaded only when one of the app's
@@ -34,7 +38,7 @@ source ../../guest/home-files.sh   # the home is written as the user
 # of a build or an update) would hold this step 60-90 s for the device.
 systemctl enable qemu-guest-agent >/dev/null 2>&1 || true
 systemctl start --no-block qemu-guest-agent >/dev/null 2>&1 || true
-install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays omacvm-desktop-recover /usr/local/bin/
+install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays omacvm-desktop-recover omacvm-media /usr/local/bin/
 # What the Mac tells the VM at start (SMBIOS strings), for omacvm-app-host and
 # the virtio-gpu driver's loader.
 install -Dm755 omacvm-smbios /usr/local/lib/omacvm/omacvm-smbios
@@ -51,6 +55,7 @@ install -Dm755 virtio-gpu/omacvm-virtio-gpu-load $VG/omacvm-virtio-gpu-load
 install -Dm644 virtio-gpu/linux-virtio-gpu-deep-color.patch $VG/linux-virtio-gpu-deep-color.patch
 install -Dm644 virtio-gpu/linux-virtio-gpu-damage-clips.patch $VG/linux-virtio-gpu-damage-clips.patch
 install -Dm644 virtio-gpu/linux-virtio-gpu-cursor-plane.patch $VG/linux-virtio-gpu-cursor-plane.patch
+install -Dm644 virtio-gpu/linux-virtio-gpu-hdr-metadata.patch $VG/linux-virtio-gpu-hdr-metadata.patch
 # Frames in step with the Mac (its vsync-lock patch, 3.2.3-3.2.6) is gone.
 rm -f $VG/linux-virtio-gpu-vsync-lock.patch
 ln -sf $VG/omacvm-virtio-gpu-build /usr/local/bin/omacvm-virtio-gpu-build
@@ -69,6 +74,13 @@ systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@"
 install -m644 omacvm-displays.service /etc/systemd/user/
 systemctl --global enable omacvm-displays.service >/dev/null 2>&1 || true
 systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@" restart omacvm-displays.service 2>/dev/null || true
+# AirPods and media controls (over a virtio port; the same uaccess rule): the
+# VM's MPRIS players through Gio (python-gobject, in Omarchy's base; added only
+# when missing). The agent waits for the app's switch before it reads them.
+../../guest/pkg-add python-gobject || true
+install -m644 omacvm-media.service /etc/systemd/user/
+systemctl --global enable omacvm-media.service >/dev/null 2>&1 || true
+systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@" restart omacvm-media.service 2>/dev/null || true
 # The switch "Use external displays" in Omarchy's display panel: Omarchy's own
 # widget with one more section (omacvm.monitor; the stock one stays if it no
 # longer fits).
@@ -164,6 +176,25 @@ hyprpicker/build.sh "$U" || true
 if ! pgrep -x hyprpicker >/dev/null; then
   find /run/user -mindepth 2 -maxdepth 2 -type f -name '.hyprpicker_*' -delete 2>/dev/null || true
 fi
+# Screenshots, colour picks and screen sharing of HDR apps (Chrome) in an HDR VM
+# came out 2.54 times too bright: Hyprland 0.56.2 put their SDR white at 80 nits
+# in its copy for captures (#579). A fixed copy of that one shader file, only
+# while the installed Hyprland is the one it was made for; pacman hooks take it
+# out before Hyprland changes and back after (hypr-capture/hypr-capture.sh). A
+# running desktop gets it at once.
+HC=/usr/local/lib/omacvm/hypr-capture
+rm -rf "$HC.new" "$HC.old"
+install -Dm755 hypr-capture/hypr-capture.sh "$HC.new/hypr-capture.sh"
+install -Dm644 hypr-capture/guard.py "$HC.new/guard.py"
+install -Dm644 hypr-capture/LICENSE.hyprland "$HC.new/LICENSE.hyprland"
+for v in hypr-capture/*/; do
+  install -Dm644 -t "$HC.new/$(basename "$v")" "${v}cm_helpers.glsl" "${v}original"
+done
+if [[ -d $HC ]]; then mv "$HC" "$HC.old"; fi
+mv "$HC.new" "$HC"; rm -rf "$HC.old"
+install -Dm644 hypr-capture/05-omacvm-hypr-capture-pre.hook /etc/pacman.d/hooks/05-omacvm-hypr-capture-pre.hook
+install -Dm644 hypr-capture/95-omacvm-hypr-capture.hook /etc/pacman.d/hooks/95-omacvm-hypr-capture.hook
+"$HC/hypr-capture.sh" || true
 # Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
 # nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
 # Without the VM's GPU (Update VM's run) the flags stay as they are; each
@@ -172,4 +203,4 @@ install -m755 omacvm-video-encode /usr/local/bin/
 install -m644 omacvm-video-encode.service /etc/systemd/system/
 systemctl enable omacvm-video-encode.service >/dev/null 2>&1 || true
 OMACVM_VIDEO_ENCODE_PY=$PWD/browser-video-encode.py ./omacvm-video-encode apply "$U"
-echo "OmacVM.app: display sync, every Mac display, guest agent, video decoding and encoding"
+echo "OmacVM.app: display sync, every Mac display, media controls, guest agent, video decoding and encoding"

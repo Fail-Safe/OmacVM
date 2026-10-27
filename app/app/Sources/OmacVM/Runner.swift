@@ -4,6 +4,7 @@ import Foundation
 import OmacVMFeatures
 import OmacVMAudio
 import OmacVMAuth
+import OmacVMMedia
 import OmacVMNet
 import OmacVMUpdate
 import OmacVMUSB
@@ -185,6 +186,11 @@ final class Runner {
         // device; the VM finds it by its name.
         a += ["-chardev", "socket,id=auth0,path=\(q(c.authSocket.path)),server=on,wait=off",
               "-device", "virtserialport,bus=vser0.0,nr=7,chardev=auth0,name=org.omacvm.auth"]
+        // AirPods and media controls (docs/adr/0058): the VM's player as the
+        // Mac's Now Playing (omacvm-media in the VM, MediaSession here). Every
+        // VM has it, whatever the switch, so the switch works at once; nothing
+        // is written to it before the VM's agent says hello.
+        a += MediaPort.arguments(socket: q(c.mediaSocket.path))
         // The Mac's input methods (mac-ime, experimental; docs/adr/0043): only
         // for a VM whose record says on, so every other VM starts as before.
         // QEMU's window code serves it (OMACVM_IME_SOCKET below).
@@ -392,6 +398,7 @@ final class Runner {
                                                 withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: c.qmpSocket)
         try? FileManager.default.removeItem(at: c.displaySocket)
+        try? FileManager.default.removeItem(at: c.mediaSocket)
         // QEMU empties the console log only when it opens it: the last
         // boot's text would tell the Vulkan start watch the firmware ran.
         try? FileManager.default.removeItem(at: c.folder.appendingPathComponent("logs/console.log"))
@@ -584,6 +591,7 @@ final class Runner {
         if let n = sizeNote { log.write(Data("OmacVM: resources: \(c.cpus) CPUs, \(c.memoryMB) MB for this start: \(n)\n".utf8)) }
         if let g = graphics { log.write(Data("OmacVM: graphics: \(g.record)\n".utf8)) }
         log.write(Data("OmacVM: USB devices: \(usbRecord)\n".utf8))
+        log.write(Data("OmacVM: media controls: \(Settings.mediaControls ? "on" : "off") (the app's switch AirPods and media controls)\n".utf8))
         if Settings.firmwareWait > 0 {
             log.write(Data("OmacVM: the firmware waits \(Settings.firmwareWait) s for a key (firmwareWait)\n".utf8))
         }
@@ -629,6 +637,10 @@ final class Runner {
             GuestAgent.release(socketPath: agentPath)
             let reason = proc.terminationReason
             Task { @MainActor in
+                // First: the launcher stays alive after a crash, a Vulkan
+                // fallback or a lost drive, and must not stay Now Playing.
+                self?.media?.stop("the VM stopped")
+                self?.media = nil
                 self?.noteEarlyExit(status: status, reason: reason)
                 self?.unmark(status: status)
                 if globe { self?.appendLog("OmacVM: macOS's globe shortcut given back (QEMU ended without)") }
@@ -681,6 +693,7 @@ final class Runner {
         if links.battery { startBattery() }
         if links.camera { startCamera() }
         startControl()
+        startMedia()
         // The sound's delay on the Mac, so the VM's videos keep the picture in step.
         let audioDelay = AudioLatencyWatch(agentSocket: agentPath, thread: audioThread, wireless: audioWireless,
                                            framesFile: audioFramesFile, initialFrames: audioFramesStart,
@@ -1140,6 +1153,31 @@ final class Runner {
         }
     }
 
+    // MARK: AirPods and media controls (NowPlaying.swift), reconnected while QEMU runs.
+
+    private var media: MediaSession?
+
+    private func startMedia() {
+        let path = config.mediaSocket.path
+        let session = MediaSession { [weak self] line in self?.appendLog(line) }
+        media = session
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let running = DispatchQueue.main.sync { self?.isRunning ?? false }
+                guard running else { return }
+                if FileManager.default.fileExists(atPath: path),
+                   let fd = try? NativeBridgeSocket.connectSecure(path: path, label: "media port") {
+                    let bridge = NativeMediaBridge(fd: fd)
+                    // QEMU ended meanwhile: attach closed the descriptor, so nothing reads it.
+                    guard DispatchQueue.main.sync(execute: { MainActor.assumeIsolated { session.attach(bridge) } }) else { return }
+                    bridge.read(message: { session.received($0) }, dropped: { session.dropped($0) })
+                    DispatchQueue.main.sync { MainActor.assumeIsolated { session.detach(bridge) } }
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+    }
+
     // MARK: Touch ID's port (OmacVMAuth), reconnected while QEMU runs.
 
     private var auth: AuthRelay?
@@ -1245,12 +1283,14 @@ final class Runner {
 
     private func willSleep() {
         hostAsleep = true
+        media?.sleep()
         try? sleep.prepareForHostSleep(vmIsRunning: isRunning, isStopping: false)
     }
 
     private func didWake() {
         hostAsleep = false
         venusWatch.woke()
+        media?.wake()
         do {
             try sleep.resumeAfterHostWake(vmIsRunning: isRunning, isStopping: false)
             syncClock()

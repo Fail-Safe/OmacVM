@@ -1,0 +1,15 @@
+# OmacVM.app: OmacVM's cm_helpers.glsl for Hyprland's captures (screenshots,
+# screen sharing of HDR apps) goes out before /usr/bin/Hyprland changes, so it
+# is never left beside a binary it was not checked against
+# (src/app/guest/hypr-capture/hypr-capture.sh). Never stops the transaction.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Path
+Target = usr/bin/Hyprland
+
+[Action]
+Description = OmacVM: Hyprland's shader fix for HDR captures out until checked
+When = PreTransaction
+Exec = /usr/local/lib/omacvm/hypr-capture/hypr-capture.sh --hook-pre

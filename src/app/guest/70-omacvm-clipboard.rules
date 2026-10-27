@@ -1,2 +1,3 @@
 SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.clipboard", TAG+="uaccess"
 SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.display", TAG+="uaccess"
+SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.media", TAG+="uaccess"

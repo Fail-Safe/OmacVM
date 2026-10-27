@@ -1052,6 +1052,14 @@ bench lock and are indications only):
   sets that option to 0: the copy only while a screenshot or a screen share
   runs; the scanout is the same pixel for pixel (read back over KMS) and
   screenshots are the same.
+- **Captures of HDR windows** (#579, ADR 0049's 2026-10-27 amendment): that
+  copy is written per window as it is drawn, and Hyprland 0.56.2 put a PQ
+  window's SDR white at 80 nits there (203 for SDR windows), so Chrome's
+  screenshots and screen shares were 2.54 times too bright. App VMs read a
+  fixed `cm_helpers.glsl` from `/usr/local/share/hypr/shaders/` (SDR white
+  203 nits for PQ/HLG in the copy; window shares mapped to the share's white
+  before the clamp), only beside the Hyprland binary it was made for
+  (`src/app/guest/hypr-capture/`).
 - **Measuring** (`tests/graphics/pacing`):
   a pacing page draws its frame number as 16 bit cells; ScreenCaptureKit
   captures the VM window per WindowServer frame and counts how far the number

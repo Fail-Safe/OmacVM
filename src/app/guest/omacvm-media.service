@@ -1,0 +1,14 @@
+[Unit]
+Description=OmacVM.app: AirPods and media controls (the VM's player as the Mac's Now Playing)
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionPathExists=/dev/virtio-ports/org.omacvm.media
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/bin/omacvm-media
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

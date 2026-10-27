@@ -218,21 +218,40 @@ struct KeepDockAwayRow: View {
 
 /// HDR and 10-bit colour (Settings.hdr, experimental, off by default): read
 /// by each start of the VM (Settings.hdrStart). Shown only with a display
-/// that can show HDR.
+/// that can show HDR. While the VM runs with the other setting, the row says
+/// so (HDRNote, from that start's line in qemu.log): a restart inside the VM
+/// keeps it, which was easy to miss.
 struct HDRRow: View {
     var tick = 0
+    /// The VM this window shows, and whether it runs now.
+    var folder: URL?
+    var running = false
     @State private var on = Settings.hdr
+    @State private var line = (text: HDRNote.usual, isNote: false)
 
-    static let info = "The VM's main window shows 10-bit colour, for smoother gradients, and HDR highlights on this Mac's HDR display. White stays the Mac's white; brighter parts go as far as the display can show right now. Windows on other displays stay as before. Counts from the next start of the VM; the VM gets its 10-bit graphics driver with Update VM (needs internet once). Few Linux apps send HDR yet: GStreamer does; mpv and Chromium show HDR video as SDR for now. Uses a little more memory and battery. Experimental. GPU safe mode turns it off."
+    static let info = "The VM's main window shows 10-bit colour, for smoother gradients, and HDR highlights on this Mac's HDR display. White stays the Mac's white; brighter parts go as far as the display can show right now. Windows on other displays stay as before. Counts when the VM starts: shut it down and start it again; a restart inside the VM keeps the setting it started with. The VM gets its 10-bit graphics driver with Update VM (needs internet once). Few Linux apps send HDR yet: Chrome, Chromium and GStreamer do; mpv shows HDR video as SDR for now. Uses a little more memory and battery. Experimental. GPU safe mode turns it off."
 
     var body: some View {
-        SettingRow(title: "HDR and 10-bit colour", badge: "experimental",
-                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on." : "Deeper colour, and HDR from Linux apps that send it. From the next start of the VM.",
+        SettingRow(title: "HDR and 10-bit colour", badge: "experimental", subtitle: line.text, subtitleIsNote: line.isNote,
                    info: Self.info, probe: "hdr") {
             RowSwitch(title: "HDR and 10-bit colour", isOn: $on, enabled: !Settings.gpuSafeMode)
         }
-        .onChange(of: on) { _, v in if v != Settings.hdr { Settings.hdr = v } }
-        .onChange(of: tick) { _, _ in on = Settings.hdr }
+        .onAppear(perform: refresh)
+        .onChange(of: on) { _, v in
+            if v != Settings.hdr { Settings.hdr = v }
+            refresh()
+        }
+        .onChange(of: tick) { _, _ in on = Settings.hdr; refresh() }
+        .onChange(of: running) { _, _ in refresh() }
+        .onChange(of: folder) { _, _ in refresh() }
+    }
+
+    /// The subtitle, with the note from the running VM's qemu.log (its head:
+    /// a few KB at a start, read only while it runs).
+    private func refresh() {
+        let log = running ? folder.flatMap { KeyAccess.lastLog(folder: $0) } : nil
+        let l = HDRNote.subtitle(switchOn: Settings.hdr, safeMode: Settings.gpuSafeMode, running: running, log: log)
+        if l != line { line = l }
     }
 }
 
@@ -330,6 +349,25 @@ struct SoundThreadRow: View {
         }
         .onChange(of: on) { _, v in if v != Settings.audioThread { Settings.audioThread = v } }
         .onChange(of: tick) { _, _ in on = Settings.audioThread }
+    }
+}
+
+/// AirPods and media controls (Settings.mediaControls, on by default): the
+/// launcher follows the switch at once (MediaSession).
+struct MediaControlsRow: View {
+    var tick = 0
+    @State private var on = Settings.mediaControls
+
+    static let info = "AirPods, other Bluetooth headphones and speakers, Control Center and the keyboard's play keys play, pause and skip what plays in the VM (a video in the browser, music, mpv). While the VM plays, it is the Mac's Now Playing app, like Music or Safari, and Control Center shows what plays under this app's name. A Mac app that starts playing takes the controls, as between Mac apps; playing again in the VM takes them back. Volume stays the Mac's. Nothing changes until something plays in the VM, and after 30 minutes paused the Mac's apps have the controls again. Works at once in a running VM; the VM needs Update VM once."
+
+    var body: some View {
+        SettingRow(title: "AirPods and media controls",
+                   subtitle: "AirPods, headphones and Control Center play and pause what the VM plays.",
+                   info: Self.info, probe: "media-controls") {
+            RowSwitch(title: "AirPods and media controls", isOn: $on)
+        }
+        .onChange(of: on) { _, v in if v != Settings.mediaControls { Settings.mediaControls = v } }
+        .onChange(of: tick) { _, _ in on = Settings.mediaControls }
     }
 }
 

@@ -55,6 +55,14 @@ for _, c in ipairs(configs) do
 end
 check("HDR: SDR copy for captures only", keep == 0)
 
+-- Hyprland's auto HDR off: display-sync sets Virtual-1's mode and its HDR
+-- metadata follows that (a KMS recorder reads it, #579).
+local auto
+for _, c in ipairs(configs) do
+  if c.render and c.render.cm_auto_hdr ~= nil then auto = c.render.cm_auto_hdr end
+end
+check("HDR: no auto HDR", auto == 0)
+
 -- A keep_unmodified_copy the user set in their own Hyprland files wins: ours
 -- is not set then. A comment that names it does not count.
 local function keep_set()
@@ -69,6 +77,13 @@ check("HDR: the user's own keep_unmodified_copy wins", not keep_set())
 write(cfg .. "/hypr/looknfeel.lua", '-- render.keep_unmodified_copy: see the wiki\nhl.config({ render = { direct_scanout = 1 } })\n')
 load_config({ "Virtual-1" })
 check("HDR: a comment naming it does not count", keep_set())
+write(cfg .. "/hypr/looknfeel.lua", 'hl.config({ render = { cm_auto_hdr = 1 } })\n')
+load_config({ "Virtual-1" })
+local auto_set = false
+for _, c in ipairs(configs) do
+  if c.render and c.render.cm_auto_hdr ~= nil then auto_set = true end
+end
+check("HDR: the user's own cm_auto_hdr wins", not auto_set)
 os.remove(cfg .. "/hypr/looknfeel.lua")
 
 -- The screen's kept rule comes back as it was sent (Omanotch's NOTCH output

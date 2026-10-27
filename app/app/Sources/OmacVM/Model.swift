@@ -4,6 +4,7 @@ import Foundation
 import OmacVMUpdate
 import OmacVMFeatures
 import OmacVMAudio
+import OmacVMMedia
 import OmacVMWindow
 
 enum HelperError: LocalizedError, Equatable {
@@ -252,6 +253,7 @@ struct VMConfig: Equatable {
     var authSocket: URL { Paths.runDir.appendingPathComponent("\(id).auth") }
     var imeSocket: URL { Paths.runDir.appendingPathComponent("\(id).ime") }
     var touchIDPanelSocket: URL { Paths.runDir.appendingPathComponent("\(id).tid") }
+    var mediaSocket: URL { Paths.runDir.appendingPathComponent("\(id).media") }
 
     func write() throws {
         try VMsFolder.prepare(folder.deletingLastPathComponent(), home: VMsFolder.home)
@@ -644,6 +646,20 @@ enum Settings {
     static var pauseWhileHidden: Bool {
         get { UserDefaults.standard.bool(forKey: "pauseWhileHidden") }
         set { UserDefaults.standard.set(newValue, forKey: "pauseWhileHidden") }
+    }
+    /// AirPods and media controls (docs/adr/0058): while something plays in
+    /// the VM, the launcher is the Mac's Now Playing app, so AirPods, Control
+    /// Center and the play keys go to the VM's player (MediaSession). On by
+    /// default; off by default for the test identity, so a test VM that plays
+    /// never takes the person's AirPods (a kit turns it on for its rows). The
+    /// launcher watches the key: a change counts at once in a running VM.
+    /// MediaControlsRow or defaults write org.omacvm.app mediaControls -bool false
+    static var mediaControls: Bool {
+        get { UserDefaults.standard.object(forKey: MediaControls.key) as? Bool ?? mediaControlsDefault(bundleID: Bundle.main.bundleIdentifier) }
+        set { UserDefaults.standard.set(newValue, forKey: MediaControls.key) }
+    }
+    static func mediaControlsDefault(bundleID: String?) -> Bool {
+        MediaControls.defaultOn(testIdentity: TestIdentity.isTest(bundleID))
     }
     /// Extra brightness at a start of the VM (ExtraBrightness.start): QEMU's
     /// OMACVM_EXTRA_BRIGHT (for a QEMU not started as the app) and the

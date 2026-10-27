@@ -54,7 +54,7 @@ if host=$(python3 -I "$here/../omacvm-smbios" "$P/sys/firmware/dmi/entries" 2>/d
 fi
 if [[ ! -f $ko ]]; then
   why="not built for $kernel"
-elif [[ $(cat "$root/$kernel/stamp" 2>/dev/null) != "$(cat "$root/linux-virtio-gpu-deep-color.patch" "$root/linux-virtio-gpu-cursor-plane.patch" "$root/linux-virtio-gpu-damage-clips.patch" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1) $kernel" ]]; then
+elif [[ $(cat "$root/$kernel/stamp" 2>/dev/null) != "$(cat "$root/linux-virtio-gpu-deep-color.patch" "$root/linux-virtio-gpu-cursor-plane.patch" "$root/linux-virtio-gpu-damage-clips.patch" "$root/linux-virtio-gpu-hdr-metadata.patch" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1) $kernel" ]]; then
   why="stamp out of date"
 else
   # Only the options this build has: a patch that did not fit this kernel is

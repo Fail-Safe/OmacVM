@@ -168,6 +168,9 @@ jobs:
       - name: OmacVM.app sound delay for the VM (QEMU's part, the Mac's output, limits)
         working-directory: app/app
         run: swift run audio-tests
+      - name: OmacVM.app AirPods and media controls (the port's lines, when the VM is Now Playing, a fuzz)
+        working-directory: app/app
+        run: swift run media-tests
 
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
@@ -580,6 +583,7 @@ jobs:
           python3 src/camera/guest/tests/test_frames.py
           python3 src/app/guest/tests/test_audio_latency.py
           python3 src/app/guest/tests/test_chrome_drirc.py
+          python3 src/app/guest/tests/test_omacvm_media.py
 
       - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
         run: tests/bench/final-round/test.sh
@@ -732,6 +736,11 @@ jobs:
           python3 src/omanotch/guest/tests/test_display_panel.py -v
           python3 src/camera/guest/tests/test_frames.py -v
 
+      - name: AirPods and media controls, the VM's agent with fake MPRIS players on a private session bus
+        run: |
+          sudo apt-get install -y -qq python3-gi dbus >/dev/null   # Omarchy's base has python-gobject and dbus
+          OMACVM_MEDIA_NEED_DBUS=1 python3 src/app/guest/tests/test_omacvm_media.py -v
+
       - name: A feature switch on Linux (GNU sed, glide off path)
         run: src/tests/feature-switch.sh
 
@@ -750,8 +759,14 @@ jobs:
       - name: OmacVM's virtio-gpu patches with GNU patch, as the builder in the VM (no fuzz)
         run: src/tests/virtio-gpu-patches.sh
 
+      - name: omacvm check's "HDR recordings" line says whether the running driver gives recorders the HDR metadata
+        run: src/tests/hdr-recording-check.sh
+
       - name: omacvm check's "Changed parts" line says whether the compositor's damage reaches the Mac
         run: src/tests/damage-check.sh
+
+      - name: omacvm check's "media controls" line (AirPods and media controls; no port, agent down, switch, what plays)
+        run: src/tests/media-check.sh
 
       - name: OmacVM.app's hyprpicker patch applies and leaves no buffer files in the runtime folder
         run: src/tests/hyprpicker-patch.sh
@@ -787,6 +802,12 @@ jobs:
 
       - name: omacvm check's HDR line says what Hyprland's SDR copy does (the check catches code without it)
         run: src/tests/hdr-copy-check.sh
+
+      - name: Screenshots and screen sharing of HDR apps (Hyprland 0.56.2's cm_helpers.glsl with OmacVM's two changes; its guard, hooks, check line; every shader variant compiles)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends glslang-tools
+          OMACVM_HC_STRICT=1 src/tests/hypr-capture.sh
 
       - name: Chromium's video decoder builds, and waits for a GPU that is not usable (no render node here)
         run: |
