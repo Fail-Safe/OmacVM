@@ -28,7 +28,9 @@
 # update-vm (update-vm.sh, as the window runs it) and leftovers (a start
 # without a window) run headless; also with --headless.
 # --pause-ci (or OMACVM_E2E_PAUSE_CI=1): this Mac's CI runners stopped for the
-# run (ci-runners.sh), started again at the end.
+# run (ci-runners.sh), started again at the end. A runner still on a job after
+# OMACVM_E2E_CI_WAIT s (default 3000) would start its VMs during the rows: the
+# rows on screen are BLOCKED then (the headless ones run).
 #   src/tests/e2e/onscreen.sh --app "PATH/OmacVM Test.app" --vm NAME [--out DIR]
 #       [--only ROW,...] [--headless] [--pause-ci]
 # NAME: a stopped test VM in the test app's VMs folder (e2e_vm_guard). The
@@ -42,8 +44,8 @@ source "$E/test-vms.sh"
 source "$E/onscreen-lib.sh"
 source "$E/person.sh"
 ALL="window update-vm switch-stopped vm-size pointer leftovers"
-APP=""; VM=""; OUT=""; ONLY=""; HEADLESS=0; PAUSE_CI=${OMACVM_E2E_PAUSE_CI:-0}
-usage() { sed -n '32,33s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+APP=""; VM=""; OUT=""; ONLY=""; HEADLESS=0; PAUSE_CI=${OMACVM_E2E_PAUSE_CI:-0}; CI_WAIT=${OMACVM_E2E_CI_WAIT:-3000}
+usage() { sed -n '34,35s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 while (( $# )); do
   case $1 in
     --app) APP=${2%/}; shift 2 ;;
@@ -406,14 +408,14 @@ headless_leftovers() {
 CI_PAUSED=0
 if (( HEADLESS )); then GONE="--headless"
 else
-  # The CI runners first (their jobs start VMs and load the Mac), then someone coming between two steps
-  # is written down with the time (person.log).
+  # The CI runners first (their jobs start VMs and load the Mac; one still on a job after the wait: no
+  # rows on screen), then someone coming between two steps is written down with the time (person.log).
   if (( PAUSE_CI )); then
-    CI_PAUSED=1; log "CI runners: each stopped once its job ends (<= 50 min)"
-    "$E/ci-runners.sh" pause --wait 3000 --holder $$ || log "CI runners still on jobs after 50 min: on screen anyway"
+    CI_PAUSED=1; log "CI runners: each stopped once its job ends (<= $CI_WAIT s)"
+    "$E/ci-runners.sh" pause --wait "$CI_WAIT" --holder $$ ||
+      { GONE="this Mac's CI runners still run jobs after $CI_WAIT s"; log "STOP on screen: $GONE"; }
   fi
-  PERSON_KEEP_LOG=$OUT/person.log; person_watch_start
-  onscreen_ok
+  if [[ -z $GONE ]]; then PERSON_KEEP_LOG=$OUT/person.log; person_watch_start; onscreen_ok; fi
 fi
 if [[ -z $GONE ]]; then
   log "on screen: nobody uses the Mac ($(who))"

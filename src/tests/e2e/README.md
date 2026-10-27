@@ -86,7 +86,10 @@ not only at their start (`person.sh`):
 run (`ci-runners.sh pause`: `launchctl bootout` of each runner's LaunchAgent
 once its job is over; queued jobs wait on GitHub) and starts them again at
 the end, also when the run fails (`ci-runners.sh resume`, from the EXIT
-trap, which no further Ctrl-C, hangup or lost ssh can stop half way). A run
+trap, which no further Ctrl-C, hangup or lost ssh can stop half way). A
+runner still on a job after 50 minutes would start its VMs during the rows:
+`cc-switches.sh` stops then, `onscreen.sh` runs no row on screen (BLOCKED;
+update-vm and leftovers headless). A run
 that dies without its cleanup (`kill -9`) is covered as well: the pause starts
 a guard in its own session that resumes once the run's process is gone (within
 10 s; its log `~/.omacvm-ci-paused.log`). A kit that runs several harnesses

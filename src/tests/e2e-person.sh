@@ -272,7 +272,8 @@ upto 5 gone $pz && ok "ci: the holder gone -> its pause ends while jobs still ru
 rm -f "$W/actions-runner-1" "$W/actions-runner-2"
 upto 5 [ ! -e "$T/ci-state" ] || bad "ci: state left after the holder died: $(ls "$T/ci-state" | tr '\n' ' ')"
 
-# ---- onscreen.sh's exit code: 1 a FAIL, 5 BLOCKED rows (3 was also the code of other ends)
+# ---- onscreen.sh's exit code: 1 a FAIL, 5 BLOCKED rows (3 was also the code of other ends); CI runners
+# still on jobs after the wait: no rows on screen (BLOCKED), the runners back at the end
 DOM=org.omacvm.app.test.e2e-person.$$
 OSA=$T/os/Test.app; mkdir -p "$OSA/Contents/Resources/scripts" "$T/os/vms/OmacVM M-e2e"
 for kv in "CFBundleIdentifier string $DOM" "CFBundleShortVersionString string 9.9.9" "OmacVMCommit string 0000000"; do
@@ -295,6 +296,13 @@ same "onscreen exit: BLOCKED rows only -> 5" 5 "$(OS h1 --headless --only window
 has "onscreen exit: ... the row says why" "window	BLOCKED	not run on screen: --headless" "$(cat "$T/os/h1/summary.tsv")"
 same "onscreen exit: a FAIL next to BLOCKED rows -> 1" 1 "$(OS h2 --headless --only window,update-vm)"
 has "onscreen exit: ... the FAIL row" "update-vm	FAIL" "$(cat "$T/os/h2/summary.tsv")"
+touch "$W/actions-runner-2"   # runner 2 on a job for the whole run
+same "onscreen --pause-ci: a runner still on a job after the wait -> 5" 5 "$(OS ci --only window --pause-ci)"
+has "onscreen --pause-ci: ... no row on screen, the row says why" "window	BLOCKED	not run on screen: this Mac's CI runners still run jobs" "$(cat "$T/os/ci/summary.tsv")"
+same "onscreen --pause-ci: ... nothing of the app opened" "" "$(cat "$T/os-open.log" 2>/dev/null)"
+rm -f "$W/actions-runner-2"
+upto 5 both_back && ok "onscreen --pause-ci: ... the stopped runner back at the end, state gone" ||
+  bad "onscreen --pause-ci: running '$(running)', state '$(ls "$T/ci-state" 2>/dev/null | tr '\n' ' ')'"
 defaults delete "$DOM" >/dev/null 2>&1
 
 # ---- the harnesses ask between rows, not only at their start (3.2.4: two Screen Sharing connects
