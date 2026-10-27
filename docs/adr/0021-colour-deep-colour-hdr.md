@@ -1,7 +1,9 @@
 # 0021: Colour-tagged frames, deep colour and HDR through the IOSurface present
 
 Status: accepted, amended by [0049](0049-hdr-guest-tone-maps.md) (the app's
-switch, the guest tone-maps, the driver loaded per start). Built on
+switch, the guest tone-maps, the driver loaded per start; 2026-10-27: the
+connectors carry `HDR_OUTPUT_METADATA` with deep colour, 3b for the guest's
+own KMS readers, #579). Built on
 `pacing-hdr` (`qemu-cocoa-gl-present-color.patch`, guest
 `src/app/guest/virtio-gpu/`). HDR is off by default.
 

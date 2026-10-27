@@ -11,8 +11,12 @@ in more words.
   Electron apps, came out about 2.5 times too bright, light greys white. Hyprland 0.56.2 made its
   copy for captures with their white at 80 instead of 203 nits; the VM now gets a fixed copy of
   that one shader file, only for this Hyprland. Parts brighter than white are cut off in
-  captures, which are SDR. Update VM puts it in; no restart needed. Screen recordings with
-  Omarchy's recorder still come out grey in an HDR VM.
+  captures, which are SDR. Update VM puts it in; no restart needed.
+- **Screen recordings of an HDR VM are no longer grey (#579).** Omarchy's recorder reads the
+  screen itself and took the HDR picture for SDR: every app grey and flat, white at 148 of 255.
+  The VM's graphics driver now tells it the screen is HDR, and it makes SDR of it with its own
+  curve: much lighter, white at about 224 of 255 at a high headroom. Update VM, then shut the
+  VM down and start it again (Update VM rebuilds the VM's graphics driver once).
 
 ## 3.2.8 (unreleased)
 
