@@ -5,6 +5,9 @@ in more words.
 
 ## 3.2.9 (unreleased)
 
+AirPods, Control Center and the play keys play and pause what plays in the VM. In an HDR VM,
+screenshots, screen shares and screen recordings look right. Both need Update VM once.
+
 - **Screenshots and screen sharing of HDR apps look right in an HDR VM (#579).** With HDR and
   10-bit colour on, screenshots (also Omarchy's region screenshot and its frozen screen), colour
   picks and screen or window sharing of apps that draw in HDR, such as Chrome and Chromium, came
@@ -17,9 +20,10 @@ in more words.
   screen itself and took the HDR picture for SDR: every app grey and flat, white at 148 of 255.
   The VM's graphics driver now tells it the screen is HDR, and it makes SDR of it with its own
   curve: much lighter, white at about 224 of 255 at a high headroom. Update VM, then shut the
-  VM down and start it again. For everyone with HDR and 10-bit colour, Pointer on its own layer
-  or Draw only what changed on, Update VM rebuilds the VM's graphics driver once (needs
-  internet).
+  VM down and start it again. Update VM rebuilds the VM's graphics driver once on every
+  OmacVM.app VM, whatever its switches (needs internet). If that build fails (offline, or over
+  5 minutes), the VM starts with Linux's own driver: HDR, Pointer on its own layer and Draw only
+  what changed stay off until an Update VM gets through, and `omacvm check` says so.
 
 - **The HDR switch says when it counts.** HDR and 10-bit colour is read when the VM starts; a
   restart inside the VM (Omarchy's menu) keeps the setting it started with. While the VM runs with
