@@ -762,6 +762,9 @@ jobs:
       - name: omacvm check's "Changed parts" line says whether the compositor's damage reaches the Mac
         run: src/tests/damage-check.sh
 
+      - name: omacvm check's "media controls" line (AirPods and media controls; no port, agent down, switch, what plays)
+        run: src/tests/media-check.sh
+
       - name: OmacVM.app's hyprpicker patch applies and leaves no buffer files in the runtime folder
         run: src/tests/hyprpicker-patch.sh
 
