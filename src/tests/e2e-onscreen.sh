@@ -15,14 +15,6 @@ is() { if "${@:2}"; then ok "$1"; else bad "$1"; fi; }
 isnt() { if "${@:2}"; then bad "$1"; else ok "$1"; fi; }
 same() { if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1: want '$2', got '$3'"; fi; }
 
-# Nobody at the Mac: idle over 300 s, or the last input was ours.
-is "away: idle 400 s" os_away 400 0 No 0 1000
-isnt "away: idle 20 s, never posted" os_away 20 0 No 0 1000
-is "away: idle 3 s, our event 4 s ago" os_away 3 0 No 996 1000
-isnt "away: idle 3 s, our event 60 s ago" os_away 3 0 No 940 1000
-isnt "away: a Jump Desktop session" os_away 900 2 No 0 1000
-isnt "away: screen locked" os_away 900 0 Yes 0 1000
-
 # The app's window on a 2560x1364 visible frame below a 31 pt menu bar.
 V="0 31 2560 1364"
 same "window: 800x800 centred" "" "$(os_window_problems "880 313 800 800" "$V")"

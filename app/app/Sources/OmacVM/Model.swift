@@ -574,6 +574,19 @@ enum Settings {
     /// the wait only cost time: 5 s on every start up to 3.0.0).
     /// Hidden: defaults write org.omacvm.app firmwareWait -int 5 (the old wait)
     static var firmwareWait: Int { min(max(UserDefaults.standard.integer(forKey: "firmwareWait"), 0), 60) }
+    /// Switches that are gone: their stored keys are removed once at launch,
+    /// so nothing reads them and a later switch can take the name.
+    /// vsyncLock: Frames in step with the Mac (experimental, 3.2.3 to 3.2.6),
+    /// removed in 3.2.7: no gain worth its cost (ADR 0057). A VM it was on for
+    /// draws as with it off; a downgrade to 3.2.6 reads it as off.
+    @MainActor static func removeRetiredSwitches() {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "vsyncLock") != nil else { return }
+        d.removeObject(forKey: "vsyncLock")
+        let l = "settings: Frames in step with the Mac was removed in 3.2.7; the VM draws as with it off"
+        Updater.shared.log(l)
+        FileHandle.standardError.write(Data("\(l)\n".utf8))
+    }
     /// The hidden Vulkan switch up to 2.9 (`venus`): moved once into each
     /// VM's Graphics setting at the first 3.0.0 launch, then removed
     /// (Graphics.migrateVenusSwitch).
@@ -689,17 +702,6 @@ enum Settings {
     static var pointerPlane: Bool {
         get { UserDefaults.standard.bool(forKey: "pointerPlane") }
         set { UserDefaults.standard.set(newValue, forKey: "pointerPlane") }
-    }
-    /// Frames in step with the Mac (experimental, off by default): the VM
-    /// loads its virtio-gpu driver with vsync_lock=1 (SMBIOS
-    /// omacvm.vsynclock=1), whose vblank timer then follows the Mac display's
-    /// refresh as QEMU's present gives it (ADR 0056). While frames come
-    /// steadily a frame no longer waits up to a refresh on the Mac: input shows
-    /// sooner, same frames, same rate. The VM window's switch (VsyncLockRow)
-    /// or defaults write org.omacvm.app vsyncLock -bool true. Read at each start.
-    static var vsyncLock: Bool {
-        get { UserDefaults.standard.bool(forKey: "vsyncLock") }
-        set { UserDefaults.standard.set(newValue, forKey: "vsyncLock") }
     }
     /// Draw only what changed (experimental, off by default): QEMU's tiled
     /// present (OMACVM_GL_PRESENT_TILES=1, ADR 0055): a frame that changed in

@@ -36,9 +36,10 @@ awk '/op->started = g_get_monotonic_time\(\);/ && !t {t = NR} /SDL_CloseAudioDev
 # Every open is sized from the voice's size, the launcher's and a refused one.
 grep -q 'omacvm_sdl_out_frames(' <<<"$want" && grep -q 'op->spec.samples = sdl_out_want(sdl);' <<<"$start" ||
   fail "the open is not sized"
-# After every size was refused, no start for a while unless the Mac's output changes.
-grep -q 'sdl->refused_until = now + SDL_OUT_REFUSED_US;' <<<"$(body 'static void sdl_out_poll(SDLVoiceOut *sdl)')" &&
-  grep -q 'sdl->refused_until' <<<"$start" || fail "a refusing output is started again at every stream"
+# After every size was refused, no start until the Mac's output changes (the launcher's new size file;
+# 30 s without one): each failed start may leave coreaudiod silent.
+grep -q 'sdl->refused_until = omacvm_sdl_out_hold_until(' <<<"$(body 'static void sdl_out_poll(SDLVoiceOut *sdl)')" &&
+  grep -q 'sdl->refused_until' <<<"$start" || fail "a refusing output is started again while it stays"
 # Each size gets its own time limit: slow refusals in a row are not a device that does not answer.
 grep -q 'op->started = g_get_monotonic_time();' <<<"$(awk '/for \(;;\) \{/,/^    }$/' <<<"$open")" ||
   fail "the sizes tried in a row share one time limit"

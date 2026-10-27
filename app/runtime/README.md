@@ -106,6 +106,11 @@ commit 82927e9. Changes here:
   assert there aborted QEMU once at desktop start, right after the Mac's GL had
   refused calls of the bar's context (#547). Checked by
   `Tests/virgl/test-sysval-block.c`
+- `patches/virgl-query-results-init.patch`: the info log of a failed compile or
+  link starts empty and a separable pipeline's validate status starts as valid, so
+  a GL that refuses calls (and writes nothing) no longer puts stack bytes into
+  qemu.log or stops the guest app's context with a false pipeline error. Checked
+  by `Tests/virgl/test-sysval-block.c`
 - `patches/virgl-query-result-unanswered.patch`: a query result the GL does not
   answer (a query never begun or still running, or a GL that refuses calls) reaches
   the guest as done with 0, logged once. vrend copied its unset stack variables

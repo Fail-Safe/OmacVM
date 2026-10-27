@@ -36,9 +36,13 @@
 # the caller holds its lock (cc-switches.sh does), nobody uses it, no other VM
 # runs (a display going changes every window on the Mac). The test app's
 # startFullScreen and the VM's notch-mode are put back as they were.
-# Exit 0 only when every unplug passed.
+# Between cases it waits while someone is at the Mac (person.sh); a case that
+# failed while someone came and went gets a BLOCKED "person" row.
+# Exit 0 only when every unplug passed; 1 a case failed; 2 a wrong call; 3 it
+# could not run (another VM, a tool); 5 someone stayed at the Mac (BLOCKED rows).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+source "$HERE/person.sh"
 R=$(cd "$HERE/../../.." && pwd)
 
 VM=""; ROUNDS=3; FLAPS=10; ONLY=""; OUT=""
@@ -64,12 +68,25 @@ NOTCH=645.5x824.5x34x1470x956   # a 14" MacBook Pro's notch, in points
 OUT=${OUT:-$HOME/omacvm-e2e/unplug-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 : > "$OUT/summary.tsv"
-n_fail=0
-res() {   # STEP ok|FAIL|skip DETAIL
+n_fail=0; n_blocked=0
+res() {   # STEP ok|FAIL|BLOCKED|skip DETAIL
   printf '%s\t%s\t%s\n' "unplug-$1" "$2" "$3" >> "$OUT/summary.tsv"
   printf '%-34s %-7s %s\n' "unplug-$1" "$2" "$3"
   [[ $2 == FAIL ]] && n_fail=$((n_fail + 1))
+  [[ $2 == BLOCKED ]] && n_blocked=$((n_blocked + 1))
   return 0
+}
+# Someone at the Mac between two cases (person.sh; the caller's watcher when cc-switches.sh runs this).
+GATE_LINE=0
+person_overlap() {   # EVENTS NEXT
+  local span r
+  span=$(person_span "$OUT/summary.tsv" "$GATE_LINE" 1 2)
+  r=$(person_overlap_row "$1" "${span%%$'\t'*}" "${span#*$'\t'}")
+  res person "${r%%$'\t'*}" "${r#*$'\t'}"
+}
+gate() {   # CASE: 0 when it may run (else its BLOCKED row is written)
+  [[ -z $PERSON_WHY ]] && person_gate "unplug-$1" && { GATE_LINE=$(wc -l < "$OUT/summary.tsv" | tr -d ' '); return 0; }
+  res "$1" BLOCKED "not run: $PERSON_WHY"; return 1
 }
 log() { echo "== $(date +%H:%M:%S) $*"; }
 
@@ -119,6 +136,7 @@ lockhook() { "$LOCKTOOL" "$1"; }
 FS_BEFORE=$(defaults read "$APPID" startFullScreen 2>/dev/null || echo unset)
 NOTCH_BEFORE=$(cat "$VMD/notch-mode" 2>/dev/null || echo none)
 restore() {
+  person_watch_stop
   unplug
   local p; p=$(qemu_pid)
   if [[ -n $p ]]; then
@@ -306,14 +324,19 @@ case_head() {   # #428's layout, one VM start for every head case
   sleep 3
 }
 
-want full && case_run full full "$ROUNDS"
-want fullpanel && case_run fullpanel fullpanel 2
-want window && case_run window window 1
-if want head || want head-unplug || want head-flap || want head-tiny || want head-locked; then
+person_watch_start
+want full && gate full && case_run full full "$ROUNDS"
+want fullpanel && gate fullpanel && case_run fullpanel fullpanel 2
+want window && gate window && case_run window window 1
+if { want head || want head-unplug || want head-flap || want head-tiny || want head-locked; } && gate head; then
   [[ -n $ONLY && $ONLY != *",head,"* ]] || ONLY=",head-unplug,head-flap,head-tiny,head-locked,"
   OTHER_ID=$("$CENSUS" | awk '$1 == "display" && $4 == "active" {print $2; exit}')
   FBASE=$(fullspaces "$("$CENSUS")")
   if [[ -z $OTHER_ID ]]; then res head skip "no display of this Mac to keep (head cases)"; else case_head; fi
 fi
-log "done: $n_fail failed ($OUT/summary.tsv)"
-(( n_fail == 0 ))
+ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" end
+person_watch_stop
+log "done: $n_fail failed, $n_blocked blocked ($OUT/summary.tsv)"
+(( n_fail > 0 )) && exit 1
+(( n_blocked > 0 )) && exit 5
+exit 0

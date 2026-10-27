@@ -35,6 +35,9 @@
 #     --hidden           no window on this Mac's screen (a Mac someone works on): VMs without a
 #                        window, Update VM through the app's own script, no window steps; never
 #                        counts for the gate
+#     --pause-ci         this Mac's self-hosted CI runners stopped while the run goes (each once
+#                        its job ends; started again at the end: ci-runners.sh), as for a gate
+#                        (also OMACVM_E2E_PAUSE_CI=1)
 # With --app, the test app that was installed comes back at the end (other
 # tests on this Mac use it) unless OMACVM_E2E_KEEP_APP=1.
 # Exit 0 only when every step passed (ok or a skip that says why it does not
@@ -44,14 +47,20 @@
 # commit; release.sh takes it only for the release commit.
 # Stop rules: each step has its own time limit; no retries.
 # Never on the person's own Mac session in use: refuses with a battery (the
-# MacBook) unless OMACVM_E2E_LAPTOP=1, and when the Mac was used in the last
-# 5 minutes; never the person's own app, helpers or VM (fingerprinted before
+# MacBook) unless OMACVM_E2E_LAPTOP=1. Before the first row and between rows
+# (person.sh) it waits while someone is at the Mac: a remote session (Screen
+# Sharing, port 5900, Jump Desktop) or input that was not ours in the last 5
+# minutes; at most 30 min each time (PERSON_WAIT), then the rest is BLOCKED.
+# Rows that ran while someone came and went get a "person" row (person.log has
+# the times). Never the person's own app, helpers or VM (fingerprinted before
 # and after).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 R=$(cd "$HERE/../../.." && pwd)
+source "$HERE/person.sh"
 
 VM=""; CLONE=""; NEWAPP=""; PREV=""; ONLY=""; SLOW=0; OUT=""; OWNER=cc-e2e; KEEP=0; FEATS=""; ROOTARG=""; HIDDEN=0
+PAUSE_CI=${OMACVM_E2E_PAUSE_CI:-0}
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
@@ -66,10 +75,11 @@ while (( $# )); do
     --keep-vm) KEEP=1; shift ;;
     --root) ROOTARG=$2; shift 2 ;;
     --hidden) HIDDEN=1; shift ;;
-    *) sed -n '19,44s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+    --pause-ci) PAUSE_CI=1; shift ;;
+    *) sed -n '19,47s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
-[[ -n $VM ]] || { sed -n '19,44s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+[[ -n $VM ]] || { sed -n '19,47s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 ONLY_ARG=${ONLY:-all}
 [[ -n $FEATS ]] && ONLY_ARG="$ONLY_ARG features$FEATS"
 (( HIDDEN )) && ONLY_ARG="$ONLY_ARG hidden"
@@ -119,12 +129,9 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev
 if [[ ${OMACVM_E2E_LAPTOP:-} != 1 && $(ioreg -rc AppleSmartBattery 2>/dev/null) == *'"BatteryInstalled" = Yes'* ]]; then
   die "this Mac has a battery (a MacBook someone may work on): run it on the test Mac, or OMACVM_E2E_LAPTOP=1"
 fi
-idle=$(( $(ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF; exit}') / 1000000000 ))
-(( idle >= 300 || ${OMACVM_E2E_IGNORE_IDLE:-0} == 1 )) || die "someone used this Mac ${idle}s ago: wait until it is idle 5 min"
-# A Screen Sharing session: someone may be watching this screen (its input also counts as HID input). Only a
-# session left alone for 30 min does not count.
-shares=$(pmset -g assertions 2>/dev/null | grep -c 'screensharingd.*Remote user is connected')
-(( shares == 0 || idle >= 1800 || ${OMACVM_E2E_IGNORE_IDLE:-0} == 1 )) || die "a Screen Sharing session is connected (input ${idle}s ago): wait until it ends or is idle 30 min"
+# Nobody at the Mac: no input for 5 min, no remote session (Screen Sharing or Jump Desktop, also one
+# left alone: someone may be watching this screen). Else wait for it (person.sh).
+person_gate start || die "$PERSON_WHY"
 LOCKS=()
 lock() {   # DIR: ours, or taken now (same owner counts: the caller may hold it)
   local o; o=$(cat "$1/owner" 2>/dev/null)
@@ -138,6 +145,8 @@ lock() {   # DIR: ours, or taken now (same owner counts: the caller may hold it)
 # A colon-separated list (a home folder may have a space in its path: the mini's has).
 IFS=: read -ra LOCKLIST <<< "${OMACVM_E2E_LOCKS:-$HOME/.omacvm-mini-vm.lock:$HOME/.omacvm-test-identity.lock}"
 for l in "${LOCKLIST[@]}"; do lock "$l"; done
+# Someone coming to the Mac between two checks: the watcher writes it down with the time.
+PERSON_KEEP_LOG=$OUT/person.log; person_watch_start
 
 # The person's own helpers, app and VM: the same at the end.
 fingerprint() {
@@ -165,8 +174,13 @@ launcher_pid() { LC_ALL=C pgrep -f "OmacVM Test.app/Contents/MacOS/OmacVM( |$)" 
 SERVER=""
 cleanup() {
   local rc=$?
+  # Nothing stops the cleanup half way (a second Ctrl-C, a hangup, a lost stdout after an ssh drop):
+  # the CI runners come back at its end.
+  trap '' INT TERM HUP PIPE
   log "cleanup"
-  (( FINISHED )) || res aborted FAIL "the run stopped before its end (exit $rc${DIED:+: $DIED})"
+  local ev; ev=$(_person_new | _person_events); [[ -n $ev ]] && person_overlap "$ev" end
+  # Stopped for someone at the Mac: not a product failure (the person row says which row was next).
+  (( FINISHED )) || res aborted "$( (( ${PERSON_STOP:-0} )) && echo BLOCKED || echo FAIL)" "the run stopped before its end (exit $rc${DIED:+: $DIED})"
   local p; p=$(qemu_pid)
   if [[ -n $p ]]; then gssh "systemctl poweroff" >/dev/null 2>&1; for _ in $(seq 60); do kill -0 "$p" 2>/dev/null || break; sleep 1; done; kill "$p" 2>/dev/null; fi
   p=$(launcher_pid); [[ -n $p ]] && kill "$p" 2>/dev/null
@@ -189,6 +203,8 @@ cleanup() {
   fingerprint > "$OUT/fp-after.txt"
   if diff -q "$OUT/fp-before.txt" "$OUT/fp-after.txt" >/dev/null; then res cleanup ok "the person's helpers, app and VM unchanged"
   else res cleanup FAIL "the person's helpers, app or VM changed: diff $OUT/fp-before.txt $OUT/fp-after.txt"; fi
+  person_watch_stop
+  (( ${CI_PAUSED:-0} )) && "$HERE/ci-runners.sh" resume --holder $$ >> "$OUT/ci-runners.log" 2>&1
   for l in ${LOCKS[@]+"${LOCKS[@]}"}; do rm -rf "$l"; done
   write_result
   echo; echo "$n_ok ok, $n_fail FAIL, $n_blocked BLOCKED, $n_skip skip in $(( ($(date +%s) - T0) / 60 )) min: $OUT/summary.tsv"
@@ -211,6 +227,27 @@ PY
 trap 'cleanup' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Between two rows: someone at the Mac -> wait (person.sh); rows that ran while someone came and
+# went get their own row. GATE_LINE: summary.tsv's length at the last check.
+GATE_LINE=0
+person_overlap() {   # EVENTS NEXT
+  local span r
+  span=$(person_span "$OUT/summary.tsv" "${GATE_LINE:-0}" 1 2)
+  r=$(person_overlap_row "$1" "${span%%$'\t'*}" "${span#*$'\t'}")
+  res person "${r%%$'\t'*}" "${r#*$'\t'}"
+}
+gate() {   # ROW: the row about to run
+  person_gate "$PFX$1" || { res person BLOCKED "$PERSON_WHY: $PFX$1 and the rows after it not run"; PERSON_STOP=1; die "$PERSON_WHY"; }
+  GATE_LINE=$(wc -l < "$OUT/summary.tsv" | tr -d ' ')
+}
+# This Mac's CI runners stopped for the run (their jobs start VMs and load the Mac).
+CI_PAUSED=0
+if (( PAUSE_CI )); then
+  CI_PAUSED=1
+  log "CI runners: each stopped once its job ends (<= 50 min)"
+  "$HERE/ci-runners.sh" pause --wait 3000 --holder $$ || die "this Mac's CI runners still run jobs after 50 min"
+fi
 
 tmo() {   # SECONDS CMD...: macOS has no timeout(1)
   local secs=$1; shift
@@ -675,6 +712,7 @@ step_switches() {
         || res "switch-$n" FAIL "unavailable here ($(feat reason "$n")) but the row says: $s"
       continue
     fi
+    gate "switch-$n"
     on=$(mac_feature "$n"); [[ -n $on ]] || on=$(feat on "$n" | sed 's/true/on/; s/false/off/')
     other=$([[ $on == on ]] && echo off || echo on)
     switch_one "$n" "$other"
@@ -846,37 +884,50 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
   start_vm && reachable 60 || res window-start FAIL "$(vminfo)"
 }
 
+# A child harness ended (its rows are in): "ended RC" is a FAIL row of its own unless RC is what its
+# rows say: 1 with a FAIL row, 5 (someone stayed) with a BLOCKED row. Its time limit (142) while it
+# waited for someone at the Mac is BLOCKED; any other code (a crash, 3 for a setup error) is a FAIL.
+child_end() {   # STEP SCRIPT RC SUMMARY LOG
+  local step=$1 sc=$2 rc=$3 sum=$4 lg=$5
+  (( rc == 0 )) && return 0
+  (( rc == 1 )) && grep -q $'\tFAIL\t' "$sum" 2>/dev/null && return 0
+  (( rc == 5 )) && grep -q $'\tBLOCKED\t' "$sum" 2>/dev/null && return 0
+  if (( rc == 142 )) && grep -q 'PAUSE before' "$lg" 2>/dev/null; then
+    res "$step" BLOCKED "$sc hit its time limit while it waited for someone at the Mac to leave: run it again on a quiet Mac"
+  else res "$step" FAIL "$sc ended $rc: $(tail -2 "$lg" 2>/dev/null | tr '\n' '|')"; fi
+}
+
 # The VM's modifier keys from each event's flags (#412; modifier-keys.sh, on the running VM).
 step_keys() {
   log "keys: modifier key cases into the VM (Universal Control's ways included)"
-  perl -e 'alarm 300; exec @ARGV' "$HERE/modifier-keys.sh" --vm "$VM" --out "$OUT/keys" > "$OUT/keys.log" 2>&1
+  # Its own time, and a wait for someone at the Mac between its cases (person.sh) on top.
+  perl -e 'alarm shift; exec @ARGV' $(( 300 + PERSON_WAIT )) "$HERE/modifier-keys.sh" --vm "$VM" --out "$OUT/keys" > "$OUT/keys.log" 2>&1
   local rc=$?
   while IFS=$'\t' read -r st r d; do res "$st" "$r" "$d"; done < "$OUT/keys/summary.tsv" 2>/dev/null
-  (( rc == 0 )) || grep -q FAIL "$OUT/keys/summary.tsv" 2>/dev/null ||
-    res keys FAIL "modifier-keys.sh ended $rc: $(tail -2 "$OUT/keys.log" | tr '\n' '|')"
+  child_end keys modifier-keys.sh "$rc" "$OUT/keys/summary.tsv" "$OUT/keys.log"
 }
 
 # The VM's display unplugged under it, its window there (#402; display-unplug.sh, the VM stopped).
 step_unplug() {
   if (( HIDDEN )); then res unplug skip "needs windows on this Mac's displays (--hidden)"; return; fi
   log "unplug: the display the VM's window is on unplugged, flapping, locked (limit 45 min)"
-  perl -e 'alarm 2700; exec @ARGV' "$HERE/display-unplug.sh" --vm "$VM" --out "$OUT/unplug" > "$OUT/unplug.log" 2>&1
+  perl -e 'alarm shift; exec @ARGV' $(( 2700 + PERSON_WAIT )) "$HERE/display-unplug.sh" --vm "$VM" --out "$OUT/unplug" > "$OUT/unplug.log" 2>&1
   local rc=$?
   while IFS=$'\t' read -r st r d; do res "$st" "$r" "$d"; done < "$OUT/unplug/summary.tsv" 2>/dev/null
-  (( rc == 0 )) || grep -q FAIL "$OUT/unplug/summary.tsv" 2>/dev/null ||
-    res unplug FAIL "display-unplug.sh ended $rc: $(tail -2 "$OUT/unplug.log" | tr '\n' '|')"
+  child_end unplug display-unplug.sh "$rc" "$OUT/unplug/summary.tsv" "$OUT/unplug.log"
 }
 
 steps() {   # every step on the running VM of this pass
   local st
-  log "baseline"; baseline start   # every step below works through the control centre it starts
+  gate baseline; log "baseline"; baseline start   # every step below works through the control centre it starts
   for st in switches fastnet touchid graphics updates; do
     want "$st" || continue
+    gate "$st"
     if [[ $CC_UP == 1 ]]; then "step_$st"
     else res "$st" FAIL "not run: the control centre did not come up (baseline-start)"; fi
   done
-  want keys && step_keys
-  want window && step_window
+  want keys && { gate keys; step_keys; }
+  want window && { gate window; step_window; }
   # While working on the test: the VM stays up this long first, to look at it (ssh, the cc's tmux).
   [[ ${OMACVM_E2E_HOLD:-} =~ ^[0-9]+$ ]] && { log "holding ${OMACVM_E2E_HOLD} s (OMACVM_E2E_HOLD), VM at ${IP:-?}"; sleep "$OMACVM_E2E_HOLD"; }
   stop_vm || res stop FAIL "the VM did not shut down"
@@ -891,16 +942,18 @@ bridge_start || res bridge FAIL "the test Bridge does not listen on 47931 ($BLOG
 if [[ $ONLY != ",update," ]]; then
   use_vm "$VM" "$CLONE"
   if want prepare; then
+    gate prepare
     log "prepare: Update VM in the window (limit 25 min)"
     if d=$(update_vm_window); then res update-vm ok "$d"; else res update-vm FAIL "$d"; fi
   fi
   start_pass && steps
-  want unplug && step_unplug
+  want unplug && { gate unplug; step_unplug; }
   remove_clones
 fi
 
 # ---- pass 2: the release before -> this build through the app's updater, Update VM, every step again ----
 if [[ -n $PREV ]] && want update; then
+  gate update
   log "update path (limit 60 min, then every step again)"
   PFX=update-
   ORIG=$OUT/orig/OmacVM\ Test.app CAND=$OUT/candidate/OmacVM\ Test.app

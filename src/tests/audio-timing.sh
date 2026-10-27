@@ -129,6 +129,14 @@ check "the launcher picks the sound options for a wireless output at the start" 
 for line in "playback buffers: %u frames" "the Mac's output did not start with" "the Mac's output refused every buffer" "the Mac's output changed: playback"; do
   check "out-size patch logs '$line'" grep -qF "OmacVM: sound: $line" "$SP"
 done
+# After every size was refused QEMU waits for a new size file: the app writes one after a coreaudiod restart (#569).
+ALW=$R/app/app/Sources/OmacVM/AudioLatencyWatch.swift
+check "the app listens for coreaudiod restarts" \
+  grep -qF 'var r = Self.address(kAudioHardwarePropertyServiceRestarted)' "$ALW"
+check "... adds the listener in start() and removes it in stop()" test "$(grep -cE 'AudioObject(Add|Remove)PropertyListenerBlock\(AudioObjectID\(kAudioObjectSystemObject\), &r, self.queue, self.restarted\)' "$ALW")" = 2
+check "... and its handler writes the size file anew" \
+  test -n "$(sed -n '/private func serviceRestarted()/,/^    }/p' "$ALW" | grep -F 'sizeFile.serviceRestarted()')"
+check "the size file follows AudioSizeFile's rule" grep -qF 'sizeFile.needsWrite(minimum: minimum, device: id)' "$ALW"
 stub=$(mktemp -d)
 check "the refusing-start test stub builds" clang -dynamiclib -Wall -Werror -o "$stub/aqrefuse.dylib" \
   "$R/app/runtime/Tests/audio/refuse-small-start.c" -framework AudioToolbox

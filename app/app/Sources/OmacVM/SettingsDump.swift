@@ -27,7 +27,6 @@ enum SettingsDump {
             "extraBrightness": Settings.extraBrightness,
             "pauseWhileHidden": Settings.pauseWhileHidden,
             "pointerPlane": Settings.pointerPlane,
-            "vsyncLock": Settings.vsyncLock,
             "presentTiles": Settings.presentTiles,
             "closeAction": Settings.closeAction.rawValue,
             "appIconTheme": IconTheme.choice(stored: UserDefaults.standard.object(forKey: IconTheme.key)).id,

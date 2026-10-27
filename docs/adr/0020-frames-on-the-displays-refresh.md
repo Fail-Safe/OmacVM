@@ -40,8 +40,9 @@ refreshes repeated. Native Chrome on the Mac: 120.2, 99.2 % shown once.
 
 ## Decision
 
-Option 4 now, option 1 later. (Option 1 is built since: [0056](0056-frames-in-step.md),
-the guest's vblank timer follows a grid QEMU gives, behind an experimental switch.) The display link runs on its own
+Option 4 now, option 1 later. (Option 1 was built in 3.2.3: [0056](0056-frames-in-step.md),
+the guest's vblank timer follows a grid QEMU gives, behind an experimental switch; removed in 3.2.7,
+see [0057](0057-frames-in-step-removed.md).) The display link runs on its own
 user-interactive thread (on the main thread, event handling delayed ticks by
 milliseconds and put two frames into one refresh), commits happen on a
 high-priority queue 3 ms before the vsync (`OMACVM_GL_LEAD_MS`): 2 ms still

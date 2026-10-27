@@ -58,7 +58,7 @@ every 30th partial frame in full beside it and compares them pixel for pixel
   (`linux-virtio-gpu-damage-clips.patch`, the two upstream commits squashed);
   it loads for a start with "Draw only what changed" on (SMBIOS
   `omacvm.damage=1`, 0055) and for the other switches that load it (HDR,
-  the pointer layer, frames in step; amended in 0049). `omacvm check`'s
+  the pointer layer, frames in step until 3.2.7; amended in 0049). `omacvm check`'s
   "Changed parts" line says whether the damage reaches QEMU. A buffer flushed again (the boot console, a
   TTY) carries real rects on any kernel, so once on, partial draws happen
   there on today's 7.2 guests too.

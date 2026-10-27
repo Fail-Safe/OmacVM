@@ -12,6 +12,58 @@ in more words.
   A query still waiting when the app's GL context is lost on the Mac never finished either; now
   it finishes with 0.
 
+## 3.2.7
+
+A click on another display's VM window keeps the pointer and keys, `omacvm check` names the
+window's surfaces, and the experimental Frames in step with the Mac is gone (Update VM rebuilds the
+VM's graphics driver once). Also: no memory bytes in qemu.log after a refused OpenGL call, and an
+output that refuses every sound buffer size is left alone until it changes.
+
+- **Frames in step with the Mac is gone.** The experimental switch from 3.2.3 showed typing and
+  the pointer 1.5-7 ms sooner at 60 Hz (up to 2.5 ms at 120 Hz), and only while the screen moved.
+  It saved no power, skipped a few more frames at 120 Hz, and needed OmacVM's own change to the
+  VM's graphics driver: no gain worth that cost. If you had it on, there is nothing to do: the app
+  forgets the setting and your VM draws as with it off. The other experimental switches stay as
+  they are. For everyone with HDR and 10-bit colour, Pointer on its own layer or Draw only what
+  changed on, Update VM rebuilds the VM's driver once (needs internet).
+
+- **A refused OpenGL call no longer writes memory bytes into qemu.log.** Follow-up to #547: when the
+  Mac's OpenGL does not compile or link a shader and gives no log, the log line is now empty instead of
+  whatever was in memory. A pipeline check the Mac did not answer also no longer counts as a failed
+  one; that path only runs once separable pipelines link on the Mac (#567).
+
+- **`omacvm check` says which surfaces the VM window used.** A new "window surfaces" line for
+  OmacVM.app VMs: lossless-compressed or plain, for normal colour and for HDR and Extra brightness,
+  why lossless is off when it is, and a warning when making them failed this run (#562).
+
+- **A click on an external display no longer lets go of the pointer for a moment (#563).** In
+  full screen with the VM on more than one display, each click on another display's VM window gave
+  the pointer and keyboard back to macOS and took them again: the Mac's cursor was shown and hidden,
+  and a key held during the click (Shift for a Shift-click) was let go in the VM. The VM now keeps
+  both through such a click. Command-Tab, the escape combo and swipes let go as before.
+
+- **An output that refuses every sound buffer size is left alone until the Mac's output changes.**
+  Follow-up to #548: when the Mac's output refused the VM's sound at every buffer size, QEMU tried it
+  again every 30 s while the VM played. Each failed start may leave macOS's sound service silent, so
+  now it waits until you pick another output, connect this one again or restart the sound service
+  (`sudo killall coreaudiod`). Thanks to @maxschoenberger for the report (#548).
+
+- **The "find devices on local networks" question says why it comes.** macOS asks it at the first
+  VM start because Omarchy's network runs through OmacVM: its name lookups go to the Mac's DNS server
+  (often the router, or Tailscale) and its connections to devices on your network go out from the app.
+  The question said OmacVM reaches the VM on the Mac's own VM network, which only holds for the fast
+  network. Tested on a Mac mini: an update through the app keeps the answer (3.2.3 to 3.2.4 through
+  its updater, no new question); only another version of the app in another folder is asked again.
+  Troubleshooting 42 says how to turn it on later; the Fast network's (i) says it needs it too.
+
+- Tests: the release gate's harnesses (`cc-switches.sh`, `modifier-keys.sh`, `display-unplug.sh`,
+  `onscreen.sh`) look for someone at the test Mac before every step, not only at their start: a
+  remote session (Screen Sharing, also one left alone, or Jump Desktop) or input that was not
+  theirs pauses the run until the Mac is quiet again, and rows that ran while someone came by get
+  a `person` row with the times (3.2.4's gate had two Screen Sharing connects inside a run). With
+  `--pause-ci` the test Mac's own CI runners stop for the run (each after its job) and start again
+  at its end, also when the run is killed or its ssh connection drops (`src/tests/e2e/ci-runners.sh`).
+
 ## 3.2.6
 
 Two changes: the pointer no longer jumps after a click near a corner of an external display, and

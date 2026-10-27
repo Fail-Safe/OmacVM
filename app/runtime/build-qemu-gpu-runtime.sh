@@ -817,6 +817,18 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-ow
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-head-key-same-space.patch"
 "$native_dir/Tests/display/test-fullscreen-space.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: full screen without a Space of its own (test-fullscreen-space.sh)"
+# OmacVM (#563): a click on another display's window keeps the pointer and the
+# keys (that window gives the key straight back): no let-go and grab again,
+# the Mac's cursor no longer shown and hidden at every click. Its rules' test,
+# a check that the wiring checks fail on the code before, the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-key-handback-logic.patch"
+"$native_dir/Tests/display/test-key-handback.sh" || \
+  die "the rules for a click on another display's window fail their test (test-key-handback.sh)"
+"$native_dir/Tests/display/test-key-handback.sh" --self-test "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a key hand-back wiring check passes without the patch (test-key-handback.sh)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-key-handback.patch"
+"$native_dir/Tests/display/test-key-handback.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a click on another display's window lets go of the pointer (test-key-handback.sh)"
 # OmacVM: no events into QEMU once the display is cleaned up (the crash on
 # Quit/shutdown); a full-screen start shows nothing until it is there.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shutdown-events.patch"
@@ -1070,13 +1082,6 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-heads
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
 grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
-# OmacVM: a guest that asks (its virtio-gpu driver with vsync_lock=1) gets the
-# Mac display's refresh grid for its vblank timer. Its rules' test, then the
-# wiring (virtio-gpu, hvf, the present).
-patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-vsync-follow-logic.patch"
-patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-vsync-follow.patch"
-"$native_dir/Tests/display/test-vsync-follow.sh" "$source_dir" || \
-  die "the guest's vblanks are not wired to the Mac's refresh as tested (test-vsync-follow.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -1380,6 +1385,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-decod
 # OmacVM: a program whose VirglBlock the GL reports too small (or whose size query fails) is
 # refused like a failed link, its draws skipped; an assert aborted QEMU there (#547).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-sysval-block-check.patch"
+# OmacVM: info logs and a pipeline's validate status start set: a GL that refuses calls writes
+# nothing, and the log lines printed stack bytes, a false pipeline error stopped the app's context.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-query-results-init.patch"
 # OmacVM: a query result the GL does not answer (never begun, still running, a GL refusing
 # calls) reaches the guest as done with 0; it got host stack bytes, or a wait for ever.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-query-result-unanswered.patch"

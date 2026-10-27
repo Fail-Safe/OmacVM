@@ -1,7 +1,7 @@
 #!/bin/bash
 # OmacVM's guest driver patches against real kernel sources: the files they
 # change, as kernel.org has them (src/tests/virtio-gpu-src/v*/), patched in
-# the builder's order (deep colour, the cursor plane, the vsync lock, the damage fix) with
+# the builder's order (deep colour, the cursor plane, the damage fix) with
 # patch --dry-run first and no fuzz. A patch that stops fitting a kernel shows
 # here, not first in a VM (where the builder leaves it out of that kernel's
 # build). The order is checked against omacvm-virtio-gpu-build, and its own
@@ -17,11 +17,11 @@ S=$R/src/tests/virtio-gpu-src
 T=$(mktemp -d "${TMPDIR:-/tmp}/virtio-gpu-patches.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 fail=0
-order=(linux-virtio-gpu-deep-color.patch linux-virtio-gpu-cursor-plane.patch linux-virtio-gpu-vsync-lock.patch linux-virtio-gpu-damage-clips.patch)
+order=(linux-virtio-gpu-deep-color.patch linux-virtio-gpu-cursor-plane.patch linux-virtio-gpu-damage-clips.patch)
 
 # The builder's order: deep colour first, then the others in its loop.
 loop=$(grep -m1 -E '^  for p in "\$cursor_file"' "$G/omacvm-virtio-gpu-build")
-if [[ $loop == '  for p in "$cursor_file" "$vsync_file" "$damage_file"; do' ]]; then echo "ok   the builder's order: deep colour, cursor plane, vsync lock, damage fix"
+if [[ $loop == '  for p in "$cursor_file" "$damage_file"; do' ]]; then echo "ok   the builder's order: deep colour, cursor plane, damage fix"
 else echo "FAIL the builder's order changed: '$loop' (update this test's order)"; fail=1; fi
 
 n=0
@@ -38,7 +38,7 @@ for d in "$S"/v*/; do
   if grep -q 'old_plane_state->fb != new_plane_state->fb && bo->dumb;' "$T/$v/drivers/gpu/drm/virtio/virtgpu_plane.c" &&
      grep -rq 'module_param_named(deep_color' "$T/$v/drivers/gpu/drm/virtio/" &&
      grep -rq 'module_param_named(cursor_plane' "$T/$v/drivers/gpu/drm/virtio/"; then
-    echo "ok   $v: all four apply in order, no fuzz"
+    echo "ok   $v: all three apply in order, no fuzz"
   else
     echo "FAIL $v: applied, but a patch's change is missing"; fail=1
   fi
@@ -97,13 +97,13 @@ if grep -q '^tree() {' "$T/tree.sh"; then
   if tree "$F" "$T/exact.patch" > /dev/null 2>&1 && grep -qx 'line six' "$F/$V/f.c"; then
     echo "ok   builder: an exact hunk two lines further down still applies"
   else echo "FAIL builder: an exact hunk two lines further down does not apply"; fail=1; fi
-  # Every mix the builder can fall back to (deep colour first; the vsync lock
-  # only with the cursor plane), on each kernel, through its own tree().
-  deep=$G/${order[0]} cur=$G/${order[1]} vs=$G/${order[2]} dmg=$G/${order[3]}
+  # Every mix the builder can fall back to (deep colour first), on each
+  # kernel, through its own tree().
+  deep=$G/${order[0]} cur=$G/${order[1]} dmg=$G/${order[2]}
   for d in "$S"/v*/; do
     v=$(basename "$d") M=$T/mix-$v
     mkdir -p "$M" && rm -rf "${M:?}/stock" && cp -R "$d/drivers" "$M/stock"
-    for mix in "deep" "deep cur" "deep cur vs" "deep dmg" "deep cur dmg" "deep cur vs dmg"; do
+    for mix in "deep" "deep cur" "deep dmg" "deep cur dmg"; do
       files=()
       for k in $mix; do files+=("${!k}"); done
       if tree "$M" "${files[@]}" > /dev/null 2>&1; then echo "ok   builder on $v: $mix"
