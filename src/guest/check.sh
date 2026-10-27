@@ -455,6 +455,25 @@ hdr_copy_note() {
     *) echo "; SDR copy: Hyprland's default" ;;
   esac
 }
+# hdr_recording_line LOADER-WORD BUILD-HAS RUNS: the "HDR recordings" line for a start
+# with HDR. Screen recorders that read the screen over KMS (gpu-screen-recorder:
+# Omarchy's recorder) take a PQ screen for HDR only when its connector carries the
+# compositor's HDR metadata, which OmacVM's driver offers with deep colour
+# (linux-virtio-gpu-hdr-metadata.patch). LOADER-WORD: /run/omacvm/virtio-gpu;
+# BUILD-HAS: this kernel's build has it (1/0); RUNS: that build is older than
+# this boot, so it is the one running (1/0).
+hdr_recording_line() {
+  local st=$1 has=${2:-0} runs=${3:-0}
+  if [[ $st != omacvm* || $st == "omacvm 8-bit"* ]]; then
+    printf 'skip\t%s\n' "the 10-bit driver does not run (see HDR output)"
+  elif (( has && runs )); then
+    printf 'ok\t%s\n' "the screen tells recorders it is HDR: Omarchy's recorder (gpu-screen-recorder) makes SDR of it"
+  elif (( has )); then
+    printf 'warn\t%s\n' "the driver with HDR metadata loads at the next start: shut the VM down and start it again (screen recordings come out grey until then)"
+  else
+    printf 'warn\t%s\n' "screen recordings come out grey: the running driver has no HDR metadata (Update VM, then shut the VM down and start it again; omacvm-virtio-gpu-build --status says why if it stays)"
+  fi
+}
 # hdr_capture_line STATUS HDR: the "HDR captures" line, "status<TAB>detail", from
 # `hypr-capture.sh --status` ("word<TAB>text"; empty from a VM without it) and
 # whether this start has HDR (1/0). Screenshots and screen sharing of HDR apps
@@ -667,6 +686,20 @@ app)
     warn) warn "HDR captures" "$ht" ;;
     *) skip "HDR captures" "$ht" ;;
   esac
+  # Screen recordings of the HDR screen (gpu-screen-recorder over KMS): the
+  # connector's HDR metadata, from OmacVM's driver of this boot.
+  if (( hdr )); then
+    vk=/usr/local/lib/omacvm/virtio-gpu/$(uname -r)/virtio-gpu.ko; has=0; runs=0
+    [[ -f $vk ]] && ! grep -q '^hdr_metadata:' "${vk%/*}/without" 2>/dev/null &&
+      grep -a -q drm_connector_attach_hdr_output_metadata_property "$vk" && has=1
+    [[ -f $vk ]] && (( $(stat -c %Y "$vk") < $(date +%s) - $(cut -d. -f1 /proc/uptime) )) && runs=1
+    IFS=$'\t' read -r rs rt < <(hdr_recording_line "$(cat /run/omacvm/virtio-gpu 2>/dev/null)" "$has" "$runs")
+    case $rs in
+      ok) ok "HDR recordings" "$rt" ;;
+      warn) warn "HDR recordings" "$rt" ;;
+      *) skip "HDR recordings" "$rt" ;;
+    esac
+  fi
   # The compositor's damage reaches QEMU (OmacVM's driver when the start asks
   # for it with "Draw only what changed", or the kernel's own fix).
   asked=0; grep -qx 'OMACVM_DAMAGE=1' /run/omacvm/host.env 2>/dev/null && asked=1

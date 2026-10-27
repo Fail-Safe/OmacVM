@@ -750,6 +750,9 @@ jobs:
       - name: OmacVM's virtio-gpu patches with GNU patch, as the builder in the VM (no fuzz)
         run: src/tests/virtio-gpu-patches.sh
 
+      - name: omacvm check's "HDR recordings" line says whether the running driver gives recorders the HDR metadata
+        run: src/tests/hdr-recording-check.sh
+
       - name: omacvm check's "Changed parts" line says whether the compositor's damage reaches the Mac
         run: src/tests/damage-check.sh
 
