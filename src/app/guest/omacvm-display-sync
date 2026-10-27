@@ -285,7 +285,13 @@ PY
 # the guest tone-maps into what the panel can show now (max_luminance =
 # 203 nits x headroom; QEMU does not let macOS tone-map again), and SDR
 # white is 203 nits (BT.2408), the Mac's SDR white. "edr" 0 (QEMU cannot
-# show PQ) or none (an older runtime): 10-bit sRGB. Before QEMU's first
+# show PQ) or none (an older runtime): 10-bit sRGB, still with
+# supports_hdr: Hyprland only sets or clears an output's HDR metadata while
+# it says it supports HDR, so the start's PQ metadata would stay on the
+# connector (OmacVM's driver offers it, linux-virtio-gpu-hdr-metadata.patch)
+# and a KMS recorder (gpu-screen-recorder) would take the SDR screen for PQ.
+# omacvm_app.lua turns Hyprland's auto HDR off, so the output stays SDR also
+# for a full-screen HDR window. Before QEMU's first
 # layout the output stays as it is. QEMU's EDID has no HDR block, so the
 # output's HDR support is stated here. Only the main window's output: the
 # other displays' windows draw through an 8-bit layer without PQ
@@ -322,7 +328,7 @@ print("none")
 PY
 ) || return 0
   if [[ $edr == none ]]; then
-    printf ', bitdepth = 10, cm = "srgb"'
+    printf ', bitdepth = 10, cm = "srgb", supports_wide_color = 1, supports_hdr = 1'
   else
     printf ', bitdepth = 10, cm = "hdr", supports_wide_color = 1, supports_hdr = 1, max_luminance = %s, min_luminance = 0.0005, sdr_max_luminance = 203' \
       "$(python3 -c 'import sys; print(round(203 * float(sys.argv[1])))' "$edr")"

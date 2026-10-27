@@ -63,6 +63,17 @@ end
 if not user_sets("keep_unmodified_copy") then
   pcall(hl.config, { render = { keep_unmodified_copy = 0 } })
 end
+-- HDR: omacvm-display-sync sets Virtual-1's mode (PQ, or SDR while the Mac
+-- cannot show PQ) and says supports_hdr in both, so Hyprland also takes back
+-- the HDR metadata a KMS recorder reads (#579). Hyprland's auto HDR would
+-- switch it on its own for a full-screen window: to PQ for an HDR window
+-- while the Mac cannot show PQ, and the metadata to SDR for a full-screen
+-- window that tags SDR colours while the screen stays PQ (recordings grey).
+-- 0 keeps display-sync's mode. No effect without HDR (no output says
+-- supports_hdr then). A cm_auto_hdr the user set wins, as above.
+if not user_sets("cm_auto_hdr") then
+  pcall(hl.config, { render = { cm_auto_hdr = 0 } })
+end
 -- A config reload drops the rules omacvm-display-sync gave the outputs, and
 -- each output would take monitors.lua's rule ("auto" place, cached mode) until
 -- display-sync runs again after the reload. With Omanotch's NOTCH output above
