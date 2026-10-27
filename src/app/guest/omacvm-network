@@ -137,14 +137,23 @@ def check(mac, sys_net):
         if value not in ("yes", "true"):
             raise ValueError(f"management {setting} must stay enabled")
     lan_default = False
-    for family in ("-4", "-6"):
+    ready = []
+    for family, label in (("-4", "IPv4 DHCP"), ("-6", "IPv6 DHCP/RA")):
         routes = subprocess.check_output(["ip", family, "route", "show", "default"], text=True)
         if any(re.search(rf"\bdev {re.escape(management)}(?:\s|$)", line) for line in routes.splitlines()):
             raise ValueError("management NIC has a default route (NAT fallback)")
-        lan_default |= any(re.search(rf"\bdev {re.escape(lan)}(?:\s|$)", line) for line in routes.splitlines())
+        if not any(re.search(rf"\bdev {re.escape(lan)}(?:\s|$)", line) for line in routes.splitlines()):
+            continue
+        lan_default = True
+        addresses = subprocess.check_output(["ip", "-o", family, "address", "show", "dev", lan, "scope", "global"], text=True)
+        if any(not {"tentative", "dadfailed"}.intersection(line.split())
+               for line in addresses.splitlines() if line.strip()):
+            ready.append(label)
     if not lan_default:
         raise ValueError("LAN has no DHCP/RA default route; management is deliberately not an internet fallback")
-    print(f"LAN DHCP on {lan}; private Mac 10.0.2.2 on {management}, no NAT default/DNS fallback")
+    if not ready:
+        raise ValueError("LAN has no usable global address matching its DHCP/RA default route (addresses may be tentative or DAD failed); management is deliberately not an internet fallback")
+    print(f"LAN ready on {lan} ({'; '.join(ready)}); private Mac 10.0.2.2 on {management}, no NAT default/DNS fallback")
 
 
 def main():

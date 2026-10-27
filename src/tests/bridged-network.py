@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Guest profile/route behavior with temporary files and replaced nmcli/ip."""
 import configparser
+from contextlib import redirect_stdout
+import io
 import os
 from pathlib import Path
 import runpy
@@ -108,19 +110,26 @@ class GuestNetwork(unittest.TestCase):
         self.smbios("omacvm.bridged=" + LAN, "omacvm.bridged=" + LAN)
         self.assertNotEqual(self.command().returncode, 0)
 
-    def checker(self, routes4="default via 192.0.2.1 dev lan0\n", routes6="", dns="yes"):
+    def checker(self, routes4="default via 192.0.2.1 dev lan0\n", routes6="", dns="yes",
+                addresses4="2: lan0    inet 192.0.2.10/24 brd 192.0.2.255 scope global dynamic lan0\n",
+                addresses6=""):
+        responses = {
+            ("ip", "-4", "route", "show", "default"): routes4,
+            ("ip", "-6", "route", "show", "default"): routes6,
+            ("ip", "-o", "-4", "address", "show", "dev", "lan0", "scope", "global"): addresses4,
+            ("ip", "-o", "-6", "address", "show", "dev", "lan0", "scope", "global"): addresses6,
+        }
+        for kind, device in (("management", "management0"), ("lan", "lan0")):
+            responses[("nmcli", "-g", "GENERAL.CON-UUID", "device", "show", device)] = NETWORK["PROFILES"][kind][1] + "\n"
+        for setting in ("ipv4.never-default", "ipv4.ignore-auto-dns", "ipv6.never-default", "ipv6.ignore-auto-dns"):
+            responses[("nmcli", "-g", setting, "connection", "show", "uuid", NETWORK["PROFILES"]["management"][1])] = dns + "\n"
+
         def output(command, **_):
-            if command[:3] == ["nmcli", "-g", "GENERAL.CON-UUID"]:
-                kind = "management" if command[-1] == "management0" else "lan"
-                return NETWORK["PROFILES"][kind][1] + "\n"
-            if command[0] == "nmcli":
-                return dns + "\n"
-            return routes4 if command[1] == "-4" else routes6
+            self.assertIn(tuple(command), responses, f"unexpected command: {command}")
+            return responses[tuple(command)]
         return patch.object(NETWORK["subprocess"], "check_output", side_effect=output)
 
     def test_runtime_checks_reject_nat_fallback_and_lan_dhcp_failure(self):
-        with self.checker():
-            NETWORK["check"](LAN, self.net)
         for routes4, routes6 in (("", ""), ("default via 10.0.2.2 dev management0\n", ""),
                                   ("default via 192.0.2.1 dev lan0\n", "default via fe80::2 dev management0\n")):
             with self.checker(routes4, routes6), self.assertRaises(ValueError):
@@ -128,13 +137,50 @@ class GuestNetwork(unittest.TestCase):
         with self.checker(dns="no"), self.assertRaises(ValueError):
             NETWORK["check"](LAN, self.net)
 
-    def test_live_activation_orders_management_first_and_marker_requires_success(self):
-        calls = []
-        with patch.object(NETWORK["subprocess"], "run", side_effect=lambda command, **_: calls.append(command)):
-            NETWORK["activate"](LAN, self.net)
-        self.assertEqual(calls[0], ["nmcli", "connection", "reload"])
-        self.assertEqual(calls[1][-1], "management0")
-        self.assertEqual(calls[2][-1], "lan0")
+    def test_runtime_ipv6_default_rejects_tentative_and_dadfailed_addresses(self):
+        for flags in ("tentative", "dadfailed", "tentative dadfailed"):
+            with self.subTest(flags=flags), self.checker(
+                    routes4="", routes6="default via fe80::1 dev lan0 proto ra\n", addresses4="",
+                    addresses6=f"2: lan0    inet6 2001:db8::10/64 scope global dynamic {flags}\n"):
+                with self.assertRaises(ValueError):
+                    NETWORK["check"](LAN, self.net)
+
+    def test_runtime_ipv6_only_is_ready_without_claiming_ipv4_dhcp(self):
+        output = io.StringIO()
+        with self.checker(routes4="", routes6="default via fe80::1 dev lan0 proto ra\n", addresses4="",
+                          addresses6="2: lan0    inet6 2001:db8::10/64 scope global dynamic\n"), redirect_stdout(output):
+            NETWORK["check"](LAN, self.net)
+        self.assertIn("IPv6", output.getvalue())
+        self.assertNotIn("IPv4", output.getvalue())
+
+    def test_runtime_ipv4_default_requires_ipv4_address(self):
+        with self.checker(addresses4="", addresses6="2: lan0    inet6 2001:db8::10/64 scope global dynamic\n"):
+            with self.assertRaises(ValueError):
+                NETWORK["check"](LAN, self.net)
+
+    def test_runtime_ipv4_address_and_default_are_ready(self):
+        output = io.StringIO()
+        with self.checker(), redirect_stdout(output):
+            NETWORK["check"](LAN, self.net)
+        self.assertIn("IPv4", output.getvalue())
+        self.assertNotIn("IPv6", output.getvalue())
+
+    def test_runtime_ready_family_never_masks_management_default(self):
+        with self.checker(routes6="default via fe80::2 dev management0\n"):
+            with self.assertRaises(ValueError):
+                NETWORK["check"](LAN, self.net)
+
+    def test_runtime_dual_stack_reports_only_usable_families(self):
+        for flags in ("tentative", ""):
+            output = io.StringIO()
+            with self.subTest(flags=flags), self.checker(
+                    routes6="default via fe80::1 dev lan0 proto ra\n",
+                    addresses6=f"2: lan0    inet6 2001:db8::10/64 scope global dynamic {flags}\n"), redirect_stdout(output):
+                NETWORK["check"](LAN, self.net)
+            self.assertIn("IPv4", output.getvalue())
+            self.assertEqual("IPv6" in output.getvalue(), not flags)
+
+    def test_live_failure_does_not_mark_configuration_ready(self):
         self.smbios("omacvm.bridged=" + LAN)
         arguments = [str(SCRIPT), "--root", str(self.root), "--entries", str(self.entries), "--sys-net", str(self.net), "--live"]
         with patch.object(sys, "argv", arguments), patch.object(NETWORK["subprocess"], "run", side_effect=subprocess.CalledProcessError(1, "nmcli")):

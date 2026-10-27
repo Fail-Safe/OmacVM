@@ -790,6 +790,12 @@ omacvm network --vm NAME --json
 omacvm check --vm NAME
 ```
 
+The guest check requires a usable global address and a LAN default route in
+the same address family. Tentative or DAD-failed addresses do not qualify.
+An IPv6-only network can be ready without an IPv4 DHCP lease; the reported
+families make that distinction. Readiness does not prove end-to-end LAN
+connectivity or DNS reachability.
+
 Restore the prior shared-network choice:
 
 ```sh

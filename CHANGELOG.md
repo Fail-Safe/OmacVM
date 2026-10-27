@@ -12,6 +12,8 @@ in more words.
   stays unchanged. Initial setup needs the VM running and administrator approval;
   changes apply at the next start. `omacvm network` and the app's Network row
   configure it; `omacvm check` reports the selected and running paths.
+  Guest readiness requires a usable global address matching a LAN default route;
+  IPv6-only readiness is reported separately from IPv4 DHCP.
 
 ## 3.2.9
 
