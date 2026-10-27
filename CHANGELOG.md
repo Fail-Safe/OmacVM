@@ -14,7 +14,10 @@ in more words.
   captures, which are SDR. Update VM puts it in; no restart needed. Screen recordings with
   Omarchy's recorder still come out grey in an HDR VM.
 
-## 3.2.8 (unreleased)
+## 3.2.8
+
+An OpenGL query the Mac does not answer now finishes with 0 in the VM: no memory bytes from the Mac,
+and no app waiting for it for ever.
 
 - **An OpenGL query the Mac does not answer reads as 0 in the VM, not as the Mac's memory.** When
   the Mac's OpenGL did not answer a query's result (a query never started or still running, or a GL
