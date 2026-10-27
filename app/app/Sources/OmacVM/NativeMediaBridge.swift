@@ -9,8 +9,9 @@ import OmacVMMedia
 /// the socket. It cuts lines (MediaLines: 4 KB, 20 a second), parses them
 /// and hands each message to the main thread. The main thread owns the rest:
 /// it writes with MSG_DONTWAIT (never blocks; a full port drops the line,
-/// and a line the port took only part of goes out first next time), and it
-/// closes the descriptor, only after `read` has ended.
+/// and the rest of a line the port took only part of goes out first, with
+/// the next line or MediaSession's retry a second later), and it closes the
+/// descriptor, only after `read` has ended.
 final class NativeMediaBridge: @unchecked Sendable {
     let fd: Int32
     private var closed = false       // main thread
@@ -40,14 +41,22 @@ final class NativeMediaBridge: @unchecked Sendable {
         }
     }
 
-    /// One line to the VM, without waiting: false when the port did not take it.
-    @MainActor func write(_ line: Data) -> Bool {
+    /// The rest of a line the port took only part of waits (MediaSession tries again).
+    @MainActor var hasPending: Bool { !pending.isEmpty }
+
+    /// The rest of a part-sent line, without waiting: true when nothing is left.
+    @MainActor func flush() -> Bool {
         guard !closed else { return false }
         if !pending.isEmpty {
             let n = send(pending)
             pending.removeFirst(max(0, n))
-            guard pending.isEmpty else { return false }
         }
+        return pending.isEmpty
+    }
+
+    /// One line to the VM, without waiting: false when the port did not take it.
+    @MainActor func write(_ line: Data) -> Bool {
+        guard flush() else { return false }
         let n = send(line)
         if n <= 0 { return false }
         if n < line.count { pending = line.subdata(in: n..<line.count) }

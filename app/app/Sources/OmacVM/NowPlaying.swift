@@ -19,6 +19,9 @@ final class MediaSession {
     private var bridge: NativeMediaBridge?
     private let log: (String) -> Void
     private var timer: Timer?
+    private var retry: Timer?
+    /// The Mac's last hello the port did not take (it was full): tried again.
+    private var unsent: Data?
     private var watch: NSKeyValueObservation?
     private var lastDropLog = -Double.infinity
     private var stopped = false
@@ -39,6 +42,7 @@ final class MediaSession {
     func attach(_ b: NativeMediaBridge) -> Bool {
         guard !stopped else { b.close(); return false }
         bridge = b
+        unsent = nil
         claim.connected()
         return true
     }
@@ -48,6 +52,7 @@ final class MediaSession {
         b.close()
         guard bridge === b else { return }
         bridge = nil
+        unsent = nil
         claim.disconnected()
         apply()
     }
@@ -77,6 +82,8 @@ final class MediaSession {
         watch = nil
         timer?.invalidate()
         timer = nil
+        retry?.invalidate()
+        retry = nil
         NowPlaying.shared.release(for: self)
     }
 
@@ -88,11 +95,36 @@ final class MediaSession {
     private func run(_ fx: [MediaClaim.Effect]) {
         for e in fx {
             switch e {
-            case .send(let line): _ = bridge?.write(line)
+            // Every line from the rules is the Mac's hello (an answer, the
+            // switch, a wake): one the port did not take is tried again, as the
+            // agent would keep the old switch until its next start.
+            case .send(let line): if let b = bridge { unsent = b.write(line) ? nil : line }
             case .log(let line): log("OmacVM: media controls: \(line)")
             }
         }
+        retryLater()
         apply()
+    }
+
+    /// The port was full: the rest of a part-sent line and an unsent hello
+    /// are tried again every second (nothing else would send them soon).
+    private func retryLater() {
+        guard retry == nil, let b = bridge, b.hasPending || unsent != nil else { return }
+        let t = Timer(timeInterval: 1, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.retry = nil
+                guard !self.stopped, let b = self.bridge else { return }
+                if let line = self.unsent {
+                    if b.write(line) { self.unsent = nil }
+                } else {
+                    _ = b.flush()
+                }
+                self.retryLater()
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        retry = t
     }
 
     private func apply() {
@@ -128,7 +160,7 @@ final class MediaSession {
                 log("OmacVM: media controls: \(c.rawValue) from macOS: not sent (the VM's port is full)")
                 return .commandFailed
             }
-            run(claim.commandSent(c, m, now: Self.now))
+            run(claim.commandSent(c, m, now: Self.now))   // also tries a part-sent rest again
             return .success
         }
     }
