@@ -96,7 +96,9 @@ pauses once around all of them with its own holder pid. By hand:
 
 Exit codes of `modifier-keys.sh` and `display-unplug.sh`: 0 every case
 passed, 1 a case failed, 2 a wrong call, 3 it could not run (no VM, another
-VM, a tool), 5 someone stayed at the Mac (BLOCKED rows). `cc-switches.sh`
+VM, a tool), 5 someone stayed at the Mac (BLOCKED rows). `onscreen.sh`: 0
+passed, 1 a row failed, 2 a wrong call, 5 BLOCKED rows and no FAIL (someone
+at the Mac, CI runners on jobs, `--headless`). `cc-switches.sh`
 takes their rows; a code that its rows do not explain (3, a crash, its time
 limit) is a FAIL row of its own, the time limit while it waited for someone
 a BLOCKED one.

@@ -34,8 +34,8 @@
 # NAME: a stopped test VM in the test app's VMs folder (e2e_vm_guard). The
 # caller holds the Mac's VM lock. The app's settings this changes are put back.
 # Results: OUT/summary.tsv, OUT/result.json (kind omacvm-e2e-onscreen, pass),
-# OUT/shots/, OUT/run.log. Exit 0 passed, 1 a check failed, 2 usage, 3 not
-# run in full (BLOCKED).
+# OUT/shots/, OUT/run.log. Exit 0 passed, 1 a check failed, 2 usage, 5 not
+# run in full (BLOCKED rows: someone at the Mac, CI runners on jobs, --headless).
 set -uo pipefail
 E=$(cd "$(dirname "$0")" && pwd)
 source "$E/test-vms.sh"
@@ -467,5 +467,5 @@ os_result_json "$S" omacvm-e2e-onscreen "$OUT/result.json" app="$APP" version="$
   macos="$(sw_vers -productVersion)" mac="$(sysctl -n hw.model)" seconds=$(( $(date +%s) - T0 )) only="${ONLY:-all}" \
   onscreen="$([[ -z $GONE ]] && echo yes || echo "no: $GONE")" gpuOffMainLoop0="$GPU0"
 cut -f3 "$S" | grep -qx FAIL && exit 1
-cut -f3 "$S" | grep -qx BLOCKED && exit 3
+cut -f3 "$S" | grep -qx BLOCKED && exit 5
 exit 0

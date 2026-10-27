@@ -8,7 +8,8 @@ set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d)
 WATCHERS=()
-trap 'for p in ${WATCHERS[@]+"${WATCHERS[@]}"}; do kill "$p" 2>/dev/null; done; rm -rf "$T"' EXIT
+DOM=""
+trap 'for p in ${WATCHERS[@]+"${WATCHERS[@]}"}; do kill "$p" 2>/dev/null; done; [[ -n $DOM ]] && defaults delete "$DOM" >/dev/null 2>&1; rm -rf "$T"' EXIT
 fail=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
@@ -270,6 +271,31 @@ gone() { ! kill -0 "$1" 2>/dev/null; }
 upto 5 gone $pz && ok "ci: the holder gone -> its pause ends while jobs still run" || { bad "ci: pause still waits for a dead holder"; kill $pz; }
 rm -f "$W/actions-runner-1" "$W/actions-runner-2"
 upto 5 [ ! -e "$T/ci-state" ] || bad "ci: state left after the holder died: $(ls "$T/ci-state" | tr '\n' ' ')"
+
+# ---- onscreen.sh's exit code: 1 a FAIL, 5 BLOCKED rows (3 was also the code of other ends)
+DOM=org.omacvm.app.test.e2e-person.$$
+OSA=$T/os/Test.app; mkdir -p "$OSA/Contents/Resources/scripts" "$T/os/vms/OmacVM M-e2e"
+for kv in "CFBundleIdentifier string $DOM" "CFBundleShortVersionString string 9.9.9" "OmacVMCommit string 0000000"; do
+  /usr/libexec/PlistBuddy -c "Add :$kv" "$OSA/Contents/Info.plist" >/dev/null
+done
+printf '#!/bin/bash\necho "ERROR made-up update"; exit 1\n' > "$OSA/Contents/Resources/scripts/update-vm.sh"
+echo "NAME='OmacVM M-e2e'" > "$T/os/vms/OmacVM M-e2e/vm.env"
+defaults write "$DOM" vmsRoot "$T/os/vms"
+# Nothing of the app may open here: a made-up open (and screencapture) that only say they were called.
+printf '#!/bin/bash\necho "open $*" >> "%s/os-open.log"; exit 1\n' "$T" > "$B/open"
+printf '#!/bin/bash\necho "screencapture $*" >> "%s/os-open.log"; exit 1\n' "$T" > "$B/screencapture"
+chmod +x "$B/open" "$B/screencapture"
+OS() {   # OUT ARGS...: onscreen.sh with the made-up runners and app (at most 2 min); prints its exit code
+  local o=$T/os/$1; shift
+  PATH=$B:$PATH CI_AGENTS=$A CI_STATE=$T/ci-state CI_GUARD_TICK=0.2 CI_POLL=0.3 OMACVM_E2E_CI_WAIT=1 PERSON_WAIT=2 PERSON_POLL=0.5 \
+    /usr/bin/perl -e 'alarm shift; exec @ARGV' 120 "$E/onscreen.sh" --app "$OSA" --vm "OmacVM M-e2e" --out "$o" "$@" > "$o.txt" 2>&1 < /dev/null
+  echo $?
+}
+same "onscreen exit: BLOCKED rows only -> 5" 5 "$(OS h1 --headless --only window)"
+has "onscreen exit: ... the row says why" "window	BLOCKED	not run on screen: --headless" "$(cat "$T/os/h1/summary.tsv")"
+same "onscreen exit: a FAIL next to BLOCKED rows -> 1" 1 "$(OS h2 --headless --only window,update-vm)"
+has "onscreen exit: ... the FAIL row" "update-vm	FAIL" "$(cat "$T/os/h2/summary.tsv")"
+defaults delete "$DOM" >/dev/null 2>&1
 
 # ---- the harnesses ask between rows, not only at their start (3.2.4: two Screen Sharing connects
 # inside a run that looked only at its start)
