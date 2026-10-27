@@ -1,0 +1,13 @@
+# OmacVM.app: OmacVM's cm_helpers.glsl back in after /usr/bin/Hyprland changed,
+# when the new binary is the Hyprland it was made for
+# (src/app/guest/hypr-capture/hypr-capture.sh).
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/bin/Hyprland
+
+[Action]
+Description = OmacVM: Hyprland's shader fix for HDR captures
+When = PostTransaction
+Exec = /usr/local/lib/omacvm/hypr-capture/hypr-capture.sh --hook-post

@@ -3,6 +3,17 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.9 (unreleased)
+
+- **Screenshots and screen sharing of HDR apps look right in an HDR VM (#579).** With HDR and
+  10-bit colour on, screenshots (also Omarchy's region screenshot and its frozen screen), colour
+  picks and screen or window sharing of apps that draw in HDR, such as Chrome and Chromium, came
+  out about 2.5 times too bright, light greys white. Hyprland 0.56.2 made its copy for captures
+  with their white at 80 instead of 203 nits; the VM now gets a fixed copy of that one shader
+  file, only for this Hyprland. Parts brighter than white are cut off in captures, which are SDR.
+  Update VM puts it in; no restart needed. Screen recordings with Omarchy's recorder still come
+  out grey in an HDR VM.
+
 ## 3.2.8
 
 An OpenGL query the Mac does not answer now finishes with 0 in the VM: no memory bytes from the Mac,

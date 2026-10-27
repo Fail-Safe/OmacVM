@@ -455,6 +455,20 @@ hdr_copy_note() {
     *) echo "; SDR copy: Hyprland's default" ;;
   esac
 }
+# hdr_capture_line STATUS HDR: the "HDR captures" line, "status<TAB>detail", from
+# `hypr-capture.sh --status` ("word<TAB>text"; empty from a VM without it) and
+# whether this start has HDR (1/0). Screenshots and screen sharing of HDR apps
+# (Chrome) at SDR white (#579); off HDR a missing fix changes nothing, so skip.
+hdr_capture_line() {
+  local w=${1%%$'\t'*} t=${1#*$'\t'} bad=skip
+  (( ${2:-0} )) && bad=warn
+  case $w in
+    ok) printf 'ok\t%s\n' "$t" ;;
+    own|pkg) printf 'skip\t%s\n' "$t" ;;
+    other|missing|uncovered) printf '%s\t%s\n' "$bad" "$t" ;;
+    *) printf '%s\t%s\n' "$bad" "OmacVM's fix for screenshots and screen sharing of HDR apps (Chrome) is not in this VM: Update VM" ;;
+  esac
+}
 # mpv's defaults in app and UTM VMs (app/guest/venus/mpv.sh): vo=gpu (gpu-next leaks a file per
 # frame on virgl and stops drawing after ~17 s), and OpenGL while the VM has Venus (on Vulkan mpv
 # shows no video yet).
@@ -644,6 +658,15 @@ app)
       *) warn "HDR output" "the app asked for 10-bit colour, but the stock driver runs: ${st#stock }$( [[ -z $st ]] && echo "no word from omacvm-virtio-gpu-load (omacvm apply, then restart the VM)")" ;;
     esac
   fi
+  # Screenshots, colour picks and screen sharing of HDR apps at SDR white: OmacVM's
+  # cm_helpers.glsl for the Hyprland it was made for (app/guest/hypr-capture/).
+  hdr=0; grep -qx 'OMACVM_DEEPCOLOR=1' /run/omacvm/host.env 2>/dev/null && hdr=1
+  IFS=$'\t' read -r hs ht < <(hdr_capture_line "$(/usr/local/lib/omacvm/hypr-capture/hypr-capture.sh --status "$U" 2>/dev/null)" "$hdr")
+  case $hs in
+    ok) ok "HDR captures" "$ht" ;;
+    warn) warn "HDR captures" "$ht" ;;
+    *) skip "HDR captures" "$ht" ;;
+  esac
   # The compositor's damage reaches QEMU (OmacVM's driver when the start asks
   # for it with "Draw only what changed", or the kernel's own fix).
   asked=0; grep -qx 'OMACVM_DAMAGE=1' /run/omacvm/host.env 2>/dev/null && asked=1
