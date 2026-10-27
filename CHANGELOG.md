@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.9 (unreleased)
+
+- **AirPods and Control Center play and pause the VM.** While something plays in an OmacVM.app VM
+  (a video in the browser, music, mpv), the app is the Mac's Now Playing app, like Music: play,
+  pause and skip on AirPods and other Bluetooth headphones and speakers, in Control Center and with
+  play keys that reach macOS go to the VM's player, and Control Center shows what plays. A Mac app
+  that starts playing takes the controls, as between Mac apps; playing again in the VM takes them
+  back. Volume stays the Mac's. On by default (Settings, Output, AirPods and media controls); the VM
+  needs Update VM once. `omacvm check` has a "media controls" line.
+
 ## 3.2.7
 
 A click on another display's VM window keeps the pointer and keys, `omacvm check` names the

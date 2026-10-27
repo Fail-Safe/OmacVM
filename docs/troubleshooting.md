@@ -22,6 +22,10 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   another folder is asked again. To change it later: System Settings ›
   Privacy & Security › Local Network › OmacVM, then restart the VM
   ([42](#42-app-macos-asks-to-let-omacvm-find-devices-on-local-networks)).
+- **AirPods or Control Center play or pause the Mac's music, not the VM's
+  video** (OmacVM.app): pause and play in the VM once; a Mac app that played
+  later has the controls, as between Mac apps
+  ([43](#43-app-airpods-or-control-center-play-the-macs-music-not-the-vm)).
 - **A feature does not switch on: "Omarchy's package list is older than the
   mirrors"**: the VM's system was not updated for a while, and the packages
   the feature needs are no longer on the mirrors in those versions. OmacVM
@@ -1183,3 +1187,28 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   --info --predicate 'process == "nehelper"'` says "Local network preference
   not yet set, prompting for OmacVM", or "allowed by preference" / "denied by
   preference" when macOS already has an answer.
+
+## 43. app: AirPods or Control Center play the Mac's music, not the VM
+
+- **Symptom:** a video plays in an OmacVM.app VM, and a press on the AirPods
+  (or Control Center's play button, or a play key with the VM not in front)
+  pauses or starts Music on the Mac instead.
+- **Cause:** macOS gives these controls to its Now Playing app: the app that
+  started playing last. The VM is that app only while its player plays, with
+  **AirPods and media controls** on and the VM's side updated. A Mac app that
+  started playing after the VM took the controls (macOS's rule); a Mac app
+  that played and was paused while the VM kept playing keeps them too.
+- **Fix:** pause and play in the VM once: the VM takes the controls back.
+  Else check, in this order: the switch (VM window, Output, **AirPods and
+  media controls**; the test identity has it off by default); Update VM (an
+  OmacVM.app from before 3.2.9, or a VM not updated since, has no
+  `omacvm-media`); `omacvm check`'s "media controls" line (the service not
+  running: `omacvm apply`; "waiting for the app": the VM started from an app
+  without the port, start it again); a player the VM's MPRIS does not see
+  (`busctl --user list | grep mpris` in the VM: Chromium, Firefox and mpv
+  with mpv-mpris are there).
+- **Where:** `app/app/Sources/OmacVM/NowPlaying.swift`,
+  `app/app/Sources/OmacVMMedia/` (the rules, `swift run media-tests`),
+  `src/app/guest/omacvm-media`; qemu.log `OmacVM: media controls: ...` (why
+  the VM gave the controls up), `journalctl --user -u omacvm-media` in the VM;
+  docs/adr/0058-now-playing.md.
