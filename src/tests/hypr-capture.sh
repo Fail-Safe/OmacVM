@@ -5,16 +5,18 @@
 #  1. 0.56.2/original names the v0.56.2 tag's commit and files (downloaded);
 #     our cm_helpers.glsl differs from the tag's only inside "OmacVM" blocks;
 #     every shader variant that includes it compiles as with Hyprland's own
-#     (hypr-capture-shaders.py, glslangValidator; OMACVM_NEED_GLSLANG=1: fail
-#     without it).
+#     (hypr-capture-shaders.py, glslangValidator).
 #  2. Our SDR white is omacvm-display-sync's sdr_max_luminance (203).
 #  3. hypr-capture.sh in a fake root: in only beside a binary that carries the
 #     tag's files and commit, out on any doubt (a changed byte, no binary, an
 #     unreadable one, no python3, no fix folder), the hooks, a running Hyprland
 #     reloaded only when it runs the installed binary, nobody else's file
-#     touched, never an exit code but 0, every --status word.
+#     touched (also another file of the five names ours works with), never an
+#     exit code but 0, every --status word.
 #  4. omacvm check's "HDR captures" line (hdr_capture_line, taken from check.sh).
-# Linux (GNU tools, as in the VM). Parts 1 and 3 need github.com (skip without).
+# Linux (GNU tools, as in the VM). Parts 1 and 3 need github.com and part 1
+# glslangValidator: skipped without, unless OMACVM_HC_STRICT=1 (CI), which
+# fails instead.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
 SRC=$here/../app/guest/hypr-capture
@@ -75,7 +77,8 @@ if ! git -c advice.detachedHead=false clone -q --depth 1 --branch "$TAG" --filte
      https://github.com/hyprwm/Hyprland "$G" 2>/dev/null ||
    ! git -C "$G" sparse-checkout set --no-cone /src/render/shaders/glsl/ 2>/dev/null ||
    ! git -C "$G" checkout -q 2>/dev/null; then
-  echo "skip: cannot download Hyprland $TAG (parts 1 and 3)"
+  if [[ ${OMACVM_HC_STRICT:-} == 1 ]]; then bad "cannot download Hyprland $TAG (parts 1 and 3)"
+  else echo "skip: cannot download Hyprland $TAG (parts 1 and 3)"; fi
   (( fail == 0 )) && echo "hypr-capture: all passed (offline parts only)"
   exit $fail
 fi
@@ -114,7 +117,7 @@ expect "our cm_helpers.glsl differs from $TAG's only in OmacVM blocks ($(tail -n
 if command -v glslangValidator >/dev/null; then
   if python3 "$here/hypr-capture-shaders.py" "$GL" "$SRC/0.56.2/cm_helpers.glsl"; then ok "shader variants"
   else bad "shader variants"; fi
-elif [[ ${OMACVM_NEED_GLSLANG:-} == 1 ]]; then bad "glslangValidator missing (glslang-tools)"
+elif [[ ${OMACVM_HC_STRICT:-} == 1 ]]; then bad "glslangValidator missing (glslang-tools)"
 else echo "skip: shader variants (no glslangValidator)"; fi
 
 # --- 3: hypr-capture.sh in a fake root
@@ -205,6 +208,15 @@ echo "// an older OmacVM fix" > "$OURS"
 echo "0.56.2 $(sha256sum < "$OURS" | cut -d' ' -f1)" > "$R/var/lib/omacvm/hypr-capture"
 run >/dev/null
 expect "an older OmacVM file: replaced by this one" cmp -s "$SRC/0.56.2/cm_helpers.glsl" "$OURS"
+# an older OmacVM file whose record is gone: known by its header, so the pre
+# hook still takes it out and an apply replaces it
+older() { sed 's/OMACVM_SDR_WHITE 203.0/OMACVM_SDR_WHITE 200.0/' "$SRC/0.56.2/cm_helpers.glsl" > "$OURS"; rm -f "$R/var/lib/omacvm/hypr-capture"; }
+older
+expect "an older OmacVM file, no record: status missing" test "$(status)" = missing
+run --hook-pre >/dev/null
+expect "an older OmacVM file, no record: the pre hook takes it out" test ! -e "$OURS"
+older; run >/dev/null
+expect "an older OmacVM file, no record: replaced by this one" cmp -s "$SRC/0.56.2/cm_helpers.glsl" "$OURS"
 # nobody else's file is touched
 echo "// someone's own" > "$OURS"; rm -f "$R/var/lib/omacvm/hypr-capture"
 run >/dev/null; run --hook-pre >/dev/null; run --remove >/dev/null
@@ -216,12 +228,34 @@ run >/dev/null
 expect "the package ships shader files: ours out" test ! -e "$OURS"
 expect "the package ships shader files: status pkg" test "$(status)" = pkg
 expect "the package's file left" grep -qx "// the package's" "$R/usr/share/hypr/shaders/cm_helpers.glsl"
+rm "$R/usr/share/hypr/shaders/cm_helpers.glsl"
+echo "// the package's" > "$R/usr/share/hypr/shaders/CM.glsl"
+run >/dev/null
+expect "the package ships CM.glsl only: ours out" test ! -e "$OURS"
+expect "the package ships CM.glsl only: status pkg, names it" grep -q "^pkg.*(CM.glsl)" <(run --status)
 rm -r "$R/usr/share/hypr"; run >/dev/null
+echo "// someone's" > "$R/usr/local/share/hypr/shaders/tonemap.glsl"
+expect "another tonemap.glsl beside ours: exit 0" test "$(rc)" = 0
+expect "another tonemap.glsl beside ours: ours out" test ! -e "$OURS"
+expect "another tonemap.glsl beside ours: status other, names it" grep -q "^other.*another tonemap.glsl" <(run --status)
+expect "another tonemap.glsl beside ours: left" grep -qx "// someone's" "$R/usr/local/share/hypr/shaders/tonemap.glsl"
+rm "$R/usr/local/share/hypr/shaders/tonemap.glsl"; run >/dev/null
 me=$(id -un); hm=$(getent passwd "$me" | cut -d: -f6)
 mkdir -p "$R$hm/.config/hypr/shaders"; echo "// mine" > "$R$hm/.config/hypr/shaders/cm_helpers.glsl"
 expect "the user's own file: status own" test "$(status "$me")" = own
 expect "the user's own file: ours stays in place (theirs wins in Hyprland)" test -e "$OURS"
+rm "$R$hm/.config/hypr/shaders/cm_helpers.glsl"; echo "// mine" > "$R$hm/.config/hypr/shaders/constants.h"
+expect "the user's own constants.h: status own, names it" grep -q "^own.*shaders/constants.h is used" <(run --status "$me")
 rm -r "$R$hm/.config"
+# the shader folder cannot be written: Hyprland's own copy, and says so
+run --remove >/dev/null; chmod 555 "$R/usr/local/share/hypr/shaders"
+if touch "$R/usr/local/share/hypr/shaders/.w" 2>/dev/null; then
+  rm -f "$R/usr/local/share/hypr/shaders/.w"; echo "skip: a folder that cannot be written (root writes anyway)"
+else
+  expect "cannot write ours: exit 0, says so" grep -q "could not be written" <(run 2>&1)
+  expect "cannot write ours: not there" test ! -e "$OURS"
+fi
+chmod 755 "$R/usr/local/share/hypr/shaders"; run >/dev/null
 : > "$LOG"
 expect "--remove: exit 0" test "$(rc --remove)" = 0
 expect "--remove: ours out, the live Hyprland reloaded" test "$(reloads; [[ -e $OURS ]] && echo there)" = 1

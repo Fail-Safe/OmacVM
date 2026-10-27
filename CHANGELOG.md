@@ -7,18 +7,26 @@ in more words.
 
 - **Screenshots and screen sharing of HDR apps look right in an HDR VM (#579).** With HDR and
   10-bit colour on, screenshots (also Omarchy's region screenshot and its frozen screen), colour
-  picks and screen or window sharing of apps that draw in HDR, such as Chrome, Chromium and
-  Electron apps, came out about 2.5 times too bright, light greys white. Hyprland 0.56.2 made its
-  copy for captures with their white at 80 instead of 203 nits; the VM now gets a fixed copy of
-  that one shader file, only for this Hyprland. Parts brighter than white are cut off in
-  captures, which are SDR. Update VM puts it in; no restart needed.
+  picks and screen or window sharing of apps that draw in HDR, such as Chrome and Chromium, came
+  out about 2.5 times too bright, light greys white. Hyprland 0.56.2 made its copy for captures
+  with their white at 80 instead of 203 nits; the VM now gets a fixed copy of that one shader
+  file, only for this Hyprland. Parts brighter than white are cut off in captures, which are SDR.
+  Update VM puts it in; no restart needed.
+
 - **Screen recordings of an HDR VM are no longer grey (#579).** Omarchy's recorder reads the
   screen itself and took the HDR picture for SDR: every app grey and flat, white at 148 of 255.
   The VM's graphics driver now tells it the screen is HDR, and it makes SDR of it with its own
   curve: much lighter, white at about 224 of 255 at a high headroom. Update VM, then shut the
   VM down and start it again (Update VM rebuilds the VM's graphics driver once).
 
-## 3.2.8 (unreleased)
+- **The HDR switch says when it counts.** HDR and 10-bit colour is read when the VM starts; a
+  restart inside the VM (Omarchy's menu) keeps the setting it started with. While the VM runs with
+  the other setting, the switch now says so: shut the VM down and start it again (#579).
+
+## 3.2.8
+
+An OpenGL query the Mac does not answer now finishes with 0 in the VM: no memory bytes from the Mac,
+and no app waiting for it for ever.
 
 - **An OpenGL query the Mac does not answer reads as 0 in the VM, not as the Mac's memory.** When
   the Mac's OpenGL did not answer a query's result (a query never started or still running, or a GL

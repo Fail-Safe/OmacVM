@@ -96,6 +96,8 @@ struct SettingRow<Trailing: View>: View {
     var badge: String? = nil
     var subtitle: String? = nil
     var subtitleIsError = false
+    /// A note to see (orange): not an error, but easy to miss in grey.
+    var subtitleIsNote = false
     var info: String? = nil
     var probe: String? = nil
     /// An (i) of its own (a picture in its popover) instead of info's text.
@@ -113,7 +115,7 @@ struct SettingRow<Trailing: View>: View {
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.subheadline)
-                        .foregroundStyle(subtitleIsError ? Look.red : .secondary)
+                        .foregroundStyle(subtitleIsError ? Look.red : subtitleIsNote ? Look.orange : .secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
