@@ -1388,6 +1388,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-sysval-block-check
 # OmacVM: info logs and a pipeline's validate status start set: a GL that refuses calls writes
 # nothing, and the log lines printed stack bytes, a false pipeline error stopped the app's context.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-query-results-init.patch"
+# OmacVM: a query result the GL does not answer (never begun, still running, a GL refusing
+# calls) reaches the guest as done with 0; it got host stack bytes, or a wait for ever.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-query-result-unanswered.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
