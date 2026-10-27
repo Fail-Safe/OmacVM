@@ -257,6 +257,22 @@ class Port(unittest.TestCase):
             self.assertEqual(len(bus.calls), n, "the old reply asked nothing")
             self.assertEqual(self.agent.pending, 1, "only the new ListNames is out")
 
+    def test_one_sender_with_two_names(self):
+        bus = FakeBus()
+        with fake_gi(bus):
+            self.agent.start_watching()
+            self.agent.add("org.mpris.MediaPlayer2.a", ":1.5")
+            self.agent.add("org.mpris.MediaPlayer2.b", ":1.5")
+            for p in self.agent.players.values():
+                p.update({"PlaybackStatus": "Playing"}, 1.0)
+            params = types.SimpleNamespace(unpack=lambda: (om.PLAYER, {"PlaybackStatus": "Paused"}, []))
+            self.agent.on_properties(bus, ":1.5", om.OBJECT, om.PROPS, "PropertiesChanged", params)
+            self.assertEqual({p.name: p.status for p in self.agent.players.values()},
+                             {"org.mpris.MediaPlayer2.a": "Paused", "org.mpris.MediaPlayer2.b": "Paused"},
+                             "the signal is for both names: no stale Playing keeps the Mac's claim")
+            self.agent.on_owner(bus, "", "", "", "", types.SimpleNamespace(unpack=lambda: ("org.mpris.MediaPlayer2.a", ":1.5", "")))
+            self.assertEqual(self.agent.owners, {":1.5": {"org.mpris.MediaPlayer2.b"}})
+
     def test_never_a_toggle(self):
         self.assertEqual(set(om.METHODS.values()), {"Play", "Pause", "Next", "Previous"})
         self.agent.take(b'{"t":"cmd","c":"PlayPause"}\n{"t":"cmd","c":"toggle"}\n')

@@ -190,7 +190,7 @@ class Agent:
         self.retry = PORT_RETRY[0]
         self.due: dict[str, float] = {}
         self.players: dict[str, Player] = {}
-        self.owners: dict[str, str] = {}
+        self.owners: dict[str, set[str]] = {}   # a sender's MPRIS names (one object: both get its signals)
         self.reported: str | None = None   # the player of the last state sent: commands go there
         self.watching = False
         self.pending = 0           # player reads still out at the start
@@ -466,7 +466,7 @@ class Agent:
         p = self.players.get(name) or Player(name)
         p.owner = owner
         self.players[name] = p
-        self.owners[owner] = name
+        self.owners.setdefault(owner, set()).add(name)
         self.pending += 2
         self.call(owner, OBJECT, PROPS, "GetAll", self.variant("(s)", (PLAYER,)), "(a{sv})", self.on_all, name)
         self.call(owner, OBJECT, PROPS, "Get", self.variant("(ss)", (MPRIS, "Identity")), "(v)", self.on_identity, name)
@@ -492,7 +492,10 @@ class Agent:
         if not name.startswith(MPRIS + ".") or name in SKIP:
             return
         if old:
-            self.owners.pop(old, None)
+            names = self.owners.get(old, set())
+            names.discard(name)
+            if not names:
+                self.owners.pop(old, None)
         if new:
             self.add(name, new)
         else:
@@ -501,13 +504,14 @@ class Agent:
 
     def on_properties(self, conn, sender, path, iface, signal, params, *_) -> None:
         interface, changed, invalidated = params.unpack()
-        name = self.owners.get(sender)
-        p = self.players.get(name) if name else None
-        if interface != PLAYER or not p:
+        players = [self.players[n] for n in self.owners.get(sender, ()) if n in self.players]
+        if interface != PLAYER or not players:
             return
-        p.update(changed, time.monotonic())
-        if invalidated:
-            self.call(p.owner, OBJECT, PROPS, "GetAll", self.variant("(s)", (PLAYER,)), "(a{sv})", self.on_all, p.name)
+        for p in players:
+            p.update(changed, time.monotonic())
+            if invalidated:
+                self.call(p.owner, OBJECT, PROPS, "GetAll", self.variant("(s)", (PLAYER,)), "(a{sv})", self.on_all,
+                          p.name)
         self.changed()
 
     def changed(self) -> None:
