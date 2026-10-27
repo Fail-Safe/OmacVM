@@ -1,7 +1,7 @@
 // Media keys into an OmacVM.app VM: the VM in front gets a key press through
 // QEMU's control socket (QMP, "input-send-event"), so Omarchy sees
 // XF86AudioRaiseVolume, XF86AudioPlay & co. and does what its own keys do
-// (its volume popup, playerctl). The socket is the one on the VM's QEMU
+// (its volume popup, its media keys). The socket is the one on the VM's QEMU
 // command line (OmacVM.app's run folder); it serves one client at a time and
 // the app uses it now and then, so a busy socket is a failure here (the key
 // then goes to macOS, VMKeys.repost).

@@ -19,6 +19,8 @@
 #    (hypr-capture/: a fixed shader file for Hyprland 0.56.2)
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
+#  * AirPods and media controls: the VM's player as the Mac's Now Playing
+#    (omacvm-media, while the app's switch is on)
 #  * OmacVM's virtio-gpu driver (HDR; the pointer on its own layer; Linux
 #    7.4's damage fix for "Draw only what changed"),
 #    built for every kernel but dormant: loaded only when one of the app's
@@ -36,7 +38,7 @@ source ../../guest/home-files.sh   # the home is written as the user
 # of a build or an update) would hold this step 60-90 s for the device.
 systemctl enable qemu-guest-agent >/dev/null 2>&1 || true
 systemctl start --no-block qemu-guest-agent >/dev/null 2>&1 || true
-install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays omacvm-desktop-recover /usr/local/bin/
+install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays omacvm-desktop-recover omacvm-media /usr/local/bin/
 # What the Mac tells the VM at start (SMBIOS strings), for omacvm-app-host and
 # the virtio-gpu driver's loader.
 install -Dm755 omacvm-smbios /usr/local/lib/omacvm/omacvm-smbios
@@ -72,6 +74,13 @@ systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@"
 install -m644 omacvm-displays.service /etc/systemd/user/
 systemctl --global enable omacvm-displays.service >/dev/null 2>&1 || true
 systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@" restart omacvm-displays.service 2>/dev/null || true
+# AirPods and media controls (over a virtio port; the same uaccess rule): the
+# VM's MPRIS players through Gio (python-gobject, in Omarchy's base; added only
+# when missing). The agent waits for the app's switch before it reads them.
+../../guest/pkg-add python-gobject || true
+install -m644 omacvm-media.service /etc/systemd/user/
+systemctl --global enable omacvm-media.service >/dev/null 2>&1 || true
+systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@" restart omacvm-media.service 2>/dev/null || true
 # The switch "Use external displays" in Omarchy's display panel: Omarchy's own
 # widget with one more section (omacvm.monitor; the stock one stays if it no
 # longer fits).
@@ -194,4 +203,4 @@ install -m755 omacvm-video-encode /usr/local/bin/
 install -m644 omacvm-video-encode.service /etc/systemd/system/
 systemctl enable omacvm-video-encode.service >/dev/null 2>&1 || true
 OMACVM_VIDEO_ENCODE_PY=$PWD/browser-video-encode.py ./omacvm-video-encode apply "$U"
-echo "OmacVM.app: display sync, every Mac display, guest agent, video decoding and encoding"
+echo "OmacVM.app: display sync, every Mac display, media controls, guest agent, video decoding and encoding"

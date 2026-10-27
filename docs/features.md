@@ -228,6 +228,15 @@ Omarchy's screenshot keys (window, region, display; ⌘⌥ + volume up records).
 Play/pause, next and previous go to the VM's players (OmacVM.app). Brightness
 keys change the display the VM is on (below).
 
+AirPods and Control Center (OmacVM.app, on by default: **AirPods and media
+controls** in the VM window's Output section): while something plays in the
+VM, the app is the Mac's Now Playing app, like Music. Play, pause and skip
+on AirPods and other Bluetooth headphones, in Control Center and with play
+keys that reach macOS go to the VM's player, and Control Center shows what
+plays. A Mac app that starts playing takes the controls, as between Mac
+apps; playing again in the VM takes them back. Volume stays the Mac's.
+[Details](routes/app.md#airpods-and-media-controls-on-by-default).
+
 OmacVM.app's VM takes ⌘ Tab, ⌘ Space and macOS's screenshot keys only when
 macOS lets OmacVM control the computer (System Settings › Privacy & Security ›
 Accessibility; Input Monitoring is not enough). When it does not, the VM's

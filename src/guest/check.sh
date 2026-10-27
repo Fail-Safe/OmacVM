@@ -422,6 +422,24 @@ check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.
 kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null)
 if [[ -n $kb ]]; then ok "keyboard layout" "$kb"; else bad "keyboard layout" "no layout from Hyprland"; fi
 
+# media_line PORT(1/0) RUNNING(1/0) STATUS: the "media controls" line (AirPods and
+# media controls, OmacVM.app's switch) as "ok|warn|fail|skip<TAB>detail", from whether
+# the org.omacvm.media port is there, whether omacvm-media runs, and its status
+# JSON (omacvm-media status: mac on|off|silent, player, state, error; no titles).
+media_line() {
+  local err
+  if [[ $1 != 1 ]]; then printf 'skip\t%s\n' "no media port: an OmacVM.app from before AirPods and media controls"; return; fi
+  err=$(jq -r '.error // ""' <<<"$3" 2>/dev/null)
+  if [[ $2 != 1 ]]; then printf 'fail\t%s\n' "omacvm-media.service not running${err:+ ($err)}: omacvm apply"; return; fi
+  # A player that did not take the last command (it hung, it went away): works, but say it.
+  if [[ -n $err ]]; then printf 'warn\t%s\n' "the last command failed: $err (journalctl --user -u omacvm-media)"; return; fi
+  case $(jq -r '.mac // ""' <<<"$3" 2>/dev/null) in
+    on) printf 'ok\t%s\n' "$(jq -r 'if (.state // "") == "" or .state == "none" then "on: nothing plays now" else "on: \(.player) \(.state)" end' <<<"$3" 2>/dev/null)" ;;
+    off) printf 'ok\t%s\n' "off (the app's switch AirPods and media controls)" ;;
+    *) printf 'ok\t%s\n' "waiting for the app to answer" ;;
+  esac
+}
+
 # The "Changed parts" line: whether the compositor's damage reaches QEMU (Linux
 # 7.4's fix: the kernel's own, or OmacVM's driver with it). Without it every
 # frame goes to the Mac whole and "Draw only what changed" (QEMU's tiles) has
@@ -614,6 +632,15 @@ app)
     elif [[ -z $desk ]]; then skip "desktop" "omacvm-displays desktop gave nothing"
     else ok "desktop" "wallpaper drawn on every display without windows$([[ ${fixes:-0} != 0 ]] && echo " (shell restarted $fixes time(s) to draw it)")"; fi
   else bad "every Mac display" "omacvm-displays.service not running: omacvm apply"; fi
+  mport=0; [[ -e /dev/virtio-ports/org.omacvm.media ]] && mport=1
+  mrun=0; user_active omacvm-media.service && mrun=1
+  r=$(media_line "$mport" "$mrun" "$( (( mport )) && as_user omacvm-media status 2>/dev/null)")
+  case ${r%%$'\t'*} in
+    ok) ok "media controls" "${r#*$'\t'}" ;;
+    warn) warn "media controls" "${r#*$'\t'}" ;;
+    fail) bad "media controls" "${r#*$'\t'}" ;;
+    *) skip "media controls" "${r#*$'\t'}" ;;
+  esac
   if as_user pactl list short sinks 2>/dev/null | grep -q .; then ok "sound" "$(as_user pactl list short sinks 2>/dev/null | head -1 | cut -f2)"
   else bad "sound" "no PipeWire sink: omacvm apply"; fi
   if as_user hyprctl monitors -j 2>/dev/null | jq -e '.[0].refreshRate' >/dev/null 2>&1; then

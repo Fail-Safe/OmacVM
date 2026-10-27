@@ -446,7 +446,8 @@ the VM's SSH on `127.0.0.1:<port>`.
 - The clipboard and the Mac's battery do not use the network: each has its
   own virtio port (`org.omacvm.clipboard`, `org.omacvm.battery`) on a socket
   only the app's user can open. So do the displays (`org.omacvm.display`,
-  below) and, with `mac-ime` on, the Mac's input methods (`org.omacvm.ime`,
+  below), AirPods and media controls (`org.omacvm.media`,
+  [below](#airpods-and-media-controls-on-by-default)) and, with `mac-ime` on, the Mac's input methods (`org.omacvm.ime`,
   [below](#mac-input-methods-experimental-off-by-default)). The battery goes one way; the VM can only ask
   for a fresh reading.
 - Gestures and Bridge also listen on the Mac's 127.0.0.1, where any Mac
@@ -625,6 +626,45 @@ it on, a VM whose window nobody can see stops drawing, as a macOS app does:
   "omacvm-displays: drawing paused on Virtual-1" / "drawing again".
 - Only the main window (Virtual-1); the windows on other displays in full
   screen keep drawing.
+
+## AirPods and media controls (on by default)
+
+The VM window's settings have **AirPods and media controls** (Output). While
+something plays in the VM (a video in the browser, music, mpv), the app is
+the Mac's Now Playing app, like Music or Safari:
+
+- Play, pause and skip on AirPods and other Bluetooth headphones and
+  speakers, in Control Center and with the keyboard's play keys go to the
+  VM's player. Control Center shows what plays under the app's name.
+  Volume stays the Mac's.
+- macOS gives the controls to the app that started playing last. A Mac app
+  that starts playing takes them; when the VM's player pauses and plays
+  again, the VM takes them back. A short stop (the next track, a video
+  buffering) changes nothing, and a player that stops and starts again and
+  again (also with longer stops) takes them at most once every 10 s.
+- Paused in the VM, the app keeps the controls, so the next press resumes
+  the VM. Nothing plays for 3 s (the player closed, the video ended), 30
+  minutes paused, the VM stopped, or the switch off: the controls go back to
+  the Mac's apps.
+- With the VM in front, OmacVM Bridge still types the play keys into the VM
+  as keys (Omarchy's own media keys) and macOS never sees them, so a press
+  never counts twice. QEMU's window takes no media keys of its own.
+- The Mac side is the app itself (not QEMU, which macOS would show without a
+  name). It needs no permission. The VM side is `omacvm-media` (a user
+  service, Update VM brings it): it reads the VM's MPRIS players (Chromium,
+  Firefox, mpv) once the switch is on and runs Play, Pause, Next and Previous
+  on the one that played last, never a toggle (AirPods pause when one comes
+  out). Over its own virtio port, `org.omacvm.media`; nothing goes to a VM
+  without the service.
+- It works at once in a running VM (the app watches the setting).
+  `defaults write org.omacvm.app mediaControls -bool false` does the same as
+  the row. The test identity (OmacVM Test) has it off by default, so a test
+  VM never takes your AirPods.
+- QEMU's log: "OmacVM: media controls: on|off" at each start, then a line
+  when the VM becomes Now Playing, for each command from macOS and when it
+  gives the controls up (why). Titles never go into a log. In the VM:
+  `omacvm-media status`, `journalctl --user -u omacvm-media`; `omacvm check`
+  has a "media controls" line.
 
 ## HDR and 10-bit colour (experimental, off by default)
 

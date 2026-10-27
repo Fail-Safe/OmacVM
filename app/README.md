@@ -146,7 +146,9 @@ Accessibility of its own.
    live system, OmacVM's installers put Arch Linux ARM (btrfs, GRUB) and
    Omarchy (omarchy-mac) on the disk, then OmacVM's VM side.
 3. Starts it: QEMU shows Omarchy in a window that follows its size. Quit
-   shuts the VM down cleanly; the Mac's sleep pauses it.
+   shuts the VM down cleanly; the Mac's sleep pauses it. While something
+   plays in the VM, the app is the Mac's Now Playing app: AirPods and
+   Control Center play and pause it (docs/adr/0058-now-playing.md).
 4. Before a start, the window has every setting of the VM (docs/design/settings-3.1;
    AGENTS.md lists each one's key or file). Resources (the create screen's tiers, or
    Custom with − / + for CPUs and memory) writes `CPUS` and `MEM_MB` into the
@@ -167,6 +169,7 @@ The VM is a normal install: `omarchy update` and snapshots work.
 | `scripts/appcast.sh` | the release's signed update feed |
 | `scripts/update-swap.sh` | swaps in an update, puts the old app back if the new one does not start |
 | `app/Sources/OmacVMUpdate` | the update's checks (feed, signatures, schedule), tested by `update-tests` |
+| `app/Sources/OmacVMMedia` | AirPods and media controls: the `org.omacvm.media` port's lines and when the app is the Mac's Now Playing for the VM, tested by `media-tests` |
 | `../src` | OmacVM: the installers and the VM side, `app` route |
 
 Licences: `THIRD_PARTY_NOTICES.md`. QEMU is GPL-2.0: its build scripts and

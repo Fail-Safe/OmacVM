@@ -25,6 +25,14 @@ in more words.
   restart inside the VM (Omarchy's menu) keeps the setting it started with. While the VM runs with
   the other setting, the switch now says so: shut the VM down and start it again (#579).
 
+- **AirPods and Control Center play and pause the VM (#577).** AirPods, other Bluetooth
+  headphones, Control Center and the play keys now play, pause and skip what plays in an OmacVM.app
+  VM (a video in the browser, music, mpv), and Control Center shows it. While the VM plays, the app
+  is the Mac's Now Playing app, like Music. A Mac app that starts playing takes the controls, as
+  between Mac apps; playing again in the VM takes them back. Volume stays the Mac's. On by default
+  (Settings, Output, AirPods and media controls); the VM needs Update VM once. `omacvm check` has a
+  "media controls" line.
+
 ## 3.2.8
 
 An OpenGL query the Mac does not answer now finishes with 0 in the VM: no memory bytes from the Mac,

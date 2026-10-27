@@ -135,6 +135,11 @@ Once, on the Mac:
 Then put the VM in full screen: see
 [full screen and ⌃⌥ Esc](features.md#full-screen-and-the-escape-keys).
 
+OmacVM.app: while something plays in the VM, AirPods, other Bluetooth
+headphones and Control Center play, pause and skip it, as with a Mac app
+(**AirPods and media controls**, on by default; an existing VM needs Update VM
+once): [details](routes/app.md#airpods-and-media-controls-on-by-default).
+
 ## Switch features, on any VM
 
 ```bash
