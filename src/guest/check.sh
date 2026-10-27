@@ -455,19 +455,22 @@ hdr_copy_note() {
     *) echo "; SDR copy: Hyprland's default" ;;
   esac
 }
-# hdr_recording_line LOADER-WORD BUILD-HAS RUNS: the "HDR recordings" line for a start
-# with HDR. Screen recorders that read the screen over KMS (gpu-screen-recorder:
+# hdr_recording_line LOADER-WORD BUILD-HAS RUNS PQ: the "HDR recordings" line for a
+# start with HDR. Screen recorders that read the screen over KMS (gpu-screen-recorder:
 # Omarchy's recorder) take a PQ screen for HDR only when its connector carries the
 # compositor's HDR metadata, which OmacVM's driver offers with deep colour
 # (linux-virtio-gpu-hdr-metadata.patch). LOADER-WORD: /run/omacvm/virtio-gpu;
 # BUILD-HAS: this kernel's build has it (1/0); RUNS: that build is older than
-# this boot, so it is the one running (1/0).
+# this boot, so it is the one running (1/0); PQ: Virtual-1 runs PQ now (1/0; SDR
+# while the Mac cannot show PQ: display-sync's rule then has Hyprland clear it).
 hdr_recording_line() {
-  local st=$1 has=${2:-0} runs=${3:-0}
+  local st=$1 has=${2:-0} runs=${3:-0} pq=${4:-1}
   if [[ $st != omacvm* || $st == "omacvm 8-bit"* ]]; then
     printf 'skip\t%s\n' "the 10-bit driver does not run (see HDR output)"
+  elif (( has && runs && pq )); then
+    printf 'ok\t%s\n' "the screen is HDR (PQ) now and tells recorders so: Omarchy's recorder (gpu-screen-recorder) makes SDR of it"
   elif (( has && runs )); then
-    printf 'ok\t%s\n' "the screen tells recorders it is HDR: Omarchy's recorder (gpu-screen-recorder) makes SDR of it"
+    printf 'ok\t%s\n' "the screen is SDR now (the Mac cannot show PQ) and tells recorders so: recordings as without HDR"
   elif (( has )); then
     printf 'warn\t%s\n' "the driver with HDR metadata loads at the next start: shut the VM down and start it again (screen recordings come out grey until then)"
   else
@@ -693,7 +696,8 @@ app)
     [[ -f $vk ]] && ! grep -q '^hdr_metadata:' "${vk%/*}/without" 2>/dev/null &&
       grep -a -q drm_connector_attach_hdr_output_metadata_property "$vk" && has=1
     [[ -f $vk ]] && (( $(stat -c %Y "$vk") < $(date +%s) - $(cut -d. -f1 /proc/uptime) )) && runs=1
-    IFS=$'\t' read -r rs rt < <(hdr_recording_line "$(cat /run/omacvm/virtio-gpu 2>/dev/null)" "$has" "$runs")
+    pq=0; [[ ${out#* } == hdr ]] && pq=1   # Virtual-1's preset, from the HDR output line
+    IFS=$'\t' read -r rs rt < <(hdr_recording_line "$(cat /run/omacvm/virtio-gpu 2>/dev/null)" "$has" "$runs" "$pq")
     case $rs in
       ok) ok "HDR recordings" "$rt" ;;
       warn) warn "HDR recordings" "$rt" ;;
