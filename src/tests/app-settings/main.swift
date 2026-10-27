@@ -1,6 +1,7 @@
 // The VM window's settings across launches: src/tests/app-settings.sh.
 //   t dump                 the settings as the window reads them (SettingsDump)
 //   t start                what a start of a VM reads: Extra brightness and HDR for it
+//   t retire               what a launch does with retired switches (Settings.removeRetiredSwitches)
 //   t set KEY VALUE [VM]   one change, made with the call the window's row makes
 import AppKit
 import Foundation
@@ -21,6 +22,7 @@ MainActor.assumeIsolated {
         print("extra \(x.on) (\(x.why)), hdr \(h.on) (\(h.why)), tiles \(t.on) (\(t.why))")
         exit(0)
     }
+    if a[1] == "retire" { Settings.removeRetiredSwitches(); exit(0) }
     guard a[1] == "set", a.count > 3 else { exit(2) }
     let key = a[2], value = a[3]
     let vm = a.count > 4 ? VMConfig.named(a[4]) : nil
@@ -41,7 +43,6 @@ MainActor.assumeIsolated {
         case "extraBrightness": Settings.extraBrightness = value == "true"
         case "pauseWhileHidden": Settings.pauseWhileHidden = value == "true"
         case "pointerPlane": Settings.pointerPlane = value == "true"
-        case "vsyncLock": Settings.vsyncLock = value == "true"
         case "presentTiles": Settings.presentTiles = value == "true"
         case "closeAction": Settings.closeAction = CloseAction.parse(value)
         case "appIconTheme": AppIcon.set(IconTheme.choice(stored: value))

@@ -73,7 +73,6 @@ expect "fresh: HDR and 10-bit colour off" false "$(val app.hdr)"
 expect "fresh: Extra brightness off" false "$(val app.extraBrightness)"
 expect "fresh: Pause drawing while hidden off" false "$(val app.pauseWhileHidden)"
 expect "fresh: Pointer on its own layer off" false "$(val app.pointerPlane)"
-expect "fresh: Frames in step with the Mac off" false "$(val app.vsyncLock)"
 expect "fresh: Draw only what changed off" false "$(val app.presentTiles)"
 expect "fresh: Closing the window shuts down" shutdown "$(val app.closeAction)"
 expect "fresh: OmacVM's own icon" default "$(val app.appIconTheme)"
@@ -102,7 +101,7 @@ done
 
 # (b) Changes as the window makes them, read by the next launches; (c) per VM.
 mkdir -p "$H/Shared"
-for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pauseWhileHidden true" "pointerPlane true" "vsyncLock true" "presentTiles true" "closeAction ask" "appIconTheme flexoki-light" \
+for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pauseWhileHidden true" "pointerPlane true" "presentTiles true" "closeAction ask" "appIconTheme flexoki-light" \
           "escapeSwipe all" "mouseSwipeFingers 3" "swipeOut true" "updateChecks false"; do
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
@@ -122,7 +121,6 @@ for launch in 1 2; do
   expect "launch $launch: Extra brightness on" true "$(val app.extraBrightness)"
   expect "launch $launch: Pause drawing while hidden on" true "$(val app.pauseWhileHidden)"
   expect "launch $launch: Pointer on its own layer on" true "$(val app.pointerPlane)"
-  expect "launch $launch: Frames in step with the Mac on" true "$(val app.vsyncLock)"
   expect "launch $launch: Draw only what changed on" true "$(val app.presentTiles)"
   expect "launch $launch: Closing the window asks" ask "$(val app.closeAction)"
   expect "launch $launch: icon Flexoki Light" flexoki-light "$(val app.appIconTheme)"
@@ -153,6 +151,24 @@ expect "the extra brightness switch is the key QEMU reads in the app's domain" 1
 expect "the pause switch is the key QEMU reads in the app's domain" 1 "$(defaults read "$D" pauseWhileHidden)"
 expect "update checks in the file the control centre shares" "false" \
   "$(plutil -extract update_checks raw -o - "$T/settings/settings.json")"
+
+# Frames in step with the Mac (vsyncLock, 3.2.3-3.2.6) is gone (3.2.7, ADR 0057): a launch removes
+# the stored key once, nothing reads or shows it, and no start asks the VM for it.
+defaults write "$D" vsyncLock -bool true
+run retire 2>"$T/retire.log" || { echo "FAIL retire"; fail=1; }
+expect "vsyncLock stored by 3.2.3-3.2.6: removed at launch" "" "$(defaults read "$D" vsyncLock 2>/dev/null)"
+expect "  says so once" 1 "$(grep -c 'Frames in step with the Mac was removed in 3.2.7' "$T/retire.log")"
+run retire 2>"$T/retire.log" || { echo "FAIL retire again"; fail=1; }
+expect "  a later launch has nothing to say" 0 "$(grep -c . "$T/retire.log")"
+dump
+expect "  not in the window's settings" "" "$(val app.vsyncLock)"
+grep -q '^ *Settings.removeRetiredSwitches()' "$R/app/app/Sources/OmacVM/main.swift" &&
+  echo "ok   the app removes retired switches at launch" || { echo "FAIL main.swift does not call Settings.removeRetiredSwitches()"; fail=1; }
+S=$R/app/app/Sources/OmacVM
+for w in 'omacvm.vsynclock' 'vsyncLock' 'VsyncLockRow' 'Frames in step'; do
+  n=$(grep -l "$w" "$S/Runner.swift" "$S/SettingsRows.swift" "$S/SettingsView.swift" "$S/SettingsDump.swift" | wc -l | tr -d ' ')
+  expect "no '$w' in Runner, the rows, the window or the dump" 0 "$n"
+done
 
 # (d) A VM and the settings as 3.0.17 wrote them: the same keys, read as they are.
 vm Gamma
@@ -260,14 +276,15 @@ expect "Runner: QEMU's tiles and the guest's omacvm.damage=1 from the same start
 grep -q 'a += \["-smbios", "type=11,value=omacvm.damage=1"\]' "$RUNNER" && grep -q 'env\["OMACVM_GL_PRESENT_TILES"\] = env\["OMACVM_GL_PRESENT_TILES"\] == "check" ? "check" : "1"' "$RUNNER" &&
   ! grep -q 'Settings.presentTiles && ' "$RUNNER" && echo "ok   Runner: both under tiles.on, not the bare switch" ||
   { echo "FAIL Runner: omacvm.damage=1 / OMACVM_GL_PRESENT_TILES not from Settings.presentTilesStart()"; fail=1; }
-# The (i): with the switch off, HDR, the pointer layer and frames in step still load OmacVM's
-# driver, and it carries the damage fix; only the Mac's tiles are off. Not "the standard driver".
+# The (i): with the switch off, HDR and the pointer layer still load OmacVM's driver, and it
+# carries the damage fix; only the Mac's tiles are off. Not "the standard driver", and not the
+# removed Frames in step with the Mac.
 info=$(sed -n '/^struct PresentTilesRow/,/static let info/p' "$R/app/app/Sources/OmacVM/SettingsRows.swift" | tail -n1)
-if [[ $info == *"HDR and 10-bit colour, Pointer on its own layer or Frames in step with the Mac"* &&
-      $info == *"draws whole frames"* && $info != *"keeps its standard driver"* ]]; then
+if [[ $info == *"HDR and 10-bit colour or Pointer on its own layer is on"* &&
+      $info == *"draws whole frames"* && $info != *"keeps its standard driver"* && $info != *"Frames in step"* ]]; then
   echo "ok   Draw only what changed (i): off = the driver the other switches ask for, whole frames on the Mac"
 else
-  echo "FAIL Draw only what changed (i): says off = the standard driver, but HDR / pointer layer / frames in step load OmacVM's (with the damage fix)"; fail=1
+  echo "FAIL Draw only what changed (i): says off = the standard driver (HDR / pointer layer load OmacVM's, with the damage fix), or names the removed Frames in step"; fail=1
 fi
 # The M1 Max's HDR 120 Hz set (td2) passed: the (i) says 120 Hz is tested, with its numbers.
 if [[ $info == *"M1 Max"* && $info == *"120 Hz"* && $info != *"not tested yet"* ]]; then

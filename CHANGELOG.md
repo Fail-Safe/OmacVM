@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.2.7 (unreleased)
+
+- **Frames in step with the Mac is gone.** The experimental switch from 3.2.3 showed typing and
+  the pointer 1.5-7 ms sooner at 60 Hz (up to 2.5 ms at 120 Hz), and only while the screen moved.
+  It saved no power, skipped a few more frames at 120 Hz, and needed OmacVM's own change to the
+  VM's graphics driver: no gain worth that cost. If you had it on, there is nothing to do: the app
+  forgets the setting and your VM draws as with it off. The other experimental switches stay as
+  they are. For everyone with HDR and 10-bit colour, Pointer on its own layer or Draw only what
+  changed on, Update VM rebuilds the VM's driver once (needs internet).
+
 ## 3.2.6
 
 Two changes: the pointer no longer jumps after a click near a corner of an external display, and
