@@ -216,7 +216,7 @@ class Port(unittest.TestCase):
 
 
 FAKE = r'''
-import sys
+import os, sys
 from gi.repository import Gio, GLib
 name, identity = sys.argv[2], sys.argv[3]
 XML = """<node>
@@ -259,15 +259,22 @@ for i in node.interfaces:
 bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "RequestName",
               GLib.Variant("(su)", (name, 4)), None, Gio.DBusCallFlags.NONE, 2000, None)
 print("ready", flush=True)
+buf = [b""]
 def line(fd, cond):
-    l = sys.stdin.readline().split(" ", 1)
-    w = l[0].strip()
-    if w in ("", "quit"):
+    # Every whole line there is (several can come in one read).
+    data = os.read(0, 4096)
+    if not data:
         loop.quit(); return False
-    if w == "play": set_status("Playing")
-    elif w == "pause": set_status("Paused")
-    elif w == "title":
-        state["title"] = l[1].strip(); changed(Metadata=meta())
+    buf[0] += data
+    while b"\n" in buf[0]:
+        l, buf[0] = buf[0].split(b"\n", 1)
+        w, _, rest = l.decode().strip().partition(" ")
+        if w == "quit":
+            loop.quit(); return False
+        if w == "play": set_status("Playing")
+        elif w == "pause": set_status("Paused")
+        elif w == "title":
+            state["title"] = rest; changed(Metadata=meta())
     return True
 GLib.unix_fd_add_full(GLib.PRIORITY_DEFAULT, 0, GLib.IOCondition.IN | GLib.IOCondition.HUP, line)
 loop = GLib.MainLoop()
