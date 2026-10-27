@@ -235,6 +235,41 @@ while t < 60 {
     shownBefore = now
 }
 expect(takes <= 6, "a player flapping every 2 s for a minute takes Now Playing \(takes) times (at most 6)")
+// Giving up and claiming again counts too: a player that stops 3 s or more
+// between plays (an autoplay countdown) cannot take the controls more often.
+c = linked(); run(c.received(.state(playing), now: 0))
+run(c.received(.state(stopped), now: 1)); run(c.tick(now: 4))
+expect(!c.claimed, "stopped 3 s after a claim at 0: given up")
+run(c.received(.state(playing), now: 6))
+expect(!c.claimed && c.deadline == 10, "playing again at 6 s: the new claim waits until 10 s after the last")
+run(c.tick(now: 10))
+expect(c.claimed && c.shown?.playing == true, "  then claimed, playing")
+c = linked(); run(c.received(.state(playing), now: 0)); run(c.received(.state(stopped), now: 1)); run(c.tick(now: 4))
+run(c.received(.state(playing), now: 6)); run(c.received(.state(paused), now: 7)); run(c.tick(now: 10))
+expect(!c.claimed && c.deadline == nil, "  paused before then: no claim, nothing waits")
+c = linked(); run(c.received(.state(playing), now: 0)); run(c.received(.state(stopped), now: 1)); run(c.tick(now: 4))
+run(c.received(.state(playing), now: 6)); c.disconnected(); run(c.tick(now: 10))
+expect(!c.claimed && c.deadline == nil, "  the connection gone before then: no claim from the old state")
+c = linked(); run(c.received(.state(playing), now: 0)); run(c.received(.state(stopped), now: 100)); run(c.tick(now: 103))
+run(c.received(.state(playing), now: 105))
+expect(c.claimed, "the next video 105 s after the last take: claimed at once")
+var claims: [Double] = []
+var cycle = linked()
+t = 0
+while t < 60 {   // plays 1 s, stops 5 s (given up after 3 s), again and again
+    let was = cycle.claimed
+    switch t.truncatingRemainder(dividingBy: 6) {
+    case 0: run(cycle.received(.state(playing), now: t))
+    case 1: run(cycle.received(.state(stopped), now: t))
+    default: break
+    }
+    run(cycle.tick(now: t))
+    if cycle.claimed && !was { claims.append(t) }
+    t += 0.5
+}
+let gaps = zip(claims.dropFirst(), claims).map { $0 - $1 }
+expect(claims.count <= 6 && gaps.allSatisfy { $0 >= 10 },
+       "a player that plays 1 s and stops 5 s for a minute claims \(claims.count) times, at least 10 s apart")
 // A playlist moving on while a Mac app plays: the dip is shorter than 1.5 s, so no take.
 c = linked(); run(c.received(.state(playing), now: 0))
 let before = c.shown?.playing
@@ -328,7 +363,7 @@ sent = []
 run(c.switched(true, now: 7))
 expect(!c.claimed && sent.count == 1 && object(sent[0])["on"] as? Bool == true, "switched on: the agent told, no claim from an old state")
 run(c.received(.state(playing), now: 7.2))
-expect(c.claimed, "  the agent's fresh state: claimed")
+expect(c.claimed, "  the agent's fresh state, 7 s after the last take: claimed at once (the person's switch does not wait)")
 var quiet = MediaClaim(on: true)
 sent = []
 run(quiet.switched(false, now: 0))

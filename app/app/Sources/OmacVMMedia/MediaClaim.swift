@@ -19,8 +19,9 @@ public enum RemoteCommand: String, CaseIterable, Sendable {
 /// - claim when the switch is on, the agent said hello and its player plays;
 /// - paused: keep the claim (the next press resumes the VM), shown paused;
 /// - a non-playing state shorter than 1.5 s (a track change, buffering)
-///   leaves Now Playing as it is; playing again after a pause takes Now
-///   Playing back from a Mac app, at most once per 10 s from the VM's side;
+///   leaves Now Playing as it is; playing again after a pause, or a new
+///   claim after giving up, takes Now Playing from a Mac app at most once
+///   per 10 s from the VM's side (the app's switch going on does not wait);
 /// - give up when nothing plays for 3 s, after 30 min paused, with no word
 ///   from the agent for 45 s (the Mac's sleep does not count), when the
 ///   switch goes off or QEMU ends;
@@ -110,6 +111,8 @@ public struct MediaClaim {
     private var stoppedSince: Double?
     private var pausedSince: Double?
     private var lastTake = -Double.infinity
+    /// A playing state that waits for its claim (10 s since the last take).
+    private var waiting = false
     private var graceUntil: Double?
     private var held: (playing: Bool, until: Double)?
     private var asleep = false
@@ -125,7 +128,7 @@ public struct MediaClaim {
 
     /// When `tick` is due next (nil: nothing waits).
     public var deadline: Double? {
-        guard claimed else { return nil }
+        guard claimed else { return waiting ? lastTake + Self.retakeEvery : nil }
         var d: [Double] = []
         if let h = held { d.append(h.until) }
         if last?.status == .playing, !shownPlaying { d.append(lastTake + Self.retakeEvery) }
@@ -150,6 +153,7 @@ public struct MediaClaim {
     public mutating func disconnected() {
         linked = false
         helloSeen = false
+        waiting = false
     }
 
     public mutating func received(_ m: GuestMessage, now: Double) -> [Effect] {
@@ -183,16 +187,13 @@ public struct MediaClaim {
         last = s
         if s.status != .none { info = s }
         graceUntil = nil
+        waiting = false
         var fx: [Effect] = []
         switch s.status {
         case .playing:
             notPlayingSince = nil; stoppedSince = nil; pausedSince = nil
             if !claimed {
-                claimed = true
-                shownPlaying = true
-                lastTake = now
-                held = nil
-                fx.append(.log("Now Playing is the VM (\(s.player.isEmpty ? "a player" : s.player) playing)"))
+                if now >= lastTake + Self.retakeEvery { fx += claim(now) } else { waiting = true }
             }
         case .paused:
             if wasPlaying || notPlayingSince == nil { notPlayingSince = now }
@@ -206,10 +207,21 @@ public struct MediaClaim {
         return fx + settle(now)
     }
 
+    private mutating func claim(_ now: Double) -> [Effect] {
+        claimed = true
+        shownPlaying = true
+        lastTake = now
+        held = nil
+        waiting = false
+        let player = last?.player ?? ""
+        return [.log("Now Playing is the VM (\(player.isEmpty ? "a player" : player) playing)")]
+    }
+
     /// What is due at `now`: Now Playing's state after the waits, and giving up.
     public mutating func tick(now: Double) -> [Effect] { settle(now) }
 
     private mutating func settle(_ now: Double) -> [Effect] {
+        if !claimed, waiting, now >= lastTake + Self.retakeEvery { return claim(now) }
         guard claimed, let s = last else { return [] }
         if let h = held, now < h.until {
             shownPlaying = h.playing
@@ -248,6 +260,9 @@ public struct MediaClaim {
         // The agent's next state after the hello is fresh; nothing from before counts.
         last = nil; info = nil
         notPlayingSince = nil; stoppedSince = nil; pausedSince = nil
+        waiting = false
+        // The person's own switch: its first claim does not wait for the VM's 10 s.
+        if on { lastTake = -Double.infinity }
         if linked, helloSeen { fx.append(.send(MediaLine.hello(on: on, id: guestID))) }
         if !on { fx += release("the app's switch is off") }
         return fx
@@ -299,6 +314,7 @@ public struct MediaClaim {
     public mutating func stop(_ why: String) -> [Effect] {
         linked = false
         helloSeen = false
+        waiting = false
         return release(why)
     }
 }
