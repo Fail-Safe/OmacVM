@@ -26,8 +26,21 @@ public enum HDRNote {
         return nil
     }
 
+    /// The row's subtitle without a note.
+    public static let usual = "Deeper colour, and HDR from Linux apps that send it. Counts when the VM starts, not at a restart inside it."
+
+    /// The row's subtitle, and whether it is a note about the running VM
+    /// (the row shows it in orange). The note wins over GPU safe mode's
+    /// line: safe mode also counts only from the next start, so a VM that
+    /// started with HDR keeps it until then.
+    /// - switchOn: the switch now (Settings.hdr); safeMode: Settings.gpuSafeMode.
+    public static func subtitle(switchOn: Bool, safeMode: Bool, running: Bool, log: String?) -> (text: String, isNote: Bool) {
+        if let n = note(switchOn: switchOn && !safeMode, running: running, log: log) { return (n, true) }
+        return (safeMode ? "Off while GPU safe mode is on." : usual, false)
+    }
+
     /// The row's note; nil: the usual subtitle.
-    /// - switchOn: the switch now (Settings.hdr).
+    /// - switchOn: what the next start takes (the switch, and no GPU safe mode).
     /// - running: this VM runs now.
     /// - log: the head of its logs/qemu.log (nil: none).
     public static func note(switchOn: Bool, running: Bool, log: String?) -> String? {

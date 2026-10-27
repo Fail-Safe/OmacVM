@@ -227,14 +227,12 @@ struct HDRRow: View {
     var folder: URL?
     var running = false
     @State private var on = Settings.hdr
-    @State private var note: String?
+    @State private var line = (text: HDRNote.usual, isNote: false)
 
     static let info = "The VM's main window shows 10-bit colour, for smoother gradients, and HDR highlights on this Mac's HDR display. White stays the Mac's white; brighter parts go as far as the display can show right now. Windows on other displays stay as before. Counts when the VM starts: shut it down and start it again; a restart inside the VM keeps the setting it started with. The VM gets its 10-bit graphics driver with Update VM (needs internet once). Few Linux apps send HDR yet: Chrome, Chromium and GStreamer do; mpv shows HDR video as SDR for now. Uses a little more memory and battery. Experimental. GPU safe mode turns it off."
 
     var body: some View {
-        SettingRow(title: "HDR and 10-bit colour", badge: "experimental",
-                   subtitle: Settings.gpuSafeMode ? "Off while GPU safe mode is on."
-                       : note ?? "Deeper colour, and HDR from Linux apps that send it. Counts when the VM starts, not at a restart inside it.",
+        SettingRow(title: "HDR and 10-bit colour", badge: "experimental", subtitle: line.text, subtitleIsNote: line.isNote,
                    info: Self.info, probe: "hdr") {
             RowSwitch(title: "HDR and 10-bit colour", isOn: $on, enabled: !Settings.gpuSafeMode)
         }
@@ -248,12 +246,12 @@ struct HDRRow: View {
         .onChange(of: folder) { _, _ in refresh() }
     }
 
-    /// The note from the running VM's qemu.log (its head: a few KB at a
-    /// start, read only while it runs).
+    /// The subtitle, with the note from the running VM's qemu.log (its head:
+    /// a few KB at a start, read only while it runs).
     private func refresh() {
         let log = running ? folder.flatMap { KeyAccess.lastLog(folder: $0) } : nil
-        let n = HDRNote.note(switchOn: Settings.hdr, running: running, log: log)
-        if n != note { note = n }
+        let l = HDRNote.subtitle(switchOn: Settings.hdr, safeMode: Settings.gpuSafeMode, running: running, log: log)
+        if l != line { line = l }
     }
 }
 

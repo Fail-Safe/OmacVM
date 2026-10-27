@@ -604,6 +604,18 @@ expect(HDRNote.note(switchOn: false, running: true, log: noLine) == nil, "off an
 expect(HDRNote.note(switchOn: false, running: true, log: hdrSafe) == nil, "off, and the start had none either: the usual subtitle")
 expect(HDRNote.note(switchOn: false, running: false, log: hdrOn) == nil, "not running: the usual subtitle (the log is an old start's)")
 expect(HDRNote.note(switchOn: true, running: true, log: nil) == nil, "running without a log yet: nothing to say")
+// The whole subtitle: the note in orange, and it wins over GPU safe mode's line (safe mode counts from the next start too).
+let safeStillOn = HDRNote.subtitle(switchOn: true, safeMode: true, running: true, log: hdrOn)
+expect(safeStillOn.isNote && safeStillOn.text.contains("still runs with HDR"),
+       "GPU safe mode turned on while the VM runs with HDR: the note, not \"Off while GPU safe mode is on.\"")
+expect(HDRNote.subtitle(switchOn: true, safeMode: true, running: true, log: hdrSafe) == ("Off while GPU safe mode is on.", false),
+       "GPU safe mode, and this start had none: safe mode's line, grey")
+expect(HDRNote.subtitle(switchOn: true, safeMode: true, running: false, log: nil) == ("Off while GPU safe mode is on.", false),
+       "GPU safe mode, not running: safe mode's line")
+expect(HDRNote.subtitle(switchOn: false, safeMode: false, running: true, log: hdrOn).isNote,
+       "switched off while it runs with HDR: a note")
+expect(HDRNote.subtitle(switchOn: true, safeMode: false, running: true, log: hdrOn) == (HDRNote.usual, false),
+       "on and running with HDR: the usual line, grey")
 
 // MARK: SSH repair (SSHRepair: the folder's key into a VM that knows only another Mac's)
 
