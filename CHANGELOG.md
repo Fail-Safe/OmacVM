@@ -9,6 +9,8 @@ in more words.
   the Mac's OpenGL did not answer a query's result (a query never started or still running, or a GL
   that refuses calls, as in #547), the VM got whatever bytes were on QEMU's stack, or the query never
   finished and the app waited for ever. Now it finishes with 0, and qemu.log says so once (#573).
+  A query still waiting when the app's GL context is lost on the Mac never finished either; now
+  it finishes with 0.
 
 ## 3.2.6
 

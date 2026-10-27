@@ -109,8 +109,9 @@ commit 82927e9. Changes here:
 - `patches/virgl-query-result-unanswered.patch`: a query result the GL does not
   answer (a query never begun or still running, or a GL that refuses calls) reaches
   the guest as done with 0, logged once. vrend copied its unset stack variables
-  into the guest's query buffer, or left the query "not ready" for ever. Checked
-  by `Tests/virgl/test-query-result.c`
+  into the guest's query buffer, or left the query "not ready" for ever. A query
+  still waiting when its context is lost is done with 0 too (it was dropped
+  unanswered). Checked by `Tests/virgl/test-query-result.c`
 - `patches/virgl-context-loss-report.patch`: a context that is lost anyway tells
   the guest through a status buffer the guest's Mesa names
   (`src/app/guest/mesa/`), and the log says so once

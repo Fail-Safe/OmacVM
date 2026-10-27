@@ -14,7 +14,9 @@
  *  - the GL answering: the result is the GL's (every sample of a 16x16 draw), also for
  *    a query that was not answered before;
  *  - a query the GL has not finished ("not available" for the first polls) still waits,
- *    then gets the GL's answer: only an unanswered query reads as done with 0. */
+ *    then gets the GL's answer: only an unanswered query reads as done with 0;
+ *  - a query still waiting when its context is lost: done with 0. vrend took it off its
+ *    waiting list without writing it, so the guest waited for ever. */
 #include <OpenGL/OpenGL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,13 +41,14 @@ void query_result_pending(long n);
 long query_result_pending_left(void);
 
 static CGLContextObj main_ctx;
-static int failures, unanswered_lines;
+static int failures, unanswered_lines, lost_lines;
 
 static void count_log(enum virgl_log_level_flags level, const char *message, void *data)
 {
    (void)level;
    (void)data;
    unanswered_lines += strstr(message, "query result: the GL did not answer (GL query ") != NULL;
+   lost_lines += strstr(message, "context error reported 2 ") != NULL;
    fputs(message, stderr);
 }
 
@@ -248,15 +251,19 @@ static void guest_waits(int i)
    results[i].result = GUEST_MARK;
 }
 
-static void wait_for_query(int i)
+static void wait_for(volatile struct virgl_host_query_state *state, int polls)
 {
    static uint32_t fence_id;
-   volatile struct virgl_host_query_state *state = &results[i];
-   for (int n = 0; n < 2000 && state->query_state != VIRGL_QUERY_STATE_DONE; n++) {
+   for (int n = 0; n < polls && state->query_state != VIRGL_QUERY_STATE_DONE; n++) {
       virgl_renderer_create_fence(++fence_id, 1);
       virgl_renderer_poll();
       usleep(1000);
    }
+}
+
+static void wait_for_query(int i)
+{
+   wait_for(&results[i], 2000);
 }
 
 /* GET_QUERY_RESULT for query 30 + i on a stack filled with byte: done, result 0 */
@@ -392,6 +399,42 @@ int main(void)
    check(results[0].query_state == VIRGL_QUERY_STATE_DONE && results[0].result == 256 &&
          query_result_pending_left() == 0, text);
    query_result_pending(0);
+
+   /* Context 2 has a query the GL has not finished when its command stream breaks (the
+    * context is lost). vrend then takes it off its waiting list: it must be done with 0,
+    * or the guest's Mesa waits for it for ever. */
+   static struct virgl_host_query_state lost;
+   struct iovec lost_iov = { .iov_base = &lost, .iov_len = sizeof(lost) };
+   struct virgl_renderer_resource_create_args largs = {
+      .handle = 20, .target = TEST_BUFFER, .format = VIRGL_FORMAT_R8_UNORM,
+      .bind = VIRGL_BIND_CUSTOM, .width = sizeof(lost), .height = 1, .depth = 1,
+      .array_size = 1,
+   };
+   check(!virgl_renderer_context_create(2, 4, "lost") &&
+         !virgl_renderer_resource_create(&largs, NULL, 0) &&
+         !virgl_renderer_resource_attach_iov(20, &lost_iov, 1), "a second context");
+   virgl_renderer_ctx_attach_resource(2, 20);
+   lost.query_state = VIRGL_QUERY_STATE_WAIT_HOST;
+   lost.result = GUEST_MARK;
+   emit_create_query(&c, 50, TEST_QUERY_OCCLUSION_COUNTER, 20);
+   emit_query(&c, VIRGL_CCMD_BEGIN_QUERY, 50);
+   emit_query(&c, VIRGL_CCMD_END_QUERY, 50);
+   emit_get_result(&c, 50);
+   query_result_pending(-1);
+   check(submit(2, &c) == 0 && lost.query_state == VIRGL_QUERY_STATE_WAIT_HOST,
+         "a query of context 2 waits for the GL");
+   emit(&c, VIRGL_CMD0(VIRGL_CCMD_BEGIN_QUERY, 0, 9));   /* 9 words announced, none sent */
+   submit(2, &c);
+   snprintf(text, sizeof(text), "context 2 is lost (%d log lines)", lost_lines);
+   check(lost_lines > 0, text);
+   wait_for(&lost, 200);
+   snprintf(text, sizeof(text), "its query: done with 0, not a wait for ever (state %u, 0x%llx)",
+            lost.query_state, (unsigned long long)lost.result);
+   check(lost.query_state == VIRGL_QUERY_STATE_DONE && lost.result == 0, text);
+   query_result_pending(0);
+   virgl_renderer_ctx_detach_resource(2, 20);
+   virgl_renderer_context_destroy(2);
+   virgl_renderer_resource_unref(20);
 
    for (int i = 0; i < QUERIES; i++) {
       virgl_renderer_ctx_detach_resource(1, 7 + i);
