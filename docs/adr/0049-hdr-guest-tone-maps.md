@@ -162,6 +162,31 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
   line says so. Not a Hyprland build in the VM (10-20 minutes at each
   Hyprland update, a failed build = no desktop) and not a capture tool of
   our own (it would miss colour picks and shares). Not covered: blur inside
-  captures (Omarchy has blur off; upstream #16324), Omarchy's screen
-  recordings (gpu-screen-recorder reads the PQ scanout over KMS as SDR: the
-  VM's connector has no `HDR_OUTPUT_METADATA`), captures taken on the Mac.
+  captures (Omarchy has blur off; upstream #16324), captures taken on the
+  Mac. Screen recordings (hdr-recording): Omarchy's recorder,
+  gpu-screen-recorder, reads the primary plane over KMS and treats it as HDR
+  only when the connector's `HDR_OUTPUT_METADATA` says PQ; the VM's had no
+  such property, so recordings stored PQ codes as SDR (white 148/255, grey
+  and flat). OmacVM's driver now attaches the property while virgl 3D and
+  `deep_color=1` are on (`linux-virtio-gpu-hdr-metadata.patch`, the last
+  extra patch; part of 0021's option 3b: KMS in the guest sees the HDR
+  metadata, the host still does not). Hyprland already sends its output's
+  metadata (aquamarine sets the blob on a modeset or an HDR change and
+  frees the old one); the screen does not change. gpu-screen-recorder then
+  tone-maps to SDR with its own curve: white at about 224/255 at headroom
+  6.69, 244 at 2, 255 with Extra brightness. In the stamp, so Update VM
+  builds the driver once; it loads at the VM's next start. Hyprland only
+  sets or clears an output's metadata while the output says it supports
+  HDR. display-sync's SDR rule for Virtual-1 (the Mac cannot show PQ) says
+  `supports_hdr = 1` itself; it was on there already, as `hl.monitor` keeps
+  the fields of the output's last rule, and the metadata went from PQ to
+  SDR with Virtual-1 (measured with the rule before and after). With it on,
+  Hyprland's auto HDR (`render:cm_auto_hdr`, on by default) could switch
+  that SDR output to PQ for a full-screen HDR window, and set the metadata
+  to SDR for a full-screen window that tags SDR colours while the screen
+  stays PQ (Renderer.cpp:2352-2394; no client in the VM did either: mpv
+  with gpu-next tags PQ on a PQ output, GStreamer's waylandsink did not
+  trigger it); `omacvm_app.lua` turns it off (a user's own value wins), as
+  display-sync sets Virtual-1's mode. Hyprland sends no new metadata when
+  only the headroom moves: the blob keeps the start's peak,
+  gpu-screen-recorder takes the peak from the Wayland output instead.

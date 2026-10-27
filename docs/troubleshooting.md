@@ -1202,8 +1202,8 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   ones clip; a window shared alone is clamped at 80 nits the same way. SDR
   windows get their own 203 nits there. It happens inside the VM, not on
   the Mac. The recordings are another cause: Omarchy's recorder
-  (gpu-screen-recorder) reads the screen itself and takes its PQ codes as
-  SDR, because the VM's display does not say it is HDR.
+  (gpu-screen-recorder) reads the screen itself and took its PQ codes for
+  SDR, because the VM's display did not say it is HDR.
 - **Fix:** Update VM (or `omacvm apply`). OmacVM puts a fixed copy of that
   one shader file into `/usr/local/share/hypr/shaders/`: HDR windows get SDR
   white at 203 nits in the copy, and a window shared alone is brought to
@@ -1217,10 +1217,18 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `sudo /usr/local/lib/omacvm/hypr-capture/hypr-capture.sh --remove`. Do not
   keep a copy of the file in `~/.config/hypr/shaders/`: Hyprland would read
   it before OmacVM's and keep it after a Hyprland update it was not made
-  for, where it may not compile and windows draw nothing. Recordings: no fix
-  yet. Screenshots and shares taken on the Mac (a macOS screenshot, sharing
-  the VM's window from a Mac app) are macOS's own and not covered.
+  for, where it may not compile and windows draw nothing. Recordings:
+  Update VM, then shut the VM down and start it again: the VM's graphics
+  driver then tells the recorder the screen is HDR (`omacvm check`: "HDR
+  recordings"), and it makes SDR of it itself, with its own curve: white
+  comes out at about 224 of 255 at a high headroom, 244 at headroom 2, 255
+  with Extra brightness. While the Mac cannot show PQ the VM's screen is SDR
+  and says so too ("HDR recordings" says which). Screenshots and shares taken on the Mac (a macOS
+  screenshot, sharing the VM's window from a Mac app) are macOS's own and
+  not covered.
 - **Where:** `src/app/guest/hypr-capture/` (the file, `guard.py`, the
   pacman hooks, `hypr-capture.sh`), `src/app/guest/install.sh`,
-  `src/guest/check.sh`; test `src/tests/hypr-capture.sh`; ADR 0049
-  (amended 2026-10-27).
+  `src/guest/check.sh`; test `src/tests/hypr-capture.sh`; recordings:
+  `src/app/guest/virtio-gpu/linux-virtio-gpu-hdr-metadata.patch`, tests
+  `src/tests/virtio-gpu-patches.sh`, `src/tests/hdr-recording-check.sh`;
+  ADR 0049 (amended 2026-10-27).

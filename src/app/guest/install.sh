@@ -53,6 +53,7 @@ install -Dm755 virtio-gpu/omacvm-virtio-gpu-load $VG/omacvm-virtio-gpu-load
 install -Dm644 virtio-gpu/linux-virtio-gpu-deep-color.patch $VG/linux-virtio-gpu-deep-color.patch
 install -Dm644 virtio-gpu/linux-virtio-gpu-damage-clips.patch $VG/linux-virtio-gpu-damage-clips.patch
 install -Dm644 virtio-gpu/linux-virtio-gpu-cursor-plane.patch $VG/linux-virtio-gpu-cursor-plane.patch
+install -Dm644 virtio-gpu/linux-virtio-gpu-hdr-metadata.patch $VG/linux-virtio-gpu-hdr-metadata.patch
 # Frames in step with the Mac (its vsync-lock patch, 3.2.3-3.2.6) is gone.
 rm -f $VG/linux-virtio-gpu-vsync-lock.patch
 ln -sf $VG/omacvm-virtio-gpu-build /usr/local/bin/omacvm-virtio-gpu-build
