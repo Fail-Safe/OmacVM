@@ -42,6 +42,14 @@ in more words.
   its updater, no new question); only another version of the app in another folder is asked again.
   Troubleshooting 42 says how to turn it on later; the Fast network's (i) says it needs it too.
 
+- Tests: the release gate's harnesses (`cc-switches.sh`, `modifier-keys.sh`, `display-unplug.sh`,
+  `onscreen.sh`) look for someone at the test Mac before every step, not only at their start: a
+  remote session (Screen Sharing, also one left alone, or Jump Desktop) or input that was not
+  theirs pauses the run until the Mac is quiet again, and rows that ran while someone came by get
+  a `person` row with the times (3.2.4's gate had two Screen Sharing connects inside a run). With
+  `--pause-ci` the test Mac's own CI runners stop for the run (each after its job) and start again
+  at its end, also when the run is killed or its ssh connection drops (`src/tests/e2e/ci-runners.sh`).
+
 ## 3.2.6
 
 Two changes: the pointer no longer jumps after a click near a corner of an external display, and

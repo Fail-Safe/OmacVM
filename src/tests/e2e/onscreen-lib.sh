@@ -1,10 +1,7 @@
 #!/bin/bash
 # The checks of src/tests/e2e/onscreen.sh that need no Mac screen, VM or app:
 # CI runs them with made-up values (src/tests/e2e-onscreen.sh). Source it.
-#   os_away IDLE JUMP LOCKED LAST NOW     exit 0 when nobody uses the Mac: no Jump Desktop session
-#                                         (JUMP: its proxies), the screen not locked (LOCKED: Yes|No),
-#                                         and no input for 300 s but our own (LAST: when we last
-#                                         posted an event, epoch s, 0 for never; IDLE: HID idle, s)
+# (Whether someone is at the Mac: person.sh, src/tests/e2e-person.sh.)
 #   os_window_problems "X Y W H" "SX SY SW SH"
 #                                         what is wrong with the app's window on its display's visible
 #                                         frame (points, top left): 800 wide, 500-800 tall, centred;
@@ -19,15 +16,6 @@
 #                                         result.json from summary.tsv (time, row, ok|FAIL|BLOCKED|skip,
 #                                         what): pass = no FAIL, no BLOCKED, at least one ok
 OS_WIDTH=800 OS_MIN_H=500 OS_MAX_H=800
-
-os_away() {
-  local idle=$1 jump=$2 locked=$3 last=$4 now=$5
-  (( jump == 0 )) || return 1
-  [[ $locked != Yes ]] || return 1
-  (( idle > 300 )) && return 0
-  # The last input was ours: it came no later than our last event (2 s slack).
-  (( last > 0 && now - idle <= last + 2 ))
-}
 
 # Rounded to whole points (AX gives fractions after a resize).
 _os_int() { printf '%.0f' "$1"; }
