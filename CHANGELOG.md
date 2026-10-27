@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.8 (unreleased)
+## 3.2.8
 
 An OpenGL query the Mac does not answer now finishes with 0 in the VM: no memory bytes from the Mac,
 and no app waiting for it for ever.
