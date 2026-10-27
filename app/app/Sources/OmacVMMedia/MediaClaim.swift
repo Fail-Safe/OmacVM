@@ -270,13 +270,19 @@ public struct MediaClaim {
 
     /// A command from macOS (AirPods, Control Center, a play key): what to
     /// send the VM, from the agent's own last state (not what Now Playing shows).
-    public func command(_ c: RemoteCommand) -> Answer {
+    /// Within the hold after the Mac's own play or pause, the agent's state can
+    /// still be from before it: a toggle then goes from that command (a quick
+    /// double press of a play key pauses and plays).
+    public func command(_ c: RemoteCommand, now: Double) -> Answer {
         guard claimed, on, let s = last else { return .notClaimed }
         guard linked, helloSeen else { return .noLink }
         switch c {
         case .play: return .send(.play)
         case .pause, .stop: return .send(.pause)
-        case .togglePlayPause: return .send(s.status == .playing ? .pause : .play)
+        case .togglePlayPause:
+            var playing = s.status == .playing
+            if let h = held, now < h.until { playing = h.playing }
+            return .send(playing ? .pause : .play)
         case .nextTrack: return .send(.next)
         case .previousTrack: return .send(.previous)
         }

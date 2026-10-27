@@ -115,7 +115,7 @@ final class MediaSession {
 
     /// A command from macOS while this session holds Now Playing.
     func command(_ c: RemoteCommand) -> MPRemoteCommandHandlerStatus {
-        switch claim.command(c) {
+        switch claim.command(c, now: Self.now) {
         case .notClaimed:
             return .noActionableNowPlayingItem
         case .noLink:
