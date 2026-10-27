@@ -14,7 +14,7 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   are set up per Mac, by Update VM in OmacVM. The app says so before the
   start and offers it
   ([40](#40-app-gestures-and-the-bar-do-nothing-in-a-vm-copied-from-another-mac)).
-- **macOS asks "Allow OmacVM to find devices on local networks?"**: click
+- **macOS asks "Allow “OmacVM” to find devices on local networks?"**: click
   Allow. Omarchy's network runs through OmacVM, so its name lookups (through
   the Mac's DNS server, often your router or Tailscale) and the devices on
   your network count as OmacVM reaching the local network. macOS asks once;
@@ -1159,7 +1159,7 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 
 ## 42. app: macOS asks to let OmacVM find devices on local networks
 
-- **Symptom:** at the first start of a VM macOS asks "Allow "OmacVM" to find
+- **Symptom:** at the first start of a VM macOS asks "Allow “OmacVM” to find
   devices on local networks?". With Don't Allow, macOS may keep Omarchy from
   devices on your network (printers, a NAS, other computers).
 - **Cause:** macOS's Local Network privacy (macOS 15 and later). QEMU's own
