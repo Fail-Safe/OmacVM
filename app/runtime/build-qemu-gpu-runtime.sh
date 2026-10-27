@@ -817,6 +817,18 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-ow
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-head-key-same-space.patch"
 "$native_dir/Tests/display/test-fullscreen-space.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: full screen without a Space of its own (test-fullscreen-space.sh)"
+# OmacVM (#563): a click on another display's window keeps the pointer and the
+# keys (that window gives the key straight back): no let-go and grab again,
+# the Mac's cursor no longer shown and hidden at every click. Its rules' test,
+# a check that the wiring checks fail on the code before, the wiring.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-key-handback-logic.patch"
+"$native_dir/Tests/display/test-key-handback.sh" || \
+  die "the rules for a click on another display's window fail their test (test-key-handback.sh)"
+"$native_dir/Tests/display/test-key-handback.sh" --self-test "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a key hand-back wiring check passes without the patch (test-key-handback.sh)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-key-handback.patch"
+"$native_dir/Tests/display/test-key-handback.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a click on another display's window lets go of the pointer (test-key-handback.sh)"
 # OmacVM: no events into QEMU once the display is cleaned up (the crash on
 # Quit/shutdown); a full-screen start shows nothing until it is there.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shutdown-events.patch"

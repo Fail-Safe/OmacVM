@@ -22,6 +22,12 @@ in more words.
   OmacVM.app VMs: lossless-compressed or plain, for normal colour and for HDR and Extra brightness,
   why lossless is off when it is, and a warning when making them failed this run (#562).
 
+- **A click on an external display no longer lets go of the pointer for a moment (#563).** In
+  full screen with the VM on more than one display, each click on another display's VM window gave
+  the pointer and keyboard back to macOS and took them again: the Mac's cursor was shown and hidden,
+  and a key held during the click (Shift for a Shift-click) was let go in the VM. The VM now keeps
+  both through such a click. Command-Tab, the escape combo and swipes let go as before.
+
 ## 3.2.6
 
 Two changes: the pointer no longer jumps after a click near a corner of an external display, and
