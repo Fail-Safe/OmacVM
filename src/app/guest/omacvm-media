@@ -1,0 +1,631 @@
+#!/usr/bin/python3
+"""OmacVM.app: AirPods and media controls, the VM's side.
+
+While something plays in the VM, OmacVM.app is the Mac's Now Playing app, so
+AirPods, other Bluetooth headphones, Control Center and the play keys go to
+the VM's player. This agent tells the Mac what that player does and runs the
+Mac's commands, over the virtio port org.omacvm.media, one JSON object per
+line ("t" says what; the Mac's side: app/app/Sources/OmacVMMedia):
+
+  to the Mac    {"t":"hello","v":1,"n":"5f2c9a01"}  at start (n: this run's
+                id), again every 5 s until the Mac answers
+                {"t":"state","s":"playing","player":"Chromium","title":"..",
+                 "artist":"..","album":"..","len":213.5,"pos":12.0,"rate":1.0,
+                 "next":true,"prev":false}  s: playing, paused, stopped or
+                none (no player); after the Mac's hello, 0.2 s after every
+                change, and every 15 s while there is a player
+  from the Mac  {"t":"hello","v":1,"on":true,"n":"5f2c9a01"}  the answer, with
+                this run's n (anything before it is from before this run and
+                does not count; a hello without n asks for ours again), again
+                when the app's switch changes; off: the agent stops watching
+                the players
+                {"t":"cmd","c":"play|pause|next|previous"}  for the player it
+                reports: Play, Pause, Next or Previous. Never PlayPause:
+                AirPods pause when one comes out, and a toggle would start a
+                paused video.
+
+The players are the MPRIS players on the session bus (Chromium, Firefox, mpv
+with mpv-mpris, ...), read with Gio (python-gobject, in Omarchy's base) only
+once the Mac says on. Which one: the one that went into Playing last; none
+playing, the one that played last; else a paused one (so a restarted agent
+keeps a paused player). Text is cut before it is sent (200 characters, the
+player's name 64) and written as UTF-8, so the biggest line stays within the
+Mac's 4 KB. Titles go to the Mac only, never to the journal or a file.
+
+  omacvm-media            run the agent (the user service omacvm-media)
+  omacvm-media status     the Mac's switch (on, off, or silent: no answer
+                          yet), the player and its state, the last command
+                          and error, as JSON ($XDG_RUNTIME_DIR/omacvm/media)
+"""
+
+from __future__ import annotations
+
+import errno
+import json
+import os
+from pathlib import Path
+import select
+import sys
+import time
+
+PORT = Path("/dev/virtio-ports/org.omacvm.media")
+RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+STATUS = RUNTIME / "omacvm/media"
+VERSION = 1
+MAX_LINE = 4096
+MAX_TEXT = 200
+MAX_PLAYER = 64
+HELLO_EVERY = 5.0      # until the Mac answers
+LEASE_EVERY = 15.0     # the Mac gives up after 45 s without a line
+SETTLE = 0.2           # a change is sent this much later (several come together)
+FIRST_STATE = 1.5      # after on: the first state at the latest, players read or not
+CALL_MS = 2000         # a player that hangs on D-Bus
+PORT_RETRY = (2.0, 30.0)   # the Mac's side not connected: try again, slower each time
+
+MPRIS = "org.mpris.MediaPlayer2"
+PLAYER = MPRIS + ".Player"
+OBJECT = "/org/mpris/MediaPlayer2"
+PROPS = "org.freedesktop.DBus.Properties"
+# playerctld (if a user installed playerctl) proxies the other players: not a player of its own.
+SKIP = {MPRIS + ".playerctld"}
+METHODS = {"play": "Play", "pause": "Pause", "next": "Next", "previous": "Previous"}
+HIDDEN = {0x061C, 0x200E, 0x200F, 0x2028, 0x2029, *range(0x202A, 0x202F), *range(0x2066, 0x206A)}
+
+
+def log(message: str) -> None:
+    print(f"omacvm-media: {message}", file=sys.stderr, flush=True)
+
+
+def clean(value, limit: int) -> str:
+    """Text as the Mac takes it: cut to `limit` characters, without control,
+    line break or direction characters; anything but a string is ""."""
+    if not isinstance(value, str):
+        return ""
+    out = []
+    for ch in value:
+        if len(out) == limit:
+            break
+        o = ord(ch)
+        if o < 0x20 or 0x7F <= o < 0xA0 or o in HIDDEN or 0xD800 <= o < 0xE000:
+            continue
+        out.append(ch)
+    return "".join(out).strip(" ")
+
+
+def encode(message: dict) -> bytes:
+    return json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8", "replace") + b"\n"
+
+
+class Player:
+    """One MPRIS player as the agent knows it."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name                   # its well-known name, org.mpris.MediaPlayer2.*
+        self.owner: str | None = None      # its unique name, which signals come from
+        self.identity = ""
+        self.status = "Stopped"
+        self.metadata: dict = {}
+        self.rate = 1.0
+        self.can_next = False
+        self.can_previous = False
+        self.position: int | None = None   # microseconds, read when a state goes out
+        self.since: float | None = None    # when it went into Playing
+        self.last: float | None = None     # the last time it was seen playing
+
+    def update(self, props: dict, now: float) -> None:
+        if "PlaybackStatus" in props and isinstance(props["PlaybackStatus"], str):
+            status = props["PlaybackStatus"]
+            if status == "Playing" and self.status != "Playing":
+                self.since = now
+            if status == "Playing" or self.status == "Playing":
+                self.last = now
+            self.status = status
+        if isinstance(props.get("Metadata"), dict):
+            self.metadata = props["Metadata"]
+        if isinstance(props.get("Rate"), (int, float)):
+            self.rate = float(props["Rate"])
+        if isinstance(props.get("CanGoNext"), bool):
+            self.can_next = props["CanGoNext"]
+        if isinstance(props.get("CanGoPrevious"), bool):
+            self.can_previous = props["CanGoPrevious"]
+
+    def label(self) -> str:
+        if self.identity:
+            return self.identity
+        rest = self.name[len(MPRIS) + 1:] if self.name.startswith(MPRIS + ".") else self.name
+        return rest.split(".")[0]
+
+
+def pick(players) -> Player | None:
+    """The player the Mac controls: the one that went into Playing last;
+    none playing, the one that played last; else a paused one."""
+    players = list(players)
+    playing = [p for p in players if p.status == "Playing"]
+    if playing:
+        return max(playing, key=lambda p: (p.since or 0.0, p.name))
+    played = [p for p in players if p.last is not None]
+    if played:
+        return max(played, key=lambda p: (p.last, p.name))
+    paused = sorted((p for p in players if p.status == "Paused"), key=lambda p: p.name)
+    return paused[0] if paused else None
+
+
+def state_message(p: Player | None) -> dict:
+    if p is None:
+        return {"t": "state", "s": "none"}
+    md = p.metadata
+    artists = md.get("xesam:artist")
+    if isinstance(artists, str):
+        artists = [artists]
+    artist = ", ".join(a for a in artists if isinstance(a, str)) if isinstance(artists, list) else ""
+    m = {"t": "state", "s": {"Playing": "playing", "Paused": "paused"}.get(p.status, "stopped"),
+         "player": clean(p.label(), MAX_PLAYER),
+         "title": clean(md.get("xesam:title"), MAX_TEXT),
+         "artist": clean(artist, MAX_TEXT),
+         "album": clean(md.get("xesam:album"), MAX_TEXT),
+         "rate": p.rate if 0 <= p.rate <= 4 else 1.0,
+         "next": p.can_next, "prev": p.can_previous}
+    length = md.get("mpris:length")
+    if isinstance(length, int) and not isinstance(length, bool) and length > 0:
+        m["len"] = round(length / 1e6, 3)
+    if p.position is not None and p.position >= 0:
+        m["pos"] = round(p.position / 1e6, 3)
+    return m
+
+
+class Agent:
+    def __init__(self, fd: int | None = None, status: Path = STATUS) -> None:
+        self.fd = fd if fd is not None else os.open(PORT, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+        os.set_blocking(self.fd, False)
+        self.status_path = status
+        self.id = os.urandom(4).hex()
+        self.buffer = b""
+        self.skipping = False
+        self.hello_out: bytes | None = None
+        self.state_out: bytes | None = None
+        self.partial = b""
+        self.accepted = False      # the Mac answered this run's hello
+        self.on = False            # the app's switch, as the Mac said
+        self.reachable = True      # the Mac's side was connected at the last try
+        self.retry = PORT_RETRY[0]
+        self.due: dict[str, float] = {}
+        self.players: dict[str, Player] = {}
+        self.owners: dict[str, str] = {}
+        self.reported: str | None = None   # the player of the last state sent: commands go there
+        self.watching = False
+        self.pending = 0           # player reads still out at the start
+        self.bus = None
+        self.subs: list[int] = []
+        self.glib = None           # GLib's module, once the agent runs on its loop
+        self.timer = None
+        self.watch_id = None
+        self.status = {"mac": "silent", "player": "", "state": "", "command": "", "error": "", "pid": os.getpid()}
+        self.write_status()
+
+    # The status file (no titles).
+
+    def set_status(self, **kv) -> None:
+        if all(self.status.get(k) == v for k, v in kv.items()):
+            return
+        self.status.update(kv)
+        self.write_status()
+
+    def write_status(self) -> None:
+        try:
+            self.status_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.status_path.with_name(self.status_path.name + ".new")
+            tmp.write_text(json.dumps(self.status) + "\n")
+            tmp.replace(self.status_path)
+        except OSError:
+            pass
+
+    # What is due when.
+
+    def schedule(self, what: str, delay: float) -> None:
+        self.due[what] = time.monotonic() + delay
+        self.rearm()
+
+    def soon(self, what: str, delay: float) -> None:
+        """As schedule, but never later than it already is."""
+        at = time.monotonic() + delay
+        if what not in self.due or self.due[what] > at:
+            self.due[what] = at
+            self.rearm()
+
+    def run_due(self) -> None:
+        now = time.monotonic()
+        for what, at in sorted(self.due.items(), key=lambda kv: kv[1]):
+            if at <= now and self.due.get(what) == at:
+                del self.due[what]
+                getattr(self, "due_" + what)()
+        self.rearm()
+
+    def wait(self) -> float | None:
+        if not self.due:
+            return None
+        return max(0.0, min(self.due.values()) - time.monotonic())
+
+    def rearm(self) -> None:
+        if not self.glib:
+            return
+        if self.timer is not None:
+            self.glib.source_remove(self.timer)
+            self.timer = None
+        w = self.wait()
+        if w is not None:
+            self.timer = self.glib.timeout_add(int(w * 1000) + 1, self.on_timer)
+
+    def on_timer(self) -> bool:
+        self.timer = None
+        self.run_due()
+        return False
+
+    # The port.
+
+    def due_hello(self) -> None:
+        if self.accepted:
+            return
+        self.hello_out = encode({"t": "hello", "v": VERSION, "n": self.id})
+        self.flush()
+        self.schedule("hello", HELLO_EVERY)
+
+    def due_flush(self) -> None:
+        self.flush()
+
+    def due_retry(self) -> None:
+        """The Mac's side was not connected: look again."""
+        self.reachable = True
+        self.listen()
+        self.readable()
+        self.flush()
+
+    def unreachable(self) -> None:
+        if not self.reachable:
+            return
+        self.reachable = False
+        self.unlisten()
+        self.schedule("retry", self.retry)
+        self.retry = min(self.retry * 2, PORT_RETRY[1])
+
+    def flush(self) -> None:
+        if not self.reachable:
+            return
+        while self.partial or self.hello_out or self.state_out:
+            slot = "partial" if self.partial else "hello_out" if self.hello_out else "state_out"
+            data = getattr(self, slot)
+            setattr(self, slot, b"" if slot == "partial" else None)
+            try:
+                n = os.write(self.fd, data)
+            except OSError as error:
+                if error.errno not in (errno.EAGAIN, errno.EINTR):
+                    raise
+                n = 0
+            if n == len(data):
+                continue
+            if n == 0:
+                setattr(self, slot, data)   # untouched: back in its place
+            else:
+                self.partial = data[n:]     # the rest of a line goes first
+            # The port took nothing more: the Mac's side is not connected, or it is full.
+            if self.check_reachable():
+                self.soon("flush", 1.0)
+            return
+
+    def check_reachable(self) -> bool:
+        try:
+            data = os.read(self.fd, 65536)
+        except OSError as error:
+            if error.errno in (errno.EAGAIN, errno.EINTR):
+                return True
+            raise
+        if data == b"":
+            self.unreachable()
+            return False
+        self.take(data)
+        return True
+
+    def readable(self) -> None:
+        try:
+            data = os.read(self.fd, 65536)
+        except OSError as error:
+            if error.errno in (errno.EAGAIN, errno.EINTR):
+                return
+            raise
+        if data == b"":
+            # The Mac's side is not connected (QEMU's socket has nobody, or not yet).
+            self.unreachable()
+            if self.accepted:
+                self.accepted = False
+                self.set_status(mac="silent")
+                self.soon("hello", 0)
+            return
+        self.retry = PORT_RETRY[0]
+        self.take(data)
+
+    def take(self, data: bytes) -> None:
+        self.buffer += data
+        while b"\n" in self.buffer:
+            line, self.buffer = self.buffer.split(b"\n", 1)
+            if self.skipping:
+                self.skipping = False
+                continue
+            self.on_line(line)
+        if len(self.buffer) > MAX_LINE:
+            self.buffer = b""
+            self.skipping = True
+
+    def on_line(self, line: bytes) -> None:
+        try:
+            m = json.loads(line)
+        except ValueError:
+            return
+        if not isinstance(m, dict):
+            return
+        if m.get("t") == "hello":
+            if "n" not in m:
+                self.soon("hello", 0)   # the Mac lost us: say hello again
+                self.accepted = False
+                return
+            if m.get("n") != self.id or not isinstance(m.get("v"), int) or m["v"] < 1:
+                return   # an answer to an earlier run's hello
+            self.accepted = True
+            self.due.pop("hello", None)
+            self.set_on(m.get("on") is True)
+        elif m.get("t") == "cmd" and self.accepted and self.on and isinstance(m.get("c"), str):
+            self.command(m["c"])
+
+    def set_on(self, on: bool) -> None:
+        self.on = on
+        self.set_status(mac="on" if on else "off")
+        if not on:
+            self.stop_watching()
+            return
+        if self.watching:
+            self.soon("send", 0)   # the Mac asks again (it woke up): a fresh state
+        elif self.glib:
+            self.start_watching()
+        # Before GLib runs: run() starts it, then watching.
+
+    # Watching the players (Gio, once the Mac says on).
+
+    def start_watching(self) -> None:
+        from gi.repository import Gio, GLib
+        self.watching = True
+        self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self.subs = [
+            self.bus.signal_subscribe("org.freedesktop.DBus", "org.freedesktop.DBus", "NameOwnerChanged",
+                                      "/org/freedesktop/DBus", MPRIS, Gio.DBusSignalFlags.MATCH_ARG0_NAMESPACE,
+                                      self.on_owner),
+            self.bus.signal_subscribe(None, PROPS, "PropertiesChanged", OBJECT, PLAYER, Gio.DBusSignalFlags.NONE,
+                                      self.on_properties),
+        ]
+        self.pending = 1
+        self.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames", None,
+                  "(as)", self.on_names)
+        self.soon("send", FIRST_STATE)
+
+    def stop_watching(self) -> None:
+        if self.bus:
+            for s in self.subs:
+                self.bus.signal_unsubscribe(s)
+        self.subs = []
+        self.bus = None
+        self.watching = False
+        self.players.clear()
+        self.owners.clear()
+        self.reported = None
+        self.state_out = None
+        for what in ("send", "lease"):
+            self.due.pop(what, None)
+        self.set_status(player="", state="")
+
+    def call(self, name, path, iface, method, args, reply, done, *extra) -> None:
+        from gi.repository import Gio, GLib
+        bus = self.bus
+
+        def finish(conn, result, _):
+            try:
+                value = conn.call_finish(result).unpack()
+                error = None
+            except GLib.Error as e:
+                value, error = None, e
+            if bus is self.bus:   # not from before an off
+                done(value, error, *extra)
+
+        bus.call(name, path, iface, method, args, GLib.VariantType(reply) if reply else None,
+                 Gio.DBusCallFlags.NONE, CALL_MS, None, finish, None)
+
+    def on_names(self, value, error) -> None:
+        self.pending -= 1
+        for name in (value[0] if value else []):
+            if name.startswith(MPRIS + ".") and name not in SKIP:
+                self.pending += 1
+                self.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner",
+                          self.variant("(s)", (name,)), "(s)", self.on_owner_of, name)
+        self.started()
+
+    def on_owner_of(self, value, error, name) -> None:
+        if value:
+            self.add(name, value[0])
+        self.pending -= 1
+        self.started()
+
+    def started(self) -> None:
+        if self.pending <= 0:
+            self.soon("send", 0)
+
+    def variant(self, kind, value):
+        from gi.repository import GLib
+        return GLib.Variant(kind, value)
+
+    def add(self, name: str, owner: str) -> None:
+        p = self.players.get(name) or Player(name)
+        p.owner = owner
+        self.players[name] = p
+        self.owners[owner] = name
+        self.pending += 2
+        self.call(owner, OBJECT, PROPS, "GetAll", self.variant("(s)", (PLAYER,)), "(a{sv})", self.on_all, name)
+        self.call(owner, OBJECT, PROPS, "Get", self.variant("(ss)", (MPRIS, "Identity")), "(v)", self.on_identity, name)
+
+    def on_all(self, value, error, name) -> None:
+        self.pending -= 1
+        p = self.players.get(name)
+        if p and value:
+            p.update(value[0], time.monotonic())
+            self.changed()
+        self.started()
+
+    def on_identity(self, value, error, name) -> None:
+        self.pending -= 1
+        p = self.players.get(name)
+        if p and value and isinstance(value[0], str):
+            p.identity = value[0]
+            self.changed()
+        self.started()
+
+    def on_owner(self, conn, sender, path, iface, signal, params, *_) -> None:
+        name, old, new = params.unpack()
+        if not name.startswith(MPRIS + ".") or name in SKIP:
+            return
+        if old:
+            self.owners.pop(old, None)
+        if new:
+            self.add(name, new)
+        else:
+            self.players.pop(name, None)
+            self.changed()
+
+    def on_properties(self, conn, sender, path, iface, signal, params, *_) -> None:
+        interface, changed, invalidated = params.unpack()
+        name = self.owners.get(sender)
+        p = self.players.get(name) if name else None
+        if interface != PLAYER or not p:
+            return
+        p.update(changed, time.monotonic())
+        if invalidated:
+            self.call(p.owner, OBJECT, PROPS, "GetAll", self.variant("(s)", (PLAYER,)), "(a{sv})", self.on_all, p.name)
+        self.changed()
+
+    def changed(self) -> None:
+        if self.watching:
+            self.soon("send", SETTLE)
+
+    # States to the Mac.
+
+    def due_send(self) -> None:
+        if not self.watching:
+            return
+        p = pick(self.players.values())
+        if p and p.owner and p.status in ("Playing", "Paused"):
+            # Where it is now (Position is never signalled), then the state.
+            self.call(p.owner, OBJECT, PROPS, "Get", self.variant("(ss)", (PLAYER, "Position")), "(v)",
+                      self.on_position, p.name)
+        else:
+            self.send(p)
+
+    def due_lease(self) -> None:
+        self.due_send()
+
+    def on_position(self, value, error, name) -> None:
+        p = self.players.get(name)
+        if p:
+            v = value[0] if value else None
+            p.position = v if isinstance(v, int) and not isinstance(v, bool) else None
+        current = pick(self.players.values())
+        self.send(current)
+
+    def send(self, p: Player | None) -> None:
+        if not (self.watching and self.accepted and self.on):
+            return
+        m = state_message(p)
+        self.reported = p.name if p else None
+        self.state_out = encode(m)
+        self.flush()
+        self.set_status(player=m.get("player", ""), state=m["s"])
+        if p:
+            self.schedule("lease", LEASE_EVERY)
+        else:
+            self.due.pop("lease", None)
+
+    # Commands from the Mac.
+
+    def command(self, c: str) -> None:
+        method = METHODS.get(c)
+        p = self.players.get(self.reported) if self.reported else None
+        if not method or not self.watching or not p or not p.owner:
+            return
+        self.set_status(command=c)
+        self.call(p.owner, OBJECT, PLAYER, method, None, None, self.on_called, method)
+
+    def on_called(self, value, error, method) -> None:
+        if error:
+            log(f"{method} failed: {error.message}")
+            self.set_status(error=f"{method}: {error.message}"[:200])
+        else:
+            self.set_status(error="")
+        self.soon("send", SETTLE)
+
+    # The loops: a plain one until the Mac says on, then GLib's.
+
+    def listen(self) -> None:
+        if self.glib and self.watch_id is None and self.reachable:
+            self.watch_id = self.glib.unix_fd_add_full(
+                self.glib.PRIORITY_DEFAULT, self.fd, self.glib.IOCondition.IN | self.glib.IOCondition.HUP,
+                self.on_readable)
+
+    def unlisten(self) -> None:
+        if self.glib and self.watch_id is not None:
+            self.glib.source_remove(self.watch_id)
+            self.watch_id = None
+
+    def on_readable(self, fd, condition) -> bool:
+        self.readable()
+        self.run_due()
+        if not self.reachable:
+            self.watch_id = None
+            return False
+        return True
+
+    def run(self) -> None:
+        self.soon("hello", 0)
+        while not self.on:
+            w = self.wait()
+            readers = [self.fd] if self.reachable else []
+            ready, _, _ = select.select(readers, [], [], w)
+            if ready:
+                self.readable()
+            self.run_due()
+        try:
+            from gi.repository import GLib
+        except ImportError as error:
+            log(f"python-gobject is missing ({error}): omacvm apply installs it")
+            self.set_status(error="python-gobject is missing: omacvm apply")
+            return
+        self.glib = GLib
+        self.listen()
+        self.rearm()
+        if self.on and not self.watching:
+            self.start_watching()
+        GLib.MainLoop().run()
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) >= 2 and argv[1] == "status":
+        try:
+            print(STATUS.read_text().strip())
+        except OSError:
+            print("{}")
+        return 0
+    if len(argv) >= 2 and argv[1] not in ("run",):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    fd = os.environ.get("OMACVM_MEDIA_FD")   # tests: a socket pair instead of the port
+    if fd is None and not PORT.exists():
+        log(f"{PORT} is missing (an OmacVM.app from before media controls)")
+        return 0
+    Agent(int(fd) if fd is not None else None).run()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
