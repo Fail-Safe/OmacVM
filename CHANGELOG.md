@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.7 (unreleased)
+## 3.2.7
 
 A click on another display's VM window keeps the pointer and keys, `omacvm check` names the
 window's surfaces, and the experimental Frames in step with the Mac is gone (Update VM rebuilds the
