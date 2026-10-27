@@ -82,15 +82,14 @@ out() {
 # put FOLDER: FOLDER's file in place (written beside it, then renamed); true
 # when that changed something. A file someone else put there stays.
 put() {
-  local src=$here/$1/cm_helpers.glsl dir tmp
+  local src=$here/$1/cm_helpers.glsl tmp
   [[ -e $OURS || -L $OURS ]] && ! is_ours "$OURS" && return 1
   if [[ ! -L $OURS ]] && cmp -s "$src" "$OURS"; then
     echo "$1 $(sum "$OURS")" > "$STATE" 2>/dev/null
     return 1
   fi
-  dir=$(dirname "$OURS")
-  mkdir -p "$dir" "$(dirname "$STATE")" || return 1
-  tmp=$(mktemp "$dir/.cm_helpers.glsl.XXXXXX") || return 1
+  mkdir -p "$SHADERS" "$(dirname "$STATE")" || return 1
+  tmp=$(mktemp "$SHADERS/.cm_helpers.glsl.XXXXXX" 2>/dev/null) || return 1
   if cat "$src" > "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$OURS"; then
     echo "$1 $(sum "$OURS")" > "$STATE"
     return 0
@@ -136,8 +135,10 @@ apply() {
     put "$folder" || changed=0
     if [[ $(sum "$OURS") == "$(sum "$here/$folder/cm_helpers.glsl")" ]]; then
       echo "OmacVM: HDR captures: OmacVM's cm_helpers.glsl for Hyprland $folder in place"
+    elif [[ -e $OURS || -L $OURS ]]; then
+      echo "OmacVM: HDR captures: another cm_helpers.glsl is in $SHADERS; left as it is"
     else
-      echo "OmacVM: HDR captures: another cm_helpers.glsl is in $(dirname "$OURS"); left as it is"
+      echo "OmacVM: HDR captures: OmacVM's cm_helpers.glsl could not be written to $SHADERS; Hyprland's own copy"
     fi
   else
     why=$(guard 2>&1 >/dev/null | tail -n1)

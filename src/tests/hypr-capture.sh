@@ -245,6 +245,15 @@ expect "the user's own file: ours stays in place (theirs wins in Hyprland)" test
 rm "$R$hm/.config/hypr/shaders/cm_helpers.glsl"; echo "// mine" > "$R$hm/.config/hypr/shaders/constants.h"
 expect "the user's own constants.h: status own, names it" grep -q "^own.*shaders/constants.h is used" <(run --status "$me")
 rm -r "$R$hm/.config"
+# the shader folder cannot be written: Hyprland's own copy, and says so
+run --remove >/dev/null; chmod 555 "$R/usr/local/share/hypr/shaders"
+if touch "$R/usr/local/share/hypr/shaders/.w" 2>/dev/null; then
+  rm -f "$R/usr/local/share/hypr/shaders/.w"; echo "skip: a folder that cannot be written (root writes anyway)"
+else
+  expect "cannot write ours: exit 0, says so" grep -q "could not be written" <(run 2>&1)
+  expect "cannot write ours: not there" test ! -e "$OURS"
+fi
+chmod 755 "$R/usr/local/share/hypr/shaders"; run >/dev/null
 : > "$LOG"
 expect "--remove: exit 0" test "$(rc --remove)" = 0
 expect "--remove: ours out, the live Hyprland reloaded" test "$(reloads; [[ -e $OURS ]] && echo there)" = 1
