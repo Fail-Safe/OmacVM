@@ -176,6 +176,7 @@ HC=/usr/local/lib/omacvm/hypr-capture
 rm -rf "$HC.new" "$HC.old"
 install -Dm755 hypr-capture/hypr-capture.sh "$HC.new/hypr-capture.sh"
 install -Dm644 hypr-capture/guard.py "$HC.new/guard.py"
+install -Dm644 hypr-capture/LICENSE.hyprland "$HC.new/LICENSE.hyprland"
 for v in hypr-capture/*/; do
   install -Dm644 -t "$HC.new/$(basename "$v")" "${v}cm_helpers.glsl" "${v}original"
 done

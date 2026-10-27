@@ -5,8 +5,8 @@
 #ifndef CM_HELPERS_GLSL
 #define CM_HELPERS_GLSL
 // OmacVM begin: Hyprland 0.56.2's src/render/shaders/glsl/cm_helpers.glsl (BSD-3-Clause, Copyright (c) 2022-2026,
-// vaxerski; THIRD_PARTY_NOTICES.md) with two changes for captures in an HDR VM (#579), marked "OmacVM". Hyprland
-// reads it before its own copy; OmacVM puts it in only for the Hyprland it was made for (hypr-capture.sh).
+// vaxerski; the licence in ../LICENSE.hyprland) with two changes for captures in an HDR VM (#579), marked "OmacVM".
+// Hyprland reads it before its own copy; OmacVM puts it in only for the Hyprland it was made for (hypr-capture.sh).
 #define OMACVM_SDR_WHITE 203.0
 // OmacVM end
 
