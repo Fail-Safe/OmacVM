@@ -107,6 +107,7 @@ public struct MediaClaim {
     private var helloSeen = false
     private var invited = false
     private var guestID: String?
+    private var agentLogged = -Double.infinity
     private var lastLine: Double?
     private var notPlayingSince: Double?
     private var stoppedSince: Double?
@@ -167,7 +168,12 @@ public struct MediaClaim {
         case .hello(let v, let id):
             var fx: [Effect] = [.send(MediaLine.hello(on: on, id: id))]
             if id != guestID {
-                fx.append(.log("the VM's agent is there (v\(v))"))
+                // An agent that fails and starts again every few seconds (its
+                // unit restarts it) is said at most once a minute.
+                if now - agentLogged >= 60 {
+                    fx.append(.log("the VM's agent is there (v\(v))"))
+                    agentLogged = now
+                }
                 // An agent that started again (apply, a crash) while claimed.
                 if claimed { graceUntil = now + Self.helloGrace }
             }

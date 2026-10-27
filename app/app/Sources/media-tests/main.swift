@@ -165,6 +165,14 @@ logs = []
 run(c.received(.hello(version: 1, id: "g1"), now: 6))
 expect(logs.isEmpty && sent.count == 2, "the same agent's hello again (its answer was lost): answered, said once")
 expect(!c.claimed && c.shown == nil, "hello alone: no claim")
+// An agent that keeps failing (its unit restarts it every 2 s): a new run id
+// each time, said in qemu.log at most once a minute.
+logs = []
+for i in 1...30 { run(c.received(.hello(version: 1, id: "r\(i)"), now: 6 + Double(i) * 2)) }
+expect(logs.filter { $0.hasPrefix("the VM's agent is there") }.count == 1,
+       "30 new agents in a minute: qemu.log says it once (\(logs.filter { $0.hasPrefix("the VM's agent") }.count))")
+run(c.received(.hello(version: 1, id: "r31"), now: 128))
+expect(logs.last == "the VM's agent is there (v1)", "  a minute later: said again")
 
 c = linked()
 run(c.received(.state(paused), now: 1))
