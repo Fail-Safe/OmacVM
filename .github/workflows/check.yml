@@ -759,6 +759,9 @@ jobs:
       - name: OmacVM's virtio-gpu patches with GNU patch, as the builder in the VM (no fuzz)
         run: src/tests/virtio-gpu-patches.sh
 
+      - name: omacvm check's "HDR recordings" line says whether the running driver gives recorders the HDR metadata
+        run: src/tests/hdr-recording-check.sh
+
       - name: omacvm check's "Changed parts" line says whether the compositor's damage reaches the Mac
         run: src/tests/damage-check.sh
 
@@ -799,6 +802,12 @@ jobs:
 
       - name: omacvm check's HDR line says what Hyprland's SDR copy does (the check catches code without it)
         run: src/tests/hdr-copy-check.sh
+
+      - name: Screenshots and screen sharing of HDR apps (Hyprland 0.56.2's cm_helpers.glsl with OmacVM's two changes; its guard, hooks, check line; every shader variant compiles)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends glslang-tools
+          OMACVM_HC_STRICT=1 src/tests/hypr-capture.sh
 
       - name: Chromium's video decoder builds, and waits for a GPU that is not usable (no render node here)
         run: |

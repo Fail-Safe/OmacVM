@@ -473,6 +473,42 @@ hdr_copy_note() {
     *) echo "; SDR copy: Hyprland's default" ;;
   esac
 }
+# hdr_recording_line LOADER-WORD BUILD-HAS RUNS PQ: the "HDR recordings" line for a
+# start with HDR. Screen recorders that read the screen over KMS (gpu-screen-recorder:
+# Omarchy's recorder) take a PQ screen for HDR only when its connector carries the
+# compositor's HDR metadata, which OmacVM's driver offers with deep colour
+# (linux-virtio-gpu-hdr-metadata.patch). LOADER-WORD: /run/omacvm/virtio-gpu;
+# BUILD-HAS: this kernel's build has it (1/0); RUNS: that build is older than
+# this boot, so it is the one running (1/0); PQ: Virtual-1 runs PQ now (1/0; SDR
+# while the Mac cannot show PQ: display-sync's rule then has Hyprland clear it).
+hdr_recording_line() {
+  local st=$1 has=${2:-0} runs=${3:-0} pq=${4:-1}
+  if [[ $st != omacvm* || $st == "omacvm 8-bit"* ]]; then
+    printf 'skip\t%s\n' "the 10-bit driver does not run (see HDR output)"
+  elif (( has && runs && pq )); then
+    printf 'ok\t%s\n' "the screen is HDR (PQ) now and tells recorders so: Omarchy's recorder (gpu-screen-recorder) makes SDR of it"
+  elif (( has && runs )); then
+    printf 'ok\t%s\n' "the screen is SDR now (the Mac cannot show PQ) and tells recorders so: recordings as without HDR"
+  elif (( has )); then
+    printf 'warn\t%s\n' "the driver with HDR metadata loads at the next start: shut the VM down and start it again (screen recordings come out grey until then)"
+  else
+    printf 'warn\t%s\n' "screen recordings come out grey: the running driver has no HDR metadata (Update VM, then shut the VM down and start it again; omacvm-virtio-gpu-build --status says why if it stays)"
+  fi
+}
+# hdr_capture_line STATUS HDR: the "HDR captures" line, "status<TAB>detail", from
+# `hypr-capture.sh --status` ("word<TAB>text"; empty from a VM without it) and
+# whether this start has HDR (1/0). Screenshots and screen sharing of HDR apps
+# (Chrome) at SDR white (#579); off HDR a missing fix changes nothing, so skip.
+hdr_capture_line() {
+  local w=${1%%$'\t'*} t=${1#*$'\t'} bad=skip
+  (( ${2:-0} )) && bad=warn
+  case $w in
+    ok) printf 'ok\t%s\n' "$t" ;;
+    own|pkg) printf 'skip\t%s\n' "$t" ;;
+    other|missing|uncovered) printf '%s\t%s\n' "$bad" "$t" ;;
+    *) printf '%s\t%s\n' "$bad" "OmacVM's fix for screenshots and screen sharing of HDR apps (Chrome) is not in this VM: Update VM" ;;
+  esac
+}
 # mpv's defaults in app and UTM VMs (app/guest/venus/mpv.sh): vo=gpu (gpu-next leaks a file per
 # frame on virgl and stops drawing after ~17 s), and OpenGL while the VM has Venus (on Vulkan mpv
 # shows no video yet).
@@ -669,6 +705,30 @@ app)
       omacvm*"|XRGB2101010 "*|omacvm*"|XBGR2101010 "*) ok "HDR output" "10-bit colour (${out#* }); HDR where the app's window shows it" ;;
       omacvm*) warn "HDR output" "the 10-bit driver runs, but Virtual-1 is ${out:-not known} (an own rule for it in monitors.lua?)" ;;
       *) warn "HDR output" "the app asked for 10-bit colour, but the stock driver runs: ${st#stock }$( [[ -z $st ]] && echo "no word from omacvm-virtio-gpu-load (omacvm apply, then restart the VM)")" ;;
+    esac
+  fi
+  # Screenshots, colour picks and screen sharing of HDR apps at SDR white: OmacVM's
+  # cm_helpers.glsl for the Hyprland it was made for (app/guest/hypr-capture/).
+  hdr=0; grep -qx 'OMACVM_DEEPCOLOR=1' /run/omacvm/host.env 2>/dev/null && hdr=1
+  IFS=$'\t' read -r hs ht < <(hdr_capture_line "$(/usr/local/lib/omacvm/hypr-capture/hypr-capture.sh --status "$U" 2>/dev/null)" "$hdr")
+  case $hs in
+    ok) ok "HDR captures" "$ht" ;;
+    warn) warn "HDR captures" "$ht" ;;
+    *) skip "HDR captures" "$ht" ;;
+  esac
+  # Screen recordings of the HDR screen (gpu-screen-recorder over KMS): the
+  # connector's HDR metadata, from OmacVM's driver of this boot.
+  if (( hdr )); then
+    vk=/usr/local/lib/omacvm/virtio-gpu/$(uname -r)/virtio-gpu.ko; has=0; runs=0
+    [[ -f $vk ]] && ! grep -q '^hdr_metadata:' "${vk%/*}/without" 2>/dev/null &&
+      grep -a -q drm_connector_attach_hdr_output_metadata_property "$vk" && has=1
+    [[ -f $vk ]] && (( $(stat -c %Y "$vk") < $(date +%s) - $(cut -d. -f1 /proc/uptime) )) && runs=1
+    pq=0; [[ ${out#* } == hdr ]] && pq=1   # Virtual-1's preset, from the HDR output line
+    IFS=$'\t' read -r rs rt < <(hdr_recording_line "$(cat /run/omacvm/virtio-gpu 2>/dev/null)" "$has" "$runs" "$pq")
+    case $rs in
+      ok) ok "HDR recordings" "$rt" ;;
+      warn) warn "HDR recordings" "$rt" ;;
+      *) skip "HDR recordings" "$rt" ;;
     esac
   fi
   # The compositor's damage reaches QEMU (OmacVM's driver when the start asks

@@ -679,10 +679,21 @@ the 8-bit path.
 - The VM's 10-bit graphics driver: Update VM builds it (internet once, a
   few seconds); the VM loads it only for a start with the switch on, else
   the standard driver.
-- Which Linux apps send HDR (October 2026): GStreamer does; mpv and
-  Chromium show HDR video as SDR for now.
+- It counts when the VM starts: shut the VM down and start it again. A
+  restart inside the VM (Omarchy's menu) keeps the setting it started with.
+  While the VM runs with the other setting, the switch says so.
+- Which Linux apps send HDR (October 2026): Chrome, Chromium and GStreamer
+  do; mpv shows HDR video as SDR for now.
 - Only the main window; windows on other displays stay 8-bit.
 - Extra brightness (below) wins while it is on: no HDR highlights then.
+- Screenshots, colour picks and screen sharing (Teams, Meet, OBS through
+  the desktop portal) show apps that draw HDR, such as Chrome, at normal
+  white; parts brighter than white are cut off there, as captures are SDR.
+  Update VM brings this; `omacvm check` has an "HDR captures" line.
+  Omarchy's screen recordings make SDR of the HDR screen themselves once the
+  VM was shut down and started again after Update VM (white at about 224
+  of 255 at a high headroom; "HDR recordings" in `omacvm check`;
+  [troubleshooting 44](../troubleshooting.md#44-app-screenshots-and-screen-sharing-of-chrome-too-bright-in-an-hdr-vm)).
 - GPU safe mode turns it off. `omacvm check` has an "HDR" line.
 - How it works: [ADR 0049](../adr/0049-hdr-guest-tone-maps.md).
 

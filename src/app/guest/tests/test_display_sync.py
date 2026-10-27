@@ -562,8 +562,22 @@ class HDR(SyncCase):
         for edr in (None, 0):       # an older runtime; QEMU cannot show PQ
             self.layout(edr)
             self.run_sync()
-            self.assertIn('bitdepth = 10, cm = "srgb"', self.evals()[-1])
+            self.assertIn('bitdepth = 10, cm = "srgb", supports_wide_color = 1, supports_hdr = 1', self.evals()[-1])
             self.assertNotIn("max_luminance", self.evals()[-1])
+
+    def test_sdr_after_pq_keeps_supports_hdr(self):
+        # Hyprland sets or clears an output's HDR metadata only while the
+        # output says it supports HDR, and a KMS recorder reads it from the
+        # connector (#579): the SDR rule says supports_hdr itself instead of
+        # relying on hl.monitor keeping it from the PQ rule.
+        self.layout(2)
+        self.run_sync()
+        self.layout(0)                                   # QEMU cannot show PQ now
+        self.run_sync()
+        last = self.evals()[-1]
+        self.assertIn('cm = "srgb"', last)
+        self.assertIn("supports_wide_color = 1, supports_hdr = 1", last)
+        self.assertNotIn("max_luminance", last)
 
     def test_pq_follows_the_headroom_without_hold(self):
         self.layout(4)

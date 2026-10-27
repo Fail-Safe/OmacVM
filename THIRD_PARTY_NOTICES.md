@@ -59,6 +59,12 @@ each file taken from them:
   0.6.1 and mdurl 0.1.2 (MIT, (c) Vitaly Puzrin, Alex Kocharin and others),
   linkify-it-py 2.2.0 (MIT, (c) tsutsu3), platformdirs 4.12.4 (MIT, (c) the
   platformdirs developers), typing_extensions 4.16.0 (PSF-2.0).
+- **Hyprland** (github.com/hyprwm/Hyprland), BSD-3-Clause, Copyright (c)
+  2022-2026, vaxerski, `src/app/guest/hypr-capture/LICENSE.hyprland`: its
+  shader file `cm_helpers.glsl` of v0.56.2 with two changes marked "OmacVM"
+  (`src/app/guest/hypr-capture/0.56.2/`), put into OmacVM.app's VMs for
+  Hyprland to read in place of its own (screenshots and screen sharing of
+  HDR windows, #579).
 - In the VM, nothing else is bundled: Arch Linux ARM and Omarchy
   (omarchy-mac) come from their own servers, v4l2loopback too (built in the
   VM by DKMS, GPL-2.0), each package under its own licence.
