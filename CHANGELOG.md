@@ -3,7 +3,12 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.7 (unreleased)
+## 3.2.7
+
+A click on another display's VM window keeps the pointer and keys, `omacvm check` names the
+window's surfaces, and the experimental Frames in step with the Mac is gone (Update VM rebuilds the
+VM's graphics driver once). Also: no memory bytes in qemu.log after a refused OpenGL call, and an
+output that refuses every sound buffer size is left alone until it changes.
 
 - **Frames in step with the Mac is gone.** The experimental switch from 3.2.3 showed typing and
   the pointer 1.5-7 ms sooner at 60 Hz (up to 2.5 ms at 120 Hz), and only while the screen moved.
