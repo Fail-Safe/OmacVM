@@ -13,6 +13,11 @@ in more words.
   they are. For everyone with HDR and 10-bit colour, Pointer on its own layer or Draw only what
   changed on, Update VM rebuilds the VM's driver once (needs internet).
 
+- **A refused OpenGL call no longer writes memory bytes into qemu.log.** Follow-up to #547: when the
+  Mac's OpenGL does not compile or link a shader and gives no log, the log line is now empty instead of
+  whatever was in memory. A pipeline check the Mac did not answer also no longer counts as a failed
+  one; that path only runs once separable pipelines link on the Mac (#567).
+
 ## 3.2.6
 
 Two changes: the pointer no longer jumps after a click near a corner of an external display, and
