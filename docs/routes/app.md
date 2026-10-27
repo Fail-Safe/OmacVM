@@ -635,13 +635,13 @@ the Mac's Now Playing app, like Music or Safari:
 
 - Play, pause and skip on AirPods and other Bluetooth headphones and
   speakers, in Control Center and with the keyboard's play keys go to the
-  VM's player. Control Center shows the title, artist and progress under the
-  app's name. Volume stays the Mac's.
+  VM's player. Control Center shows what plays under the app's name.
+  Volume stays the Mac's.
 - macOS gives the controls to the app that started playing last. A Mac app
   that starts playing takes them; when the VM's player pauses and plays
   again, the VM takes them back. A short stop (the next track, a video
   buffering) changes nothing, and a player that stops and starts again and
-  again takes them back at most once every 10 s.
+  again (also with longer stops) takes them at most once every 10 s.
 - Paused in the VM, the app keeps the controls, so the next press resumes
   the VM. Nothing plays for 3 s (the player closed, the video ended), 30
   minutes paused, the VM stopped, or the switch off: the controls go back to

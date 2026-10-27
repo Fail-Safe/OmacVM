@@ -57,12 +57,14 @@ Option 2, over a virtio port of its own:
 - **Mac** (`OmacVMMedia`'s `MediaClaim`, `NowPlaying.swift`): claim when the
   switch is on and the guest's player plays; paused keeps the claim; a
   non-playing state under 1.5 s (a track change) changes nothing; playing
-  again after a pause takes Now Playing back from a Mac app at most once per
-  10 s from the VM's side; give up when nothing plays for 3 s, after 30 min
+  again after a pause, or a new claim after giving up, takes Now Playing
+  from a Mac app at most once per 10 s from the VM's side (the switch going
+  on does not wait); give up when nothing plays for 3 s, after 30 min
   paused, with no line for 45 s (the Mac's sleep does not count), when the
   switch goes off, and first thing when QEMU ends (the launcher outlives a
-  crash, a Vulkan fallback or a lost drive). An agent that starts again
-  (Update VM) keeps the claim when its first state within 3 s has a player.
+  crash, a Vulkan fallback or a lost drive). An agent that starts again in
+  the running VM (`omacvm apply`, `omacvm update`) keeps the claim when its
+  first state within 8 s has a player.
 - **Threads**: the rules and MediaPlayer on the main thread; the port read on
   its own thread, cut and parsed there (4 KB lines, 20 a second); writes
   never block (`MSG_DONTWAIT`, a full port drops the line: the command
@@ -71,7 +73,12 @@ Option 2, over a virtio port of its own:
   name 64) without control or direction characters and goes only into Now
   Playing, never into qemu.log, the journal or a status file; numbers are
   clamped; no picture is taken from it. The guest cuts first and writes
-  UTF-8, so its biggest line fits 4 KB (escaped emoji would not).
+  UTF-8, so its biggest line fits 4 KB (escaped emoji would not). The port
+  has no other check than the hello: any process in the VM that can open it
+  (root, or the logged-in user through the uaccess rule) can say hello and
+  claim like the agent. The most it can do is what a playing Mac app does:
+  take the controls (at most once per 10 s) and show a Now Playing entry
+  with its cleaned text under OmacVM's name.
 - Skip and seek stay off, so a double or triple press on AirPods stays next
   and previous. Volume stays the Mac's.
 - On by default, as it only acts after something played in the VM, by the
@@ -90,6 +97,11 @@ Option 2, over a virtio port of its own:
   later version may read which processes play sound).
 - Two players playing in the VM at once: the agent and Omarchy's keys may
   pick different ones.
+- A player that plays muted (a muted tab, mpv muted, the VM's volume at 0)
+  claims like one with sound; Safari, as far as known, does not make muted
+  media Now Playing. Whether Chromium shows muted autoplay over MPRIS is a
+  hand check; a later version may claim only while the player's sound
+  stream runs (PipeWire).
 - Not verified on hardware yet: real AirPods (press, double, triple, ear
   detection), other headsets, the lock screen, Siri, the Watch, macOS 15 and
   26. Tests: `swift run media-tests` (rules, a seeded fuzz),

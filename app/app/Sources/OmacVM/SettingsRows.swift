@@ -339,7 +339,7 @@ struct MediaControlsRow: View {
     var tick = 0
     @State private var on = Settings.mediaControls
 
-    static let info = "While something plays in the VM (a video in the browser, music, mpv), the VM is the Mac's Now Playing app, like Music or Safari: play, pause and skip on AirPods and other Bluetooth headphones and speakers, in Control Center and with the keyboard's play keys go to the VM's player. Control Center shows what plays, under this app's name. A Mac app that starts playing takes the controls, as between Mac apps; playing again in the VM takes them back. Volume stays the Mac's. Nothing changes until something plays in the VM, and after 30 minutes paused the Mac's apps have the controls again. Works at once in a running VM; the VM needs Update VM once."
+    static let info = "AirPods, other Bluetooth headphones and speakers, Control Center and the keyboard's play keys play, pause and skip what plays in the VM (a video in the browser, music, mpv). While the VM plays, it is the Mac's Now Playing app, like Music or Safari, and Control Center shows what plays under this app's name. A Mac app that starts playing takes the controls, as between Mac apps; playing again in the VM takes them back. Volume stays the Mac's. Nothing changes until something plays in the VM, and after 30 minutes paused the Mac's apps have the controls again. Works at once in a running VM; the VM needs Update VM once."
 
     var body: some View {
         SettingRow(title: "AirPods and media controls",

@@ -1203,8 +1203,10 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   media controls**; the test identity has it off by default); Update VM (an
   OmacVM.app from before 3.2.9, or a VM not updated since, has no
   `omacvm-media`); `omacvm check`'s "media controls" line (the service not
-  running: `omacvm apply`; "waiting for the app": the VM started from an app
-  without the port, start it again); a player the VM's MPRIS does not see
+  running: `omacvm apply`; "waiting for the app to answer": the port is there
+  but the app has not answered the VM's side yet, which tries again at most
+  30 s apart; if it stays, quit the VM and start it again from the app); a
+  player the VM's MPRIS does not see
   (`busctl --user list | grep mpris` in the VM: Chromium, Firefox and mpv
   with mpv-mpris are there).
 - **Where:** `app/app/Sources/OmacVM/NowPlaying.swift`,
