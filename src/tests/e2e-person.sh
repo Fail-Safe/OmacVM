@@ -8,8 +8,11 @@ set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d)
 WATCHERS=()
-DOM=""
-trap 'for p in ${WATCHERS[@]+"${WATCHERS[@]}"}; do kill "$p" 2>/dev/null; done; [[ -n $DOM ]] && defaults delete "$DOM" >/dev/null 2>&1; rm -rf "$T"' EXIT
+# The made-up app's settings domain (onscreen.sh rows): gone at the end, its file too (in the real home:
+# cfprefsd does not follow HOME).
+DOM=""; PREFS=$HOME/Library/Preferences
+undom() { [[ -n $DOM ]] && { defaults delete "$DOM" >/dev/null 2>&1; rm -f "$PREFS/$DOM.plist"; }; return 0; }
+trap 'for p in ${WATCHERS[@]+"${WATCHERS[@]}"}; do kill "$p" 2>/dev/null; done; undom; rm -rf "$T"' EXIT
 fail=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
@@ -337,7 +340,7 @@ same "onscreen --pause-ci: ... nothing of the app opened" "" "$(cat "$T/os-open.
 rm -f "$W/actions-runner-2"
 upto 5 both_back && ok "onscreen --pause-ci: ... the stopped runner back at the end, state gone" ||
   bad "onscreen --pause-ci: running '$(running)', state '$(ls "$T/ci-state" 2>/dev/null | tr '\n' ' ')'"
-defaults delete "$DOM" >/dev/null 2>&1
+undom
 
 # ---- the harnesses ask between rows, not only at their start (3.2.4: two Screen Sharing connects
 # inside a run that looked only at its start)
