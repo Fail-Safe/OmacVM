@@ -298,6 +298,12 @@ for f in modifier-keys display-unplug; do
 done
 wired "cc-switches reads the children's exit codes" "$E/cc-switches.sh" \
   'child_end keys modifier-keys.sh "\$rc"' 'child_end unplug display-unplug.sh "\$rc"'
+# The EXIT trap that stops the watcher is set before the watcher starts (a run stopped in between left its
+# folder and, for cc-switches, ran without its cleanup).
+for f in modifier-keys display-unplug cc-switches onscreen; do
+  same "watcher: $f sets its EXIT trap first" "trap first" "$(awk '/^ *trap .* EXIT$/ && !t { t = NR }
+    /^[^#]*person_watch_start( |;|$)/ && $0 !~ /\(\)/ && !w { w = NR } END { print (t && w && t < w) ? "trap first" : "trap " t ", watcher " w }' "$E/$f.sh")"
+done
 # The cleanup goes to its end whatever comes (a second Ctrl-C, a hangup, a lost stdout): first thing in it.
 for f in cc-switches onscreen; do
   first=$(awk '/^cleanup\(\) \{/ { c = 1; next } c && !/^ *#/ && !/^  local rc=\$\?$/ { print; exit }' "$E/$f.sh")

@@ -58,8 +58,9 @@ person_overlap() {   # EVENTS NEXT
   r=$(person_overlap_row "$1" "${span%%$'\t'*}" "${span#*$'\t'}")
   res person "${r%%$'\t'*}" "${r#*$'\t'}"
 }
-person_watch_start
+# The trap first: a run stopped right after the watcher started leaves no watcher folder behind.
 trap 'person_watch_stop' EXIT
+person_watch_start
 
 VMD=$( (source "$HERE/test-vms.sh" && e2e_vm_guard "$APPID" "$VM") 2>&1) || { echo "modifier-keys: $VMD" >&2; exit 2; }
 QPAT='(runtime/bin/OmacVM|MacOS/OmacVM-VM) -name'

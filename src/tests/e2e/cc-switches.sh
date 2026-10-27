@@ -145,8 +145,6 @@ lock() {   # DIR: ours, or taken now (same owner counts: the caller may hold it)
 # A colon-separated list (a home folder may have a space in its path: the mini's has).
 IFS=: read -ra LOCKLIST <<< "${OMACVM_E2E_LOCKS:-$HOME/.omacvm-mini-vm.lock:$HOME/.omacvm-test-identity.lock}"
 for l in "${LOCKLIST[@]}"; do lock "$l"; done
-# Someone coming to the Mac between two checks: the watcher writes it down with the time.
-PERSON_KEEP_LOG=$OUT/person.log; person_watch_start
 
 # The person's own helpers, app and VM: the same at the end.
 fingerprint() {
@@ -227,6 +225,9 @@ PY
 trap 'cleanup' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# Someone coming to the Mac between two checks: the watcher writes it down with the time (started
+# after the trap, which stops it).
+PERSON_KEEP_LOG=$OUT/person.log; person_watch_start
 
 # Between two rows: someone at the Mac -> wait (person.sh); rows that ran while someone came and
 # went get their own row. GATE_LINE: summary.tsv's length at the last check.
