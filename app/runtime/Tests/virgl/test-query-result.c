@@ -12,7 +12,9 @@
  *  - available, but the result refused (query-result-gl.c, linked in): done, result 0
  *    (before the fix: what the stack held, 9 here);
  *  - the GL answering: the result is the GL's (every sample of a 16x16 draw), also for
- *    a query that was not answered before. */
+ *    a query that was not answered before;
+ *  - a query the GL has not finished ("not available" for the first polls) still waits,
+ *    then gets the GL's answer: only an unanswered query reads as done with 0. */
 #include <OpenGL/OpenGL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +35,8 @@ enum { TEST_SHADER_VERTEX = 0, TEST_SHADER_FRAGMENT = 1, TEST_PRIM_TRIANGLES = 4
 
 void query_result_refuse(int on);
 unsigned long query_result_refused(void);
+void query_result_pending(long n);
+long query_result_pending_left(void);
 
 static CGLContextObj main_ctx;
 static int failures, unanswered_lines;
@@ -367,6 +371,27 @@ int main(void)
                30 + i, (unsigned long long)results[i].result);
       check(results[i].query_state == VIRGL_QUERY_STATE_DONE && results[i].result == 256, text);
    }
+
+   /* Not finished yet: the GL answers "not available" for the first 3 polls. The query
+    * must wait (a fix that made it done with 0 here would fail), then get the 256. */
+   guest_waits(0);
+   emit_query(&c, VIRGL_CCMD_BEGIN_QUERY, 30);
+   emit_draw(&c);
+   emit_query(&c, VIRGL_CCMD_END_QUERY, 30);
+   emit_get_result(&c, 30);
+   query_result_pending(3);
+   check(submit(1, &c) == 0, "a draw inside a query");
+   snprintf(text, sizeof(text), "query not finished yet: still waiting after the submit "
+            "(state %u, 0x%llx)", results[0].query_state, (unsigned long long)results[0].result);
+   check(results[0].query_state == VIRGL_QUERY_STATE_WAIT_HOST && results[0].result == GUEST_MARK,
+         text);
+   wait_for_query(0);
+   snprintf(text, sizeof(text), "query not finished yet: done with the GL's 256 samples once "
+            "it is (state %u, %llu, %ld polls left)", results[0].query_state,
+            (unsigned long long)results[0].result, query_result_pending_left());
+   check(results[0].query_state == VIRGL_QUERY_STATE_DONE && results[0].result == 256 &&
+         query_result_pending_left() == 0, text);
+   query_result_pending(0);
 
    for (int i = 0; i < QUERIES; i++) {
       virgl_renderer_ctx_detach_resource(1, 7 + i);
