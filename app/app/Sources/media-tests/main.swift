@@ -467,5 +467,40 @@ expect(taken > 2000 && bad > 2000, "fuzz: 20000 mutated lines, \(taken) taken, \
 expect(!claimedEarly, "fuzz: never claimed without a hello on the connection")
 expect(!logs.contains { $0.contains("Song") || $0.contains("Band") }, "fuzz: no title in qemu.log")
 
+// After the Mac's pause, while the agent still says playing (10 s after the
+// last take): the next wake is the hold's end, not a time already past.
+c = linked(); run(c.received(.state(playing), now: 0))
+run(c.commandSent(.pause, .pause, now: 20)); run(c.tick(now: 20))
+expect(c.deadline == 21.5, "after the Mac's pause: due when the hold ends (21.5), not at once (\(c.deadline ?? -1))")
+
+// Random events: after a tick nothing is due that was not done (the timer
+// would fire every 50 ms), and nothing breaks.
+r = Rand(s: 0xC1A1_0BAD)
+var spins = 0, steps = 0
+for _ in 0..<200 {
+    var m = MediaClaim(on: r.int(4) != 0)
+    var now = 0.0
+    for _ in 0..<200 {
+        now += Double(r.int(40)) / 10
+        let states = [playing, paused, stopped, none]
+        switch r.int(12) {
+        case 0: m.connected()
+        case 1: m.disconnected()
+        case 2: run(m.received(.hello(version: 1, id: "g\(r.int(3))"), now: now))
+        case 3: run(m.switched(r.int(2) == 0, now: now))
+        case 4: m.sleep()
+        case 5: run(m.wake(now: now))
+        case 6, 7:
+            let rc = RemoteCommand.allCases[r.int(RemoteCommand.allCases.count)]
+            if case .send(let mc) = m.command(rc, now: now) { run(m.commandSent(rc, mc, now: now)) }
+        default: run(m.received(.state(states[r.int(4)]), now: now))
+        }
+        run(m.tick(now: now))
+        steps += 1
+        if let d = m.deadline, d <= now { spins += 1 }
+    }
+}
+expect(spins == 0, "random events (\(steps)): after a tick nothing is due at once (\(spins) times)")
+
 if failures > 0 { print("\(failures) failed"); exit(1) }
 print("all passed")

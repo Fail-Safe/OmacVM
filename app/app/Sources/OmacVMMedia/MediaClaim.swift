@@ -130,9 +130,14 @@ public struct MediaClaim {
     public var deadline: Double? {
         guard claimed else { return waiting ? lastTake + Self.retakeEvery : nil }
         var d: [Double] = []
-        if let h = held { d.append(h.until) }
-        if last?.status == .playing, !shownPlaying { d.append(lastTake + Self.retakeEvery) }
-        if shownPlaying, last?.status != .playing, let n = notPlayingSince { d.append(n + Self.settle) }
+        // While held, what Now Playing shows waits for the hold's end (a retake
+        // due earlier would wake the timer every 50 ms until then).
+        if let h = held {
+            d.append(h.until)
+        } else {
+            if last?.status == .playing, !shownPlaying { d.append(lastTake + Self.retakeEvery) }
+            if shownPlaying, last?.status != .playing, let n = notPlayingSince { d.append(n + Self.settle) }
+        }
         if let s = stoppedSince { d.append(s + Self.stopRelease) }
         if let p = pausedSince { d.append(p + Self.pausedRelease) }
         if let g = graceUntil { d.append(g) }
