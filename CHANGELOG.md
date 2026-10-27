@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.2.9 (unreleased)
+## 3.2.9
 
 AirPods, Control Center and the play keys play and pause what plays in the VM. In an HDR VM,
 screenshots, screen shares and screen recordings look right. Both need Update VM once.
