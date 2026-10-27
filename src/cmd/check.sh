@@ -451,6 +451,34 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     else ok "GPU path" "$g"; fi
   fi
 fi
+# The window's surfaces this run (#562): the present makes them lossless-compressed
+# where that was checked on screen (8-bit since 3.2.1, #531; half float with HDR or
+# Extra brightness since 3.2.6, #536), else plain; qemu.log names the kind at the
+# first frame and when it changes (the last line of each kind counts). Plain looks
+# the same and costs more GPU work; a failure makes them plain for the rest of the run.
+surfaces_line() {   # qemu.log -> "ok|warn<TAB>detail", nothing without a surface line
+  local s8 sh off failed d=""
+  s8=$(grep -oE 'cocoa: 8-bit surfaces (lossless-compressed|plain)' "$1" | tail -1)
+  sh=$(grep -oE 'cocoa: half-float surfaces (lossless-compressed|plain)' "$1" | tail -1)
+  [[ -n $s8$sh ]] || return 0
+  off=$(grep -oE 'cocoa: lossless surfaces: off \(.*\)' "$1" | tail -1)
+  failed=$(grep -oE 'cocoa: lossless (half-float )?surfaces failed' "$1" | tail -1)
+  [[ -n $s8 ]] && d="8-bit ${s8##* }"
+  [[ -n $sh ]] && d="${d:+$d, }half float ${sh##* }"
+  [[ -n $off ]] && d="$d; lossless off ${off#cocoa: lossless surfaces: off }"
+  if [[ -n $failed ]]; then
+    printf 'warn\t%s\n' "$d; ${failed#cocoa: } this run, plain from then on: the window looks the same, with more GPU work (logs/qemu.log says when)"
+  else
+    printf 'ok\t%s\n' "$d"
+  fi
+}
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  sl=$(surfaces_line "$miclog")
+  case ${sl%%$'\t'*} in
+    ok) ok "window surfaces" "${sl#*$'\t'}" ;;
+    warn) warn "window surfaces" "${sl#*$'\t'}" ;;
+  esac
+fi
 # Whether the VM's GPU work ran without QEMU's big lock this run (ADR 0046,
 # gpuOffMainLoop: on by default after 3.1.25). A runtime before 3.1.18 says nothing.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then

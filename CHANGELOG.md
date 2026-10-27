@@ -18,6 +18,10 @@ in more words.
   whatever was in memory. A pipeline check the Mac did not answer also no longer counts as a failed
   one; that path only runs once separable pipelines link on the Mac (#567).
 
+- **`omacvm check` says which surfaces the VM window used.** A new "window surfaces" line for
+  OmacVM.app VMs: lossless-compressed or plain, for normal colour and for HDR and Extra brightness,
+  why lossless is off when it is, and a warning when making them failed this run (#562).
+
 ## 3.2.6
 
 Two changes: the pointer no longer jumps after a click near a corner of an external display, and

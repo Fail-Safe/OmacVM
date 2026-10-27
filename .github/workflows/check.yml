@@ -579,6 +579,9 @@ jobs:
       - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
         run: src/tests/audio-timing.sh
 
+      - name: omacvm check's "window surfaces" line says which surfaces the app's window used (lossless or plain)
+        run: src/tests/surfaces-check.sh
+
       - name: Disk flushes as write barriers (patch pinned and tested, log lines, check)
         run: src/tests/disk-flush.sh
 
