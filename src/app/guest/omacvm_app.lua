@@ -65,11 +65,12 @@ if not user_sets("keep_unmodified_copy") then
 end
 -- HDR: omacvm-display-sync sets Virtual-1's mode (PQ, or SDR while the Mac
 -- cannot show PQ) and says supports_hdr in both, so Hyprland also takes back
--- the HDR metadata a KMS recorder reads (#579). Hyprland's auto HDR would
--- switch it on its own for a full-screen window: to PQ for an HDR window
--- while the Mac cannot show PQ, and the metadata to SDR for a full-screen
--- window that tags SDR colours while the screen stays PQ (recordings grey).
--- 0 keeps display-sync's mode. No effect without HDR (no output says
+-- the HDR metadata a KMS recorder reads (#579). With supports_hdr Hyprland's
+-- auto HDR could switch it on its own for a full-screen window: to PQ for an
+-- HDR window while the Mac cannot show PQ, and the metadata to SDR for one
+-- that tags SDR colours while the screen stays PQ (recordings grey; read in
+-- Hyprland 0.56.2's Renderer.cpp, no client in the VM did it). 0 keeps
+-- display-sync's mode. No effect without HDR (no output says
 -- supports_hdr then). A cm_auto_hdr the user set wins, as above.
 if not user_sets("cm_auto_hdr") then
   pcall(hl.config, { render = { cm_auto_hdr = 0 } })

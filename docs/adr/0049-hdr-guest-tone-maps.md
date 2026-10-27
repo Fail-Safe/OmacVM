@@ -177,12 +177,16 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
   6.69, 244 at 2, 255 with Extra brightness. In the stamp, so Update VM
   builds the driver once; it loads at the VM's next start. Hyprland only
   sets or clears an output's metadata while the output says it supports
-  HDR, so display-sync's SDR rule for Virtual-1 (the Mac cannot show PQ)
-  keeps `supports_hdr = 1`, and `omacvm_app.lua` turns Hyprland's auto HDR
-  off (`render:cm_auto_hdr = 0`): else the start's PQ metadata stayed on an
-  SDR screen, auto HDR switched a full-screen HDR window to PQ the Mac
-  could not show, and a full-screen window that tags SDR colours set the
-  metadata to SDR while the screen stayed PQ; recordings were wrong in all
-  three. Hyprland sends no new metadata when only the headroom moves: the
-  blob keeps the start's peak, gpu-screen-recorder takes the peak from the
-  Wayland output instead.
+  HDR. display-sync's SDR rule for Virtual-1 (the Mac cannot show PQ) says
+  `supports_hdr = 1` itself; it was on there already, as `hl.monitor` keeps
+  the fields of the output's last rule, and the metadata went from PQ to
+  SDR with Virtual-1 (measured with the rule before and after). With it on,
+  Hyprland's auto HDR (`render:cm_auto_hdr`, on by default) could switch
+  that SDR output to PQ for a full-screen HDR window, and set the metadata
+  to SDR for a full-screen window that tags SDR colours while the screen
+  stays PQ (Renderer.cpp:2352-2394; no client in the VM did either: mpv
+  with gpu-next tags PQ on a PQ output, GStreamer's waylandsink did not
+  trigger it); `omacvm_app.lua` turns it off (a user's own value wins), as
+  display-sync sets Virtual-1's mode. Hyprland sends no new metadata when
+  only the headroom moves: the blob keeps the start's peak,
+  gpu-screen-recorder takes the peak from the Wayland output instead.

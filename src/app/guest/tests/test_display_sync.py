@@ -567,9 +567,9 @@ class HDR(SyncCase):
 
     def test_sdr_after_pq_keeps_supports_hdr(self):
         # Hyprland sets or clears an output's HDR metadata only while the
-        # output says it supports HDR: without supports_hdr in the SDR rule
-        # the start's PQ metadata stayed on the connector, and a KMS recorder
-        # took the SDR screen for PQ (#579).
+        # output says it supports HDR, and a KMS recorder reads it from the
+        # connector (#579): the SDR rule says supports_hdr itself instead of
+        # relying on hl.monitor keeping it from the PQ rule.
         self.layout(2)
         self.run_sync()
         self.layout(0)                                   # QEMU cannot show PQ now

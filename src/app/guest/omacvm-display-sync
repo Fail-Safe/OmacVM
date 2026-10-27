@@ -287,11 +287,12 @@ PY
 # white is 203 nits (BT.2408), the Mac's SDR white. "edr" 0 (QEMU cannot
 # show PQ) or none (an older runtime): 10-bit sRGB, still with
 # supports_hdr: Hyprland only sets or clears an output's HDR metadata while
-# it says it supports HDR, so the start's PQ metadata would stay on the
-# connector (OmacVM's driver offers it, linux-virtio-gpu-hdr-metadata.patch)
-# and a KMS recorder (gpu-screen-recorder) would take the SDR screen for PQ.
-# omacvm_app.lua turns Hyprland's auto HDR off, so the output stays SDR also
-# for a full-screen HDR window. Before QEMU's first
+# it says it supports HDR, and a KMS recorder (gpu-screen-recorder) reads that
+# metadata from the connector (linux-virtio-gpu-hdr-metadata.patch). hl.monitor
+# keeps the fields of the output's last rule, so after PQ it stayed on anyway
+# and the metadata went back to SDR (measured); said here, it does not hang
+# on that. omacvm_app.lua turns Hyprland's auto HDR off, so the output stays
+# SDR also for a full-screen HDR window. Before QEMU's first
 # layout the output stays as it is. QEMU's EDID has no HDR block, so the
 # output's HDR support is stated here. Only the main window's output: the
 # other displays' windows draw through an 8-bit layer without PQ
