@@ -1189,11 +1189,10 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 
 ## 44. app: screenshots and screen sharing of Chrome too bright in an HDR VM
 
-- **Symptom:** with HDR and 10-bit colour on, screenshots of Chrome,
-  Chromium or an Electron app (Omarchy's screenshot, also its frozen screen
-  while you pick a region, `grim`), colours picked with hyprpicker, and
-  screen or window sharing (Teams, Meet, OBS through the desktop portal)
-  come out washed out: light greys white, Teams' #5B5FC7 as (142,148,255).
+- **Symptom:** with HDR and 10-bit colour on, screenshots of Chrome or
+  Chromium (Omarchy's screenshot, also its frozen screen while you pick a
+  region, `grim`), colours picked with hyprpicker, and screen or window
+  sharing (Teams, Meet, OBS through the desktop portal) come out washed out: light greys white, Teams' #5B5FC7 as (142,148,255).
   On screen they look right; apps that draw SDR (imv, a terminal) come out
   exact. Omarchy's screen recordings come out grey and flat for every app.
 - **Cause:** those apps draw in HDR (PQ) with SDR white at 203 nits
@@ -1214,11 +1213,13 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   (0.56.2, checked byte for byte at each Hyprland update): with another one
   `omacvm check`'s "HDR captures" line says there is no OmacVM fix for it,
   and Hyprland's own copy is used. Back to Hyprland's own copy until the
-  next Update VM: `sudo /usr/local/lib/omacvm/hypr-capture/hypr-capture.sh
-  --remove`; for good: your own `~/.config/hypr/shaders/cm_helpers.glsl`
-  comes first. Recordings: no fix yet. Screenshots and shares taken on the
-  Mac (a macOS screenshot, sharing the VM's window from a Mac app) are
-  macOS's own and not covered.
+  next Update VM or Hyprland update (both put it back):
+  `sudo /usr/local/lib/omacvm/hypr-capture/hypr-capture.sh --remove`. Do not
+  keep a copy of the file in `~/.config/hypr/shaders/`: Hyprland would read
+  it before OmacVM's and keep it after a Hyprland update it was not made
+  for, where it may not compile and windows draw nothing. Recordings: no fix
+  yet. Screenshots and shares taken on the Mac (a macOS screenshot, sharing
+  the VM's window from a Mac app) are macOS's own and not covered.
 - **Where:** `src/app/guest/hypr-capture/` (the file, `guard.py`, the
   pacman hooks, `hypr-capture.sh`), `src/app/guest/install.sh`,
   `src/guest/check.sh`; test `src/tests/hypr-capture.sh`; ADR 0049

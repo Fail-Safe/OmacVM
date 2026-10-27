@@ -337,8 +337,10 @@ PY
 # looked gray. So while Virtual-1 runs PQ, windows are only clipped at
 # max_luminance (tonemap "clamp"). SDR windows are not tone-mapped either
 # way. The rule is for every window, also on the other Mac displays (8-bit
-# SDR): a client that always sends PQ there is clipped at that display's
-# SDR white. Chrome and mpv draw SDR there. After PQ the same rule says
+# SDR): a client that always sends PQ there gets its reference white (203
+# nits) at that display's white and brighter parts clipped (OmacVM's
+# cm_helpers.glsl, hypr-capture/; Hyprland's own clipped it from 80 nits).
+# Chrome and mpv draw SDR there. After PQ the same rule says
 # Hyprland's default ("on"): 0.56 keeps a rule's tone map on open windows
 # when the rule is gone. omacvm_app.lua sets it again after a config reload.
 # A refused rule is logged once; the file "tonemap" is for omacvm check.

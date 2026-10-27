@@ -3,7 +3,7 @@
 # Hyprland 0.56.2 makes the SDR copy that screenshots (grim, Omarchy's
 # screenshot and its frozen screen), colour picks (hyprpicker) and screen
 # sharing (xdg-desktop-portal-hyprland) read with SDR white at 80 nits for
-# windows drawn in HDR (PQ: Chrome, Chromium, Electron apps), which put it at
+# windows drawn in HDR (PQ: Chrome, Chromium), which put it at
 # 203: those came out 2.54 times too bright, light greys white. A window shared
 # alone was cut at 80 nits the same way. OmacVM puts a fixed copy of the one
 # shader file that does both (cm_helpers.glsl, changes marked "OmacVM") into
@@ -19,6 +19,7 @@
 #   hypr-capture.sh --hook-pre       pacman, before /usr/bin/Hyprland changes: out
 #   hypr-capture.sh --hook-post      pacman, after: as without an option
 #   hypr-capture.sh --remove         out: Hyprland's own copy, until the next Update VM
+#                                    or Hyprland update (the post hook puts it back)
 #   hypr-capture.sh --status [USER]  "WORD<TAB>text" for omacvm check (ok, own, pkg,
 #                                    other, missing, uncovered)
 # A change reaches each running Hyprland of the installed binary at once
@@ -182,7 +183,7 @@ status() {
 case ${1:-} in
   "" | --hook-post) apply ;;
   --hook-pre) out && echo "OmacVM: HDR captures: OmacVM's cm_helpers.glsl out until Hyprland is checked again"; exit 0 ;;
-  --remove) out && { echo "OmacVM: HDR captures: OmacVM's cm_helpers.glsl removed (back with the next Update VM)"; reload; }; exit 0 ;;
+  --remove) out && { echo "OmacVM: HDR captures: OmacVM's cm_helpers.glsl removed (back with the next Update VM or Hyprland update)"; reload; }; exit 0 ;;
   --status) status "${2:-}" ;;
   *) echo "usage: hypr-capture.sh [--hook-pre|--hook-post|--remove|--status [USER]]" >&2; exit 2 ;;
 esac
