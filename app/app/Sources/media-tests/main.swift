@@ -355,6 +355,19 @@ expect(b.needsInfo(after: a, seconds: 0), "a new title: new info")
 b = a; b.playing = false; b.rate = 0
 expect(b.needsInfo(after: a, seconds: 0), "paused: new info")
 expect(a.needsInfo(after: nil, seconds: 0), "nothing set yet: info")
+// Compared with the info last set, not the last shown: a seek right after a
+// lease that set nothing still sets it, and the leases alone set it once.
+func at(_ e: Double) -> MediaClaim.Shown { var s = a; s.elapsed = e; return s }
+var gate = MediaClaim.InfoGate()
+expect(gate.needsSet(at(10), now: 0), "info: the first is set")
+expect(!gate.needsSet(at(25), now: 15), "  15 s later at 25 s: not set again")
+expect(gate.needsSet(at(41), now: 16), "  a seek 15 s on, 1 s after that: set (Control Center would show 26 s)")
+gate = MediaClaim.InfoGate()
+var sets = 0
+for i in 0...8 where gate.needsSet(at(10 + Double(i) * 15), now: Double(i) * 15) { sets += 1 }
+expect(sets == 1, "  a state every 15 s while playing for 2 min: set once (\(sets))")
+gate.cleared()
+expect(gate.needsSet(at(130), now: 120), "  after Now Playing was given up: set again")
 
 // MARK: Fuzz: random lines never crash, never claim before a hello, and keep every cap.
 

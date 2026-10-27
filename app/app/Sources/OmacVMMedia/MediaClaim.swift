@@ -65,6 +65,27 @@ public struct MediaClaim {
         }
     }
 
+    /// Whether Now Playing's info must be set again. macOS moves the elapsed
+    /// time on by itself from the info last set, so a new `Shown` is compared
+    /// with that one and the time since it was set, not with the last shown.
+    public struct InfoGate {
+        private var set: Shown?
+        private var at = 0.0
+
+        public init() {}
+
+        /// Whether `s` must be set at `now`; when it must, it counts as set.
+        public mutating func needsSet(_ s: Shown, now: Double) -> Bool {
+            guard s.needsInfo(after: set, seconds: now - at) else { return false }
+            set = s
+            at = now
+            return true
+        }
+
+        /// The info was cleared (Now Playing given up).
+        public mutating func cleared() { set = nil }
+    }
+
     public static let settle = 1.5
     public static let stopRelease = 3.0
     public static let helloGrace = 3.0

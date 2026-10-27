@@ -142,8 +142,7 @@ final class NowPlaying {
     static let shared = NowPlaying()
     private weak var owner: MediaSession?
     private var registered = false
-    private var shown: MediaClaim.Shown?
-    private var infoSetAt = 0.0
+    private var infoGate = MediaClaim.InfoGate()
 
     private var commands: [(MPRemoteCommand, RemoteCommand)] {
         let c = MPRemoteCommandCenter.shared()
@@ -180,8 +179,7 @@ final class NowPlaying {
         if c.nextTrackCommand.isEnabled != s.canNext { c.nextTrackCommand.isEnabled = s.canNext }
         if c.previousTrackCommand.isEnabled != s.canPrevious { c.previousTrackCommand.isEnabled = s.canPrevious }
         let center = MPNowPlayingInfoCenter.default()
-        let now = MediaSession.now
-        if s.needsInfo(after: shown, seconds: now - infoSetAt) {
+        if infoGate.needsSet(s, now: MediaSession.now) {
             var info: [String: Any] = [MPMediaItemPropertyTitle: s.title,
                                        MPNowPlayingInfoPropertyPlaybackRate: s.rate,
                                        MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue]
@@ -190,11 +188,9 @@ final class NowPlaying {
             if let d = s.duration { info[MPMediaItemPropertyPlaybackDuration] = d }
             if let e = s.elapsed { info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = e }
             center.nowPlayingInfo = info
-            infoSetAt = now
         }
         let state: MPNowPlayingPlaybackState = s.playing ? .playing : .paused
         if center.playbackState != state { center.playbackState = state }
-        shown = s
     }
 
     /// Gives Now Playing up: no targets, no info, stopped.
@@ -208,7 +204,7 @@ final class NowPlaying {
         center.nowPlayingInfo = nil
         center.playbackState = .stopped
         registered = false
-        shown = nil
+        infoGate.cleared()
         owner = nil
     }
 
