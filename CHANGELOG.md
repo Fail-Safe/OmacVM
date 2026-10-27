@@ -14,6 +14,10 @@ in more words.
   Update VM puts it in; no restart needed. Screen recordings with Omarchy's recorder still come
   out grey in an HDR VM.
 
+- **The HDR switch says when it counts.** HDR and 10-bit colour is read when the VM starts; a
+  restart inside the VM (Omarchy's menu) keeps the setting it started with. While the VM runs with
+  the other setting, the switch now says so: shut the VM down and start it again (#579).
+
 ## 3.2.8
 
 An OpenGL query the Mac does not answer now finishes with 0 in the VM: no memory bytes from the Mac,
