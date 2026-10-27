@@ -326,13 +326,15 @@ for (st, name) in [(playing, "playing"), (paused, "paused")] {
     logs = []
     run(c.received(.hello(version: 1, id: "g2"), now: 10))   // omacvm apply restarts the agent
     expect(c.claimed, "apply while \(name): the new agent's hello keeps the claim")
-    run(c.received(.state(st), now: 11)); run(c.tick(now: 20))
-    expect(c.claimed && c.shown?.playing == shown, "  its first state (\(name)) within 3 s: the same claim, Now Playing as it was")
+    run(c.tick(now: 16.9)); run(c.received(.state(st), now: 17)); run(c.tick(now: 30))
+    expect(c.claimed && c.shown?.playing == shown, "  its first state (\(name)) 7 s later (a busy VM): the same claim, Now Playing as it was")
     expect(!logs.contains { $0.hasPrefix("Now Playing") }, "  never given up and taken again")
 }
 c = linked(); run(c.received(.state(playing), now: 0))
-run(c.received(.hello(version: 1, id: "g2"), now: 10)); run(c.tick(now: 13))
-expect(!c.claimed, "a new agent that names no player within 3 s: given up")
+run(c.received(.hello(version: 1, id: "g2"), now: 10)); run(c.tick(now: 17.9))
+expect(c.claimed, "a new agent that names no player for 7.9 s: kept")
+run(c.tick(now: 18))
+expect(!c.claimed, "  8 s: given up")
 c = linked(); run(c.received(.state(playing), now: 0))
 run(c.received(.hello(version: 1, id: "g2"), now: 10)); run(c.received(.state(none), now: 11)); run(c.tick(now: 14))
 expect(!c.claimed, "a new agent with no player: given up after 3 s")

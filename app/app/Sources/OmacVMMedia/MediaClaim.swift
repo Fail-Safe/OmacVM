@@ -26,7 +26,8 @@ public enum RemoteCommand: String, CaseIterable, Sendable {
 ///   from the agent for 45 s (the Mac's sleep does not count), when the
 ///   switch goes off or QEMU ends;
 /// - an agent that starts again (apply) says hello: the claim stays if its
-///   first state comes within 3 s and has a player.
+///   first state comes within 8 s and has a player (gi, D-Bus and a busy VM
+///   take their time).
 public struct MediaClaim {
     public enum Effect: Equatable { case send(Data), log(String) }
     public enum Answer: Equatable { case send(MacCommand), notClaimed, noLink }
@@ -89,7 +90,7 @@ public struct MediaClaim {
 
     public static let settle = 1.5
     public static let stopRelease = 3.0
-    public static let helloGrace = 3.0
+    public static let helloGrace = 8.0
     public static let retakeEvery = 10.0
     public static let lease = 45.0
     public static let pausedRelease = 1800.0

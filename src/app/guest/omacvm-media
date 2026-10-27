@@ -58,7 +58,7 @@ MAX_PLAYER = 64
 HELLO_EVERY = 5.0      # until the Mac answers
 LEASE_EVERY = 15.0     # the Mac gives up after 45 s without a line
 SETTLE = 0.2           # a change is sent this much later (several come together)
-FIRST_STATE = 1.5      # after on: the first state at the latest, players read or not
+FIRST_STATE = 4.0      # after on: the first state at the latest, players read or not (the Mac waits 8 s)
 CALL_MS = 2000         # a player that hangs on D-Bus
 PORT_RETRY = (2.0, 30.0)   # the Mac's side not connected: try again, slower each time
 
