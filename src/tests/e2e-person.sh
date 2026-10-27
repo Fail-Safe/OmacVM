@@ -272,6 +272,40 @@ upto 5 gone $pz && ok "ci: the holder gone -> its pause ends while jobs still ru
 rm -f "$W/actions-runner-1" "$W/actions-runner-2"
 upto 5 [ ! -e "$T/ci-state" ] || bad "ci: state left after the holder died: $(ls "$T/ci-state" | tr '\n' ' ')"
 
+# ---- onscreen.sh: waits only between rows, its windows hidden meanwhile; inside a row only a look
+sed -n '/^onscreen_ok() {/,/^}/p; /^onscreen_mid() {/,/^}/p; /^hide_ours() {/,/^}/p; /^show_ours() {/,/^}/p' "$E/onscreen.sh" > "$T/os-gate.sh"
+printf '#!/bin/bash\necho "$*" >> "%s/tool.log"\n' "$T" > "$T/tool"; chmod +x "$T/tool"
+sleep 30 & P1=$!; sleep 30 & P2=$!
+os_gate() {   # CALL [SECONDS SOMEONE STAYS]: one call of the gate in a subshell; prints rc, seconds, GONE/MID
+  ( TD=$T; T=$TD/tool; S=$TD/os-s.tsv; : > "$S"; GONE=""; MID=""; HIDDEN=""; GATE_LINE=0; PERSON_WAIT=${3:-5}; PERSON_POLL=0.2
+    away() { [[ ! -e $F/someone ]]; }; who() { echo "a test"; }; log() { :; }
+    launcher_pid() { echo "$P1"; }; qemu_pid() { echo "$P2"; }
+    _person_new() { :; }; person_overlap() { :; }
+    source "$TD/os-gate.sh"
+    t0=$(date +%s); "$1"; rc=$?; echo "$rc $(( $(date +%s) - t0 )) ${GONE:+gone}${MID:+mid:$MID}" )
+}
+: > "$T/tool.log"; touch "$F/someone"; ( sleep 1; rm -f "$F/someone" ) &
+r=$(os_gate onscreen_ok)
+same "onscreen: someone between rows -> waits, then on" 0 "${r%% *}"
+same "onscreen: ... the app's and the VM's windows hidden while waiting, shown after" "hide $P1|hide $P2|unhide $P1|unhide $P2|" "$(tr '\n' '|' < "$T/tool.log")"
+: > "$T/tool.log"; touch "$F/someone"
+r=$(os_gate onscreen_ok 5 1)
+same "onscreen: someone who stays -> no more rows" "1 gone" "$(echo "$r" | cut -d' ' -f1,3)"
+same "onscreen: ... the windows stay hidden (the cleanup quits the app)" "hide $P1|hide $P2|" "$(tr '\n' '|' < "$T/tool.log")"
+: > "$T/tool.log"
+r=$(os_gate onscreen_mid)
+has "onscreen: someone inside a row -> that row stops at once, no wait" "1 0 mid:someone came to the Mac during the row" "$r"
+same "onscreen: ... nothing hidden or shown" "" "$(cat "$T/tool.log")"
+rm -f "$F/someone"
+same "onscreen: nobody inside a row -> on" "0 0 " "$(os_gate onscreen_mid)"
+kill "$P1" "$P2" 2>/dev/null; wait "$P1" "$P2" 2>/dev/null
+# Inside a row nothing waits (a wait there kept the row's window, maybe a full-screen VM, up for 30 min).
+w=$(awk '/^(row_[a-z_]+|switch_stopped|start_in_window|gpu_lock_switch|switch_applied)\(\) \{/ { f = $1 }
+  f && /onscreen_ok/ { print f } /^}/ { f = "" }' "$E/onscreen.sh" | sort -u | tr '\n' ' ')
+same "onscreen: no wait inside a row (onscreen_ok only between rows)" "" "$w"
+grep -qE 'onscreen_mid \|\| \{ "\$T" full "\$QP" off' "$E/onscreen.sh" && ok "onscreen: the pointer row leaves full screen before it stops for someone" ||
+  bad "onscreen: the pointer row may stop in full screen"
+
 # ---- onscreen.sh's exit code: 1 a FAIL, 5 BLOCKED rows (3 was also the code of other ends); CI runners
 # still on jobs after the wait: no rows on screen (BLOCKED), the runners back at the end
 DOM=org.omacvm.app.test.e2e-person.$$
