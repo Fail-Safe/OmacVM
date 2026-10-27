@@ -333,6 +333,25 @@ struct SoundThreadRow: View {
     }
 }
 
+/// AirPods and media controls (Settings.mediaControls, on by default): the
+/// launcher follows the switch at once (MediaSession).
+struct MediaControlsRow: View {
+    var tick = 0
+    @State private var on = Settings.mediaControls
+
+    static let info = "While something plays in the VM (a video in the browser, music, mpv), the VM is the Mac's Now Playing app, like Music or Safari: play, pause and skip on AirPods and other Bluetooth headphones and speakers, in Control Center and with the keyboard's play keys go to the VM's player. Control Center shows what plays, under this app's name. A Mac app that starts playing takes the controls, as between Mac apps; playing again in the VM takes them back. Volume stays the Mac's. Nothing changes until something plays in the VM, and after 30 minutes paused the Mac's apps have the controls again. Works at once in a running VM; the VM needs Update VM once."
+
+    var body: some View {
+        SettingRow(title: "AirPods and media controls",
+                   subtitle: "AirPods, headphones and Control Center play and pause what the VM plays.",
+                   info: Self.info, probe: "media-controls") {
+            RowSwitch(title: "AirPods and media controls", isOn: $on)
+        }
+        .onChange(of: on) { _, v in if v != Settings.mediaControls { Settings.mediaControls = v } }
+        .onChange(of: tick) { _, _ in on = Settings.mediaControls }
+    }
+}
+
 /// The VM's GPU work without QEMU's big lock (Settings.gpuOffMainLoop,
 /// 3.1.18, on by default after 3.1.25): read by each start of the VM.
 struct GPUOffMainLoopRow: View {

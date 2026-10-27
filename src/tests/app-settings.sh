@@ -74,6 +74,10 @@ expect "fresh: Extra brightness off" false "$(val app.extraBrightness)"
 expect "fresh: Pause drawing while hidden off" false "$(val app.pauseWhileHidden)"
 expect "fresh: Pointer on its own layer off" false "$(val app.pointerPlane)"
 expect "fresh: Draw only what changed off" false "$(val app.presentTiles)"
+expect "fresh: AirPods and media controls on" true "$(val app.mediaControls)"
+expect "  on for the app (org.omacvm.app)" true "$(run mediadefault org.omacvm.app)"
+expect "  off for the test identity: a test VM never takes the person's AirPods" "false false" \
+  "$(run mediadefault org.omacvm.app.test) $(run mediadefault org.omacvm.app.test.lane)"
 expect "fresh: Closing the window shuts down" shutdown "$(val app.closeAction)"
 expect "fresh: OmacVM's own icon" default "$(val app.appIconTheme)"
 expect "fresh: escape combo: focused monitor" pointer "$(val app.escapeSwipe)"
@@ -101,7 +105,7 @@ done
 
 # (b) Changes as the window makes them, read by the next launches; (c) per VM.
 mkdir -p "$H/Shared"
-for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pauseWhileHidden true" "pointerPlane true" "presentTiles true" "closeAction ask" "appIconTheme flexoki-light" \
+for kv in "startFullScreen false" "keepDockAway false" "audioThread false" "gpuOffMainLoop false" "shareKeyboard true" "vkWindowsNoCopy false" "hdr true" "extraBrightness true" "pauseWhileHidden true" "pointerPlane true" "presentTiles true" "mediaControls false" "closeAction ask" "appIconTheme flexoki-light" \
           "escapeSwipe all" "mouseSwipeFingers 3" "swipeOut true" "updateChecks false"; do
   run set $kv || { echo "FAIL set $kv"; fail=1; }
 done
@@ -122,6 +126,7 @@ for launch in 1 2; do
   expect "launch $launch: Pause drawing while hidden on" true "$(val app.pauseWhileHidden)"
   expect "launch $launch: Pointer on its own layer on" true "$(val app.pointerPlane)"
   expect "launch $launch: Draw only what changed on" true "$(val app.presentTiles)"
+  expect "launch $launch: AirPods and media controls off" false "$(val app.mediaControls)"
   expect "launch $launch: Closing the window asks" ask "$(val app.closeAction)"
   expect "launch $launch: icon Flexoki Light" flexoki-light "$(val app.appIconTheme)"
   expect "launch $launch: escape combo: all monitors" all "$(val app.escapeSwipe)"
@@ -149,6 +154,7 @@ expect "the Vulkan windows switch is a key in the app's domain" 0 "$(defaults re
 expect "the HDR switch is the hidden switch's key in the app's domain" 1 "$(defaults read "$D" hdr)"
 expect "the extra brightness switch is the key QEMU reads in the app's domain" 1 "$(defaults read "$D" extraBrightness)"
 expect "the pause switch is the key QEMU reads in the app's domain" 1 "$(defaults read "$D" pauseWhileHidden)"
+expect "the media controls switch is the key the launcher watches in the app's domain" 0 "$(defaults read "$D" mediaControls)"
 expect "update checks in the file the control centre shares" "false" \
   "$(plutil -extract update_checks raw -o - "$T/settings/settings.json")"
 

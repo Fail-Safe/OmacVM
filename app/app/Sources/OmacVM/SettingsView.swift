@@ -218,6 +218,7 @@ struct SettingsSections: View {
             SectionTitle(text: "Output")
             Card {
                 SoundThreadRow(tick: state.tick)
+                MediaControlsRow(tick: state.tick)
             }
         }
         .spySection("output")

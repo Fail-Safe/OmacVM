@@ -28,6 +28,7 @@ enum SettingsDump {
             "pauseWhileHidden": Settings.pauseWhileHidden,
             "pointerPlane": Settings.pointerPlane,
             "presentTiles": Settings.presentTiles,
+            "mediaControls": Settings.mediaControls,
             "closeAction": Settings.closeAction.rawValue,
             "appIconTheme": IconTheme.choice(stored: UserDefaults.standard.object(forKey: IconTheme.key)).id,
             "escapeSwipe": EscapeSetting.current().rawValue,
