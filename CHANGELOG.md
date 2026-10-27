@@ -13,7 +13,10 @@ in more words.
   (Settings, Output, AirPods and media controls); the VM needs Update VM once. `omacvm check` has a
   "media controls" line.
 
-## 3.2.8 (unreleased)
+## 3.2.8
+
+An OpenGL query the Mac does not answer now finishes with 0 in the VM: no memory bytes from the Mac,
+and no app waiting for it for ever.
 
 - **An OpenGL query the Mac does not answer reads as 0 in the VM, not as the Mac's memory.** When
   the Mac's OpenGL did not answer a query's result (a query never started or still running, or a GL
