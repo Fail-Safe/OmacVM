@@ -579,6 +579,32 @@ expect(KeyNote.startHadAccess(refused) == false && KeyNote.startHadAccess(fine) 
        && KeyNote.startHadAccess(refusedWithIM) == false && KeyNote.startHadAccess(refusedWithAccess) == true
        && KeyNote.startHadAccess("x") == nil, "the record read: Accessibility (keys) only")
 
+// MARK: HDR row: the running VM's own start (HDRNote, #579)
+
+// The head of qemu.log as Runner writes it: the "OmacVM: HDR:" line only when the switch was on at that start.
+let head = "OmacVM: network: user\nOmacVM: keys: Input Monitoring allowed, Accessibility (keys) allowed for OmacVM\n"
+let hdrOn = head + "OmacVM: HDR: on (10-bit, HDR where the window's display can show it)\nOmacVM: pointer layer: off\n"
+let hdrSafe = head + "OmacVM: HDR: off (GPU safe mode)\n"
+let noLine = head + "OmacVM: pointer layer: off\n"
+expect(HDRNote.startAnswer(hdrOn)?.on == true, "the start's line: on")
+expect(HDRNote.startAnswer(hdrSafe).map { !$0.on && $0.why == "GPU safe mode" } == true, "the start's line: off and why")
+expect(HDRNote.startAnswer(noLine) == nil, "no line: started with the switch off")
+expect(HDRNote.startAnswer(head + "OmacVM: HDR: off (switch off)\n") == nil, "off (switch off) reads as no HDR asked")
+expect(HDRNote.startAnswer("cocoa: extra brightness: on, 2.00x, over HDR\n") == nil, "QEMU's own lines are not the start's answer")
+let stillOn = HDRNote.note(switchOn: false, running: true, log: hdrOn)
+expect(stillOn?.contains("still runs with HDR") == true && stillOn?.contains("restart inside the VM keeps it") == true,
+       "switched off while the VM runs with HDR: says it still runs with HDR, and that a restart inside the VM keeps it")
+let stillOff = HDRNote.note(switchOn: true, running: true, log: noLine)
+expect(stillOff?.contains("runs without HDR") == true && stillOff?.contains("shut the VM down and start it again") == true,
+       "switched on while the VM runs without: says when it comes")
+expect(HDRNote.note(switchOn: true, running: true, log: hdrSafe) == "This start of the VM has no HDR: GPU safe mode.",
+       "on, but this start had none: why")
+expect(HDRNote.note(switchOn: true, running: true, log: hdrOn) == nil, "on and running with HDR: the usual subtitle")
+expect(HDRNote.note(switchOn: false, running: true, log: noLine) == nil, "off and running without: the usual subtitle")
+expect(HDRNote.note(switchOn: false, running: true, log: hdrSafe) == nil, "off, and the start had none either: the usual subtitle")
+expect(HDRNote.note(switchOn: false, running: false, log: hdrOn) == nil, "not running: the usual subtitle (the log is an old start's)")
+expect(HDRNote.note(switchOn: true, running: true, log: nil) == nil, "running without a log yet: nothing to say")
+
 // MARK: SSH repair (SSHRepair: the folder's key into a VM that knows only another Mac's)
 
 let sshKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOmacVMwindowTestKeyOnly0123456789abcdefghij omacvm-vm"
