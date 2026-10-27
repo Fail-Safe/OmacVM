@@ -61,6 +61,20 @@ expect(AudioOutputSize.frames(thread: true, minimum: 0) == 256 && AudioOutputSiz
        "own thread started wired: 256, 512 after a switch to AirPods")
 expect(AudioOutputSize.frames(thread: false, minimum: 512) == 512 && AudioOutputSize.frames(thread: true, wireless: true, minimum: 0) == 512,
        "main loop and wireless start: 512 either way")
+// When the app writes QEMU's size file anew: QEMU waits for a new file after
+// every size was refused, so a coreaudiod restart must give one too (#569).
+var sf = AudioSizeFile(frames: 0, device: 73)
+expect(!sf.needsWrite(minimum: 0, device: 73), "size file: same output, same size: not written")
+expect(sf.needsWrite(minimum: 512, device: 73), "size file: same output, new size: written")
+expect(sf.needsWrite(minimum: 0, device: 81), "size file: another output, same size: written (QEMU forgets the refusal)")
+sf.serviceRestarted()
+expect(sf.needsWrite(minimum: 0, device: 73), "size file: after a coreaudiod restart the same output (same ID) gets a new file")
+expect(sf.needsWrite(minimum: 0, device: 0), "size file: after a coreaudiod restart, also with no output yet")
+sf.written(minimum: 0, device: 73)
+expect(!sf.needsWrite(minimum: 0, device: 73) && sf == AudioSizeFile(frames: 0, device: 73), "size file: once written, not again")
+sf.written(minimum: 512, device: 90)
+sf.serviceRestarted()
+expect(sf.frames == 512 && sf.needsWrite(minimum: 512, device: 90), "size file: a restart keeps the size, forgets the output")
 // SDL3's queue: 6 x 256 frames at 48 kHz (32 ms), 4 x 512 (42.7 ms), 3 x 1024 (64 ms); 4 x 512 at 44.1 kHz (46.4 ms).
 expect(near(AudioOutputSize.queueMs(frames: 256), 32.0) && near(AudioOutputSize.queueMs(frames: 512), 42.67)
        && near(AudioOutputSize.queueMs(frames: 1024), 64.0) && near(AudioOutputSize.queueMs(frames: 512, rate: 44100), 46.44),

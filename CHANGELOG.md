@@ -28,6 +28,12 @@ in more words.
   and a key held during the click (Shift for a Shift-click) was let go in the VM. The VM now keeps
   both through such a click. Command-Tab, the escape combo and swipes let go as before.
 
+- **An output that refuses every sound buffer size is left alone until the Mac's output changes.**
+  Follow-up to #548: when the Mac's output refused the VM's sound at every buffer size, QEMU tried it
+  again every 30 s while the VM played. Each failed start may leave macOS's sound service silent, so
+  now it waits until you pick another output, connect this one again or restart the sound service
+  (`sudo killall coreaudiod`). Thanks to @maxschoenberger for the report (#548).
+
 ## 3.2.6
 
 Two changes: the pointer no longer jumps after a click near a corner of an external display, and

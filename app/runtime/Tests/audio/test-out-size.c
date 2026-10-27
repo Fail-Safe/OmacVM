@@ -55,6 +55,14 @@ int main(void)
     expect(!omacvm_sdl_out_start_refused("No such device."), "no device: no");
     expect(!omacvm_sdl_out_start_refused(NULL), "no error text: no");
 
+    /*
+     * After every size was refused: with the launcher's size file (written anew
+     * at every change of the Mac's output) no new start before it changes;
+     * without one (QEMU not started by the app) after the wait.
+     */
+    expect(omacvm_sdl_out_hold_until(true, 100, 30) == LLONG_MAX, "size file: no start until it changes");
+    expect(omacvm_sdl_out_hold_until(false, 100, 30) == 130, "no size file: a start after the wait");
+
     /* The launcher's size file. */
     expect(omacvm_sdl_out_parse_hint("512\n") == 512, "512 and a newline");
     expect(omacvm_sdl_out_parse_hint("0\n") == 0, "0: no wish");
