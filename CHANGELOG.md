@@ -17,7 +17,9 @@ in more words.
   screen itself and took the HDR picture for SDR: every app grey and flat, white at 148 of 255.
   The VM's graphics driver now tells it the screen is HDR, and it makes SDR of it with its own
   curve: much lighter, white at about 224 of 255 at a high headroom. Update VM, then shut the
-  VM down and start it again (Update VM rebuilds the VM's graphics driver once).
+  VM down and start it again. For everyone with HDR and 10-bit colour, Pointer on its own layer
+  or Draw only what changed on, Update VM rebuilds the VM's graphics driver once (needs
+  internet).
 
 - **The HDR switch says when it counts.** HDR and 10-bit colour is read when the VM starts; a
   restart inside the VM (Omarchy's menu) keeps the setting it started with. While the VM runs with

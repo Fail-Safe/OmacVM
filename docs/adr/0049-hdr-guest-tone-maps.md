@@ -175,4 +175,14 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
   frees the old one); the screen does not change. gpu-screen-recorder then
   tone-maps to SDR with its own curve: white at about 224/255 at headroom
   6.69, 244 at 2, 255 with Extra brightness. In the stamp, so Update VM
-  builds the driver once; it loads at the VM's next start.
+  builds the driver once; it loads at the VM's next start. Hyprland only
+  sets or clears an output's metadata while the output says it supports
+  HDR, so display-sync's SDR rule for Virtual-1 (the Mac cannot show PQ)
+  keeps `supports_hdr = 1`, and `omacvm_app.lua` turns Hyprland's auto HDR
+  off (`render:cm_auto_hdr = 0`): else the start's PQ metadata stayed on an
+  SDR screen, auto HDR switched a full-screen HDR window to PQ the Mac
+  could not show, and a full-screen window that tags SDR colours set the
+  metadata to SDR while the screen stayed PQ; recordings were wrong in all
+  three. Hyprland sends no new metadata when only the headroom moves: the
+  blob keeps the start's peak, gpu-screen-recorder takes the peak from the
+  Wayland output instead.

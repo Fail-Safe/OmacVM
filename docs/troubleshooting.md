@@ -1222,7 +1222,8 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   driver then tells the recorder the screen is HDR (`omacvm check`: "HDR
   recordings"), and it makes SDR of it itself, with its own curve: white
   comes out at about 224 of 255 at a high headroom, 244 at headroom 2, 255
-  with Extra brightness. Screenshots and shares taken on the Mac (a macOS
+  with Extra brightness. While the Mac cannot show PQ the VM's screen is SDR
+  and says so too ("HDR recordings" says which). Screenshots and shares taken on the Mac (a macOS
   screenshot, sharing the VM's window from a Mac app) are macOS's own and
   not covered.
 - **Where:** `src/app/guest/hypr-capture/` (the file, `guard.py`, the
