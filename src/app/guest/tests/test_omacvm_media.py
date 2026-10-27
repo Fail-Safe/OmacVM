@@ -6,7 +6,8 @@
 The rules (which player, what a state line holds, caps, the port's hello) run
 anywhere. With python-gobject and dbus-daemon (Linux, the guest CI job) the
 agent also runs against fake MPRIS players on a private session bus, with a
-socket pair as the port and this test as the Mac.
+socket pair as the port and this test as the Mac. OMACVM_MEDIA_NEED_DBUS=1
+(the guest CI job) makes those fail instead of skip when the two are missing.
 """
 import importlib.machinery
 import importlib.util
@@ -38,6 +39,8 @@ try:
 except (ImportError, ValueError):
     HAVE_GI = False
 HAVE_DBUS = HAVE_GI and shutil.which("dbus-daemon") is not None
+# The guest CI job sets it: there the D-Bus tests must run, never skip.
+NEED_DBUS = os.environ.get("OMACVM_MEDIA_NEED_DBUS") == "1"
 
 
 def player(name="org.mpris.MediaPlayer2.mpv", status="Stopped", **props):
@@ -346,11 +349,12 @@ loop.run()
 '''
 
 
-@unittest.skipUnless(HAVE_DBUS, "needs python-gobject and dbus-daemon (Linux, the guest CI job)")
+@unittest.skipUnless(HAVE_DBUS or NEED_DBUS, "needs python-gobject and dbus-daemon (Linux, the guest CI job)")
 class WithPlayers(unittest.TestCase):
     """The agent on a private session bus with fake MPRIS players."""
 
     def setUp(self):
+        self.assertTrue(HAVE_DBUS, "python3-gi or dbus-daemon is missing: OMACVM_MEDIA_NEED_DBUS=1 wants these tests")
         self.tmp = tempfile.mkdtemp()
         self.bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1"],
                                     stdout=subprocess.PIPE, text=True)

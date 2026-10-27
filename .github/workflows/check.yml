@@ -739,7 +739,7 @@ jobs:
       - name: AirPods and media controls, the VM's agent with fake MPRIS players on a private session bus
         run: |
           sudo apt-get install -y -qq python3-gi dbus >/dev/null   # Omarchy's base has python-gobject and dbus
-          python3 src/app/guest/tests/test_omacvm_media.py -v
+          OMACVM_MEDIA_NEED_DBUS=1 python3 src/app/guest/tests/test_omacvm_media.py -v
 
       - name: A feature switch on Linux (GNU sed, glide off path)
         run: src/tests/feature-switch.sh
