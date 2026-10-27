@@ -34,6 +34,14 @@ in more words.
   now it waits until you pick another output, connect this one again or restart the sound service
   (`sudo killall coreaudiod`). Thanks to @maxschoenberger for the report (#548).
 
+- **The "find devices on local networks" question says why it comes.** macOS asks it at the first
+  VM start because Omarchy's network runs through OmacVM: its name lookups go to the Mac's DNS server
+  (often the router, or Tailscale) and its connections to devices on your network go out from the app.
+  The question said OmacVM reaches the VM on the Mac's own VM network, which only holds for the fast
+  network. Tested on a Mac mini: an update through the app keeps the answer (3.2.3 to 3.2.4 through
+  its updater, no new question); only another version of the app in another folder is asked again.
+  Troubleshooting 42 says how to turn it on later; the Fast network's (i) says it needs it too.
+
 ## 3.2.6
 
 Two changes: the pointer no longer jumps after a click near a corner of an external display, and

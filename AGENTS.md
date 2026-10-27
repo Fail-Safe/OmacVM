@@ -590,9 +590,10 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   every renamed or ad hoc test copy asks again, while copies of `org.omacvm.app.test` at any path and of any
   build share its grants (2026-10-26: 8 copies of 3 builds on the mini, all allowed). A lane's own id
   (`org.omacvm.app.test.<lane>`) is a new app to macOS with no grants (`src/tests/e2e/relabel.sh` refuses it;
-  the release kits' r322-r324 made 54 "would like to control this Mac" dialogs in 36 hours). One id is not enough for
-  Local Network: macOS asks it again for each new build even of `org.omacvm.app.test` (2026-10-26 on the M1 Max), so
-  a new build's first start on a Mac someone uses can show that prompt. Test with only this one:
+  the release kits' r322-r324 made 54 "would like to control this Mac" dialogs in 36 hours). Local Network is kept per id
+  and folder instead: a new build copied over a folder that has an answer keeps it (as an update does), a new build
+  in a new folder (`apps/<sha>/`) is asked again (2026-10-26, mini; troubleshooting 42). Kits that start new builds
+  on a Mac someone uses copy them over one fixed folder. Test with only this one:
   `OMACVM_SIGN_ID=<Developer ID> app/scripts/build-app.sh --test-identity --install` builds "OmacVM Test"
   (`org.omacvm.app.test`) and copies it over `~/Applications/OmacVM Test.app`; its helpers in
   `Contents/Helpers` are "OmacVM Test Bridge" (`org.omacvm.test.bridge`, port 47931,

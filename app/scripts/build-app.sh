@@ -307,7 +307,7 @@ cat > "$C/Info.plist" <<EOF
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>
-  <key>NSLocalNetworkUsageDescription</key><string>OmacVM reaches your VM on the Mac's own VM network: to set it up, for the control centre and for the fast network.</string>
+  <key>NSLocalNetworkUsageDescription</key><string>The VM's network runs through OmacVM: Omarchy looks up names and reaches devices on your network this way, and the Mac reaches the VM on the fast network.</string>
   <key>NSMicrophoneUsageDescription</key><string>The VM can use your Mac's microphone.</string>
   <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>
   <key>NSDocumentsFolderUsageDescription</key><string>Your Mac folder setting shares this folder with the VM at ~/Mac.</string>

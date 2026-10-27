@@ -563,7 +563,7 @@ struct FastNetworkRow: View {
     /// The service needs the person (FastNetwork.serviceNeeds): its button.
     @State private var fix: String?
 
-    static let info = "Off: QEMU's own network. On: macOS's VM network (as Parallels and UTM), faster to and from the Mac; macOS asks for your password once."
+    static let info = "Off: QEMU's own network. On: macOS's VM network (as Parallels and UTM), faster to and from the Mac; macOS asks for your password once. The Mac reaches the VM there: OmacVM needs Local Network (Privacy & Security), as for devices on your network."
 
     var body: some View {
         SettingRow(title: "Fast network", badge: "experimental",
