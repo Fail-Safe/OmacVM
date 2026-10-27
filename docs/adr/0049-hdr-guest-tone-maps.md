@@ -5,6 +5,8 @@ Status: accepted, built (`hdr`), behind the app's experimental switch
 [0021](0021-colour-deep-colour-hdr.md). Amended by
 [0050](0050-extra-brightness.md) (2026-10-21): while Extra brightness is
 on, the guest is told headroom 1 and its PQ frames end at SDR white.
+Amended 2026-10-27 (#579, below): screenshots and screen sharing of HDR
+windows.
 Notes and numbers: work/tracks/hdr.md.
 
 ## Context
@@ -125,3 +127,41 @@ BT.2100 PQ, and the layer asks for EDR. It stayed hidden because:
   something captures the output. The screen, screenshots and screen
   shares are the same; an HDR frame costs the GPU 10-19 % less (mini,
   QEMU GPU ms/s; M1 Max at 120 Hz -17 %).
+- Amended 2026-10-27 (hdr-capture, #579): captures of HDR windows. Hyprland
+  0.56 writes the SDR copy that screenshots (grim, Omarchy's screenshot and
+  its frozen screen), hyprpicker and the portal's screen shares read per
+  window while it draws (a second render target), with SDR white at 80 nits
+  for PQ and HLG windows (`cm_helpers.glsl`, a TODO upstream), and a window
+  shared alone is clamped at 80 nits. Chrome's white is 203 nits: its
+  captures were 2.54 times too bright in linear light, light greys white;
+  SDR windows were exact (the copy uses their own 203). App VMs get a copy
+  of that one shader file with two changes in `/usr/local/share/hypr/shaders/`,
+  which Hyprland reads before its built-in copy, at its start and at
+  `hyprctl reloadshaders` (a running desktop gets it at once): PQ and HLG
+  windows go into the copy with SDR white at 203 nits (BT.2408, the
+  `sdr_max_luminance` display-sync sets; a test keeps the two equal), and
+  with the clamp rule a PQ or HLG window drawn into an SDR target (a window
+  share) is brought from its reference white to the target's before the
+  clamp. Parts above SDR white clip in captures, which are SDR, as the clamp
+  rule does on the screen: a roll-off would have to start below white and
+  change SDR colours. The copy has no client reference white (the shader
+  variant that writes it gets none), so it takes 203 nits for every PQ and
+  HLG window; a window share follows Hyprland's own HDR-to-SDR rule and
+  takes the client's reference. The two only differ for a client whose
+  reference is not 203 nits; Chrome, Chromium, mpv and GStreamer all say
+  203. Virtual-1's HDR output does not change (its passes target FP16
+  linear or PQ). Two other things change, both corrections: on other
+  outputs a client sending raw PQ while HDR is on gets its reference white
+  at the display's white (not clipped from 80 nits), and an output that
+  mirrors Virtual-1 with Hyprland's own mirroring draws from the same copy,
+  so it shows PQ windows at SDR white too. Installed only while
+  `/usr/bin/Hyprland` was built from v0.56.2 and carries the five shader
+  files the copy works with byte for byte (`guard.py`); pacman hooks take it out before Hyprland changes and put it
+  back when the new binary passes; any other Hyprland reads its own copy
+  (the bug may be back, nothing breaks), and `omacvm check`'s "HDR captures"
+  line says so. Not a Hyprland build in the VM (10-20 minutes at each
+  Hyprland update, a failed build = no desktop) and not a capture tool of
+  our own (it would miss colour picks and shares). Not covered: blur inside
+  captures (Omarchy has blur off; upstream #16324), Omarchy's screen
+  recordings (gpu-screen-recorder reads the PQ scanout over KMS as SDR: the
+  VM's connector has no `HDR_OUTPUT_METADATA`), captures taken on the Mac.

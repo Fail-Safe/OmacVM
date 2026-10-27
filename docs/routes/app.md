@@ -646,6 +646,12 @@ the 8-bit path.
   do; mpv shows HDR video as SDR for now.
 - Only the main window; windows on other displays stay 8-bit.
 - Extra brightness (below) wins while it is on: no HDR highlights then.
+- Screenshots, colour picks and screen sharing (Teams, Meet, OBS through
+  the desktop portal) show apps that draw HDR, such as Chrome, at normal
+  white; parts brighter than white are cut off there, as captures are SDR.
+  Update VM brings this; `omacvm check` has an "HDR captures" line. Screen
+  recordings with Omarchy's recorder come out grey in an HDR VM for now
+  ([troubleshooting 44](../troubleshooting.md#44-app-screenshots-and-screen-sharing-of-chrome-too-bright-in-an-hdr-vm)).
 - GPU safe mode turns it off. `omacvm check` has an "HDR" line.
 - How it works: [ADR 0049](../adr/0049-hdr-guest-tone-maps.md).
 
